@@ -54,8 +54,20 @@ func (m Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// detailHeight leaves room for the header, the back button, a blank line and the legend.
 func (m Model) detailHeight() int {
-	return m.height - lineCount(m.header()) - lineCount(m.footer()) - 1
+	return m.height - lineCount(m.header()) - 1 - lineCount(m.footer()) - 1
+}
+
+const backLabel = " ← Back to the board "
+
+func (m Model) detailBack() string {
+	return selected.Render(backLabel)
+}
+
+// onBack says whether a click at x, y (inside the margin) hits the back button under the header.
+func (m Model) onBack(x, y int) bool {
+	return y == lineCount(m.header()) && x >= 0 && x < lipgloss.Width(backLabel)
 }
 
 func (m Model) maxOffset() int {

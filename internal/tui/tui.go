@@ -283,6 +283,10 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.detail.offset = max(0, m.detail.offset-3)
 		case tea.MouseButtonWheelDown:
 			m.detail.offset = min(m.maxOffset(), m.detail.offset+3)
+		case tea.MouseButtonLeft:
+			if msg.Action == tea.MouseActionPress && m.onBack(msg.X, msg.Y) {
+				m.detail = nil
+			}
 		}
 		return m, nil
 	}
@@ -597,7 +601,7 @@ func (m Model) board() string {
 		for len(lines) < m.detailHeight() {
 			lines = append(lines, "")
 		}
-		return top + "\n" + strings.Join(lines, "\n") + "\n\n" + bottom
+		return top + "\n" + m.detailBack() + "\n" + strings.Join(lines, "\n") + "\n\n" + bottom
 	}
 	var body string
 	bottom0 := m.preview() + "\n" + m.footer()

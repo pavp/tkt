@@ -929,3 +929,23 @@ func TestDoubleClickOpensTheActionsMenu(t *testing.T) {
 		t.Errorf("right click should do nothing")
 	}
 }
+
+func TestBackButtonLeavesTheDetail(t *testing.T) {
+	r := &recorder{}
+	m := press(loaded(r), "l")
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	m, _ = m.Update(cmd())
+	view := m.View()
+	y := lineIndex(view, "← Back to the board")
+	if y < 0 {
+		t.Fatalf("detail has no back button:\n%s", stripANSI(view))
+	}
+	line := strings.Split(stripANSI(view), "\n")[y]
+	x := lipgloss.Width(line[:strings.Index(line, "Back")])
+	if m = click(m, x+30, y+3); !strings.Contains(stripANSI(m.View()), "← Back to the board") {
+		t.Fatalf("a click elsewhere should keep the detail open")
+	}
+	if m = click(m, x, y); strings.Contains(stripANSI(m.View()), "← Back to the board") || !strings.Contains(stripANSI(m.View()), "In Progress") {
+		t.Errorf("clicking back should return to the board:\n%s", stripANSI(m.View()))
+	}
+}
