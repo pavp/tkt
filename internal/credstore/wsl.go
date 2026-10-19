@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -18,13 +19,39 @@ import (
 type WSL struct {
 	run     execx.Runner
 	timeout time.Duration
+	exists  func(string) bool
 }
 
 func NewWSL(run execx.Runner) *WSL {
 	if run == nil {
 		run = execx.OS{}
 	}
-	return &WSL{run: run, timeout: 30 * time.Second}
+	return &WSL{run: run, timeout: 30 * time.Second, exists: fileExists}
+}
+
+// windowsPaths are where Windows keeps the tools tkt calls, as WSL mounts the system drive by default.
+var windowsPaths = map[string]string{
+	"powershell.exe": "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+	"clip.exe":       "/mnt/c/Windows/System32/clip.exe",
+	"explorer.exe":   "/mnt/c/Windows/explorer.exe",
+}
+
+// WindowsExe finds a Windows tool from WSL. WSL only puts Windows directories on PATH when
+// appendWindowsPath is on, and programs started outside a login shell, such as Herdr's panes, may not
+// inherit them, so it falls back to the tool's fixed location.
+func WindowsExe(name string, lookPath func(string) (string, error), exists func(string) bool) string {
+	if _, err := lookPath(name); err == nil {
+		return name
+	}
+	if p, ok := windowsPaths[name]; ok && exists(p) {
+		return p
+	}
+	return name
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 func (w *WSL) Name() string { return "Windows Credential Manager" }
@@ -88,7 +115,7 @@ func (w *WSL) powershell(body string, stdin []byte) ([]byte, error) {
 	defer cancel()
 	script := "$ErrorActionPreference = 'Stop'\n" + credType + "\n" + body
 	args := []string{"-NoProfile", "-NonInteractive", "-EncodedCommand", encode(script)}
-	out, err := w.run.Run(ctx, "", "powershell.exe", args, stdin)
+	out, err := w.run.Run(ctx, "", WindowsExe("powershell.exe", w.run.LookPath, w.exists), args, stdin)
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil, fmt.Errorf("powershell.exe did not answer within %s", w.timeout)
 	}

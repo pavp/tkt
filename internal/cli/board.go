@@ -230,7 +230,7 @@ func (a *App) copyToClipboard(ctx context.Context, text string) error {
 	case a.Env.GOOS == "darwin":
 		tools = []tool{{"pbcopy", nil}}
 	case credstore.IsWSL(a.Env.Getenv, os.ReadFile):
-		tools = []tool{{"clip.exe", nil}}
+		tools = []tool{{a.windowsExe("clip.exe"), nil}}
 	default:
 		tools = []tool{{"wl-copy", nil}, {"xclip", []string{"-selection", "clipboard"}}, {"xsel", []string{"--clipboard", "--input"}}}
 	}
@@ -248,6 +248,13 @@ func status(s string) tea.Cmd {
 	return func() tea.Msg { return tui.StatusMsg(s) }
 }
 
+func (a *App) windowsExe(name string) string {
+	return credstore.WindowsExe(name, a.Run.LookPath, func(p string) bool {
+		_, err := os.Stat(p)
+		return err == nil
+	})
+}
+
 // openURL opens a link in the default browser: open on macOS, wslview or explorer.exe under WSL, xdg-open elsewhere.
 func (a *App) openURL(ctx context.Context, url string) error {
 	if !strings.HasPrefix(url, "https://") {
@@ -258,7 +265,7 @@ func (a *App) openURL(ctx context.Context, url string) error {
 	case a.Env.GOOS == "darwin":
 		candidates = []string{"open"}
 	case credstore.IsWSL(a.Env.Getenv, os.ReadFile):
-		candidates = []string{"wslview", "explorer.exe"}
+		candidates = []string{"wslview", a.windowsExe("explorer.exe")}
 	default:
 		candidates = []string{"xdg-open"}
 	}

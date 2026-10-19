@@ -153,3 +153,50 @@ func TestWSLRejectsUnsafeKeys(t *testing.T) {
 		t.Error("powershell ran with an unsafe key")
 	}
 }
+
+func TestWindowsExeFallsBackToTheSystemPath(t *testing.T) {
+	onDisk := map[string]bool{
+		"/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe": true,
+		"/mnt/c/Windows/System32/clip.exe":                              true,
+	}
+	exists := func(p string) bool { return onDisk[p] }
+	missing := func(string) (string, error) { return "", errors.New("not found") }
+	found := func(n string) (string, error) { return "/usr/bin/" + n, nil }
+	tests := []struct {
+		name, exe string
+		look      func(string) (string, error)
+		want      string
+	}{
+		{"on PATH", "powershell.exe", found, "powershell.exe"},
+		{"Windows path not appended to PATH", "powershell.exe", missing, "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"},
+		{"clip", "clip.exe", missing, "/mnt/c/Windows/System32/clip.exe"},
+		{"unknown stays as is", "explorer.exe", missing, "explorer.exe"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := WindowsExe(tt.exe, tt.look, exists); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+type pathlessPS struct{ ran []string }
+
+func (p *pathlessPS) Run(_ context.Context, _, name string, _ []string, _ []byte) ([]byte, error) {
+	p.ran = append(p.ran, name)
+	return nil, nil
+}
+func (p *pathlessPS) LookPath(string) (string, error) { return "", errors.New("not found") }
+
+func TestWSLFindsPowershellOutsideThePath(t *testing.T) {
+	r := &pathlessPS{}
+	w := NewWSL(r)
+	w.exists = func(p string) bool { return p == "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" }
+	if err := w.Set("jira:example.atlassian.net:dev@example.com", "v"); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.ran) != 1 || r.ran[0] != "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" {
+		t.Errorf("ran %v", r.ran)
+	}
+}

@@ -193,7 +193,7 @@ func (a *App) readClipboard(ctx context.Context) string {
 	case a.Env.GOOS == "darwin":
 		tools = []tool{{"pbpaste", nil}}
 	case credstore.IsWSL(a.Env.Getenv, os.ReadFile):
-		tools = []tool{{"powershell.exe", []string{"-NoProfile", "-Command", "Get-Clipboard"}}}
+		tools = []tool{{a.windowsExe("powershell.exe"), []string{"-NoProfile", "-Command", "Get-Clipboard"}}}
 	default:
 		tools = []tool{{"wl-paste", []string{"-n"}}, {"xclip", []string{"-selection", "clipboard", "-o"}}, {"xsel", []string{"--clipboard", "--output"}}}
 	}
