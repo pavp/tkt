@@ -58,6 +58,23 @@ type settingsForm struct {
 	values []string
 	focus  int
 	apply  func(c *config.Config, values []string)
+	// repo forms hold repository, base branch and path; folder forms only the folder.
+	repo  bool
+	found []string
+	hint  string
+}
+
+const (
+	fieldRepo = 0
+	fieldPath = 2
+)
+
+// pathField is the field ctrl+o fills: the local path of a repository, or the folder itself.
+func (f *settingsForm) pathField() int {
+	if f.repo {
+		return fieldPath
+	}
+	return 0
 }
 
 type settingsConfirm struct {
@@ -203,11 +220,66 @@ func (m Model) settingsAction(action string) (tea.Model, tea.Cmd) {
 			c.RepoRoots = append(c.RepoRoots, v[0])
 		}}
 	}
+	return m, m.lookupClones()
+}
+
+// lookupClones asks for clones of the form's repository when its path is still empty.
+func (m Model) lookupClones() tea.Cmd {
+	f := m.settings.form
+	if f == nil || !f.repo || f.values[fieldPath] != "" || strings.Count(f.values[fieldRepo], "/") != 1 {
+		return nil
+	}
+	return m.actions.FindClones(strings.TrimSpace(f.values[fieldRepo]))
+}
+
+// settingsLookup takes the answers of FindClones, RepoAt and PickFolder into the open form, so each
+// half of a repository fills the other: its name finds its clone, a folder names its repository.
+func (m Model) settingsLookup(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.settings == nil || m.settings.form == nil {
+		return m, nil
+	}
+	f := m.settings.form
+	switch msg := msg.(type) {
+	case ClonesFoundMsg:
+		if !f.repo || !strings.EqualFold(strings.TrimSpace(f.values[fieldRepo]), msg.Repo) {
+			return m, nil
+		}
+		f.found = msg.Paths
+		switch len(msg.Paths) {
+		case 0:
+			f.hint = "no clone found in your clone folders · ctrl+o to browse"
+		case 1:
+			f.hint = "clone found in your clone folders"
+		default:
+			f.hint = fmt.Sprintf("%d clones found · ctrl+n next", len(msg.Paths))
+		}
+		if f.values[fieldPath] == "" && len(msg.Paths) > 0 {
+			f.values[fieldPath] = msg.Paths[0]
+		}
+	case RepoFoundMsg:
+		if f.repo && f.values[fieldPath] == msg.Path && f.values[fieldRepo] == "" && msg.Repo != "" {
+			f.values[fieldRepo] = msg.Repo
+			f.hint = "repository read from the folder's origin"
+		}
+	case FolderPickedMsg:
+		if msg.Err != nil {
+			m.settings.err = msg.Err.Error()
+			return m, nil
+		}
+		if msg.Path == "" {
+			return m, nil
+		}
+		f.values[f.pathField()] = msg.Path
+		if f.repo && f.values[fieldRepo] == "" {
+			return m, m.actions.RepoAt(msg.Path)
+		}
+	}
 	return m, nil
 }
 
 func repoForm(title string, r config.Repo, set func(c *config.Config, r config.Repo)) *settingsForm {
 	return &settingsForm{
+		repo:   true,
 		title:  title,
 		labels: []string{"Repository (owner/name)", "Base branch", "Local path (optional)"},
 		values: []string{r.Name, r.Base, r.Path},
@@ -232,10 +304,33 @@ func (m Model) settingsFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.settings.form = nil
 		return m.saveSettings(func(c *config.Config) { f.apply(c, f.values) })
-	case tea.KeyTab, tea.KeyDown:
-		f.focus = (f.focus + 1) % len(f.values)
-	case tea.KeyShiftTab, tea.KeyUp:
-		f.focus = (f.focus + len(f.values) - 1) % len(f.values)
+	case tea.KeyTab, tea.KeyDown, tea.KeyShiftTab, tea.KeyUp:
+		left := f.focus
+		if k.Type == tea.KeyTab || k.Type == tea.KeyDown {
+			f.focus = (f.focus + 1) % len(f.values)
+		} else {
+			f.focus = (f.focus + len(f.values) - 1) % len(f.values)
+		}
+		switch {
+		case f.repo && left == fieldRepo:
+			return m, m.lookupClones()
+		case f.repo && left == fieldPath && f.values[fieldPath] != "" && strings.TrimSpace(f.values[fieldRepo]) == "":
+			return m, m.actions.RepoAt(strings.TrimSpace(f.values[fieldPath]))
+		}
+	case tea.KeyCtrlO:
+		start := f.values[f.pathField()]
+		if start == "" && len(m.settings.cfg.RepoRoots) > 0 {
+			start = m.settings.cfg.RepoRoots[0]
+		}
+		if start == "" {
+			start = "~"
+		}
+		return m, m.actions.PickFolder(start)
+	case tea.KeyCtrlN:
+		if f.repo && len(f.found) > 1 {
+			i := (slices.Index(f.found, f.values[fieldPath]) + 1) % len(f.found)
+			f.values[fieldPath] = f.found[i]
+		}
 	case tea.KeyBackspace:
 		if v := []rune(f.values[f.focus]); len(v) > 0 {
 			f.values[f.focus] = string(v[:len(v)-1])
@@ -326,7 +421,11 @@ func (m Model) settingsLines() ([]string, []int) {
 		if s.section == sectionRoots && i == 0 {
 			lines, at = append(lines, dim.Render("Folders where tkt looks for your local clones")), append(at, -1)
 		}
-		lines, at = append(lines, truncate(line, m.width)), append(at, i)
+		line = truncate(line, m.width-3)
+		if r.kind == rowRepo || r.kind == rowRoot {
+			line = pad(line, m.width-2) + dim.Render("✕")
+		}
+		lines, at = append(lines, line), append(at, i)
 	}
 	return lines, at
 }
@@ -367,8 +466,11 @@ func (m Model) settingsModal() string {
 		} else {
 			lines = append(lines, "  "+dim.Render(l), "   "+v)
 		}
+		if i == f.pathField() && f.hint != "" {
+			lines = append(lines, "   "+keyDim.Render(f.hint))
+		}
 	}
-	lines = append(lines, "", dim.Render("enter save · tab next field · esc cancel"))
+	lines = append(lines, "", dim.Render("enter save · tab next field · ctrl+o browse folders · esc cancel"))
 	return menuBox.Render(strings.Join(lines, "\n"))
 }
 
@@ -421,6 +523,9 @@ func (m Model) settingsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	i := start + msg.Y - lineCount(m.header()) - 2
 	if i >= 0 && i < len(at) && at[i] >= 0 {
 		s.row = at[i]
+		if r, ok := s.current(); ok && (r.kind == rowRepo || r.kind == rowRoot) && msg.X >= m.width-3 {
+			return m.settingsAction("d")
+		}
 	}
 	return m, nil
 }

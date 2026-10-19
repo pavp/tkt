@@ -108,6 +108,30 @@ func (b *boardActions) Config() config.Config {
 	return b.cfg().Clone()
 }
 
+func (b *boardActions) FindClones(repo string) tea.Cmd {
+	return func() tea.Msg {
+		paths := b.a.Resolver(b.cfg()).FindAll(b.ctx, repo)
+		for i, p := range paths {
+			paths[i] = b.a.tildePath(p)
+		}
+		return tui.ClonesFoundMsg{Repo: repo, Paths: paths}
+	}
+}
+
+func (b *boardActions) RepoAt(path string) tea.Cmd {
+	return func() tea.Msg {
+		repo, _ := b.a.Resolver(b.cfg()).RepoAt(b.ctx, b.a.Env.ExpandHome(path))
+		return tui.RepoFoundMsg{Path: path, Repo: repo}
+	}
+}
+
+func (b *boardActions) PickFolder(start string) tea.Cmd {
+	return func() tea.Msg {
+		p, err := b.a.pickFolder(b.ctx, start)
+		return tui.FolderPickedMsg{Path: p, Err: err}
+	}
+}
+
 func (b *boardActions) SaveConfig(c config.Config) tea.Cmd {
 	return func() tea.Msg {
 		c = c.Clone()

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
@@ -26,13 +27,16 @@ func settingsBoard(t *testing.T) (tea.Model, *recorder) {
 	return press(next, ","), r
 }
 
-// send runs a key and feeds the command's message back, as the program loop would.
+// send runs a key and feeds the resulting messages back, as the program loop would, following chained
+// commands a few steps deep.
 func send(m tea.Model, k tea.KeyMsg) tea.Model {
 	m, cmd := m.Update(k)
-	if cmd != nil {
-		if msg := cmd(); msg != nil {
-			m, _ = m.Update(msg)
+	for i := 0; cmd != nil && i < 5; i++ {
+		msg := cmd()
+		if msg == nil {
+			break
 		}
+		m, cmd = m.Update(msg)
 	}
 	return m
 }
@@ -162,5 +166,77 @@ func TestSettingsClosesWithEscOrTheBackButton(t *testing.T) {
 	y := lineIndex(m.View(), "← Back to the board")
 	if v := stripANSI(click(m, 2, y).View()); strings.Contains(v, "Spaces & repositories") {
 		t.Errorf("the back button should return to the board:\n%s", v)
+	}
+}
+
+func TestSettingsShowsARemoveButtonOnConfiguredRows(t *testing.T) {
+	m, r := settingsBoard(t)
+	lines := strings.Split(stripANSI(m.View()), "\n")
+	y := lineIndex(m.View(), "▸ example-org/web")
+	if y < 0 || !strings.HasSuffix(strings.TrimRight(lines[y], " "), "✕") {
+		t.Fatalf("no ✕ on the configured repository:\n%s", strings.Join(lines, "\n"))
+	}
+	if inf := lineIndex(m.View(), "inferred from your tickets"); strings.HasSuffix(strings.TrimRight(lines[inf], " "), "✕") {
+		t.Error("inferred repositories have nothing to remove")
+	}
+	x := lipgloss.Width(lines[y][:strings.LastIndex(lines[y], "✕")])
+	m = click(m, x, y)
+	if !strings.Contains(stripANSI(m.View()), "Remove example-org/web from DEMO? (y/n)") {
+		t.Fatalf("clicking ✕ should ask to remove:\n%s", stripANSI(m.View()))
+	}
+	send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if len(r.saved) != 1 || len(r.saved[0].Spaces[0].Repos) != 0 {
+		t.Errorf("saved = %+v", r.saved)
+	}
+}
+
+func TestSettingsFillsTheLocalPathFromFoundClones(t *testing.T) {
+	m, r := settingsBoard(t)
+	r.clones = map[string][]string{"example-org/web": {"~/src/web", "~/work/web"}}
+	m = send(m, keyEnter)
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "~/src/web") || !strings.Contains(v, "2 clones found · ctrl+n next") {
+		t.Fatalf("the path should come prefilled from the clones found:\n%s", v)
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlN})
+	if !strings.Contains(stripANSI(m.View()), "~/work/web") {
+		t.Errorf("ctrl+n should switch to the next clone:\n%s", stripANSI(m.View()))
+	}
+	send(m, keyEnter)
+	if len(r.saved) != 1 || r.saved[0].Spaces[0].Repos[0].Path != "~/work/web" {
+		t.Errorf("saved = %+v", r.saved)
+	}
+}
+
+func TestSettingsFillsTheRepositoryFromThePickedFolder(t *testing.T) {
+	m, r := settingsBoard(t)
+	r.picked = "~/code/docs"
+	r.origins = map[string]string{"~/code/docs": "example-org/docs"}
+	m = press(m, "a")
+	m = send(m, keyTab)
+	m = send(m, keyTab)
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "~/code/docs") || !strings.Contains(v, "example-org/docs") {
+		t.Fatalf("ctrl+o should fill the path and then the repository from its origin:\n%s", v)
+	}
+	if len(r.starts) != 1 || r.starts[0] != "~/src" {
+		t.Errorf("the picker should start in the first clone folder: %v", r.starts)
+	}
+	send(m, keyEnter)
+	if len(r.saved) != 1 || r.saved[0].Spaces[0].Repos[1] != (config.Repo{Name: "example-org/docs", Path: "~/code/docs"}) {
+		t.Errorf("saved = %+v", r.saved)
+	}
+}
+
+func TestSettingsPicksACloneFolder(t *testing.T) {
+	m, r := settingsBoard(t)
+	r.picked = "~/projects"
+	m = send(m, keyTab)
+	m = press(m, "a")
+	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlO})
+	send(m, keyEnter)
+	if len(r.saved) != 1 || strings.Join(r.saved[0].RepoRoots, ",") != "~/src,~/projects" {
+		t.Errorf("saved = %+v", r.saved)
 	}
 }

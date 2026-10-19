@@ -81,3 +81,26 @@ func TestBoardSaveConfigKeepsTildePaths(t *testing.T) {
 		t.Errorf("in-use config not expanded: %+v", got)
 	}
 }
+
+func TestBoardFindsClonesAndReadsOrigins(t *testing.T) {
+	h, _ := workHarness(t)
+	h.clone(t, "web")
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	found := b.FindClones("example-org/web")().(tui.ClonesFoundMsg)
+	if found.Repo != "example-org/web" || len(found.Paths) != 1 || found.Paths[0] != "~/src/web" {
+		t.Errorf("clones = %+v", found)
+	}
+	origin := b.RepoAt("~/src/web")().(tui.RepoFoundMsg)
+	if origin.Repo != "example-org/web" || origin.Path != "~/src/web" {
+		t.Errorf("origin = %+v", origin)
+	}
+	h.app.Env.GOOS = "linux"
+	h.run.missing["zenity"], h.run.missing["kdialog"] = true, true
+	if picked := b.PickFolder("~/src")().(tui.FolderPickedMsg); picked.Err == nil || !strings.Contains(picked.Err.Error(), "no folder picker") {
+		t.Errorf("without a picker = %+v", picked)
+	}
+}

@@ -31,6 +31,27 @@ type Actions interface {
 	Config() config.Config
 	// SaveConfig writes the configuration; the outcome arrives as a SettingsSavedMsg.
 	SaveConfig(c config.Config) tea.Cmd
+	// FindClones looks for local clones of repo ("owner/name"); they arrive as a ClonesFoundMsg.
+	FindClones(repo string) tea.Cmd
+	// RepoAt reads the GitHub repository a folder's origin points to; it arrives as a RepoFoundMsg.
+	RepoAt(path string) tea.Cmd
+	// PickFolder shows the system's folder chooser; the choice arrives as a FolderPickedMsg.
+	PickFolder(start string) tea.Cmd
+}
+
+type ClonesFoundMsg struct {
+	Repo  string
+	Paths []string
+}
+
+type RepoFoundMsg struct {
+	Path, Repo string
+}
+
+// FolderPickedMsg carries the chosen folder; an empty Path means the user cancelled.
+type FolderPickedMsg struct {
+	Path string
+	Err  error
 }
 
 // SettingsSavedMsg reports a settings save: the configuration as written, with defaults filled in, or why
@@ -265,6 +286,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reselect()
 	case SettingsSavedMsg:
 		return m.settingsSaved(msg)
+	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg:
+		return m.settingsLookup(msg)
 	case SnapshotMsg:
 		m.loading = false
 		if msg.Err != nil {

@@ -23,6 +23,21 @@ type recorder struct {
 	saved []config.Config
 	// saveErr makes SaveConfig fail.
 	saveErr error
+	clones  map[string][]string
+	origins map[string]string
+	picked  string
+	starts  []string
+}
+
+func (r *recorder) FindClones(repo string) tea.Cmd {
+	return func() tea.Msg { return ClonesFoundMsg{Repo: repo, Paths: r.clones[repo]} }
+}
+func (r *recorder) RepoAt(path string) tea.Cmd {
+	return func() tea.Msg { return RepoFoundMsg{Path: path, Repo: r.origins[path]} }
+}
+func (r *recorder) PickFolder(start string) tea.Cmd {
+	r.starts = append(r.starts, start)
+	return func() tea.Msg { return FolderPickedMsg{Path: r.picked} }
 }
 
 func (r *recorder) Config() config.Config { return r.cfg.Clone() }
