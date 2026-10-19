@@ -497,3 +497,28 @@ func TestTicketRowsNameRepoAndPR(t *testing.T) {
 		t.Errorf("PR / CI column:\n%s", v)
 	}
 }
+
+func TestCardsShowDetailsAndDensityToggles(t *testing.T) {
+	snap := snapshot()
+	snap.Tickets[1].Type = "Story"
+	snap.Tickets[1].PRs[0].Repo = "example-org/web"
+	snap.Tickets[1].Subtasks = []ticket.Ticket{{Key: "DEMO-9"}}
+	m := New(board.Snapshot{}, false, &recorder{}, ViewColumns)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	next, _ = next.Update(SnapshotMsg{Snap: snap})
+	v := stripANSI(next.View())
+	for _, want := range []string{"web#812 ✕", "Story · 1 subtasks", "no PR yet"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("detailed card missing %q:\n%s", want, v)
+		}
+	}
+	next = press(next, "z")
+	v = stripANSI(next.View())
+	if strings.Contains(v, "web#812 ✕") || !strings.Contains(v, "Filter accounts") || !strings.Contains(v, "compact cards") {
+		t.Errorf("compact cards:\n%s", v)
+	}
+	next = click(next, 40, lineIndex(next.View(), "DEMO-1"))
+	if !strings.Contains(stripANSI(next.View()), "▸ DEMO-1") {
+		t.Error("click hit-testing broke in compact mode")
+	}
+}

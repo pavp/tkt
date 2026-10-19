@@ -63,6 +63,7 @@ type Model struct {
 	height       int
 	status       string
 	now          func() time.Time
+	compact      bool
 }
 
 // tickMsg drives the "synced … ago" label and the periodic refresh.
@@ -271,7 +272,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	colWidth := m.columnWidth() + 2
 	c := msg.X / colWidth
 	// Inside a column box: top border, the column title, then one bordered card after another.
-	r := (body - 2) / cardLines
+	r := (body - 2) / m.cardLines()
 	if body >= 2 && c >= 0 && c < len(cols) && r < len(cols[c]) {
 		m.col, m.row = c, r
 		m.remember()
@@ -321,6 +322,13 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
+	case "z":
+		m.compact = !m.compact
+		if m.compact {
+			m.status = "compact cards · z for details"
+		} else {
+			m.status = "detailed cards · z for compact"
+		}
 	case "v":
 		if m.view == ViewColumns {
 			m.view = ViewList
@@ -592,8 +600,13 @@ func (m Model) reviewStrip() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, row...)
 }
 
-// cardLines is how many lines one bordered card takes: border, key, title, meta, border.
-const cardLines = 5
+// cardLines is how many lines one bordered card takes: two border lines plus its content lines.
+func (m Model) cardLines() int {
+	if m.compact {
+		return 4
+	}
+	return 6
+}
 
 // columnsView draws the four columns as boxes reaching height lines, each ticket in its own card.
 func (m Model) columnsView(height int) string {
@@ -606,7 +619,7 @@ func (m Model) columnsView(height int) string {
 			parts = append(parts, dim.Render("— nothing here"))
 		}
 		for ri, it := range cols[ci] {
-			parts = append(parts, card(*it.ticket, inner-2, ci == m.col && ri == m.row))
+			parts = append(parts, card(*it.ticket, inner-2, ci == m.col && ri == m.row, m.compact))
 		}
 		st := box
 		if ci == m.col {
@@ -627,7 +640,15 @@ var (
 )
 
 // card renders one ticket in its own bordered box of the given outer width.
-func card(t ticket.Ticket, outer int, sel bool) string {
+var (
+	cardBoxWarn = cardBox.BorderForeground(lipgloss.Color("130"))
+	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255"))
+	keyDim      = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+)
+
+// card renders one ticket in its own bordered box: key and attention flag, title, then (unless compact)
+// its pull requests with colored CI marks and a dimmed line with type and subtasks.
+func card(t ticket.Ticket, outer int, sel, compact bool) string {
 	width := outer - 2
 	mark := " "
 	if sel {
@@ -637,21 +658,69 @@ func card(t ticket.Ticket, outer int, sel bool) string {
 	if r := t.Attention(); len(r) > 0 {
 		flag = warn.Render("! " + string(r[0]))
 	}
-	head := fmt.Sprintf("%s %s", mark, t.Key)
+	head := keyDim.Render(fmt.Sprintf("%s %s", mark, t.Key))
 	if sel {
-		head = selected.Render(head)
+		head = selected.Render(fmt.Sprintf("%s %s", mark, t.Key))
 	}
 	gap := max(1, width-lipgloss.Width(head)-lipgloss.Width(flag))
-	meta := prMeta(t)
-	if len(t.Subtasks) > 0 {
-		meta = strings.TrimSpace(meta + fmt.Sprintf(" · %d subtasks", len(t.Subtasks)))
+	lines := []string{head + strings.Repeat(" ", gap) + flag, "  " + titleStyle.Render(truncate(t.Summary, width-2))}
+	if !compact {
+		lines = append(lines, "  "+coloredPRs(t.PRs, width-2))
+		info := t.Type
+		if len(t.Subtasks) > 0 {
+			info = strings.TrimSpace(fmt.Sprintf("%s · %d subtasks", info, len(t.Subtasks)))
+		}
+		if info == "" {
+			info = t.Status
+		}
+		lines = append(lines, "  "+dim.Render(truncate(info, width-2)))
 	}
-	content := head + strings.Repeat(" ", gap) + flag + "\n" + "  " + truncate(t.Summary, width-2) + "\n" + "  " + dim.Render(truncate(meta, width-2))
 	st := cardBox
-	if sel {
+	switch {
+	case sel:
 		st = cardBoxSel
+	case len(t.Attention()) > 0:
+		st = cardBoxWarn
 	}
-	return st.Width(width).Render(content)
+	return st.Width(width).Render(strings.Join(lines, "\n"))
+}
+
+// coloredPRs lists PRs as "repo#n" with the CI mark colored by state, cut to width.
+func coloredPRs(prs []ticket.PullRequest, width int) string {
+	if len(prs) == 0 {
+		return dim.Render("no PR yet")
+	}
+	var parts []string
+	used := 0
+	for _, pr := range prs {
+		_, repo, _ := strings.Cut(pr.Repo, "/")
+		ref := fmt.Sprintf("%s#%d", repo, pr.Number)
+		if repo == "" {
+			ref = fmt.Sprintf("#%d", pr.Number)
+		}
+		markText, style := checkMark(pr.Checks), dim
+		switch {
+		case pr.State == ticket.PRMerged:
+			markText, style = "merged", ok
+		case pr.State == ticket.PRClosed:
+			markText = "closed"
+		case pr.Checks == ticket.ChecksFail:
+			style = warn
+		case pr.Checks == ticket.ChecksPass:
+			style = ok
+		}
+		w := lipgloss.Width(ref) + 1 + lipgloss.Width(markText)
+		if used > 0 && used+1+w > width {
+			parts = append(parts, dim.Render("…"))
+			break
+		}
+		if w > width {
+			ref = truncate(ref, max(4, width-1-lipgloss.Width(markText)))
+		}
+		parts = append(parts, ref+" "+style.Render(markText))
+		used += w + 1
+	}
+	return strings.Join(parts, " ")
 }
 
 // prRef names a PR with its repository and state: "accounts-web#812 ✕", "web#790 merged".
@@ -826,7 +895,7 @@ func (m Model) footer() string {
 	}
 	legend := [][2]string{
 		{move, "move"}, {"click", "select"}, {"enter", "Open agent · Start"}, {"f", "fix CI"}, {"i", "ticket pane"},
-		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {"g", "refresh"}, {"q", "close"},
+		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
 	}
 	items := make([]string, len(legend))
 	for i, k := range legend {
