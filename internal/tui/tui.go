@@ -875,7 +875,8 @@ func prMeta(t ticket.Ticket) string {
 const (
 	keyWidth    = 13
 	statusWidth = 18
-	prWidth     = 30
+	// prWidth caps the PR / CI column, which otherwise fits its widest value.
+	prWidth = 22
 )
 
 // pad truncates s to n cells and fills the rest with spaces, so columns line up.
@@ -889,11 +890,22 @@ func (m Model) listView() string {
 	if len(items) == 0 {
 		return dim.Render("  nothing matches this filter")
 	}
+	prText := func(it item) string {
+		if it.pr != nil {
+			return checkMark(it.pr.Checks)
+		}
+		return prRefs(it.ticket.PRs)
+	}
+	prW := lipgloss.Width("PR / CI")
+	for _, it := range items {
+		prW = max(prW, lipgloss.Width(prText(it)))
+	}
+	prW = min(prW, prWidth)
 	// Narrow panes shrink PR / CI first, then STATUS, so the title always keeps some room.
-	statusW, prW := statusWidth, prWidth
+	statusW := statusWidth
 	const minTitle = 12
 	if short := minTitle - (m.width - 2 - keyWidth - statusW - prW - 3); short > 0 {
-		cut := min(short, prW-12)
+		cut := max(0, min(short, prW-8))
 		prW -= cut
 		statusW -= min(short-cut, statusW-10)
 	}
@@ -906,9 +918,9 @@ func (m Model) listView() string {
 	for i, it := range items {
 		var line string
 		if it.pr != nil {
-			line = row(string(it.key), "Review requested", checkMark(it.pr.Checks), it.pr.Title)
+			line = row(string(it.key), "Review requested", prText(it), it.pr.Title)
 		} else {
-			line = row(string(it.key), it.ticket.Status, prRefs(it.ticket.PRs), it.ticket.Summary)
+			line = row(string(it.key), it.ticket.Status, prText(it), it.ticket.Summary)
 		}
 		switch {
 		case i == m.row:

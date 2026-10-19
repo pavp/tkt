@@ -629,3 +629,17 @@ func TestWrapWords(t *testing.T) {
 		}
 	}
 }
+
+func TestPRColumnFitsItsContent(t *testing.T) {
+	m := press(loaded(&recorder{}), "v")
+	for _, l := range strings.Split(stripANSI(m.View()), "\n") {
+		if strings.Contains(l, "DEMO-1") && strings.Contains(l, "#812 ✕") {
+			gap := l[strings.Index(l, "#812 ✕")+len("#812 ✕"):]
+			if spaces := len(gap) - len(strings.TrimLeft(gap, " ")); spaces > 4 {
+				t.Errorf("PR / CI column wastes %d spaces: %q", spaces, l)
+			}
+			return
+		}
+	}
+	t.Fatal("row not found")
+}
