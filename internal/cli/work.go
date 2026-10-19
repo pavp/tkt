@@ -136,7 +136,7 @@ func linkKey(c *config.Config, branch string, args []string) (ticket.Key, error)
 		return inBranch, nil
 	}
 	want := ticket.Key(strings.ToUpper(args[0]))
-	for _, k := range ticket.KeysIn(branch) {
+	for _, k := range ticket.BranchKeys(branch) {
 		if k == want {
 			return want, nil
 		}

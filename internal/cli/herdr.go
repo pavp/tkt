@@ -321,7 +321,7 @@ func keyFromURL(u string, snap board.Snapshot) (ticket.Key, bool) {
 	}
 	for _, pr := range snap.Reviews {
 		if strings.HasPrefix(trimmed, pr.URL) {
-			if keys := ticket.KeysIn(pr.Branch); len(keys) > 0 {
+			if keys := ticket.BranchKeys(pr.Branch); len(keys) > 0 {
 				return keys[0], true
 			}
 		}

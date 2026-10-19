@@ -233,3 +233,14 @@ func TestInteractiveCommandsRejectJSON(t *testing.T) {
 		t.Error("launched an agent despite --json")
 	}
 }
+
+func TestLinkAcceptsLowercaseKeysInBranches(t *testing.T) {
+	h, _ := workHarness(t)
+	h.inCheckout("test/demo-7-coverage", "/src/web-demo-7", "git@github.com:example-org/web.git")
+	if code := h.exec("link"); code != 0 || !strings.Contains(h.out.String(), "✓ DEMO-7 ← test/demo-7-coverage") {
+		t.Fatalf("exit %d: %s %s", code, h.out, h.errOut)
+	}
+	if code := h.exec("link", "DEMO-7"); code != 0 {
+		t.Errorf("explicit key against a lowercase branch: exit %d, %s", code, h.errOut)
+	}
+}

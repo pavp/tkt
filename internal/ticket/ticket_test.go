@@ -39,6 +39,8 @@ func TestKeyInBranchFiltersBySpace(t *testing.T) {
 		{"chore/UTF-8-cleanup", "", false},
 		{"feature/UTF-8-OPS-9", "OPS-9", true},
 		{"fix-date-filter", "", false},
+		{"test/demo-170449-per-folder-coverage", "DEMO-170449", true},
+		{"fix-123-lowercase", "", false},
 	}
 	for _, tt := range tests {
 		got, ok := KeyInBranch(tt.branch, spaces)
@@ -108,9 +110,10 @@ func TestAttachPRs(t *testing.T) {
 		{Repo: "example-org/api", Number: 4, Branch: "feature/DEMO-1-a"},
 		{Repo: "example-org/web", Number: 10, Branch: "fix/DEMO-2-OPS-3"},
 		{Repo: "example-org/web", Number: 11, Branch: "chore/no-key"},
+		{Repo: "example-org/api", Number: 12, Branch: "test/demo-2-lowercase"},
 	}
 	got := AttachPRs(tickets, prs)
-	want := map[Key][]int{"DEMO-1": {4, 9}, "DEMO-2": {10}, "OPS-3": {10}}
+	want := map[Key][]int{"DEMO-1": {4, 9}, "DEMO-2": {12, 10}, "OPS-3": {10}}
 	for _, tk := range got {
 		var nums []int
 		for _, pr := range tk.PRs {

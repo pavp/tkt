@@ -11,8 +11,7 @@ type Key string
 
 var keyPattern = regexp.MustCompile(`[A-Z][A-Z0-9]+-[0-9]+`)
 
-// KeysIn returns the issue keys found in s, in order, without duplicates. Only uppercase keys count:
-// lowercase matching would turn ordinary branch words like "fix-123" or "release-2026" into keys.
+// KeysIn returns the uppercase issue keys found in s, in order, without duplicates.
 func KeysIn(s string) []Key {
 	var out []Key
 	seen := map[Key]bool{}
@@ -32,13 +31,20 @@ func KeysIn(s string) []Key {
 	return out
 }
 
-// KeyInBranch returns the first key in branch whose space is one of spaces.
+// BranchKeys returns the keys in a branch name in any case, so "test/acto-170449-coverage" yields
+// DEMO-170449. Ordinary words such as "fix-123" also match; callers keep only keys of known spaces or
+// tickets, which makes that harmless.
+func BranchKeys(branch string) []Key {
+	return KeysIn(strings.ToUpper(branch))
+}
+
+// KeyInBranch returns the first key in branch, in any case, whose space is one of spaces.
 func KeyInBranch(branch string, spaces []string) (Key, bool) {
 	allowed := map[string]bool{}
 	for _, s := range spaces {
 		allowed[s] = true
 	}
-	for _, k := range KeysIn(branch) {
+	for _, k := range BranchKeys(branch) {
 		if allowed[k.Space()] {
 			return k, true
 		}
@@ -228,7 +234,7 @@ func (t Ticket) Checks() CheckState {
 func AttachPRs(tickets []Ticket, prs []PullRequest) []Ticket {
 	byKey := map[Key][]PullRequest{}
 	for _, pr := range prs {
-		for _, k := range KeysIn(pr.Branch) {
+		for _, k := range BranchKeys(pr.Branch) {
 			byKey[k] = append(byKey[k], pr)
 		}
 	}

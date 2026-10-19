@@ -170,7 +170,7 @@ func (s Snapshot) Filter(space string) Snapshot {
 	}
 	out.Reviews = nil
 	for _, pr := range s.Reviews {
-		for _, k := range ticket.KeysIn(pr.Branch) {
+		for _, k := range ticket.BranchKeys(pr.Branch) {
 			if k.Space() == space {
 				out.Reviews = append(out.Reviews, pr)
 				break
