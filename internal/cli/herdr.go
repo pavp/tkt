@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ type HerdrAPI interface {
 	FocusWorkspace(ctx context.Context, id string) error
 	ReportWorkspaceTokens(ctx context.Context, workspaceID, source string, tokens map[string]*string, ttl time.Duration) error
 	Agents(ctx context.Context) ([]herdr.Agent, error)
+	Panes(ctx context.Context) ([]herdr.Pane, error)
 	StartAgent(ctx context.Context, paneID, kind, name string, args []string) error
 	Prompt(ctx context.Context, target, text string) error
 	OpenPluginPane(ctx context.Context, p herdr.PaneOpen) error
@@ -524,13 +526,30 @@ func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Sn
 			}
 		}
 	}
+	// Herdr reports a worktree only for workspaces it manages as git worktrees; one opened on a plain
+	// checkout (as tkt herdr start does) is found through its panes' folders.
+	paneDirs := map[string][]string{}
+	if panes, err := h.Panes(ctx); err == nil {
+		for _, p := range panes {
+			if p.Cwd != "" && !slices.Contains(paneDirs[p.WorkspaceID], p.Cwd) {
+				paneDirs[p.WorkspaceID] = append(paneDirs[p.WorkspaceID], p.Cwd)
+			}
+		}
+	}
 	n := 0
 	agents := map[string]string{}
 	for _, ws := range all {
-		if ws.Worktree == nil {
-			continue
+		dirs := paneDirs[ws.ID]
+		if ws.Worktree != nil {
+			dirs = []string{ws.Worktree.CheckoutPath}
 		}
-		key, ok := a.keyAt(ctx, c, ws.Worktree.CheckoutPath)
+		var key ticket.Key
+		ok := false
+		for _, dir := range dirs {
+			if key, ok = a.keyAt(ctx, c, dir); ok {
+				break
+			}
+		}
 		if !ok {
 			continue
 		}

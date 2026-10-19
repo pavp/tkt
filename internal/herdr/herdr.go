@@ -105,6 +105,14 @@ type Workspace struct {
 	Worktree *Worktree         `json:"worktree"`
 }
 
+func (c *Client) Panes(ctx context.Context) ([]Pane, error) {
+	var r struct {
+		Panes []Pane `json:"panes"`
+	}
+	err := c.Call(ctx, "pane.list", nil, &r)
+	return r.Panes, err
+}
+
 func (c *Client) Workspaces(ctx context.Context) ([]Workspace, error) {
 	var r struct {
 		Workspaces []Workspace `json:"workspaces"`
@@ -114,8 +122,9 @@ func (c *Client) Workspaces(ctx context.Context) ([]Workspace, error) {
 }
 
 type Pane struct {
-	ID  string `json:"pane_id"`
-	Cwd string `json:"cwd"`
+	ID          string `json:"pane_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Cwd         string `json:"cwd"`
 }
 
 // CreateWorkspace opens a workspace at cwd and returns it with its root pane.
