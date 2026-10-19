@@ -63,3 +63,14 @@ func TestSidebarBlockCoexistsWithTheKeysBlock(t *testing.T) {
 		t.Errorf("leftovers:\n%s", cfg)
 	}
 }
+
+func TestSidebarPlanTreatsInlineTablesAsTheUsers(t *testing.T) {
+	for _, c := range []string{"[ui]\nsidebar = { width = 30 }\n", "ui = { accent = \"cyan\" }\n", "ui.sidebar = { width = 30 }\n"} {
+		if got := PlanSidebar(c); got != SidebarConflict {
+			t.Errorf("adding a table to an inline one breaks Herdr's strict TOML: %q → %v", c, got)
+		}
+	}
+	if _, ok := RemoveSidebarBlock(sidebarStart + "\n[ui.sidebar.spaces]\nrows = []\n"); ok {
+		t.Error("a block without its end marker must be left alone")
+	}
+}

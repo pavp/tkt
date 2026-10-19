@@ -195,7 +195,6 @@ func (c *Client) UnlinkPlugin(ctx context.Context, id string) error {
 	return c.Call(ctx, "plugin.unlink", map[string]any{"plugin_id": id}, nil)
 }
 
-// ReloadConfig makes the running server reread config.toml.
 // ReloadRejected means Herdr read its config but did not apply all of it.
 type ReloadRejected struct {
 	Status      string
@@ -203,7 +202,7 @@ type ReloadRejected struct {
 }
 
 func (e *ReloadRejected) Error() string {
-	return fmt.Sprintf("herdr %s its config reload: %s", e.Status, strings.Join(e.Diagnostics, "; "))
+	return fmt.Sprintf("herdr config reload %s: %s", e.Status, strings.Join(e.Diagnostics, "; "))
 }
 
 // ReloadConfig asks Herdr to reread its config; a failed or partial reload returns *ReloadRejected.
