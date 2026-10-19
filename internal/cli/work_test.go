@@ -145,7 +145,7 @@ func TestStartPicksReposAndLaunchesAgent(t *testing.T) {
 		t.Fatalf("launches = %+v", *calls)
 	}
 	c := (*calls)[0]
-	if c.dir != api || c.name != "claude" || !strings.Contains(c.args[0], "Work on Jira ticket DEMO-7: Export users") {
+	if c.dir != api || c.name != "claude" || !strings.Contains(c.args[0], "Work on Jira ticket DEMO-7: Export users") || strings.Contains(c.args[0], "herdr") {
 		t.Errorf("launch = %+v", c)
 	}
 	out := h.out.String()

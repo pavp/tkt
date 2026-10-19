@@ -57,6 +57,19 @@ func TestCallsAndDecoding(t *testing.T) {
 	if got := f.Last("agent.start"); got["kind"] != "claude" || got["pane_id"] != "w2:p1" || got["args"].([]any)[0] != "do it" {
 		t.Errorf("start params = %v", got)
 	}
+	if err := c.WaitAgent(ctx, "w2:p1", "idle", 2*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Last("agent.wait"); got["target"] != "w2:p1" || got["until"].([]any)[0] != "idle" || got["timeout_ms"] != float64(120000) {
+		t.Errorf("wait params = %v", got)
+	}
+	f.Results["pane.split"] = `{"type":"pane_info","pane":{"pane_id":"w2:p2","workspace_id":"w2","cwd":"/src/web"}}`
+	if p, err := c.SplitPane(ctx, "w2:p1", "/src/web"); err != nil || p.ID != "w2:p2" {
+		t.Fatalf("SplitPane = %+v, %v", p, err)
+	}
+	if got := f.Last("pane.split"); got["target_pane_id"] != "w2:p1" || got["direction"] != "right" || got["cwd"] != "/src/web" {
+		t.Errorf("split params = %v", got)
+	}
 	label := "DEMO-1 · CI failing"
 	if err := c.ReportWorkspaceTokens(ctx, "w1", "plugin:tkt", map[string]*string{"tkt": &label, "old": nil}, 30*time.Minute); err != nil {
 		t.Fatal(err)

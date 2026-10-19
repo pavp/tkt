@@ -115,6 +115,12 @@ func TestPrompts(t *testing.T) {
 			t.Errorf("start prompt missing %q", want)
 		}
 	}
+	if strings.Contains(p, "herdr") {
+		t.Error("plain start prompt mentions herdr")
+	}
+	if hp := HerdrStartPrompt("DEMO-1", "Filter accounts"); !strings.HasPrefix(hp, p) || !strings.Contains(hp, "herdr worktree create") || !strings.Contains(hp, "git worktree add") {
+		t.Errorf("herdr start prompt = %q", hp)
+	}
 	if !strings.Contains(ContinuePrompt("DEMO-1", "Filter"), "Continue work on Jira ticket DEMO-1") {
 		t.Error("continue prompt")
 	}

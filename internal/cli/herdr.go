@@ -33,6 +33,8 @@ type HerdrAPI interface {
 	Agents(ctx context.Context) ([]herdr.Agent, error)
 	Panes(ctx context.Context) ([]herdr.Pane, error)
 	StartAgent(ctx context.Context, paneID, kind, name string, args []string) error
+	WaitAgent(ctx context.Context, target, status string, timeout time.Duration) error
+	SplitPane(ctx context.Context, paneID, cwd string) (herdr.Pane, error)
 	Prompt(ctx context.Context, target, text string) error
 	OpenPluginPane(ctx context.Context, p herdr.PaneOpen) error
 	Notify(ctx context.Context, title, body string) error
@@ -342,6 +344,7 @@ func (a *App) herdrStart(cmd *cobra.Command, args, repoFlags []string, clone boo
 		}
 		return a.startInWorkspace(ctx, h, plan.Existing.Path, string(plan.Key), plan.Prompt, true)
 	}
+	plan.Prompt = workspace.HerdrStartPrompt(plan.Key, plan.Summary)
 	for i, dir := range plan.Dirs {
 		label := string(plan.Key) + " · " + filepath.Base(dir)
 		if err := a.startInWorkspace(ctx, h, dir, label, plan.Prompt, i == 0); err != nil {
@@ -354,31 +357,84 @@ func (a *App) herdrStart(cmd *cobra.Command, args, repoFlags []string, clone boo
 // startInWorkspace names the agent plain "claude", as Herdr shows agents it detects itself; the workspace
 // above it already names the ticket. Herdr wants agent names unique, so a taken name gets a number.
 // The prompt goes through agent.prompt, not as an argument: Herdr refuses multi-line arguments for the shell.
+// An open workspace at dir with no agent is reused; when its pane is busy (an editor, a server), claude gets a
+// split next to it, and only when that fails a new workspace opens.
 func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, dir, label, prompt string, focus bool) error {
+	if p, ok := idlePaneAt(ctx, h, dir); ok {
+		name, err := startClaude(ctx, h, p.ID)
+		if err != nil && !notReady(err) {
+			if split, serr := h.SplitPane(ctx, p.ID, dir); serr == nil {
+				name, err = startClaude(ctx, h, split.ID)
+			}
+		}
+		if err == nil || notReady(err) {
+			if focus {
+				_ = h.FocusWorkspace(ctx, p.WorkspaceID)
+			}
+			return a.promptStarted(ctx, h, name, "open workspace "+p.WorkspaceID, prompt, err)
+		}
+	}
 	ws, pane, err := h.CreateWorkspace(ctx, dir, label, focus)
 	if err != nil {
 		return err
 	}
+	name, err := startClaude(ctx, h, pane.ID)
+	return a.promptStarted(ctx, h, name, fmt.Sprintf("workspace %s (%s)", label, ws.ID), prompt, err)
+}
+
+// startClaude returns the agent's name, which later calls target: Herdr may not resolve the pane id to it yet.
+func startClaude(ctx context.Context, h HerdrAPI, paneID string) (string, error) {
 	name := "claude"
 	for n := 2; ; n++ {
-		err := h.StartAgent(ctx, pane.ID, "claude", name, []string{})
-		if err == nil {
-			break
-		}
-		if notReady(err) {
-			a.printf("! Claude Code in workspace %s (%s) is waiting for an answer; once it is ready, give it this prompt:\n\n%s\n", label, ws.ID, prompt)
-			return nil
-		}
-		if n > 9 || !nameTaken(err) {
-			return err
+		err := h.StartAgent(ctx, paneID, "claude", name, []string{})
+		if err == nil || n > 9 || !nameTaken(err) {
+			return name, err
 		}
 		name = fmt.Sprintf("claude-%d", n)
 	}
-	if err := h.Prompt(ctx, pane.ID, prompt); err != nil {
-		return fmt.Errorf("claude started in workspace %s but did not get its first prompt: %w", label, err)
+}
+
+// promptStarted sends the first prompt once claude is ready. A claude showing a question at startup (such as
+// its folder trust prompt) gets the prompt after the user answers; the wait stays under the socket deadline.
+// When the prompt cannot be sent, the user gets it to paste, since claude is already open.
+func (a *App) promptStarted(ctx context.Context, h HerdrAPI, agent, where, prompt string, startErr error) error {
+	if notReady(startErr) {
+		a.printf("! Claude Code in %s is asking a question; answer it there and the prompt follows…\n", where)
+		if err := h.WaitAgent(ctx, agent, "idle", 4*time.Minute); err != nil {
+			a.printf("! It did not get ready in time; give it this prompt:\n\n%s\n", prompt)
+			return nil
+		}
+	} else if startErr != nil {
+		return startErr
 	}
-	a.printf("✓ Claude Code started in workspace %s (%s)\n", label, ws.ID)
+	if err := h.Prompt(ctx, agent, prompt); err != nil {
+		a.printf("! Claude Code started in %s but did not get its first prompt (%v); give it this prompt:\n\n%s\n", where, err, prompt)
+		return nil
+	}
+	a.printf("✓ Claude Code started in %s\n", where)
 	return nil
+}
+
+// idlePaneAt finds a pane at dir in a workspace where no agent runs.
+func idlePaneAt(ctx context.Context, h HerdrAPI, dir string) (herdr.Pane, bool) {
+	panes, err := h.Panes(ctx)
+	if err != nil {
+		return herdr.Pane{}, false
+	}
+	agents, err := h.Agents(ctx)
+	if err != nil {
+		return herdr.Pane{}, false
+	}
+	busy := map[string]bool{}
+	for _, ag := range agents {
+		busy[ag.WorkspaceID] = true
+	}
+	for _, p := range panes {
+		if !busy[p.WorkspaceID] && p.Cwd != "" && filepath.Clean(p.Cwd) == filepath.Clean(dir) {
+			return p, true
+		}
+	}
+	return herdr.Pane{}, false
 }
 
 func workspaceAt(ctx context.Context, h HerdrAPI, path string) (herdr.Workspace, bool) {
@@ -688,5 +744,5 @@ func nameTaken(err error) bool {
 
 // notReady means Herdr started the agent but it is showing a question, such as Claude Code's folder trust prompt.
 func notReady(err error) bool {
-	return strings.Contains(err.Error(), "agent_not_ready")
+	return err != nil && strings.Contains(err.Error(), "agent_not_ready")
 }
