@@ -1,6 +1,7 @@
 package herdrplugin
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -31,9 +32,17 @@ const (
 	SidebarConflict
 )
 
+// inlineUI spots ui or ui.sidebar written as inline tables. TOML forbids adding a [ui.sidebar.spaces]
+// table to them, and Herdr's parser is strict even where BurntSushi's is not, so they count as the
+// user's own rows.
+var inlineUI = regexp.MustCompile(`(?m)^\s*(ui|ui\.sidebar|sidebar)\s*=`)
+
 func PlanSidebar(config string) SidebarPlan {
 	if strings.Contains(config, sidebarStart) {
 		return SidebarPresent
+	}
+	if inlineUI.MatchString(config) {
+		return SidebarConflict
 	}
 	var c struct {
 		UI struct {

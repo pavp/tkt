@@ -406,8 +406,8 @@ func TestHerdrInstallAddsAndUninstallRemovesSidebarRows(t *testing.T) {
 	if !strings.Contains(h.errOut.String(), "Show each ticket and its agent in Herdr's sidebar?") || !strings.Contains(h.out.String(), "✓ Added tkt's ticket and agent lines to Herdr's sidebar") {
 		t.Errorf("stderr %q, stdout %q", h.errOut, h.out)
 	}
-	if count(f, "server.reload_config") != 1 {
-		t.Error("config not reloaded")
+	if count(f, "server.reload_config") != 2 {
+		t.Error("config should be reloaded before (to learn its warnings) and after writing the rows")
 	}
 	if code := h.exec("herdr", "uninstall"); code != 0 {
 		t.Fatalf("uninstall exit %d: %s", code, h.errOut)
@@ -467,4 +467,46 @@ func TestBoardRefreshCarriesAgentStatesInsideHerdr(t *testing.T) {
 	if got := msg.Snap.Agents["DEMO-1"]; got != "blocked" {
 		t.Errorf("agents = %v", msg.Snap.Agents)
 	}
+}
+
+func TestHerdrInstallKeepsSidebarRowsDespiteUnrelatedWarnings(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	cfg := herdrConfig(t, h, "[toast]\nenabled = true\n")
+	f.Results["server.reload_config"] = `{"type":"config_reload","status":"partial","diagnostics":["[toast] is not a known section"]}`
+	if code := h.exec("herdr", "install", "--no-keys", "--sidebar"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if b, _ := os.ReadFile(cfg); !strings.Contains(string(b), `token = "$tkt"`) {
+		t.Errorf("a warning that was there before should not undo the rows:\n%s\n%s", b, h.out)
+	}
+}
+
+func TestHerdrInstallUndoesSidebarRowsThatAddWarnings(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	original := "[toast]\nenabled = true\n"
+	cfg := herdrConfig(t, h, original)
+	f.Results["server.reload_config"] = `{"type":"config_reload","status":"partial","diagnostics":["[toast] is not a known section"]}`
+	h.app.NewHerdr = func() HerdrAPI { return reloadSequence{HerdrAPI: herdr.New(f.Path), f: f} }
+	if code := h.exec("herdr", "install", "--no-keys", "--sidebar"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if b, _ := os.ReadFile(cfg); string(b) != original {
+		t.Errorf("rows that add a warning should be undone:\n%s", b)
+	}
+	if !strings.Contains(h.out.String(), "ui.sidebar.spaces.rows: unknown style") {
+		t.Errorf("stdout = %q", h.out)
+	}
+}
+
+// reloadSequence makes the second reload (after tkt writes its rows) report a new warning.
+type reloadSequence struct {
+	HerdrAPI
+	f *herdrtest.FakeServer
+}
+
+func (r reloadSequence) ReloadConfig(ctx context.Context) error {
+	if count(r.f, "server.reload_config") == 1 {
+		r.f.Results["server.reload_config"] = `{"type":"config_reload","status":"partial","diagnostics":["[toast] is not a known section","ui.sidebar.spaces.rows: unknown style"]}`
+	}
+	return r.HerdrAPI.ReloadConfig(ctx)
 }

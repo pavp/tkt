@@ -172,10 +172,17 @@ func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
 		}
 	}
 	if len(current) > 0 {
-		if _, err := os.Stat(path + ".bak-tkt"); os.IsNotExist(err) {
-			if err := os.WriteFile(path+".bak-tkt", current, 0o644); err != nil {
-				return fmt.Errorf("back up %s: %w", path, err)
-			}
+		if err := os.WriteFile(path+".bak-tkt", current, 0o644); err != nil {
+			return fmt.Errorf("back up %s: %w", path, err)
+		}
+	}
+	h := a.NewHerdr()
+	// Warnings the config already causes are not tkt's doing; only new ones mean Herdr rejected the rows.
+	known := map[string]bool{}
+	var before *herdr.ReloadRejected
+	if errors.As(h.ReloadConfig(cmd.Context()), &before) {
+		for _, d := range before.Diagnostics {
+			known[d] = true
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -184,17 +191,29 @@ func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
 	if err := os.WriteFile(path, []byte(herdrplugin.AddSidebarBlock(string(current))), 0o644); err != nil {
 		return err
 	}
-	h := a.NewHerdr()
 	err = h.ReloadConfig(cmd.Context())
 	var rejected *herdr.ReloadRejected
-	switch {
-	case errors.As(err, &rejected):
-		if werr := os.WriteFile(path, current, 0o644); werr != nil {
-			return fmt.Errorf("restore %s after Herdr rejected it: %w", path, werr)
+	if errors.As(err, &rejected) {
+		var added []string
+		for _, d := range rejected.Diagnostics {
+			if !known[d] {
+				added = append(added, d)
+			}
 		}
-		_ = h.ReloadConfig(cmd.Context())
-		a.printf("! Herdr rejected the sidebar rows (%s); your config is back as it was\n", strings.Join(rejected.Diagnostics, "; "))
-		return nil
+		if rejected.Status == "failed" || len(added) > 0 {
+			if werr := os.WriteFile(path, current, 0o644); werr != nil {
+				return fmt.Errorf("restore %s after Herdr rejected it: %w", path, werr)
+			}
+			_ = h.ReloadConfig(cmd.Context())
+			if len(added) == 0 {
+				added = rejected.Diagnostics
+			}
+			a.printf("! Herdr rejected the sidebar rows (%s); your config is back as it was\n", strings.Join(added, "; "))
+			return nil
+		}
+		err = nil
+	}
+	switch {
 	case err != nil:
 		a.printf("! sidebar lines saved; reload Herdr's config to see them (%v)\n", err)
 		return nil
