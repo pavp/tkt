@@ -879,31 +879,53 @@ func TestListHeaderHasARuleAndNeutralSections(t *testing.T) {
 	}
 }
 
-func rightClick(m tea.Model, x, y int) (tea.Model, tea.Cmd) {
-	return m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
-}
+func TestDoubleClickOpensTheActionsMenu(t *testing.T) {
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	start := func(view string) tea.Model {
+		m := New(board.Snapshot{}, false, &recorder{}, view).WithClock(func() time.Time { return now })
+		next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+		next, _ = next.Update(SnapshotMsg{Snap: snapshot()})
+		return next
+	}
+	at := func(m tea.Model, key string) (int, int) {
+		lines := strings.Split(stripANSI(m.View()), "\n")
+		y := lineIndex(m.View(), key)
+		return lipgloss.Width(lines[y][:strings.Index(lines[y], key)]), y
+	}
 
-func TestRightClickOpensTheActionsMenu(t *testing.T) {
-	r := &recorder{}
-	m := loaded(r)
-	lines := strings.Split(stripANSI(m.View()), "\n")
-	y := lineIndex(m.View(), "DEMO-2")
-	m, _ = rightClick(m, lipgloss.Width(lines[y][:strings.Index(lines[y], "DEMO-2")]), y)
+	m := start(ViewColumns)
+	x, y := at(m, "DEMO-2")
+	m = click(m, x, y)
+	now = now.Add(200 * time.Millisecond)
+	m = click(m, x, y)
 	if v := stripANSI(m.View()); !strings.Contains(v, "Actions for DEMO-2") {
-		t.Fatalf("right click on a card should open its menu:\n%s", v)
+		t.Fatalf("double click on a card should open its menu:\n%s", v)
 	}
 
-	m = press(loaded(r), "v")
-	y = lineIndex(m.View(), "DEMO-3")
-	if m, _ = rightClick(m, 5, y); !strings.Contains(stripANSI(m.View()), "Actions for DEMO-3") {
-		t.Errorf("right click on a list row should open its menu:\n%s", stripANSI(m.View()))
+	m = start(ViewList)
+	x, y = at(m, "DEMO-3")
+	m = click(m, x, y)
+	now = now.Add(200 * time.Millisecond)
+	if m = click(m, x, y); !strings.Contains(stripANSI(m.View()), "Actions for DEMO-3") {
+		t.Errorf("double click on a list row should open its menu:\n%s", stripANSI(m.View()))
 	}
 
-	m = loaded(r)
-	lines = strings.Split(stripANSI(m.View()), "\n")
-	y = lineIndex(m.View(), "#820")
-	m, cmd := rightClick(m, lipgloss.Width(lines[y][:strings.Index(lines[y], "#820")]), y)
-	if cmd != nil || !strings.Contains(stripANSI(m.View()), "Review request #820") {
-		t.Errorf("right click on a review chip should open its menu, not the PR:\n%s", stripANSI(m.View()))
+	m = start(ViewColumns)
+	x, y = at(m, "DEMO-2")
+	m = click(m, x, y)
+	now = now.Add(time.Second)
+	if m = click(m, x, y); strings.Contains(stripANSI(m.View()), "Actions for") {
+		t.Errorf("two slow clicks are not a double click")
+	}
+	x2, y2 := at(m, "DEMO-3")
+	m = click(m, x2, y2)
+	now = now.Add(100 * time.Millisecond)
+	if m = click(m, x, y); strings.Contains(stripANSI(m.View()), "Actions for") {
+		t.Errorf("clicks on two different tickets are not a double click")
+	}
+
+	m, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+	if cmd != nil || strings.Contains(stripANSI(m.View()), "Actions for") {
+		t.Errorf("right click should do nothing")
 	}
 }

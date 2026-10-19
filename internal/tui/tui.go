@@ -57,6 +57,10 @@ type item struct {
 }
 
 type Model struct {
+	// lastClick and lastClickAt detect a double click, which the terminal does not report.
+	lastClick   ticket.Key
+	lastClickAt time.Time
+
 	snap    board.Snapshot
 	stale   error
 	loading bool
@@ -305,20 +309,16 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case tea.MouseButtonWheelDown:
 		m.move(0, 1)
 		return m, nil
-	case tea.MouseButtonLeft, tea.MouseButtonRight:
+	case tea.MouseButtonLeft:
 	default:
 		return m, nil
 	}
 	if msg.Action != tea.MouseActionPress {
 		return m, nil
 	}
-	// A right click selects what is under the pointer and opens its menu, like enter.
-	right := msg.Button == tea.MouseButtonRight
 	headerLines := lineCount(m.header())
 	if _, _, x, y, h, _ := m.headerLayout(); msg.Y >= y && msg.Y < y+h {
-		if !right {
-			m.clickHeader(msg.X - x)
-		}
+		m.clickHeader(msg.X - x)
 		return m, nil
 	}
 	body := msg.Y - headerLines
@@ -336,22 +336,15 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if i := start + body; i >= 0 && i < len(at) && at[i] >= 0 {
 			m.row = at[i]
 			m.remember()
-			if right {
-				m.openMenu()
-			}
+			m.selectedByClick()
 		}
 		return m, nil
 	}
 	if strip, spans := m.reviewChips(); strip != "" {
 		if body < lineCount(strip) {
 			// A click on a review chip opens that pull request: following a link is harmless, unlike starting an agent.
-			for i, sp := range spans {
+			for _, sp := range spans {
 				if msg.X >= sp.start && msg.X < sp.start+sp.width {
-					if right {
-						m.inStrip, m.stripSel = true, i
-						m.openMenu()
-						return m, nil
-					}
 					return m, m.actions.Open(sp.pr.URL)
 				}
 			}
@@ -366,13 +359,29 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	r := (body - 3) / m.cardLines()
 	if body >= 3 && c >= 0 && c < len(cols) && r < len(cols[c]) {
 		m.col, m.row = c, r
+		m.inStrip = false
 		m.remember()
-		if right {
-			m.inStrip = false
-			m.openMenu()
-		}
+		m.selectedByClick()
 	}
 	return m, nil
+}
+
+const doubleClickWindow = 400 * time.Millisecond
+
+// selectedByClick opens the actions menu when this click lands on the item the previous one selected,
+// soon enough to be a double click.
+func (m *Model) selectedByClick() {
+	it, ok := m.current()
+	if !ok {
+		return
+	}
+	now := m.now()
+	if it.key == m.lastClick && now.Sub(m.lastClickAt) <= doubleClickWindow {
+		m.lastClick = ""
+		m.menu = m.buildMenu(it)
+		return
+	}
+	m.lastClick, m.lastClickAt = it.key, now
 }
 
 func (m *Model) openMenu() {
@@ -1240,7 +1249,7 @@ func (m Model) footer() string {
 		move = "←↑↓→ wasd"
 	}
 	legend := [][2]string{
-		{move, "move · ↑ to reviews"}, {"click", "select · open review"}, {"right-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
+		{move, "move · ↑ to reviews"}, {"click", "select · open review"}, {"double-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
 		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
 	}
 	items := make([]string, len(legend))
