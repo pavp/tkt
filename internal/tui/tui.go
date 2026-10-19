@@ -641,16 +641,17 @@ func (m Model) columnsView(height int) string {
 	inner := m.columnWidth()
 	rendered := make([]string, len(cols))
 	for ci, c := range ticket.Columns {
-		parts := []string{bold.Render(fmt.Sprintf("%s %d", c.Title(), len(cols[ci])))}
+		parts := []string{" " + bold.Render(fmt.Sprintf("%s %d", c.Title(), len(cols[ci])))}
 		if len(cols[ci]) == 0 {
-			parts = append(parts, dim.Render("— nothing here"))
+			parts = append(parts, " "+dim.Render("— nothing here"))
 		}
 		for ri, it := range cols[ci] {
-			parts = append(parts, card(*it.ticket, inner-2, ci == m.col && ri == m.row, m.compact))
+			parts = append(parts, card(*it.ticket, inner, ci == m.col && ri == m.row, m.compact))
 		}
-		st := box
+		// Cards run edge to edge inside their column, with no padding between them and the border.
+		st := box.Padding(0)
 		if ci == m.col {
-			st = boxSel
+			st = boxSel.Padding(0)
 		}
 		st = st.Width(inner)
 		if height > 2 {
