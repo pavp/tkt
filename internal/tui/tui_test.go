@@ -749,7 +749,7 @@ func TestMenuShowDetailsOpensTheDetail(t *testing.T) {
 func TestListSeparatesMyTicketsFromReviews(t *testing.T) {
 	m := press(loaded(&recorder{}), "v")
 	v := stripANSI(m.View())
-	mine, reviews := strings.Index(v, "My tickets · 3"), strings.Index(v, "Review requested · 1")
+	mine, reviews := strings.Index(v, "My tickets  3"), strings.Index(v, "Review requested  1")
 	if mine < 0 || reviews < 0 || mine > reviews {
 		t.Fatalf("sections missing or out of order:\n%s", v)
 	}
@@ -851,5 +851,24 @@ func TestColumnTitlesPutTheCountRightAboveARule(t *testing.T) {
 	}
 	if strings.Count(lines[y+1], "│──") < 4 {
 		t.Errorf("no rule under the column titles: %q", lines[y+1])
+	}
+}
+
+func TestListHeaderHasARuleAndNeutralSections(t *testing.T) {
+	m := New(board.Snapshot{}, false, &recorder{}, ViewList)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	next, _ = next.Update(SnapshotMsg{Snap: snapshot()})
+	lines := strings.Split(stripANSI(next.View()), "\n")
+	y := lineIndex(strings.Join(lines, "\n"), "KEY")
+	if y < 0 || !strings.HasPrefix(strings.TrimSpace(lines[y+1]), "──────") {
+		t.Fatalf("no rule under the list header:\n%s", strings.Join(lines, "\n"))
+	}
+	if lipgloss.Width(lines[y+1]) > 120 {
+		t.Errorf("rule wider than the pane: %d", lipgloss.Width(lines[y+1]))
+	}
+	for _, want := range []string{" My tickets  ", " Review requested  1"} {
+		if !strings.Contains(strings.Join(lines, "\n"), want) {
+			t.Errorf("missing section title %q:\n%s", want, strings.Join(lines, "\n"))
+		}
 	}
 }

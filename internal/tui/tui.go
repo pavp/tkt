@@ -1059,14 +1059,12 @@ func (m Model) listView() string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-var sectionStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
-
 // listLines lays the list out in two sections, the user's tickets and review requests, and returns for
 // every line the index of the item on it (-1 for titles and spacing), so clicks map back to items.
 func (m Model) listLines(row func(key, status, pr, title string) string, prText func(item) string) ([]string, []int) {
 	items := m.listItems()
-	lines := []string{"  " + dim.Render(row("KEY", "STATUS", "PR / CI", "TITLE"))}
-	at := []int{-1}
+	lines := []string{"  " + dim.Render(row("KEY", "STATUS", "PR / CI", "TITLE")), dim.Render(strings.Repeat("─", m.width))}
+	at := []int{-1, -1}
 	nTickets := 0
 	for _, it := range items {
 		if it.ticket != nil {
@@ -1074,10 +1072,10 @@ func (m Model) listLines(row func(key, status, pr, title string) string, prText 
 		}
 	}
 	section := func(title string, n int) {
-		if len(lines) > 1 {
+		if len(lines) > 2 {
 			lines, at = append(lines, ""), append(at, -1)
 		}
-		lines = append(lines, sectionStyle.Render(fmt.Sprintf("%s · %d", title, n)))
+		lines = append(lines, bold.Render(title)+"  "+dim.Render(strconv.Itoa(n)))
 		at = append(at, -1)
 	}
 	for i, it := range items {
