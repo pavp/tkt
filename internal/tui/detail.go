@@ -54,9 +54,10 @@ func (m Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// detailHeight leaves room for the header, the back button, a blank line and the legend.
+// detailHeight leaves room for the header, the back button and the blank line under it, a blank line
+// and the legend.
 func (m Model) detailHeight() int {
-	return m.height - lineCount(m.header()) - 1 - lineCount(m.footer()) - 1
+	return m.height - lineCount(m.header()) - 2 - lineCount(m.footer()) - 1
 }
 
 const backLabel = " ← Back to the board "

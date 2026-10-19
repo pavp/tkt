@@ -601,7 +601,7 @@ func (m Model) board() string {
 		for len(lines) < m.detailHeight() {
 			lines = append(lines, "")
 		}
-		return top + "\n" + m.detailBack() + "\n" + strings.Join(lines, "\n") + "\n\n" + bottom
+		return top + "\n" + m.detailBack() + "\n\n" + strings.Join(lines, "\n") + "\n\n" + bottom
 	}
 	var body string
 	bottom0 := m.preview() + "\n" + m.footer()

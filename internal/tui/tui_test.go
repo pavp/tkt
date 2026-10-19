@@ -941,6 +941,9 @@ func TestBackButtonLeavesTheDetail(t *testing.T) {
 		t.Fatalf("detail has no back button:\n%s", stripANSI(view))
 	}
 	line := strings.Split(stripANSI(view), "\n")[y]
+	if next := strings.Split(stripANSI(view), "\n")[y+1]; strings.TrimSpace(next) != "" {
+		t.Errorf("the back button should be apart from the text, got %q under it", next)
+	}
 	x := lipgloss.Width(line[:strings.Index(line, "Back")])
 	if m = click(m, x+30, y+3); !strings.Contains(stripANSI(m.View()), "← Back to the board") {
 		t.Fatalf("a click elsewhere should keep the detail open")
