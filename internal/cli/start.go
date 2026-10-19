@@ -267,8 +267,8 @@ func (a *App) offerClone(cmd *cobra.Command, res repos.Resolver, r config.Repo, 
 }
 
 // inferStartRepos finds repositories for a space that configures none: those of the ticket's Jira-linked
-// pull requests, those the board already knows for the space, owner/name --repo flags, or, in a
-// terminal, the user's answer. They live only in memory; the config is never written.
+// pull requests, those the board already knows for the space, owner/name --repo flags, those of the
+// space's other sprint tickets, or, in a terminal, the user's answer. They live only in memory; the config is never written.
 func (a *App) inferStartRepos(ctx context.Context, js JiraAPI, is jira.Issue, key ticket.Key, flags []string) ([]config.Repo, error) {
 	var names []string
 	add := func(n string) {
@@ -290,6 +290,11 @@ func (a *App) inferStartRepos(ctx context.Context, js JiraAPI, is jira.Issue, ke
 	for _, f := range flags {
 		if strings.Count(f, "/") == 1 {
 			add(f)
+		}
+	}
+	if len(names) == 0 {
+		for _, r := range suggestRepos(ctx, js, key.Space()) {
+			add(r)
 		}
 	}
 	if len(names) == 0 && a.IsTerminal() {

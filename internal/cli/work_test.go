@@ -296,3 +296,20 @@ func TestStartAsksForARepositoryWhenNoneIsKnown(t *testing.T) {
 		t.Errorf("piped: exit %d, %q", code, h.errOut)
 	}
 }
+
+func TestStartFindsTheRepositoryFromOtherSprintTickets(t *testing.T) {
+	h, calls := workHarness(t)
+	if err := os.WriteFile(h.app.configPath, []byte(noRepoConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	web := h.clone(t, "web")
+	h.jira.details["DEMO-7"] = jira.Issue{ID: "107", Key: "DEMO-7", Summary: "Export users", Status: "To Do", StatusCategory: "new"}
+	h.jira.issues = []jira.Issue{{ID: "101", Key: "DEMO-1"}, {ID: "107", Key: "DEMO-7"}}
+	h.jira.devPRs = map[string][]jira.DevPullRequest{"101": {{Repo: "example-org/web", Number: 9}}}
+	if code := h.exec("start", "DEMO-7"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if len(*calls) != 1 || (*calls)[0].dir != web {
+		t.Errorf("launches = %+v", *calls)
+	}
+}
