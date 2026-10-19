@@ -12,8 +12,9 @@ const (
 	sidebarEnd   = "# <<< tkt sidebar"
 )
 
-// SidebarRows are Herdr's default space rows plus one row with tkt's ticket and agent. Herdr styles a
-// token, not a value, so each part has one token per color and tkt reports only the one that applies.
+// SidebarRows are Herdr's default space rows plus one row with tkt's ticket and agent; Herdr joins a
+// row's parts with " · ". It styles a token, not a value, so each part has one token per color and tkt
+// reports only the one that applies.
 const SidebarRows = `[ui.sidebar.spaces]
 rows = [
   ["state_icon", "workspace"],

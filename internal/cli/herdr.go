@@ -680,7 +680,6 @@ func sidebarTokens(t ticket.Ticket, agentStatus string) map[string]*string {
 		tokens[tokenTicket] = &line
 	}
 	agent, kind := board.AgentLine(agentStatus)
-	agent = "· " + agent
 	switch kind {
 	case board.AgentWorking:
 		tokens[tokenAgent] = &agent
