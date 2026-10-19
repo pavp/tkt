@@ -308,9 +308,9 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.Action != tea.MouseActionPress {
 		return m, nil
 	}
-	headerLines := 1 + strings.Count(wrap(m.headerItems(), m.width), "\n") + 1
-	if msg.Y == 1 {
-		m.clickHeader(msg.X)
+	headerLines := lineCount(m.header())
+	if _, _, x, y := m.headerLayout(); msg.Y == y {
+		m.clickHeader(msg.X - x)
 		return m, nil
 	}
 	body := msg.Y - headerLines
@@ -633,21 +633,32 @@ func windowStart(lines []string, n int) int {
 }
 
 func (m Model) header() string {
+	title, controls, x, y := m.headerLayout()
+	if y == 0 {
+		return title + strings.Repeat(" ", x-lipgloss.Width(title)) + controls
+	}
+	return title + "\n" + controls
+}
+
+// headerLayout puts the filter and view buttons and the sync state right of the title, as the prototype
+// does, and moves them to a second row when the pane is too narrow. x and y say where controls start.
+func (m Model) headerLayout() (title, controls string, x, y int) {
 	parts := []string{bold.Render("tkt")}
 	for _, sp := range m.snap.Sprints {
 		parts = append(parts, sp.Space+" · "+board.SprintLabel(sp, m.snap.FetchedAt))
 	}
-	title := truncate(strings.Join(parts, " · "), m.width-28)
 	sync := dim.Render(m.syncLabel())
 	if m.stale != nil {
 		sync = warn.Render(m.syncLabel())
 	}
-	gap := m.width - lipgloss.Width(title) - lipgloss.Width(sync)
-	if gap < 2 {
-		gap = 2
+	controls = strings.Join(append(m.headerItems(), sync), "  ")
+	title = strings.Join(parts, " · ")
+	if x = m.width - lipgloss.Width(controls); lipgloss.Width(title)+2 <= x {
+		return title, controls, x, 0
 	}
-	line2 := wrap(m.headerItems(), m.width)
-	return title + strings.Repeat(" ", gap) + sync + "\n" + line2
+	title = truncate(title, m.width)
+	controls = wrap(append(m.headerItems(), sync), m.width)
+	return title, controls, 0, 1
 }
 
 type headerItem struct {

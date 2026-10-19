@@ -400,8 +400,8 @@ func TestMouseSelectsCardsRowsAndFilters(t *testing.T) {
 		t.Fatalf("click on DEMO-2's card did not select it:\n%s", stripANSI(m.View()))
 	}
 
-	header := strings.Split(stripANSI(m.View()), "\n")[1]
-	m = click(m, strings.Index(header, "List")+1, 1)
+	header := strings.Split(stripANSI(m.View()), "\n")[0]
+	m = click(m, lipgloss.Width(header[:strings.Index(header, "List")])+1, 0)
 	if !strings.Contains(stripANSI(m.View()), "↑↓ ws move") {
 		t.Fatalf("click on List did not switch view:\n%s", header)
 	}
@@ -412,8 +412,8 @@ func TestMouseSelectsCardsRowsAndFilters(t *testing.T) {
 		t.Errorf("click on DEMO-3's row selected %q", line)
 	}
 
-	header = strings.Split(stripANSI(m.View()), "\n")[1]
-	m = click(m, strings.Index(header, "Needs you"), 1)
+	header = strings.Split(stripANSI(m.View()), "\n")[0]
+	m = click(m, lipgloss.Width(header[:strings.Index(header, "Needs you")]), 0)
 	if v := stripANSI(m.View()); strings.Contains(v, "DEMO-3") || !strings.Contains(v, "DEMO-1") {
 		t.Errorf("click on Needs you did not filter:\n%s", v)
 	}
@@ -804,5 +804,33 @@ func TestCardLinesStartAtTheSameColumn(t *testing.T) {
 	sel := card(tk, 30, true, false)
 	if m, ti := col(sel, "▸ DEMO-1"), col(sel, "Filter"); m != ti {
 		t.Errorf("selected card: mark at %d, title at %d:\n%s", m, ti, stripANSI(sel))
+	}
+}
+
+func TestHeaderControlsShareTheTitleRow(t *testing.T) {
+	m := loaded(&recorder{})
+	lines := strings.Split(stripANSI(m.View()), "\n")
+	first := lines[0]
+	for _, want := range []string{"tkt", "1 All", "3 Reviews", "Columns", "List"} {
+		if !strings.Contains(first, want) {
+			t.Errorf("title row lacks %q: %q", want, first)
+		}
+	}
+	if strings.Index(first, "1 All") < strings.Index(first, "DEMO S42") || !strings.HasSuffix(strings.TrimRight(first, " "), "ago") && !strings.Contains(first, "synced") && !strings.Contains(first, "refreshing") {
+		t.Errorf("controls should sit right of the sprint, ending with the sync state: %q", first)
+	}
+	if strings.Contains(lines[1], "1 All") {
+		t.Errorf("filters repeated on a second row: %q", lines[1])
+	}
+
+	narrow, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 40})
+	nl := strings.Split(stripANSI(narrow.View()), "\n")
+	if !strings.Contains(nl[0], "tkt") || !strings.Contains(nl[1], "1 All") {
+		t.Errorf("a narrow pane should move the controls to the second row:\n%s\n%s", nl[0], nl[1])
+	}
+	for _, l := range nl {
+		if lipgloss.Width(l) > 60 {
+			t.Errorf("line wider than the pane: %q", l)
+		}
 	}
 }
