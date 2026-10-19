@@ -510,3 +510,23 @@ func (r reloadSequence) ReloadConfig(ctx context.Context) error {
 	}
 	return r.HerdrAPI.ReloadConfig(ctx)
 }
+
+func TestHerdrRefreshLabelsWorkspacesOpenedOnAPlainCheckout(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w9","label":"live test"}]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[
+		{"pane_id":"w9:p1","workspace_id":"w9","cwd":"/src/web"},
+		{"pane_id":"w8:p1","workspace_id":"w8","cwd":"/elsewhere"}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[]}`
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
+	if code := h.exec("herdr", "refresh"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	got := f.Last("workspace.report_metadata")
+	if got == nil || got["workspace_id"] != "w9" {
+		t.Fatalf("a workspace on a plain checkout should be labelled from its pane's folder: %v", got)
+	}
+	if tok := got["tokens"].(map[string]any)["tkt_agent_idle"]; tok != "no agent" {
+		t.Errorf("tokens = %v", got["tokens"])
+	}
+}
