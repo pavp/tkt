@@ -41,6 +41,10 @@ func (s *stubGitHub) PullRequests(_ context.Context, repos []string) ([]ticket.P
 	s.repos = repos
 	return s.prs, s.prErr
 }
+func (s *stubGitHub) PullRequestsForKeys(context.Context, []string, []string) ([]ticket.PullRequest, error) {
+	return nil, nil
+}
+
 func (s *stubGitHub) ReviewRequests(_ context.Context, repos []string, direct bool) ([]ticket.PullRequest, error) {
 	s.reviewCalls++
 	s.reviewRepos, s.direct = repos, direct

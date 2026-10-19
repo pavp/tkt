@@ -44,6 +44,7 @@ func (a *App) jiraClient(c *config.Config) (JiraAPI, error) {
 // GitHubAPI is the read-only GitHub surface commands use.
 type GitHubAPI interface {
 	PullRequests(ctx context.Context, repos []string) ([]ticket.PullRequest, error)
+	PullRequestsForKeys(ctx context.Context, repos, keys []string) ([]ticket.PullRequest, error)
 	ReviewRequests(ctx context.Context, repos []string, direct bool) ([]ticket.PullRequest, error)
 	FailedChecks(ctx context.Context, repo, sha string) ([]github.FailedCheck, error)
 	ChangeRequests(ctx context.Context, repo string, number int) ([]github.ChangeRequest, error)

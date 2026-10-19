@@ -29,6 +29,7 @@ type JiraSource interface {
 
 type GitHubSource interface {
 	PullRequests(ctx context.Context, repos []string) ([]ticket.PullRequest, error)
+	PullRequestsForKeys(ctx context.Context, repos, keys []string) ([]ticket.PullRequest, error)
 	ReviewRequests(ctx context.Context, repos []string, direct bool) ([]ticket.PullRequest, error)
 }
 
@@ -66,6 +67,19 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 			snap.Warnings = append(snap.Warnings, "pull requests unavailable: "+err.Error())
 		}
 		tickets = ticket.AttachPRs(tickets, prs)
+		var missing []string
+		for _, t := range tickets {
+			if len(t.PRs) == 0 {
+				missing = append(missing, string(t.Key))
+			}
+		}
+		if len(missing) > 0 && err == nil {
+			older, err := gh.PullRequestsForKeys(ctx, names, missing)
+			if err != nil {
+				snap.Warnings = append(snap.Warnings, "older pull requests unavailable: "+err.Error())
+			}
+			tickets = ticket.AttachPRs(tickets, append(prs, older...))
+		}
 	}
 	snap.Tickets = ticket.GroupSubtasks(tickets)
 

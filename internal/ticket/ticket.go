@@ -230,12 +230,19 @@ func (t Ticket) Checks() CheckState {
 	return worst
 }
 
-// AttachPRs gives each ticket the PRs whose branch carries its key. A PR whose branch names several
-// tickets belongs to each of them.
+// AttachPRs gives each ticket the PRs whose branch or title carries its key, once each. A PR naming
+// several tickets belongs to each of them.
 func AttachPRs(tickets []Ticket, prs []PullRequest) []Ticket {
 	byKey := map[Key][]PullRequest{}
+	seen := map[string]bool{}
 	for _, pr := range prs {
-		for _, k := range BranchKeys(pr.Branch) {
+		keys := append(BranchKeys(pr.Branch), KeysIn(strings.ToUpper(pr.Title))...)
+		for _, k := range keys {
+			id := fmt.Sprintf("%s|%s#%d", k, pr.Repo, pr.Number)
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
 			byKey[k] = append(byKey[k], pr)
 		}
 	}

@@ -16,11 +16,18 @@ import (
 )
 
 type fakeGitHub struct {
-	prs     []ticket.PullRequest
-	reviews map[string][]ticket.PullRequest
-	err     error
-	failed  map[string][]github.FailedCheck
-	changes map[int][]github.ChangeRequest
+	prs       []ticket.PullRequest
+	reviews   map[string][]ticket.PullRequest
+	err       error
+	failed    map[string][]github.FailedCheck
+	changes   map[int][]github.ChangeRequest
+	older     []ticket.PullRequest
+	keysAsked []string
+}
+
+func (f *fakeGitHub) PullRequestsForKeys(_ context.Context, _, keys []string) ([]ticket.PullRequest, error) {
+	f.keysAsked = append(f.keysAsked, keys...)
+	return f.older, nil
 }
 
 func (f *fakeGitHub) FailedChecks(_ context.Context, repo, sha string) ([]github.FailedCheck, error) {
@@ -197,5 +204,19 @@ func TestListRequiresToken(t *testing.T) {
 	delete(h.creds, "jira:example.atlassian.net:dev@example.com")
 	if code := h.exec("list"); code == 0 || !strings.Contains(h.errOut.String(), "no Jira token: run `tkt auth jira`") {
 		t.Errorf("exit %d, %q", code, h.errOut)
+	}
+}
+
+func TestListFindsOlderPRsByKey(t *testing.T) {
+	h, gh := listHarness(t)
+	gh.older = []ticket.PullRequest{{Repo: "example-org/web", Number: 569, Title: "feat: DEMO-3 export users", Branch: "some-branch", State: ticket.PRMerged}}
+	if code := h.exec("list"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if !strings.Contains(strings.Join(gh.keysAsked, ","), "DEMO-3") || strings.Contains(strings.Join(gh.keysAsked, ","), "DEMO-1") {
+		t.Errorf("searched keys = %v (only tickets without PRs)", gh.keysAsked)
+	}
+	if !strings.Contains(h.out.String(), "1 merged") {
+		t.Errorf("older PR found by title not attached:\n%s", h.out)
 	}
 }

@@ -268,3 +268,47 @@ func (c *Client) ReviewRequests(ctx context.Context, repos []string, direct bool
 	}
 	return out, nil
 }
+
+// keysPerSearch stays within GitHub search's limit of five OR operators per query.
+const keysPerSearch = 5
+
+// PullRequestsForKeys finds PRs mentioning any of keys in repos, open or finished, however old: the
+// recent-PR listing misses tickets whose PRs merged long ago.
+func (c *Client) PullRequestsForKeys(ctx context.Context, repos, keys []string) ([]ticket.PullRequest, error) {
+	byOwner := map[string][]string{}
+	for _, r := range repos {
+		owner, _, _ := strings.Cut(r, "/")
+		byOwner[owner] = append(byOwner[owner], r)
+	}
+	owners := make([]string, 0, len(byOwner))
+	for o := range byOwner {
+		owners = append(owners, o)
+	}
+	sort.Strings(owners)
+	q := `query($q: String!) { search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { ` + prFields + ` } } } }`
+	var out []ticket.PullRequest
+	for _, owner := range owners {
+		for start := 0; start < len(keys); start += keysPerSearch {
+			batch := keys[start:min(start+keysPerSearch, len(keys))]
+			terms := []string{"is:pr"}
+			for _, r := range byOwner[owner] {
+				terms = append(terms, "repo:"+r)
+			}
+			terms = append(terms, strings.Join(batch, " OR "))
+			var data struct {
+				Search struct {
+					Nodes []prNode `json:"nodes"`
+				} `json:"search"`
+			}
+			if err := c.query(ctx, owner, q, map[string]any{"q": strings.Join(terms, " ")}, &data); err != nil {
+				return nil, fmt.Errorf("pull requests for %s: %w", strings.Join(batch, ", "), err)
+			}
+			for _, n := range data.Search.Nodes {
+				if n.Number != 0 {
+					out = append(out, n.toPR())
+				}
+			}
+		}
+	}
+	return out, nil
+}

@@ -171,3 +171,24 @@ func TestCachedTokensFetchesOncePerAccount(t *testing.T) {
 		t.Errorf("fetches = %d, want 2 (work + active)", fetches)
 	}
 }
+
+func TestPullRequestsForKeysBatchesFiveKeys(t *testing.T) {
+	base, h, calls := gqlServer(t, func(string) (int, string) {
+		return 200, `{"data":{"search":{"nodes":[` + pr("example-org/web", 569, "x", "MERGED", "", "SUCCESS") + `]}}}`
+	})
+	c := New(staticTokens(map[string]string{"example-org": "t"})).WithEndpoints(base, h)
+	keys := []string{"DEMO-1", "DEMO-2", "DEMO-3", "DEMO-4", "DEMO-5", "DEMO-6"}
+	got, err := c.PullRequestsForKeys(context.Background(), []string{"example-org/web", "example-org/api"}, keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 2 || len(got) != 2 {
+		t.Fatalf("calls = %d, prs = %d", len(*calls), len(got))
+	}
+	if q := (*calls)[0].vars["q"]; q != "is:pr repo:example-org/web repo:example-org/api DEMO-1 OR DEMO-2 OR DEMO-3 OR DEMO-4 OR DEMO-5" {
+		t.Errorf("first query = %v", q)
+	}
+	if q := (*calls)[1].vars["q"]; q != "is:pr repo:example-org/web repo:example-org/api DEMO-6" {
+		t.Errorf("second query = %v", q)
+	}
+}

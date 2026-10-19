@@ -155,3 +155,14 @@ func TestSplitPRsAndSummary(t *testing.T) {
 		t.Errorf("empty summary = %q", got)
 	}
 }
+
+func TestAttachPRsMatchesTitlesOnce(t *testing.T) {
+	got := AttachPRs([]Ticket{{Key: "DEMO-1"}}, []PullRequest{
+		{Repo: "example-org/web", Number: 5, Branch: "x", Title: "feat: DEMO-1 thing"},
+		{Repo: "example-org/web", Number: 6, Branch: "feature/demo-1-y", Title: "DEMO-1: same ticket in both"},
+		{Repo: "example-org/web", Number: 6, Branch: "feature/demo-1-y", Title: "DEMO-1: same ticket in both"},
+	})
+	if len(got[0].PRs) != 2 {
+		t.Errorf("PRs = %+v", got[0].PRs)
+	}
+}
