@@ -140,3 +140,12 @@ func TestInitRejectsUnknownSpace(t *testing.T) {
 		t.Errorf("exit %d, %q", code, h.errOut)
 	}
 }
+
+func TestInitNamesTheEnvironmentToken(t *testing.T) {
+	h := initHarness(t, "example.atlassian.net\ndev@example.com\nn\ntyped\n")
+	h.env["TKT_JIRA_TOKEN"] = "from-env"
+	h.exec("init")
+	if !strings.Contains(h.errOut.String(), "Use the token in TKT_JIRA_TOKEN and save it in test store?") {
+		t.Errorf("prompt = %q", h.errOut)
+	}
+}

@@ -28,6 +28,9 @@ func newStartCmd(a *App) *cobra.Command {
 			"creates branches or changes Jira.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if a.jsonOut {
+				return errInteractive("start")
+			}
 			plan, err := a.planStart(cmd, args, repoFlags, clone)
 			if err != nil {
 				return err
@@ -131,6 +134,11 @@ func (a *App) planStart(cmd *cobra.Command, args, repoFlags []string, clone bool
 	}
 	plan.Prompt = workspace.StartPrompt(key, is.Summary)
 	return plan, nil
+}
+
+// errInteractive rejects --json on commands that hand the terminal to the user or an agent.
+func errInteractive(name string) error {
+	return fmt.Errorf("--json is not supported by `tkt %s`: it is interactive", name)
 }
 
 func names(rs []config.Repo) []string {

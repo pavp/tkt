@@ -221,3 +221,15 @@ func TestStartUnknownSpace(t *testing.T) {
 		t.Errorf("exit %d, %q", code, h.errOut)
 	}
 }
+
+func TestInteractiveCommandsRejectJSON(t *testing.T) {
+	h, calls := workHarness(t)
+	for _, args := range [][]string{{"--json", "start", "DEMO-7"}, {"--json", "init"}} {
+		if code := h.exec(args...); code == 0 || !strings.Contains(h.errOut.String(), "--json is not supported by `tkt "+args[1]+"`: it is interactive") {
+			t.Errorf("%v: exit %d, %q", args, code, h.errOut)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Error("launched an agent despite --json")
+	}
+}

@@ -54,3 +54,16 @@ func TestRenderIsValidTOML(t *testing.T) {
 		t.Errorf("link handlers = %+v", m.LinkHandlers)
 	}
 }
+
+func TestRenderQuotesUnusualPaths(t *testing.T) {
+	out := Render("/tmp/we\"ird\\path\tx", "dev")
+	var m struct {
+		Actions []struct{ Command []string } `toml:"actions"`
+	}
+	if _, err := toml.Decode(out, &m); err != nil {
+		t.Fatalf("invalid TOML for an unusual path: %v", err)
+	}
+	if got := m.Actions[0].Command[0]; got != "/tmp/we\"ird\\path\tx" {
+		t.Errorf("path round-trip = %q", got)
+	}
+}

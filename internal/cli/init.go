@@ -25,6 +25,9 @@ func newInitCmd(a *App) *cobra.Command {
 			"type what Jira cannot know: which repositories each space uses and where your clones live.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if a.jsonOut {
+				return errInteractive("init")
+			}
 			return a.runInit(cmd)
 		},
 	}
@@ -94,9 +97,13 @@ func (a *App) runInit(cmd *cobra.Command) error {
 	if email == "" {
 		return errors.New("an email is required")
 	}
-	token, _, err := credstore.JiraToken(a.Creds, a.Env.Getenv, siteURL, email)
+	token, src, err := credstore.JiraToken(a.Creds, a.Env.Getenv, siteURL, email)
 	if err == nil {
-		if ans, err := a.ask("Use the token already stored for "+email+"? (Y/n)", "y"); err != nil {
+		question := "Use the token already stored for " + email + "? (Y/n)"
+		if src == credstore.SourceEnv {
+			question = "Use the token in " + credstore.EnvJiraToken + " and save it in " + a.Creds.Name() + "? (Y/n)"
+		}
+		if ans, err := a.ask(question, "y"); err != nil {
 			return err
 		} else if strings.HasPrefix(strings.ToLower(ans), "n") {
 			token = ""
