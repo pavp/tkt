@@ -157,6 +157,8 @@ type state struct {
 	// JiraSite and JiraEmail remember which account `tkt auth jira` stored a token for, so setup need not ask.
 	JiraSite  string `json:"jira_site,omitempty"`
 	JiraEmail string `json:"jira_email,omitempty"`
+	// GitHubAccounts remembers which gh account was detected for each owner without a configured one.
+	GitHubAccounts map[string]string `json:"github_accounts,omitempty"`
 }
 
 func (a *App) statePath() string { return filepath.Join(a.Env.DataDir(), "state.json") }

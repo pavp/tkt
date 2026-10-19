@@ -7,7 +7,6 @@ import (
 
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
-	"github.com/pavp/tkt/internal/execx"
 	"github.com/pavp/tkt/internal/github"
 	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/ticket"
@@ -51,8 +50,43 @@ type GitHubAPI interface {
 	ChangeRequests(ctx context.Context, repo string, number int) ([]github.ChangeRequest, error)
 }
 
-func githubFor(c *config.Config, run execx.Runner) GitHubAPI {
-	return github.New(github.CachedTokens(c.GitHubAccount, func(ctx context.Context, account string) (string, error) {
-		return github.Token(ctx, run, account)
+func (a *App) githubFor(c *config.Config) GitHubAPI {
+	var client *github.Client
+	accountFor := func(ctx context.Context, owner string) string {
+		return a.githubAccount(ctx, c, owner, func(ctx context.Context, token, org string) (bool, error) {
+			return client.OrgMember(ctx, token, org)
+		})
+	}
+	client = github.New(github.CachedTokens(accountFor, func(ctx context.Context, account string) (string, error) {
+		return github.Token(ctx, a.Run, account)
 	}))
+	return client
+}
+
+// githubAccount picks the gh account for owner: the configured one, the one detected earlier, or the
+// logged-in account that can read owner. Empty means gh's active account.
+func (a *App) githubAccount(ctx context.Context, c *config.Config, owner string, member func(ctx context.Context, token, org string) (bool, error)) string {
+	if acct := c.GitHubAccount(owner); acct != "" {
+		return acct
+	}
+	st := a.loadState()
+	if acct := st.GitHubAccounts[owner]; acct != "" {
+		return acct
+	}
+	accounts := github.LoggedInAccounts(ctx, a.Run)
+	if len(accounts) < 2 {
+		return ""
+	}
+	acct := github.DetectAccount(ctx, accounts, owner, func(ctx context.Context, account string) (string, error) {
+		return github.Token(ctx, a.Run, account)
+	}, member)
+	if acct == "" {
+		return ""
+	}
+	if st.GitHubAccounts == nil {
+		st.GitHubAccounts = map[string]string{}
+	}
+	st.GitHubAccounts[owner] = acct
+	a.saveState(st)
+	return acct
 }

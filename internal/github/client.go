@@ -47,13 +47,13 @@ func (c *Client) WithEndpoints(base string, h *http.Client) *Client {
 }
 
 // CachedTokens memoizes gh tokens per account for the life of one command.
-func CachedTokens(accountFor func(owner string) string, fetch func(ctx context.Context, account string) (string, error)) TokenFunc {
+func CachedTokens(accountFor func(ctx context.Context, owner string) string, fetch func(ctx context.Context, account string) (string, error)) TokenFunc {
 	var mu sync.Mutex
 	cache := map[string]string{}
 	return func(ctx context.Context, owner string) (string, error) {
-		account := accountFor(owner)
 		mu.Lock()
 		defer mu.Unlock()
+		account := accountFor(ctx, owner)
 		if t, ok := cache[account]; ok {
 			return t, nil
 		}

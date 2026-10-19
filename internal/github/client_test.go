@@ -153,7 +153,7 @@ func TestReviewRequests(t *testing.T) {
 
 func TestCachedTokensFetchesOncePerAccount(t *testing.T) {
 	fetches := 0
-	tf := CachedTokens(func(owner string) string {
+	tf := CachedTokens(func(_ context.Context, owner string) string {
 		if owner == "example-org" || owner == "example-two" {
 			return "work"
 		}

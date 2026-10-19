@@ -72,7 +72,7 @@ func NewApp() (*App, error) {
 		Sleep:        sleep,
 		Launch:       launch,
 	}
-	a.NewGitHub = func(c *config.Config) GitHubAPI { return githubFor(c, a.Run) }
+	a.NewGitHub = a.githubFor
 	a.NewHerdr = func() HerdrAPI { return herdr.New(herdr.SocketPath(a.Env.Getenv, a.Env.Home)) }
 	a.Executable = executable
 	return a, nil
