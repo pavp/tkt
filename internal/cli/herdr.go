@@ -482,7 +482,7 @@ func (a *App) herdrSidebar(cmd *cobra.Command, cachedOnly bool) error {
 		}
 		return err
 	}
-	n, err := a.updateSidebar(cmd.Context(), c, snap)
+	n, _, err := a.updateSidebar(cmd.Context(), c, snap)
 	if err != nil {
 		return err
 	}
@@ -490,11 +490,12 @@ func (a *App) herdrSidebar(cmd *cobra.Command, cachedOnly bool) error {
 	return nil
 }
 
-func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Snapshot) (int, error) {
+// updateSidebar labels every workspace that holds a ticket and returns the agent status shown for each.
+func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Snapshot) (int, map[string]string, error) {
 	h := a.NewHerdr()
 	all, err := h.Workspaces(ctx)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	statuses := map[string][]string{}
 	if agents, err := h.Agents(ctx); err == nil {
@@ -505,6 +506,7 @@ func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Sn
 		}
 	}
 	n := 0
+	agents := map[string]string{}
 	for _, ws := range all {
 		if ws.Worktree == nil {
 			continue
@@ -517,12 +519,16 @@ func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Sn
 		if !ok {
 			t = ticket.Ticket{Key: key, Status: "not in your sprint"}
 		}
-		if err := h.ReportWorkspaceTokens(ctx, ws.ID, sidebarSource, sidebarTokens(t, board.MostUrgentAgent(statuses[ws.ID])), sidebarTTL); err != nil {
-			return n, err
+		agent := board.MostUrgentAgent(statuses[ws.ID])
+		if agent != "" {
+			agents[string(key)] = board.MostUrgentAgent([]string{agents[string(key)], agent})
+		}
+		if err := h.ReportWorkspaceTokens(ctx, ws.ID, sidebarSource, sidebarTokens(t, agent), sidebarTTL); err != nil {
+			return n, agents, err
 		}
 		n++
 	}
-	return n, nil
+	return n, agents, nil
 }
 
 // worktreePath digs the checkout path out of a worktree.created event payload without depending on its
@@ -580,20 +586,21 @@ func (a *App) herdrOnWorktree(cmd *cobra.Command) error {
 	}
 	a.printf("✓ %s ← %s (%s)\n", key, co.branch, co.repo)
 	if snap, ok, _ := a.cache().Load(); ok {
-		_, _ = a.updateSidebar(cmd.Context(), c, snap)
+		_, _, _ = a.updateSidebar(cmd.Context(), c, snap)
 	}
 	return nil
 }
 
 // refreshSidebarQuietly updates Herdr labels after a fresh fetch when tkt runs inside Herdr; any failure
 // is ignored because the sidebar is a convenience, never a reason for a command to fail.
-func (a *App) refreshSidebarQuietly(ctx context.Context, c *config.Config, snap board.Snapshot) {
+func (a *App) refreshSidebarQuietly(ctx context.Context, c *config.Config, snap board.Snapshot) map[string]string {
 	if a.Env.Getenv("HERDR_ENV") != "1" || a.NewHerdr == nil {
-		return
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	_, _ = a.updateSidebar(ctx, c, snap)
+	_, agents, _ := a.updateSidebar(ctx, c, snap)
+	return agents
 }
 
 // Herdr colors a token, not a value, so each line is reported under the token whose color fits it and

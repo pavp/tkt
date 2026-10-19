@@ -999,7 +999,7 @@ func (m Model) columnsView(height int) string {
 			parts = append(parts, moreLine("↑", off))
 		}
 		for ri := off; ri < end; ri++ {
-			parts = append(parts, card(*cols[ci][ri].ticket, inner, ci == m.col && ri == m.row && !m.inStrip, m.compact))
+			parts = append(parts, card(*cols[ci][ri].ticket, inner, ci == m.col && ri == m.row && !m.inStrip, m.compact, m.snap.Agents[string(cols[ci][ri].key)]))
 		}
 		if scroll {
 			parts = append(parts, moreLine("↓", n-end))
@@ -1047,7 +1047,7 @@ var (
 
 // card renders one ticket in its own bordered box: key and attention flag, title, then (unless compact)
 // its pull requests with colored CI marks and a dimmed line with type and subtasks.
-func card(t ticket.Ticket, outer int, sel, compact bool) string {
+func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 	width := outer - 2
 	inner := width - 2
 	flag := ""
@@ -1068,7 +1068,16 @@ func card(t ticket.Ticket, outer int, sel, compact bool) string {
 		lines = append(lines, titleStyle.Render(l))
 	}
 	if !compact {
-		lines = append(lines, coloredPRs(t.PRs, inner))
+		prs := coloredPRs(t.PRs, inner)
+		if line, kind := board.AgentLine(agent); kind != board.AgentNone {
+			styled := map[board.AgentKind]lipgloss.Style{board.AgentWorking: keyStyle, board.AgentNeedsYou: warn, board.AgentIdle: dim}[kind].Render(line)
+			if lipgloss.Width(prs)+3+lipgloss.Width(line) <= inner {
+				prs += dim.Render(" · ") + styled
+			} else {
+				prs = truncate(prs, max(1, inner-lipgloss.Width(line)-3)) + dim.Render(" · ") + styled
+			}
+		}
+		lines = append(lines, prs)
 		info := t.Type
 		if len(t.Subtasks) > 0 {
 			info = strings.TrimSpace(fmt.Sprintf("%s · %d subtasks", info, len(t.Subtasks)))

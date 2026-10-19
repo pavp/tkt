@@ -12,6 +12,7 @@ import (
 	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/herdr/herdrtest"
 	"github.com/pavp/tkt/internal/ticket"
+	"github.com/pavp/tkt/internal/tui"
 	"github.com/pavp/tkt/internal/workspace"
 )
 
@@ -444,5 +445,26 @@ func TestHerdrInstallUndoesSidebarRowsHerdrRejects(t *testing.T) {
 	}
 	if !strings.Contains(h.out.String(), "Herdr rejected the sidebar rows (ui.sidebar.spaces.rows: unknown token); your config is back as it was") {
 		t.Errorf("stdout = %q", h.out)
+	}
+}
+
+func TestBoardRefreshCarriesAgentStatesInsideHerdr(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.env["HERDR_ENV"] = "1"
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[
+		{"workspace_id":"w1","label":"web-DEMO-1","worktree":{"checkout_path":"/src/web-DEMO-1"}}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p1","workspace_id":"w1","agent":"claude","agent_status":"blocked"}]}`
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	msg, ok := b.Refresh()().(tui.SnapshotMsg)
+	if !ok || msg.Err != nil {
+		t.Fatalf("refresh = %+v", msg)
+	}
+	if got := msg.Snap.Agents["DEMO-1"]; got != "blocked" {
+		t.Errorf("agents = %v", msg.Snap.Agents)
 	}
 }
