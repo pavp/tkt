@@ -749,25 +749,39 @@ func actionHint(t ticket.Ticket) string {
 	return "p opens the PR ↗"
 }
 
+var keyStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
+
+// footer is the key legend: each key highlighted, its meaning dimmed, with room between commands.
 func (m Model) footer() string {
-	move := "↑↓/ws move"
+	move := "↑↓ ws"
 	if m.effectiveView() == ViewColumns {
-		move = "←↑↓→/wasd move"
+		move = "←↑↓→ wasd"
 	}
-	keys := []string{move, "click selects", "enter Open agent · Start", "f fix CI", "i ticket pane", "o Jira ↗", "p PR ↗", "tab/1-3 filter", "v view", "g refresh", "q close"}
-	return dim.Render(wrap(keys, m.width))
+	legend := [][2]string{
+		{move, "move"}, {"click", "select"}, {"enter", "Open agent · Start"}, {"f", "fix CI"}, {"i", "ticket pane"},
+		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {"g", "refresh"}, {"q", "close"},
+	}
+	items := make([]string, len(legend))
+	for i, k := range legend {
+		items[i] = keyStyle.Render(k[0]) + " " + dim.Render(k[1])
+	}
+	return wrapSep(items, m.width, "    ")
 }
 
 // wrap joins items with two spaces, starting a new line instead of overflowing width.
 func wrap(items []string, width int) string {
+	return wrapSep(items, width, "  ")
+}
+
+func wrapSep(items []string, width int, sep string) string {
 	var lines []string
 	cur := ""
 	for _, it := range items {
 		switch {
 		case cur == "":
 			cur = it
-		case lipgloss.Width(cur)+2+lipgloss.Width(it) <= width:
-			cur += "  " + it
+		case lipgloss.Width(cur)+lipgloss.Width(sep)+lipgloss.Width(it) <= width:
+			cur += sep + it
 		default:
 			lines = append(lines, cur)
 			cur = it

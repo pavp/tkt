@@ -101,7 +101,7 @@ func TestColumnsViewAndNavigation(t *testing.T) {
 	r := &recorder{}
 	m := loaded(r)
 	view := m.View()
-	for _, want := range []string{"To Do 1", "In Progress 1", "In Review 1", "Done 0", "— nothing here", "! CI failing", "#812 ✕", "Review requested", "#820 · Add pagination", "←↑↓→/wasd move"} {
+	for _, want := range []string{"To Do 1", "In Progress 1", "In Review 1", "Done 0", "— nothing here", "! CI failing", "#812 ✕", "Review requested", "#820 · Add pagination", "←↑↓→ wasd move"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("columns view missing %q", want)
 		}
@@ -127,14 +127,14 @@ func TestToggleViewKeepsSelection(t *testing.T) {
 	r := &recorder{}
 	m := press(loaded(r), "l", "v")
 	view := m.View()
-	if !strings.Contains(view, "▸ ") || !strings.Contains(view, "↑↓/ws move") {
+	if !strings.Contains(view, "▸ ") || !strings.Contains(view, "↑↓ ws move") {
 		t.Fatalf("not in list view:\n%s", view)
 	}
 	if line := selectedLine(view); !strings.Contains(line, "DEMO-1") {
 		t.Errorf("selection lost after toggling: %q", line)
 	}
 	m = press(m, "v")
-	if !strings.Contains(m.View(), "←↑↓→/wasd move") || !strings.Contains(m.View(), "▸ DEMO-1") {
+	if !strings.Contains(m.View(), "←↑↓→ wasd move") || !strings.Contains(m.View(), "▸ DEMO-1") {
 		t.Error("toggling back lost the columns or the selection")
 	}
 }
@@ -152,7 +152,7 @@ func TestNarrowTerminalUsesList(t *testing.T) {
 	r := &recorder{}
 	m := loaded(r)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
-	if !strings.Contains(m.View(), "↑↓/ws move") {
+	if !strings.Contains(m.View(), "↑↓ ws move") {
 		t.Error("narrow terminal did not fall back to the list")
 	}
 }
@@ -166,7 +166,7 @@ func TestFilters(t *testing.T) {
 	}
 	m = press(m, "r")
 	view = m.View()
-	if strings.Contains(view, "DEMO-1") || !strings.Contains(view, "#820") || !strings.Contains(view, "↑↓/ws move") {
+	if strings.Contains(view, "DEMO-1") || !strings.Contains(view, "#820") || !strings.Contains(view, "↑↓ ws move") {
 		t.Errorf("reviews filter:\n%s", view)
 	}
 	_, _ = run(m, "enter")
@@ -398,7 +398,7 @@ func TestMouseSelectsCardsRowsAndFilters(t *testing.T) {
 
 	header := strings.Split(stripANSI(m.View()), "\n")[1]
 	m = click(m, strings.Index(header, "List")+1, 1)
-	if !strings.Contains(stripANSI(m.View()), "↑↓/ws move") {
+	if !strings.Contains(stripANSI(m.View()), "↑↓ ws move") {
 		t.Fatalf("click on List did not switch view:\n%s", header)
 	}
 	view = m.View()

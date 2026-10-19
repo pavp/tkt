@@ -9,7 +9,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
@@ -43,6 +46,7 @@ func newBoardCmd(a *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			forceColor(a.Env.Getenv)
 			model := tui.New(snap, have, &boardActions{a: a, c: c, ctx: cmd.Context()}, view)
 			_, err = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context())).Run()
 			if errors.Is(err, tea.ErrProgramKilled) {
@@ -168,4 +172,17 @@ func (a *App) openURL(ctx context.Context, url string) error {
 		return err
 	}
 	return last
+}
+
+// forceColor turns colors on for the board when stdout is a terminal: inside Herdr panes the color
+// detection can come up empty and render everything plain. NO_COLOR still wins.
+func forceColor(getenv func(string) string) {
+	if getenv("NO_COLOR") != "" || !term.IsTerminal(int(os.Stdout.Fd())) {
+		return
+	}
+	profile := termenv.ANSI256
+	if ct := getenv("COLORTERM"); ct == "truecolor" || ct == "24bit" {
+		profile = termenv.TrueColor
+	}
+	lipgloss.SetColorProfile(profile)
 }
