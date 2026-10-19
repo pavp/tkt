@@ -27,7 +27,7 @@ func newBoardCmd(a *App) *cobra.Command {
 		Use:   "board",
 		Short: "Interactive board: columns or list, filters, start, fix CI (the Herdr popup)",
 		Long: "Interactive board. It opens instantly from the cached board and refreshes in the background.\n" +
-			"Keys: arrows, wasd or hjkl move · enter Open agent / Start · f send CI failures or review comments to the agent ·\n" +
+			"Keys: arrows, wasd or hjkl move · enter actions menu · f send CI failures or review comments to the agent ·\n" +
 			"i ticket pane · o Jira · p pull request · n needs you · r reviews · v columns/list · g refresh · q close.\n" +
 			"When tkt is not configured, it offers to run the setup.",
 		Args: cobra.NoArgs,
@@ -142,6 +142,53 @@ func (b *boardActions) Fix(key ticket.Key) tea.Cmd {
 		}
 		return tui.StatusMsg(msg)
 	}
+}
+
+func (b *boardActions) Copy(text, what string) tea.Cmd {
+	return func() tea.Msg {
+		if err := b.a.copyToClipboard(b.ctx, text); err != nil {
+			return tui.StatusMsg("could not copy: " + err.Error())
+		}
+		return tui.StatusMsg("✓ copied the " + what)
+	}
+}
+
+func (b *boardActions) CopyContext(key ticket.Key) tea.Cmd {
+	return func() tea.Msg {
+		d, err := b.a.loadDetail(b.ctx, b.c, key)
+		if err != nil {
+			return tui.StatusMsg(err.Error())
+		}
+		if err := b.a.copyToClipboard(b.ctx, renderContext(d, nil)); err != nil {
+			return tui.StatusMsg("could not copy: " + err.Error())
+		}
+		return tui.StatusMsg("✓ copied " + string(key) + "'s context as Markdown")
+	}
+}
+
+// copyToClipboard pipes text into the platform clipboard tool.
+func (a *App) copyToClipboard(ctx context.Context, text string) error {
+	type tool struct {
+		name string
+		args []string
+	}
+	var tools []tool
+	switch {
+	case a.Env.GOOS == "darwin":
+		tools = []tool{{"pbcopy", nil}}
+	case credstore.IsWSL(a.Env.Getenv, os.ReadFile):
+		tools = []tool{{"clip.exe", nil}}
+	default:
+		tools = []tool{{"wl-copy", nil}, {"xclip", []string{"-selection", "clipboard"}}, {"xsel", []string{"--clipboard", "--input"}}}
+	}
+	for _, t := range tools {
+		if _, err := a.Run.LookPath(t.name); err != nil {
+			continue
+		}
+		_, err := a.Run.Run(ctx, "", t.name, t.args, []byte(text))
+		return err
+	}
+	return errors.New("no clipboard tool found")
 }
 
 func status(s string) tea.Cmd {

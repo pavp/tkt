@@ -41,7 +41,7 @@ GOPRIVATE=github.com/pavp/* go install github.com/pavp/tkt/cmd/tkt@latest
 | `tkt context [KEY] [--images DIR]` | The ticket as Markdown for an agent (`> .ticket.md`); `--images` downloads image attachments |
 | `tkt start KEY [--repo R] [--clone]` | Open Claude Code on a ticket: in its worktree if it has one, otherwise in the chosen repositories with instructions to create the branch per project rules |
 | `tkt link [KEY]` | Register the current worktree as the work on a ticket; the branch must contain the key |
-| `tkt board [--view list]` | Interactive board: arrows or `wasd` move, columns or list (`v`), filters (`n` needs you, `r` reviews), `enter` Open agent / Start, `f` fix CI, `i` ticket pane, `o` Jira, `p` PR |
+| `tkt board [--view list]` | Interactive board: arrows or `wasd` move, columns or list (`v`), filters (`n` needs you, `r` reviews), `enter` actions menu (start, ticket pane, Jira, PRs, fix CI, copy), `f` fix CI, `i` ticket pane, `o` Jira, `p` PR |
 | `tkt fix [KEY] [--print]` | Send the failing check logs and requested-change comments of the ticket's PRs to its agent in Herdr (or print the prompt) |
 
 Every command accepts `--json` and `--config <path>`.

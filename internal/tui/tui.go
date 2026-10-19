@@ -20,6 +20,9 @@ type Actions interface {
 	TicketPane(key ticket.Key) tea.Cmd
 	Open(url string) tea.Cmd
 	Fix(key ticket.Key) tea.Cmd
+	// Copy puts text on the clipboard; what names it in the confirmation, such as "key".
+	Copy(text, what string) tea.Cmd
+	CopyContext(key ticket.Key) tea.Cmd
 }
 
 // SnapshotMsg delivers a fetched board; Stale explains why it came from the cache, Err why nothing came.
@@ -64,6 +67,7 @@ type Model struct {
 	status       string
 	now          func() time.Time
 	compact      bool
+	menu         *menu
 }
 
 // tickMsg drives the "synced … ago" label and the periodic refresh.
@@ -234,6 +238,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // mouse selects what is under a click and scrolls with the wheel. Clicks only select: actions stay on
 // the keyboard so a stray click never starts an agent.
 func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.menu != nil {
+		switch {
+		case msg.Button == tea.MouseButtonWheelUp:
+			m.menu.sel = max(0, m.menu.sel-1)
+		case msg.Button == tea.MouseButtonWheelDown:
+			m.menu.sel = min(len(m.menu.items)-1, m.menu.sel+1)
+		case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
+			top := lineCount(m.header())
+			height := m.height - top - lineCount(m.preview()+"\n"+m.footer())
+			if i := m.menuItemAt(msg.X, msg.Y, top, height); i >= 0 {
+				return m.runMenuItem(i)
+			}
+			m.menu = nil
+		}
+		return m, nil
+	}
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
 		m.move(0, -1)
@@ -319,6 +339,9 @@ func (m Model) columnWidth() int {
 }
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.menu != nil {
+		return m.menuKey(k)
+	}
 	switch k.String() {
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
@@ -371,12 +394,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		m.status = "refreshing…"
 		return m, m.actions.Refresh()
-	case "enter":
+	case "enter", " ":
 		if it, ok := m.current(); ok {
-			if it.pr != nil {
-				return m, m.actions.Open(it.pr.URL)
-			}
-			return m, m.actions.Start(it.key)
+			m.menu = m.buildMenu(it)
 		}
 	case "i":
 		if it, ok := m.current(); ok && it.ticket != nil {
@@ -462,7 +482,10 @@ func (m Model) View() string {
 	top := m.header()
 	var body string
 	bottom0 := m.preview() + "\n" + m.footer()
-	if m.effectiveView() == ViewColumns {
+	if m.menu != nil {
+		height := m.height - lineCount(top) - lineCount(bottom0)
+		body = lipgloss.Place(m.width, max(height, lipgloss.Height(m.menuView())), lipgloss.Center, lipgloss.Center, m.menuView())
+	} else if m.effectiveView() == ViewColumns {
 		height := m.height - lineCount(top) - lineCount(bottom0)
 		if strip := m.reviewStrip(); strip != "" {
 			body = strip + "\n"
@@ -906,7 +929,7 @@ func (m Model) footer() string {
 		move = "←↑↓→ wasd"
 	}
 	legend := [][2]string{
-		{move, "move"}, {"click", "select"}, {"enter", "Open agent · Start"}, {"f", "fix CI"}, {"i", "ticket pane"},
+		{move, "move"}, {"click", "select"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
 		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
 	}
 	items := make([]string, len(legend))

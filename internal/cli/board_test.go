@@ -46,3 +46,22 @@ func TestBoardActionsRefreshAndFix(t *testing.T) {
 		t.Errorf("fix outside Herdr = %v", got)
 	}
 }
+
+func TestCopyToClipboard(t *testing.T) {
+	h, _ := listHarness(t)
+	h.app.Env.GOOS = "darwin"
+	h.run.out["pbcopy"] = ""
+	if err := h.app.copyToClipboard(context.Background(), "DEMO-1"); err != nil {
+		t.Fatal(err)
+	}
+	h.app.Env.GOOS = "linux"
+	h.run.missing["wl-copy"] = true
+	h.run.out["xclip -selection clipboard"] = ""
+	if err := h.app.copyToClipboard(context.Background(), "DEMO-1"); err != nil {
+		t.Fatal(err)
+	}
+	h.run.missing["xclip"], h.run.missing["xsel"] = true, true
+	if err := h.app.copyToClipboard(context.Background(), "x"); err == nil || !strings.Contains(err.Error(), "no clipboard tool") {
+		t.Errorf("err = %v", err)
+	}
+}

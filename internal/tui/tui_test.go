@@ -117,9 +117,13 @@ func TestColumnsViewAndNavigation(t *testing.T) {
 	if !strings.Contains(m.View(), "▸ DEMO-2") {
 		t.Error("moving right should skip the empty Done column and stay on In Review")
 	}
+	m = press(m, "enter")
+	if !strings.Contains(stripANSI(m.View()), "Actions for DEMO-2") {
+		t.Fatalf("enter did not open the actions menu:\n%s", stripANSI(m.View()))
+	}
 	_, msg := run(m, "enter")
 	if r.last() != "start DEMO-2" || msg != StatusMsg("start DEMO-2") {
-		t.Errorf("enter = %v / %v", r.calls, msg)
+		t.Errorf("first menu item = %v / %v", r.calls, msg)
 	}
 }
 
@@ -169,7 +173,8 @@ func TestFilters(t *testing.T) {
 	if strings.Contains(view, "DEMO-1") || !strings.Contains(view, "#820") || !strings.Contains(view, "↑↓ ws move") {
 		t.Errorf("reviews filter:\n%s", view)
 	}
-	_, _ = run(m, "enter")
+	m = press(m, "enter")
+	m, _ = run(m, "enter")
 	if r.last() != "open https://github.com/example-org/web/pull/820" {
 		t.Errorf("enter on a review = %v", r.calls)
 	}
@@ -533,3 +538,50 @@ func TestReviewChipShowsTicketKey(t *testing.T) {
 		t.Errorf("chip:\n%s", v)
 	}
 }
+
+func TestActionsMenu(t *testing.T) {
+	r := &recorder{}
+	m := press(loaded(r), "l", "enter")
+	v := stripANSI(m.View())
+	for _, want := range []string{"Actions for DEMO-1", "Start · open the agent", "Open the ticket pane", "Open in Jira ↗", "Open #812 ✕ in GitHub ↗", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("menu missing %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "Send the review comments") {
+		t.Error("offered review comments for a ticket without requested changes")
+	}
+	m = press(m, "s", "s", "s", "s")
+	_, msg := run(m, "enter")
+	if r.last() != "fix DEMO-1" || msg != StatusMsg("fix DEMO-1") {
+		t.Errorf("fifth item ran %v", r.calls)
+	}
+	m = press(loaded(r), "enter", "w")
+	run(m, "enter")
+	if r.last() != "context DEMO-3" {
+		t.Errorf("w from the top should wrap to the last item: %v", r.calls)
+	}
+	m = press(loaded(r), "enter")
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if strings.Contains(stripANSI(m.View()), "Actions for") {
+		t.Error("esc did not close the menu")
+	}
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc}); cmd == nil {
+		t.Error("esc outside the menu should still close the board")
+	}
+}
+
+func TestActionsMenuClick(t *testing.T) {
+	r := &recorder{}
+	m := press(loaded(r), "enter")
+	v := m.View()
+	y := lineIndex(v, "Open in Jira ↗")
+	line := strings.Split(stripANSI(v), "\n")[y]
+	m = click(m, lipgloss.Width(line[:strings.Index(line, "Open in Jira")]), y)
+	if r.last() != "open https://example.atlassian.net/browse/DEMO-3" {
+		t.Errorf("click ran %v", r.calls)
+	}
+}
+
+func (r *recorder) Copy(text, what string) tea.Cmd   { return r.cmd("copy " + what + " " + text) }
+func (r *recorder) CopyContext(k ticket.Key) tea.Cmd { return r.cmd("context " + string(k)) }
