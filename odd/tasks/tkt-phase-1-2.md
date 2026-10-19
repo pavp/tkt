@@ -30,7 +30,7 @@ Forecast (items 1–23, see L5): 4,310–7,040 authored changed lines.
 | T2b | Cache, board assembly, `list` | S4 S10 | measured 910 | inline, no Writer reason | `feat/tkt-phase-1-2-2b-list` (T2a) | done · 84 tests · RDD medium, under budget (pending in slice) | 0bba4f9 87ec9c6 |
 | T3a | ADF, `show`, `context` | S4 | measured 1,074 | inline, no Writer reason | `feat/tkt-phase-1-2-3a-show` (T2b) | done · RDD medium, under budget (pending in slice) | e88349d f3f4426 f2ce6d8 |
 | T3b | `init`, discovery, `link`, `start` | S2 S3 S4 S11 | measured 1,393 | inline, no Writer reason | `feat/tkt-phase-1-2-3b-work` (T3a) | done · 41 CLI tests · RDD high (auth hot path, process boundary), review deferred | 494c074 24629af 9a4b977 |
-| T4 | Herdr: client, `tkt herdr` commands, sidebar + agent state, manifest, setup action | S3 S11 | 1,200–2,000 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-4-herdr` (T3b) | pending | |
+| T4 | Herdr: client, `tkt herdr` commands, sidebar + agent state, manifest, setup action | S3 S11 | measured 1,568 | inline, no Writer reason | `feat/tkt-phase-1-2-4-herdr` (T3b) | done · RDD medium (escalate item 5: `tkt herdr install` links into the user's Herdr) | e758a7f 3a3e807 06502e6 |
 | T5 | Board TUI, `f`, docs | S7 S8 S9 S10 | 1,300–2,000 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-5-board` (T4) | pending | |
 
 High-risk units get their own commit: secrets (T1, item 2), new dependencies (T1, item 5), `tkt herdr install` (T4, item 5).
