@@ -12,14 +12,13 @@ const (
 	sidebarEnd   = "# <<< tkt sidebar"
 )
 
-// SidebarRows are Herdr's default space rows plus tkt's ticket line and agent line. Herdr styles a
-// token, not a value, so each line has one token per color and tkt reports only the one that applies.
+// SidebarRows are Herdr's default space rows plus one row with tkt's ticket and agent. Herdr styles a
+// token, not a value, so each part has one token per color and tkt reports only the one that applies.
 const SidebarRows = `[ui.sidebar.spaces]
 rows = [
   ["state_icon", "workspace"],
   ["branch", "git_status"],
-  [{ token = "$tkt", fg = "#8DBBFF" }, { token = "$tkt_alert", fg = "#F5B970" }],
-  [{ token = "$tkt_agent", fg = "#8DBBFF" }, { token = "$tkt_agent_alert", fg = "#F5B970" }, { token = "$tkt_agent_idle", dim = true }],
+  [{ token = "$tkt", fg = "#8DBBFF" }, { token = "$tkt_alert", fg = "#F5B970" }, { token = "$tkt_agent", fg = "#8DBBFF" }, { token = "$tkt_agent_alert", fg = "#F5B970" }, { token = "$tkt_agent_idle", dim = true }],
 ]
 `
 
@@ -28,6 +27,8 @@ type SidebarPlan int
 const (
 	SidebarAdd SidebarPlan = iota
 	SidebarPresent
+	// SidebarOutdated means an earlier tkt wrote different rows; the managed block is replaced.
+	SidebarOutdated
 	// SidebarConflict means the user configures space rows already; tkt never rewrites them.
 	SidebarConflict
 )
@@ -39,7 +40,10 @@ var inlineUI = regexp.MustCompile(`(?m)^\s*(ui|ui\.sidebar|sidebar)\s*=`)
 
 func PlanSidebar(config string) SidebarPlan {
 	if strings.Contains(config, sidebarStart) {
-		return SidebarPresent
+		if strings.Contains(config, sidebarStart+"\n"+SidebarRows+sidebarEnd) {
+			return SidebarPresent
+		}
+		return SidebarOutdated
 	}
 	if inlineUI.MatchString(config) {
 		return SidebarConflict
@@ -66,6 +70,12 @@ func AddSidebarBlock(config string) string {
 	}
 	b.WriteString(sidebarStart + "\n" + SidebarRows + sidebarEnd + "\n")
 	return b.String()
+}
+
+// UpdateSidebarBlock replaces an earlier managed block with the current rows.
+func UpdateSidebarBlock(config string) string {
+	without, _ := RemoveSidebarBlock(config)
+	return AddSidebarBlock(without)
 }
 
 // RemoveSidebarBlock drops the managed sidebar rows; ok is false when config has none.

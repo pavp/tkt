@@ -215,7 +215,7 @@ func TestHerdrRefreshLabelsTicketWorkspaces(t *testing.T) {
 		t.Errorf("report = %v", got)
 	}
 	tokens := got["tokens"].(map[string]any)
-	want := map[string]any{"tkt": nil, "tkt_alert": "DEMO-1 · ✕ CI · #812", "tkt_agent": "● claude working", "tkt_agent_alert": nil, "tkt_agent_idle": nil}
+	want := map[string]any{"tkt": nil, "tkt_alert": "✕ CI · #812", "tkt_agent": "· ● claude working", "tkt_agent_alert": nil, "tkt_agent_idle": nil}
 	if !reflect.DeepEqual(tokens, want) {
 		t.Errorf("tokens = %v, want %v", tokens, want)
 	}
@@ -241,7 +241,7 @@ func TestHerdrRestoreUsesCacheOnly(t *testing.T) {
 	if code := h.exec("herdr", "restore"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	if label := f.Last("workspace.report_metadata")["tokens"].(map[string]any)["tkt"]; label != "DEMO-1 · In Progress" {
+	if label := f.Last("workspace.report_metadata")["tokens"].(map[string]any)["tkt"]; label != "In Progress" {
 		t.Errorf("label = %v", label)
 	}
 }
@@ -528,7 +528,7 @@ func TestHerdrRefreshLabelsWorkspacesOpenedOnAPlainCheckout(t *testing.T) {
 	if got == nil || got["workspace_id"] != "w9" {
 		t.Fatalf("a workspace on a plain checkout should be labelled from its pane's folder: %v", got)
 	}
-	if tok := got["tokens"].(map[string]any)["tkt_agent_idle"]; tok != "no agent" {
+	if tok := got["tokens"].(map[string]any)["tkt_agent_idle"]; tok != "· no agent" {
 		t.Errorf("tokens = %v", got["tokens"])
 	}
 }
@@ -551,7 +551,7 @@ func TestHerdrOnAgentRelabelsFromTheCache(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
 	got := f.Last("workspace.report_metadata")
-	if got == nil || got["tokens"].(map[string]any)["tkt_agent"] != "● claude working" {
+	if got == nil || got["tokens"].(map[string]any)["tkt_agent"] != "· ● claude working" {
 		t.Errorf("report = %v", got)
 	}
 }

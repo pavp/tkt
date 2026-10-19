@@ -324,9 +324,10 @@ func DaysLeft(end, now time.Time) int {
 }
 
 // TicketLine is the ticket half of a workspace's sidebar entry, at most 80 characters (Herdr's token
-// limit), such as "DEMO-1 · ✕ CI · #812"; alert is true when the ticket needs the user.
+// limit), such as "✕ CI · #812"; alert is true when the ticket needs the user. It leaves out the key,
+// which the workspace label and the branch above it already show.
 func TicketLine(t ticket.Ticket) (line string, alert bool) {
-	parts := []string{string(t.Key)}
+	var parts []string
 	reasons := t.Attention()
 	switch {
 	case len(reasons) > 0 && reasons[0] == ticket.ReasonCIFailing:

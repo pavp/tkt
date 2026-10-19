@@ -159,6 +159,8 @@ func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	next := herdrplugin.AddSidebarBlock(string(current))
+	done := "✓ Added tkt's ticket and agent lines to Herdr's sidebar"
 	switch herdrplugin.PlanSidebar(string(current)) {
 	case herdrplugin.SidebarPresent:
 		a.printf("✓ tkt's sidebar lines are already in %s\n", path)
@@ -166,6 +168,8 @@ func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
 	case herdrplugin.SidebarConflict:
 		a.printf("! you configure [ui.sidebar.spaces] yourself; add tkt's rows to show each ticket and its agent:\n%s", herdrplugin.SidebarRows)
 		return nil
+	case herdrplugin.SidebarOutdated:
+		next, done, yes = herdrplugin.UpdateSidebarBlock(string(current)), "✓ Updated tkt's sidebar lines", true
 	}
 	if !yes {
 		ans, err := a.readLine("Show each ticket and its agent in Herdr's sidebar? [Y/n] ")
@@ -191,7 +195,7 @@ func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, []byte(herdrplugin.AddSidebarBlock(string(current))), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
 		return err
 	}
 	err = h.ReloadConfig(cmd.Context())
@@ -221,7 +225,7 @@ func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
 		a.printf("! sidebar lines saved; reload Herdr's config to see them (%v)\n", err)
 		return nil
 	}
-	a.printf("✓ Added tkt's ticket and agent lines to Herdr's sidebar (%s)\n", path)
+	a.printf("%s (%s)\n", done, path)
 	return nil
 }
 
@@ -676,6 +680,7 @@ func sidebarTokens(t ticket.Ticket, agentStatus string) map[string]*string {
 		tokens[tokenTicket] = &line
 	}
 	agent, kind := board.AgentLine(agentStatus)
+	agent = "· " + agent
 	switch kind {
 	case board.AgentWorking:
 		tokens[tokenAgent] = &agent

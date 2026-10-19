@@ -26,7 +26,7 @@ func TestSidebarBlockAddsValidRowsAndRemovesCleanly(t *testing.T) {
 		t.Fatalf("the block is not valid TOML: %v\n%s", err, added)
 	}
 	rows := parsed.UI.Sidebar.Spaces.Rows
-	if len(rows) != 4 || !strings.Contains(added, `token = "$tkt_alert"`) || !strings.Contains(added, `token = "$tkt_agent_idle"`) {
+	if len(rows) != 3 || len(rows[2]) != 5 || !strings.Contains(added, `token = "$tkt_alert"`) || !strings.Contains(added, `token = "$tkt_agent_idle"`) {
 		t.Errorf("rows = %v\n%s", rows, added)
 	}
 	if PlanSidebar(added) != SidebarPresent {
@@ -72,5 +72,16 @@ func TestSidebarPlanTreatsInlineTablesAsTheUsers(t *testing.T) {
 	}
 	if _, ok := RemoveSidebarBlock(sidebarStart + "\n[ui.sidebar.spaces]\nrows = []\n"); ok {
 		t.Error("a block without its end marker must be left alone")
+	}
+}
+
+func TestSidebarPlanUpdatesAnOlderManagedBlock(t *testing.T) {
+	old := "[keys]\nprefix = \"ctrl+b\"\n\n" + sidebarStart + "\n[ui.sidebar.spaces]\nrows = [[\"workspace\"]]\n" + sidebarEnd + "\n"
+	if got := PlanSidebar(old); got != SidebarOutdated {
+		t.Fatalf("plan = %v", got)
+	}
+	updated := UpdateSidebarBlock(old)
+	if PlanSidebar(updated) != SidebarPresent || strings.Count(updated, sidebarStart) != 1 || !strings.HasPrefix(updated, "[keys]") {
+		t.Errorf("updated:\n%s", updated)
 	}
 }
