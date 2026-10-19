@@ -82,3 +82,7 @@ links the tkt plugin into the running Herdr (0.9.5 or later). Herdr plugins cann
 go build -o tkt ./cmd/tkt
 go test ./...
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).

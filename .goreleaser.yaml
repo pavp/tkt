@@ -19,6 +19,7 @@ archives:
     name_template: "tkt_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
+      - LICENSE
 
 checksum:
   name_template: "checksums.txt"
@@ -37,6 +38,7 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/pavp/tkt"
+    license: "MIT"
     description: "Sprint tickets across Jira spaces with GitHub PRs and CI, for agent-driven development"
     test: |
       system "#{bin}/tkt", "--version"
