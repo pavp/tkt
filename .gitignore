@@ -1,0 +1,18 @@
+# Build output
+/tkt
+/dist/
+*.exe
+
+# Test and coverage
+*.test
+*.out
+coverage.*
+
+# Per-worktree ticket context written by `tkt start`
+.ticket.md
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
