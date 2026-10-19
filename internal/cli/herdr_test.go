@@ -377,3 +377,72 @@ func TestEnsureJiraTokenConnectsBeforeTheBoard(t *testing.T) {
 		t.Errorf("a stored token should open the board without asking: %v, %v", ok, err)
 	}
 }
+
+func herdrConfig(t *testing.T, h *harness, content string) string {
+	t.Helper()
+	cfg := filepath.Join(h.home, ".config", "herdr", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func TestHerdrInstallAddsAndUninstallRemovesSidebarRows(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	original := "[theme]\nname = \"catppuccin\"\n"
+	cfg := herdrConfig(t, h, original)
+	h.app.Stdin = strings.NewReader("n\n\n")
+	if code := h.exec("herdr", "install"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	b, _ := os.ReadFile(cfg)
+	if !strings.Contains(string(b), `token = "$tkt_agent"`) || strings.Contains(string(b), "tkt.board") {
+		t.Errorf("config:\n%s", b)
+	}
+	if !strings.Contains(h.errOut.String(), "Show each ticket and its agent in Herdr's sidebar?") || !strings.Contains(h.out.String(), "✓ Added tkt's ticket and agent lines to Herdr's sidebar") {
+		t.Errorf("stderr %q, stdout %q", h.errOut, h.out)
+	}
+	if count(f, "server.reload_config") != 1 {
+		t.Error("config not reloaded")
+	}
+	if code := h.exec("herdr", "uninstall"); code != 0 {
+		t.Fatalf("uninstall exit %d: %s", code, h.errOut)
+	}
+	if b, _ := os.ReadFile(cfg); string(b) != original {
+		t.Errorf("uninstall left:\n%s", b)
+	}
+}
+
+func TestHerdrInstallLeavesTheUsersSidebarRowsAlone(t *testing.T) {
+	h, _, _ := herdrHarness(t)
+	own := "[ui.sidebar.spaces]\nrows = [[\"workspace\"]]\n"
+	cfg := herdrConfig(t, h, own)
+	if code := h.exec("herdr", "install", "--no-keys", "--sidebar"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if b, _ := os.ReadFile(cfg); string(b) != own {
+		t.Errorf("own rows rewritten:\n%s", b)
+	}
+	if !strings.Contains(h.out.String(), "you configure [ui.sidebar.spaces] yourself") || !strings.Contains(h.out.String(), `token = "$tkt"`) {
+		t.Errorf("should show the rows to add:\n%s", h.out)
+	}
+}
+
+func TestHerdrInstallUndoesSidebarRowsHerdrRejects(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	original := "[theme]\nname = \"catppuccin\"\n"
+	cfg := herdrConfig(t, h, original)
+	f.Results["server.reload_config"] = `{"type":"config_reload","status":"failed","diagnostics":["ui.sidebar.spaces.rows: unknown token"]}`
+	if code := h.exec("herdr", "install", "--no-keys", "--sidebar"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if b, _ := os.ReadFile(cfg); string(b) != original {
+		t.Errorf("rejected rows should be undone:\n%s", b)
+	}
+	if !strings.Contains(h.out.String(), "Herdr rejected the sidebar rows (ui.sidebar.spaces.rows: unknown token); your config is back as it was") {
+		t.Errorf("stdout = %q", h.out)
+	}
+}

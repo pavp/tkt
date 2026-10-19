@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -195,6 +196,27 @@ func (c *Client) UnlinkPlugin(ctx context.Context, id string) error {
 }
 
 // ReloadConfig makes the running server reread config.toml.
+// ReloadRejected means Herdr read its config but did not apply all of it.
+type ReloadRejected struct {
+	Status      string
+	Diagnostics []string
+}
+
+func (e *ReloadRejected) Error() string {
+	return fmt.Sprintf("herdr %s its config reload: %s", e.Status, strings.Join(e.Diagnostics, "; "))
+}
+
+// ReloadConfig asks Herdr to reread its config; a failed or partial reload returns *ReloadRejected.
 func (c *Client) ReloadConfig(ctx context.Context) error {
-	return c.Call(ctx, "server.reload_config", nil, nil)
+	var r struct {
+		Status      string   `json:"status"`
+		Diagnostics []string `json:"diagnostics"`
+	}
+	if err := c.Call(ctx, "server.reload_config", nil, &r); err != nil {
+		return err
+	}
+	if r.Status == "failed" || r.Status == "partial" {
+		return &ReloadRejected{Status: r.Status, Diagnostics: r.Diagnostics}
+	}
+	return nil
 }
