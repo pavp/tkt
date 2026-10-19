@@ -99,7 +99,14 @@ func (b *boardActions) cfg() *config.Config {
 	return b.c
 }
 
-func (b *boardActions) Config() config.Config { return b.cfg().Clone() }
+// Config returns the configuration as written on disk, with "~" unexpanded, so saving it keeps the
+// user's paths portable; the board itself runs on an expanded copy.
+func (b *boardActions) Config() config.Config {
+	if c, err := config.Load(b.a.ConfigPath()); err == nil {
+		return *c
+	}
+	return b.cfg().Clone()
+}
 
 func (b *boardActions) SaveConfig(c config.Config) tea.Cmd {
 	return func() tea.Msg {
@@ -107,8 +114,10 @@ func (b *boardActions) SaveConfig(c config.Config) tea.Cmd {
 		if err := config.Save(b.a.ConfigPath(), &c); err != nil {
 			return tui.SettingsSavedMsg{Err: err}
 		}
+		inUse := c.Clone()
+		b.a.expandPaths(&inUse)
 		b.mu.Lock()
-		b.c = &c
+		b.c = &inUse
 		b.mu.Unlock()
 		return tui.SettingsSavedMsg{Config: c.Clone()}
 	}

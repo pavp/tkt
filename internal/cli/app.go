@@ -95,6 +95,11 @@ func (a *App) LoadConfig() (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	a.expandPaths(c)
+	return c, nil
+}
+
+func (a *App) expandPaths(c *config.Config) {
 	for i, r := range c.RepoRoots {
 		c.RepoRoots[i] = a.Env.ExpandHome(r)
 	}
@@ -105,7 +110,6 @@ func (a *App) LoadConfig() (*config.Config, error) {
 			}
 		}
 	}
-	return c, nil
 }
 
 func (a *App) Resolver(c *config.Config) repos.Resolver {

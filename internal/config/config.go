@@ -236,7 +236,6 @@ func (r Repo) ShortName() string {
 	return name
 }
 
-// GitHubAccount returns the gh account configured for owner; empty means gh's active account.
 // Clone returns a deep copy, so an editor can change it without touching the config in use.
 func (c Config) Clone() Config {
 	out := c
@@ -251,6 +250,7 @@ func (c Config) Clone() Config {
 	return out
 }
 
+// GitHubAccount returns the gh account configured for owner; empty means gh's active account.
 func (c *Config) GitHubAccount(owner string) string {
 	return c.GitHub.Accounts[owner]
 }

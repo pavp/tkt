@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/pavp/tkt/internal/config"
@@ -54,5 +55,29 @@ func TestBoardSaveConfigRejectsInvalidAndKeepsTheFile(t *testing.T) {
 	}
 	if got := b.Config(); len(got.Spaces[0].Repos) != 1 {
 		t.Errorf("board config changed: %+v", got)
+	}
+}
+
+func TestBoardSaveConfigKeepsTildePaths(t *testing.T) {
+	h := newHarness(t, baseConfig+"path = \"~/src/web\"\n")
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	edit := b.Config()
+	if edit.RepoRoots[0] != "~/src" || edit.Spaces[0].Repos[0].Path != "~/src/web" {
+		t.Fatalf("the editor should see the paths as written: %+v", edit)
+	}
+	edit.RepoRoots = []string{"~/code"}
+	if msg := b.SaveConfig(edit)().(tui.SettingsSavedMsg); msg.Err != nil || msg.Config.RepoRoots[0] != "~/code" {
+		t.Fatalf("save = %+v", msg)
+	}
+	data, _ := os.ReadFile(h.app.configPath)
+	if strings.Contains(string(data), h.home) || !strings.Contains(string(data), "~/code") {
+		t.Errorf("save expanded ~ paths:\n%s", data)
+	}
+	if got := b.cfg(); got.RepoRoots[0] != h.home+"/code" || got.Spaces[0].Repos[0].Path != h.home+"/src/web" {
+		t.Errorf("in-use config not expanded: %+v", got)
 	}
 }
