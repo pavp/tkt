@@ -321,9 +321,9 @@ func DaysLeft(end, now time.Time) int {
 	return int((end.Sub(now) + 24*time.Hour - time.Nanosecond) / (24 * time.Hour))
 }
 
-// SidebarLabel is the one-line status Herdr shows next to a ticket's workspace, at most 80 characters
-// (Herdr's token limit), such as "DEMO-1 · ✕ CI · #812 · claude working".
-func SidebarLabel(t ticket.Ticket, agentStatus string) string {
+// TicketLine is the ticket half of a workspace's sidebar entry, at most 80 characters (Herdr's token
+// limit), such as "DEMO-1 · ✕ CI · #812"; alert is true when the ticket needs the user.
+func TicketLine(t ticket.Ticket) (line string, alert bool) {
 	parts := []string{string(t.Key)}
 	reasons := t.Attention()
 	switch {
@@ -345,14 +345,46 @@ func SidebarLabel(t ticket.Ticket, agentStatus string) string {
 	if len(prs) > 0 {
 		parts = append(parts, strings.Join(prs, " "))
 	}
-	if agentStatus != "" {
-		parts = append(parts, "claude "+agentStatus)
+	line = strings.Join(parts, " · ")
+	if r := []rune(line); len(r) > 80 {
+		line = string(r[:79]) + "…"
 	}
-	label := strings.Join(parts, " · ")
-	if r := []rune(label); len(r) > 80 {
-		label = string(r[:79]) + "…"
+	return line, len(reasons) > 0
+}
+
+// AgentKind groups Herdr's agent statuses into what the user acts on.
+type AgentKind int
+
+const (
+	AgentNone AgentKind = iota
+	AgentIdle
+	AgentWorking
+	AgentNeedsYou
+)
+
+// AgentLine words a Herdr agent status as the prototype does. Herdr reports "blocked" while an agent waits
+// for the user's confirmation, and "unknown" for panes it cannot read, which tells the user nothing.
+func AgentLine(status string) (string, AgentKind) {
+	switch status {
+	case "working":
+		return "● claude working", AgentWorking
+	case "blocked":
+		return "! claude needs you", AgentNeedsYou
+	case "idle", "done":
+		return "○ claude idle", AgentIdle
 	}
-	return label
+	return "no agent", AgentNone
+}
+
+// MostUrgentAgent picks the status to show for a workspace running several agents.
+func MostUrgentAgent(statuses []string) string {
+	best, bestKind := "", AgentNone
+	for _, s := range statuses {
+		if _, k := AgentLine(s); k > bestKind {
+			best, bestKind = s, k
+		}
+	}
+	return best
 }
 
 // Find returns the ticket with key, searching subtasks too.
