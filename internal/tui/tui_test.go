@@ -338,7 +338,7 @@ func TestMatchesMockupDetails(t *testing.T) {
 		}
 	}
 	next = press(next, "l")
-	if !strings.Contains(stripANSI(next.View()), "DEMO-1 · In Progress · CI failing · f sends the failure to the agent") {
+	if !strings.Contains(stripANSI(next.View()), "DEMO-1 · In Progress · CI failing · #812 · f sends the failure to the agent") {
 		t.Errorf("preview hint missing:\n%s", stripANSI(next.View()))
 	}
 }
@@ -481,8 +481,8 @@ func TestReviewsRenderLikeTheMockup(t *testing.T) {
 			line = l
 		}
 	}
-	if !strings.Contains(line, "web#820 ✓") || strings.Contains(line, "example-org") {
-		t.Errorf("review row should show repo#number and the CI mark: %q", line)
+	if !strings.Contains(line, "Review requested   ✓") || strings.Contains(line, "example-org") {
+		t.Errorf("review row should show only the CI mark, as in the mockup: %q", line)
 	}
 	if !strings.Contains(stripANSI(next.View()), "CI passing ✓") {
 		t.Error("preview does not spell out the CI state")
@@ -498,7 +498,7 @@ func TestTicketRowsNameRepoAndPR(t *testing.T) {
 	m := New(board.Snapshot{}, false, &recorder{}, ViewList)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
-	if v := stripANSI(next.View()); !strings.Contains(v, "web#806 ✓ api#311 ○") || !strings.Contains(v, "no PR") {
+	if v := stripANSI(next.View()); !strings.Contains(v, "#806 ✓ #311 ○") || !strings.Contains(v, " —  ") {
 		t.Errorf("PR / CI column:\n%s", v)
 	}
 }
@@ -512,14 +512,14 @@ func TestCardsShowDetailsAndDensityToggles(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	v := stripANSI(next.View())
-	for _, want := range []string{"web#812 ✕", "Story · 1 subtasks", "no PR yet"} {
+	for _, want := range []string{"#812 ✕", "Story · 1 subtasks"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("detailed card missing %q:\n%s", want, v)
 		}
 	}
 	next = press(next, "z")
 	v = stripANSI(next.View())
-	if strings.Contains(v, "web#812 ✕") || !strings.Contains(v, "Filter accounts") || !strings.Contains(v, "compact cards") {
+	if strings.Contains(v, "#812 ✕") || !strings.Contains(v, "Filter accounts") || !strings.Contains(v, "compact cards") {
 		t.Errorf("compact cards:\n%s", v)
 	}
 	next = click(next, 40, lineIndex(next.View(), "DEMO-1"))
@@ -585,3 +585,21 @@ func TestActionsMenuClick(t *testing.T) {
 
 func (r *recorder) Copy(text, what string) tea.Cmd   { return r.cmd("copy " + what + " " + text) }
 func (r *recorder) CopyContext(k ticket.Key) tea.Cmd { return r.cmd("context " + string(k)) }
+
+func TestPRColumnMatchesMockup(t *testing.T) {
+	cases := []struct {
+		prs  []ticket.PullRequest
+		want string
+	}{
+		{nil, "—"},
+		{[]ticket.PullRequest{{Number: 812, State: ticket.PROpen, Checks: ticket.ChecksFail}}, "#812 ✕"},
+		{[]ticket.PullRequest{{Number: 806, State: ticket.PROpen, Checks: ticket.ChecksPass}, {Number: 311, State: ticket.PROpen, Checks: ticket.ChecksPending}}, "#806 ✓ #311 ○"},
+		{[]ticket.PullRequest{{Number: 790, State: ticket.PRMerged}}, "#790 merged"},
+		{[]ticket.PullRequest{{Number: 1, State: ticket.PRMerged}, {Number: 2, State: ticket.PRMerged}}, "2 merged"},
+	}
+	for _, c := range cases {
+		if got := prRefs(c.prs); got != c.want {
+			t.Errorf("prRefs = %q, want %q", got, c.want)
+		}
+	}
+}

@@ -715,17 +715,13 @@ func card(t ticket.Ticket, outer int, sel, compact bool) string {
 // coloredPRs lists PRs as "repo#n" with the CI mark colored by state, cut to width.
 func coloredPRs(prs []ticket.PullRequest, width int) string {
 	if len(prs) == 0 {
-		return dim.Render("no PR yet")
+		return dim.Render("—")
 	}
 	open, merged, closed := ticket.SplitPRs(prs)
 	var parts []string
 	used := 0
 	for _, pr := range open {
-		_, repo, _ := strings.Cut(pr.Repo, "/")
-		ref := fmt.Sprintf("%s#%d", repo, pr.Number)
-		if repo == "" {
-			ref = fmt.Sprintf("#%d", pr.Number)
-		}
+		ref := fmt.Sprintf("#%d", pr.Number)
 		markText, style := checkMark(pr.Checks), dim
 		switch {
 		case pr.State == ticket.PRMerged:
@@ -748,35 +744,46 @@ func coloredPRs(prs []ticket.PullRequest, width int) string {
 		parts = append(parts, ref+" "+style.Render(markText))
 		used += w + 1
 	}
-	if f := ticket.FinishedSummary(merged, closed); f != "" && used+len(f) <= width {
+	if merged+closed == 1 {
+		for _, pr := range prs {
+			if pr.State != ticket.PROpen {
+				parts = append(parts, ok.Render(prRef(pr)))
+			}
+		}
+	} else if f := ticket.FinishedSummary(merged, closed); f != "" && used+len(f) <= width {
 		parts = append(parts, ok.Render(f))
 	}
 	return strings.Join(parts, " ")
 }
 
-// prRef names a PR with its repository and state: "accounts-web#812 ✕", "web#790 merged".
+// prRef is a PR as the board mockup shows it: number and state, such as "#812 ✕" or "#790 merged".
 func prRef(pr ticket.PullRequest) string {
-	_, repo, _ := strings.Cut(pr.Repo, "/")
-	mark := checkMark(pr.Checks)
 	switch pr.State {
 	case ticket.PRMerged:
-		mark = "merged"
+		return fmt.Sprintf("#%d merged", pr.Number)
 	case ticket.PRClosed:
-		mark = "closed"
+		return fmt.Sprintf("#%d closed", pr.Number)
 	}
-	return fmt.Sprintf("%s#%d %s", repo, pr.Number, mark)
+	return fmt.Sprintf("#%d %s", pr.Number, checkMark(pr.Checks))
 }
 
+// prRefs lists open PRs; finished ones show by number when there is one, as a count when there are several.
 func prRefs(prs []ticket.PullRequest) string {
 	if len(prs) == 0 {
-		return "no PR"
+		return "—"
 	}
 	open, merged, closed := ticket.SplitPRs(prs)
 	parts := make([]string, 0, len(open)+1)
 	for _, pr := range open {
 		parts = append(parts, prRef(pr))
 	}
-	if f := ticket.FinishedSummary(merged, closed); f != "" {
+	if merged+closed == 1 {
+		for _, pr := range prs {
+			if pr.State != ticket.PROpen {
+				parts = append(parts, prRef(pr))
+			}
+		}
+	} else if f := ticket.FinishedSummary(merged, closed); f != "" {
 		parts = append(parts, f)
 	}
 	return strings.Join(parts, " ")
@@ -851,7 +858,7 @@ func (m Model) listView() string {
 	for i, it := range items {
 		var line string
 		if it.pr != nil {
-			line = row(string(it.key), "Review requested", prRef(*it.pr), it.pr.Title)
+			line = row(string(it.key), "Review requested", checkMark(it.pr.Checks), it.pr.Title)
 		} else {
 			line = row(string(it.key), it.ticket.Status, prRefs(it.ticket.PRs), it.ticket.Summary)
 		}
@@ -885,6 +892,11 @@ func (m Model) preview() string {
 	}
 	if len(t.Attention()) == 0 && t.Checks() == ticket.ChecksPass {
 		parts = append(parts, "checks pass")
+	}
+	for _, pr := range t.PRs {
+		if pr.State == ticket.PROpen {
+			parts = append(parts, pr.Repo+"#"+fmt.Sprint(pr.Number))
+		}
 	}
 	if hint := actionHint(*t); hint != "" {
 		parts = append(parts, hint)
