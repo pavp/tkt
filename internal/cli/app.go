@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"golang.org/x/term"
 
@@ -31,6 +32,8 @@ type App struct {
 	IsTerminal   func() bool
 	ReadPassword func() ([]byte, error)
 	NewJira      func(site, email, token string) JiraAPI
+	NewGitHub    func(c *config.Config) GitHubAPI
+	Now          func() time.Time
 
 	configPath string
 	jsonOut    bool
@@ -42,7 +45,7 @@ func NewApp() (*App, error) {
 		return nil, err
 	}
 	stdin := int(os.Stdin.Fd())
-	return &App{
+	a := &App{
 		Stdin:        os.Stdin,
 		Stdout:       os.Stdout,
 		Stderr:       os.Stderr,
@@ -52,7 +55,10 @@ func NewApp() (*App, error) {
 		IsTerminal:   func() bool { return term.IsTerminal(stdin) },
 		ReadPassword: func() ([]byte, error) { return term.ReadPassword(stdin) },
 		NewJira:      func(site, email, token string) JiraAPI { return jira.New(site, email, token) },
-	}, nil
+		Now:          time.Now,
+	}
+	a.NewGitHub = func(c *config.Config) GitHubAPI { return githubFor(c, a.Run) }
+	return a, nil
 }
 
 func (a *App) ConfigPath() string {
