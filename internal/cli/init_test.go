@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/pavp/tkt/internal/config"
+	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/herdr/herdrtest"
 	"github.com/pavp/tkt/internal/jira"
 )
 
@@ -167,5 +169,24 @@ func TestInitSkipsJiraQuestionsAfterAuth(t *testing.T) {
 	}
 	if h.jira.token != "stored" {
 		t.Errorf("validated with %q", h.jira.token)
+	}
+}
+
+func TestInitInHerdrPausesThenOpensBoard(t *testing.T) {
+	h := initHarness(t, "DEMO\n\n\n\n")
+	h.creds["jira:example.atlassian.net:dev@example.com"] = "stored"
+	h.env["XDG_DATA_HOME"] = filepath.Join(h.home, "data")
+	h.env["HERDR_PLUGIN_ID"] = "tkt"
+	h.app.saveState(state{JiraSite: "https://example.atlassian.net", JiraEmail: "dev@example.com"})
+	f := herdrtest.Start(t)
+	h.app.NewHerdr = func() HerdrAPI { return herdr.New(f.Path) }
+	if code := h.exec("init"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if !strings.Contains(h.errOut.String(), "! DEMO has no repositories") || !strings.Contains(h.errOut.String(), "Press Enter to open the board") {
+		t.Errorf("stderr = %q", h.errOut)
+	}
+	if got := f.Last("plugin.pane.open"); got["entrypoint"] != "board" {
+		t.Errorf("board not opened: %v", got)
 	}
 }

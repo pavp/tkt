@@ -13,6 +13,7 @@ import (
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/github"
+	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/jira"
 )
 
@@ -176,6 +177,9 @@ func (a *App) runInit(cmd *cobra.Command) error {
 		if err != nil {
 			return err
 		}
+		if len(splitList(ans)) == 0 {
+			fmt.Fprintf(a.Stderr, "! %s has no repositories: its pull requests and `tkt start` need at least one (add them later in the config)\n", s.Key)
+		}
 		for _, name := range splitList(ans) {
 			r := config.Repo{Name: name}
 			s.Repos = append(s.Repos, r)
@@ -233,6 +237,12 @@ func (a *App) runInit(cmd *cobra.Command) error {
 		return err
 	}
 	a.printf("✓ Wrote %s\nNext: `tkt doctor` checks everything, then `tkt list`.\n", path)
+	if a.Env.Getenv("HERDR_PLUGIN_ID") != "" {
+		// Herdr closes a plugin pane as soon as its command exits, which would hide this summary.
+		if _, err := a.readLine("\nPress Enter to open the board "); err == nil {
+			_ = a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "board"})
+		}
+	}
 	return nil
 }
 
