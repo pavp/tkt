@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/herdr"
@@ -23,6 +24,7 @@ func herdrHarness(t *testing.T) (*harness, *herdrtest.FakeServer, *[]launchCall)
 	f := herdrtest.Start(t)
 	h.app.NewHerdr = func() HerdrAPI { return herdr.New(f.Path) }
 	h.app.Executable = func() (string, error) { return "/opt/tkt/bin/tkt", nil }
+	h.app.Sleep = func(context.Context, time.Duration) error { return nil }
 	h.run.out["herdr --default-config"] = "[keys]\nprefix = \"ctrl+b\"\nnew_tab = \"prefix+c\"\n"
 	return h, f, calls
 }
@@ -617,6 +619,29 @@ func TestHerdrStartReusesOpenWorkspaceWithoutAgent(t *testing.T) {
 				t.Errorf("agent.prompt = %v", got)
 			}
 		})
+	}
+}
+
+func TestHerdrStartRetriesPromptUntilAgentNameIsActive(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+	f.Errors["agent.prompt"] = "agent_not_ready: agent claude is not an active named agent"
+	var slept []time.Duration
+	h.app.Sleep = func(_ context.Context, d time.Duration) error {
+		slept = append(slept, d)
+		if len(slept) == 3 {
+			delete(f.Errors, "agent.prompt")
+		}
+		return nil
+	}
+	if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", true); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(f, "agent.prompt"); n != 4 || len(slept) != 3 {
+		t.Errorf("prompts = %d, sleeps = %v", n, slept)
+	}
+	if out := h.out.String(); !strings.Contains(out, "✓ Claude Code started in workspace DEMO-7 · web (w9)") {
+		t.Errorf("output = %q", out)
 	}
 }
 
