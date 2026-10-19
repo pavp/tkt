@@ -310,7 +310,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	headerLines := lineCount(m.header())
-	if _, _, x, y := m.headerLayout(); msg.Y == y {
+	if _, _, x, y, h, _ := m.headerLayout(); msg.Y >= y && msg.Y < y+h {
 		m.clickHeader(msg.X - x)
 		return m, nil
 	}
@@ -356,32 +356,19 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// clickHeader switches filter or view when x falls on one of the header buttons (first header line).
+// clickHeader switches filter or view when x, relative to where the controls start, falls on a button.
 func (m *Model) clickHeader(x int) {
-	items := m.headerItems()
-	spec := m.headerSpec()
-	pos := 0
-	for i, it := range items {
-		w := lipgloss.Width(it)
-		if i < 3 {
-			if x >= pos && x < pos+w {
-				m.filter = spec[i].filter
-				m.reselect()
-				return
+	_, _, _, _, _, spans := m.headerLayout()
+	for _, sp := range spans {
+		if x >= sp.start && x < sp.start+sp.width {
+			if sp.filter != "" {
+				m.filter = sp.filter
+			} else {
+				m.view = sp.view
 			}
-		} else {
-			start := pos + 1
-			for _, v := range spec[3:] {
-				vw := lipgloss.Width(v.label)
-				if x >= start && x < start+vw {
-					m.view = v.view
-					m.reselect()
-					return
-				}
-				start += vw
-			}
+			m.reselect()
+			return
 		}
-		pos += w + 2
 	}
 }
 
@@ -634,32 +621,89 @@ func windowStart(lines []string, n int) int {
 }
 
 func (m Model) header() string {
-	title, controls, x, y := m.headerLayout()
-	if y == 0 {
-		return title + strings.Repeat(" ", x-lipgloss.Width(title)) + controls
+	title, controls, x, y, h, _ := m.headerLayout()
+	var top string
+	switch {
+	case y == 0 && h == 1:
+		top = title + strings.Repeat(" ", x-lipgloss.Width(title)) + controls
+	case y == 0:
+		top = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().PaddingTop(1).Render(title), strings.Repeat(" ", x-lipgloss.Width(title)), controls)
+	default:
+		top = title + "\n" + controls
 	}
-	return title + "\n" + controls
+	return top + "\n" + dim.Render(strings.Repeat("─", m.width))
 }
 
-// headerLayout puts the filter and view buttons and the sync state right of the title, as the prototype
-// does, and moves them to a second row when the pane is too narrow. x and y say where controls start.
-func (m Model) headerLayout() (title, controls string, x, y int) {
+type headerSpan struct {
+	start, width int
+	filter, view string
+}
+
+var (
+	filterOff = box.Foreground(lipgloss.Color("250"))
+	filterOn  = boxSel.Foreground(lipgloss.Color("153")).Bold(true)
+)
+
+// headerLayout places the filter and view buttons, boxed as in the prototype, and the sync state right of
+// the title; on a narrower pane they move to their own row, and unboxed when even that is too narrow.
+// x and y say where the controls start, h how many rows they take, spans where each button sits from x.
+func (m Model) headerLayout() (title, controls string, x, y, h int, spans []headerSpan) {
 	parts := []string{bold.Render("tkt")}
 	for _, sp := range m.snap.Sprints {
 		parts = append(parts, sp.Space+" · "+board.SprintLabel(sp, m.snap.FetchedAt))
 	}
+	title = strings.Join(parts, " · ")
 	sync := dim.Render(m.syncLabel())
 	if m.stale != nil {
 		sync = warn.Render(m.syncLabel())
 	}
-	controls = strings.Join(append(m.headerItems(), sync), "  ")
-	title = strings.Join(parts, " · ")
-	if x = m.width - lipgloss.Width(controls); lipgloss.Width(title)+2 <= x {
-		return title, controls, x, 0
+	var row []string
+	pos := 0
+	for i, it := range m.headerSpec() {
+		gap := map[bool]int{true: 1, false: 0}[i > 0]
+		if i == 3 {
+			gap = 2
+		}
+		row = append(row, strings.Repeat(" ", gap))
+		pos += gap
+		st := filterOff
+		if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) {
+			st = filterOn
+		}
+		chip := st.Render(strings.TrimSpace(it.label))
+		spans = append(spans, headerSpan{start: pos, width: lipgloss.Width(chip), filter: it.filter, view: it.view})
+		row = append(row, chip)
+		pos += lipgloss.Width(chip)
 	}
-	title = truncate(title, m.width)
-	controls = wrap(append(m.headerItems(), sync), m.width)
-	return title, controls, 0, 1
+	row = append(row, "  ", lipgloss.NewStyle().PaddingTop(1).Render(sync))
+	controls = lipgloss.JoinHorizontal(lipgloss.Top, row...)
+	cw := lipgloss.Width(controls)
+	switch {
+	case lipgloss.Width(title)+2+cw <= m.width:
+		return title, controls, m.width - cw, 0, 3, spans
+	case cw <= m.width:
+		return truncate(title, m.width), controls, 0, 1, 3, spans
+	}
+	items := m.headerItems()
+	spans = spans[:0]
+	pos = 0
+	for i, it := range m.headerSpec() {
+		w := lipgloss.Width(it.label)
+		if i < 3 {
+			w = lipgloss.Width(items[i])
+		}
+		if pos+w > m.width {
+			break
+		}
+		spans = append(spans, headerSpan{start: pos, width: w, filter: it.filter, view: it.view})
+		pos += w
+		if i < 2 {
+			pos += 2
+		} else if i == 2 {
+			pos += 3
+		}
+	}
+	return truncate(title, m.width), wrap(append(items, sync), m.width), 0, 1, 1, spans
 }
 
 type headerItem struct {

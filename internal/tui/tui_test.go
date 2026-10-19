@@ -332,7 +332,7 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "synced 3 min ago", "1 All 4", "2 Needs you 2", " Columns  List ", "DEMO-3 · Export CSV\n To Do · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "synced 3 min ago", "1 All 4", "2 Needs you 2", "│ Columns │ │ List │", "DEMO-3 · Export CSV\n To Do · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
@@ -401,8 +401,8 @@ func TestMouseSelectsCardsRowsAndFilters(t *testing.T) {
 		t.Fatalf("click on DEMO-2's card did not select it:\n%s", stripANSI(m.View()))
 	}
 
-	header := strings.Split(stripANSI(m.View()), "\n")[0]
-	m = click(m, lipgloss.Width(header[:strings.Index(header, "List")])+1, 0)
+	header := strings.Split(stripANSI(m.View()), "\n")[1]
+	m = click(m, lipgloss.Width(header[:strings.Index(header, "List")])+1, 1)
 	if !strings.Contains(stripANSI(m.View()), "↑↓ ws move") {
 		t.Fatalf("click on List did not switch view:\n%s", header)
 	}
@@ -413,8 +413,8 @@ func TestMouseSelectsCardsRowsAndFilters(t *testing.T) {
 		t.Errorf("click on DEMO-3's row selected %q", line)
 	}
 
-	header = strings.Split(stripANSI(m.View()), "\n")[0]
-	m = click(m, lipgloss.Width(header[:strings.Index(header, "Needs you")]), 0)
+	header = strings.Split(stripANSI(m.View()), "\n")[1]
+	m = click(m, lipgloss.Width(header[:strings.Index(header, "Needs you")]), 2)
 	if v := stripANSI(m.View()); strings.Contains(v, "DEMO-3") || !strings.Contains(v, "DEMO-1") {
 		t.Errorf("click on Needs you did not filter:\n%s", v)
 	}
@@ -458,7 +458,7 @@ func TestBoardScrollsToKeepSelectionVisible(t *testing.T) {
 	}
 	view := stripANSI(next.View())
 	lines := strings.Split(view, "\n")
-	if len(lines) != 15 || !strings.Contains(view, "▸ ") || !strings.Contains(lines[len(lines)-1], "close") || !strings.HasPrefix(lines[0], " tkt") {
+	if len(lines) != 15 || !strings.Contains(view, "▸ ") || !strings.Contains(lines[len(lines)-1], "close") || !strings.HasPrefix(lines[1], " tkt") {
 		t.Errorf("scrolled view lost the header, selection or legend:\n%s", view)
 	}
 }
@@ -782,8 +782,8 @@ func TestEveryRowSharesOneLeftMargin(t *testing.T) {
 				t.Errorf("%s line %d is %d wide: %q", view, i, w, line)
 			}
 		}
-		if !strings.HasPrefix(stripANSI(m.View()), " tkt") {
-			t.Errorf("%s header should start at the margin: %q", view, strings.SplitN(stripANSI(m.View()), "\n", 2)[0])
+		if l := strings.Split(stripANSI(m.View()), "\n")[1]; !strings.HasPrefix(l, " tkt") {
+			t.Errorf("%s header should start at the margin: %q", view, l)
 		}
 	}
 }
@@ -811,17 +811,20 @@ func TestCardLinesStartAtTheSameColumn(t *testing.T) {
 func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	m := loaded(&recorder{})
 	lines := strings.Split(stripANSI(m.View()), "\n")
-	first := lines[0]
-	for _, want := range []string{"tkt", "1 All", "3 Reviews", "Columns", "List"} {
+	first := lines[1]
+	for _, want := range []string{"tkt", "│ 1 All 4 │", "│ 3 Reviews 1 │", "│ Columns │", "│ List │"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("title row lacks %q: %q", want, first)
 		}
 	}
-	if strings.Index(first, "1 All") < strings.Index(first, "DEMO S42") || !strings.HasSuffix(strings.TrimRight(first, " "), "ago") && !strings.Contains(first, "synced") && !strings.Contains(first, "refreshing") {
-		t.Errorf("controls should sit right of the sprint, ending with the sync state: %q", first)
+	if !strings.Contains(lines[0], "╭") || !strings.Contains(lines[2], "╰") {
+		t.Errorf("filters should be boxed:\n%s\n%s\n%s", lines[0], first, lines[2])
 	}
-	if strings.Contains(lines[1], "1 All") {
-		t.Errorf("filters repeated on a second row: %q", lines[1])
+	if strings.Index(first, "1 All") < strings.Index(first, "tkt") || !strings.Contains(first, "synced") && !strings.Contains(first, "refreshing") {
+		t.Errorf("controls should sit right of the title, ending with the sync state: %q", first)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(lines[3]), "──────") {
+		t.Errorf("no rule under the header: %q", lines[3])
 	}
 
 	narrow, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 40})
