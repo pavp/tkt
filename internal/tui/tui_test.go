@@ -643,3 +643,25 @@ func TestPRColumnFitsItsContent(t *testing.T) {
 	}
 	t.Fatal("row not found")
 }
+
+func TestClickOnReviewChipOpensThePR(t *testing.T) {
+	r := &recorder{}
+	m := loaded(r)
+	v := m.View()
+	y := lineIndex(v, "! #820")
+	line := strings.Split(stripANSI(v), "\n")[y]
+	x := lipgloss.Width(line[:strings.Index(line, "#820")])
+	_, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if cmd == nil {
+		t.Fatal("click on the chip did nothing")
+	}
+	cmd()
+	if r.last() != "open https://github.com/example-org/web/pull/820" {
+		t.Errorf("click ran %v", r.calls)
+	}
+	before := len(r.calls)
+	m, cmd = m.Update(tea.MouseMsg{X: 2, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if cmd != nil || len(r.calls) != before {
+		t.Error("click on the strip label should do nothing")
+	}
+}

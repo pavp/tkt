@@ -285,8 +285,17 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if strip := m.reviewStrip(); strip != "" {
-		body -= strings.Count(strip, "\n") + 1
+	if strip, spans := m.reviewChips(); strip != "" {
+		if body < lineCount(strip) {
+			// A click on a review chip opens that pull request: following a link is harmless, unlike starting an agent.
+			for _, sp := range spans {
+				if msg.X >= sp.start && msg.X < sp.start+sp.width {
+					return m, m.actions.Open(sp.pr.URL)
+				}
+			}
+			return m, nil
+		}
+		body -= lineCount(strip)
 	}
 	cols := m.columns()
 	colWidth := m.columnWidth() + 2
@@ -604,27 +613,41 @@ var reviewChip = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderFore
 
 // reviewStrip shows review requests above the columns, each in its own orange chip as in the mockup.
 func (m Model) reviewStrip() string {
+	row, _ := m.reviewChips()
+	return row
+}
+
+// chipSpan is where one review chip sits on the strip, for clicks.
+type chipSpan struct {
+	start, width int
+	pr           ticket.PullRequest
+}
+
+// reviewChips renders the strip and returns each visible chip's horizontal span.
+func (m Model) reviewChips() (string, []chipSpan) {
 	if len(m.snap.Reviews) == 0 {
-		return ""
+		return "", nil
 	}
 	label := dim.Render("Review requested")
 	row := []string{lipgloss.NewStyle().PaddingTop(1).Render(label)}
 	used := lipgloss.Width(label)
+	var spans []chipSpan
 	for i, pr := range m.snap.Reviews {
-		label := fmt.Sprintf(" #%d", pr.Number)
+		text := fmt.Sprintf(" #%d", pr.Number)
 		if keys := ticket.BranchKeys(pr.Branch); len(keys) > 0 {
-			label += " · " + string(keys[0])
+			text += " · " + string(keys[0])
 		}
-		chip := reviewChip.Render(warn.Render("!") + label)
+		chip := reviewChip.Render(warn.Render("!") + text)
 		if used+2+lipgloss.Width(chip) > m.width {
 			more := lipgloss.NewStyle().PaddingTop(1).Render(dim.Render(fmt.Sprintf("+%d more · press 3", len(m.snap.Reviews)-i)))
 			row = append(row, " ", more)
 			break
 		}
 		row = append(row, "  ", chip)
+		spans = append(spans, chipSpan{start: used + 2, width: lipgloss.Width(chip), pr: pr})
 		used += 2 + lipgloss.Width(chip)
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, row...)
+	return lipgloss.JoinHorizontal(lipgloss.Top, row...), spans
 }
 
 // cardLines is how many lines one bordered card takes: two border lines plus its content lines.
@@ -1004,7 +1027,7 @@ func (m Model) footer() string {
 		move = "←↑↓→ wasd"
 	}
 	legend := [][2]string{
-		{move, "move"}, {"click", "select"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
+		{move, "move"}, {"click", "select · open review"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
 		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
 	}
 	items := make([]string, len(legend))
