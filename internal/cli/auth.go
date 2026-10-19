@@ -54,6 +54,9 @@ func newAuthJiraCmd(a *App) *cobra.Command {
 			if err := a.Creds.Set(credstore.JiraKey(s, e), token); err != nil {
 				return err
 			}
+			st := a.loadState()
+			st.JiraSite, st.JiraEmail = s, e
+			a.saveState(st)
 			if a.jsonOut {
 				return a.printJSON(map[string]any{"saved": true, "verified": verified, "user": user.DisplayName, "store": a.Creds.Name(), "site": s, "email": e})
 			}

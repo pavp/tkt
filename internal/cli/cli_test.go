@@ -142,6 +142,9 @@ func TestAuthJiraStoresTokenFromStdin(t *testing.T) {
 	if h.jira.token != "tok-123" {
 		t.Errorf("validated with %q", h.jira.token)
 	}
+	if st := h.app.loadState(); st.JiraSite != "https://example.atlassian.net" || st.JiraEmail != "dev@example.com" {
+		t.Errorf("account not remembered: %+v", st)
+	}
 	if strings.Contains(h.out.String()+h.errOut.String(), "tok-123") {
 		t.Error("token printed")
 	}

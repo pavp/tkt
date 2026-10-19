@@ -61,12 +61,11 @@ width = "80%"
 height = "80%"
 command = [{{TKT}}, "herdr", "ticket-popup"]
 
+# A tab rather than a popup: setup takes several steps and Herdr popups cannot be moved or closed by hand.
 [[panes]]
 id = "setup"
 title = "tkt setup"
-placement = "popup"
-width = "80%"
-height = "80%"
+placement = "tab"
 command = [{{TKT}}, "init"]
 
 [[link_handlers]]

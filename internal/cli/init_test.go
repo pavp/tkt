@@ -104,7 +104,7 @@ func TestInitKeepsExistingConfigUnlessConfirmed(t *testing.T) {
 }
 
 func TestInitReusesStoredTokenAndDefaults(t *testing.T) {
-	h := initHarness(t, "y\n\n\n\nDEMO\n\n\n")
+	h := initHarness(t, "y\nDEMO\n\n\n")
 	if err := os.MkdirAll(filepath.Dir(h.app.configPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -147,5 +147,25 @@ func TestInitNamesTheEnvironmentToken(t *testing.T) {
 	h.exec("init")
 	if !strings.Contains(h.errOut.String(), "Use the token in TKT_JIRA_TOKEN and save it in test store?") {
 		t.Errorf("prompt = %q", h.errOut)
+	}
+}
+
+func TestInitSkipsJiraQuestionsAfterAuth(t *testing.T) {
+	h := initHarness(t, "DEMO\nexample-org/web\n~/src\n\n")
+	h.creds["jira:example.atlassian.net:dev@example.com"] = "stored"
+	h.env["XDG_DATA_HOME"] = filepath.Join(h.home, "data")
+	h.app.saveState(state{JiraSite: "https://example.atlassian.net", JiraEmail: "dev@example.com"})
+	if code := h.exec("init"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	errOut := h.errOut.String()
+	if strings.Contains(errOut, "Jira site") || strings.Contains(errOut, "account email") || !strings.Contains(errOut, "Using https://example.atlassian.net as dev@example.com with the stored token") {
+		t.Errorf("asked for known Jira details:\n%s", errOut)
+	}
+	if !strings.Contains(errOut, "Ctrl-C cancels") {
+		t.Error("no cancel hint")
+	}
+	if h.jira.token != "stored" {
+		t.Errorf("validated with %q", h.jira.token)
 	}
 }

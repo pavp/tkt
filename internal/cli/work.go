@@ -154,6 +154,9 @@ func firstSpace(c *config.Config) string {
 // state remembers small per-user choices, such as the repositories last picked for each space.
 type state struct {
 	LastRepos map[string][]string `json:"last_repos,omitempty"`
+	// JiraSite and JiraEmail remember which account `tkt auth jira` stored a token for, so setup need not ask.
+	JiraSite  string `json:"jira_site,omitempty"`
+	JiraEmail string `json:"jira_email,omitempty"`
 }
 
 func (a *App) statePath() string { return filepath.Join(a.Env.DataDir(), "state.json") }

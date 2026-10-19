@@ -44,7 +44,7 @@ func TestRenderIsValidTOML(t *testing.T) {
 	for _, p := range m.Panes {
 		panes[p.ID] = p.Placement + " " + strings.Join(p.Command[1:], " ")
 	}
-	if panes["board"] != "popup board" || panes["ticket"] != "split show --watch" || panes["setup"] != "popup init" {
+	if panes["board"] != "popup board" || panes["ticket"] != "split show --watch" || panes["setup"] != "tab init" {
 		t.Errorf("panes = %v", panes)
 	}
 	if len(m.Events) != 1 || m.Events[0].On != "worktree.created" || strings.Join(m.Events[0].Command[1:], " ") != "herdr on-worktree" {

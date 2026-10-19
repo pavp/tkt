@@ -79,39 +79,52 @@ func (a *App) runInit(cmd *cobra.Command) error {
 	defSite, defEmail := "", ""
 	if prev != nil {
 		defSite, defEmail = prev.Jira.Site, prev.Jira.Email
+	} else if st := a.loadState(); st.JiraSite != "" {
+		defSite, defEmail = st.JiraSite, st.JiraEmail
 	}
+	fmt.Fprintln(a.Stderr, "tkt setup · Ctrl-C cancels at any time; nothing is saved until the end")
 
-	fmt.Fprintln(a.Stderr, "1/4 Jira")
-	site, err := a.ask("Jira site (e.g. example.atlassian.net)", defSite)
-	if err != nil {
-		return err
-	}
-	siteURL, err := config.SiteURL(site)
-	if err != nil {
-		return err
-	}
-	email, err := a.ask("Atlassian account email", defEmail)
-	if err != nil {
-		return err
-	}
-	if email == "" {
-		return errors.New("an email is required")
-	}
-	token, src, err := credstore.JiraToken(a.Creds, a.Env.Getenv, siteURL, email)
-	if err == nil {
-		question := "Use the token already stored for " + email + "? (Y/n)"
-		if src == credstore.SourceEnv {
-			question = "Use the token in " + credstore.EnvJiraToken + " and save it in " + a.Creds.Name() + "? (Y/n)"
-		}
-		if ans, err := a.ask(question, "y"); err != nil {
-			return err
-		} else if strings.HasPrefix(strings.ToLower(ans), "n") {
-			token = ""
+	fmt.Fprintln(a.Stderr, "\n1/4 Jira")
+	var siteURL, email, token string
+	if defSite != "" && defEmail != "" {
+		if u, err := config.SiteURL(defSite); err == nil {
+			if t, _, err := credstore.JiraToken(a.Creds, a.Env.Getenv, u, defEmail); err == nil {
+				siteURL, email, token = u, defEmail, t
+				fmt.Fprintf(a.Stderr, "Using %s as %s with the stored token (another account: `tkt auth jira --site … --email …` first)\n", u, defEmail)
+			}
 		}
 	}
 	if token == "" {
-		if token, err = a.readToken(email); err != nil {
+		site, err := a.ask("Jira site (e.g. example.atlassian.net)", defSite)
+		if err != nil {
 			return err
+		}
+		if siteURL, err = config.SiteURL(site); err != nil {
+			return err
+		}
+		if email, err = a.ask("Atlassian account email", defEmail); err != nil {
+			return err
+		}
+		if email == "" {
+			return errors.New("an email is required")
+		}
+		if t, src, err := credstore.JiraToken(a.Creds, a.Env.Getenv, siteURL, email); err == nil {
+			question := "Use the token already stored for " + email + "? (Y/n)"
+			if src == credstore.SourceEnv {
+				question = "Use the token in " + credstore.EnvJiraToken + " and save it in " + a.Creds.Name() + "? (Y/n)"
+			}
+			ans, err := a.ask(question, "y")
+			if err != nil {
+				return err
+			}
+			if !strings.HasPrefix(strings.ToLower(ans), "n") {
+				token = t
+			}
+		}
+		if token == "" {
+			if token, err = a.readToken(email); err != nil {
+				return err
+			}
 		}
 	}
 	js := a.NewJira(siteURL, email, token)
