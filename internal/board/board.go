@@ -100,6 +100,21 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 		attached[i].PRs = mergeLinked(attached[i].PRs, linked[attached[i].Key], prs)
 	}
 	tickets = attached
+	for _, t := range tickets {
+		for _, p := range t.PRs {
+			addRepo(snap.Repos, t.Space(), strings.ToLower(p.Repo))
+		}
+	}
+	for _, s := range c.Spaces {
+		if len(snap.Repos[s.Key]) > 0 {
+			continue
+		}
+		why := "none of your tickets has a pull request"
+		if len(tickets) > 0 && len(devFailed) == len(tickets) {
+			why = "Jira does not show your tickets' pull requests"
+		}
+		snap.Warnings = append(snap.Warnings, s.Key+" has no repositories yet: "+why+", so CI and reviews are off; add one in the config")
+	}
 	snap.Tickets = ticket.GroupSubtasks(tickets)
 
 	if mode := c.ReviewMode(); mode != config.ReviewsOff && len(names) > 0 {
@@ -123,26 +138,26 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 // Jira links to the user's tickets, so a space works without any configured repository.
 func spaceRepos(c *config.Config, linked map[ticket.Key][]jira.DevPullRequest) map[string][]string {
 	out := map[string][]string{}
-	add := func(space, repo string) {
-		if repo == "" || slices.ContainsFunc(out[space], func(r string) bool { return strings.EqualFold(r, repo) }) {
-			return
-		}
-		out[space] = append(out[space], repo)
-	}
 	for _, s := range c.Spaces {
 		for _, r := range s.Repos {
-			add(s.Key, r.Name)
+			addRepo(out, s.Key, r.Name)
 		}
 	}
 	for key, prs := range linked {
 		for _, p := range prs {
-			add(key.Space(), strings.ToLower(p.Repo))
+			addRepo(out, key.Space(), strings.ToLower(p.Repo))
 		}
 	}
-	for k := range out {
-		slices.Sort(out[k])
-	}
 	return out
+}
+
+// addRepo adds repo to space once, ignoring case, keeping the list sorted.
+func addRepo(bySpace map[string][]string, space, repo string) {
+	if repo == "" || slices.ContainsFunc(bySpace[space], func(r string) bool { return strings.EqualFold(r, repo) }) {
+		return
+	}
+	bySpace[space] = append(bySpace[space], repo)
+	slices.Sort(bySpace[space])
 }
 
 func allRepos(bySpace map[string][]string) []string {

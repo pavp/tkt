@@ -391,3 +391,16 @@ func TestFetchInfersRepositoriesFromJiraLinkedPRs(t *testing.T) {
 		t.Errorf("DEMO-1 should get CI from the inferred repo: %+v", prs)
 	}
 }
+
+func TestFetchWarnsAboutSpacesWithoutRepositories(t *testing.T) {
+	c := &config.Config{Spaces: []config.Space{{Key: "DEMO"}, {Key: "OPS", Repos: []config.Repo{{Name: "example-org/ops"}}}}}
+	js := &stubJira{issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Status: "To Do", StatusCategory: "new"}}, linked: map[string][]jira.DevPullRequest{}}
+	snap, err := Fetch(context.Background(), c, js, &stubGitHub{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "DEMO has no repositories yet: none of your tickets has a pull request, so CI and reviews are off; add one in the config"
+	if !reflect.DeepEqual(snap.Warnings, []string{want}) {
+		t.Errorf("warnings = %q", snap.Warnings)
+	}
+}

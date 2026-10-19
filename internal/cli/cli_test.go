@@ -443,3 +443,11 @@ func TestAuthJiraOffersTheLastLoginInATerminal(t *testing.T) {
 		t.Errorf("creds = %v", h.creds)
 	}
 }
+
+func TestDoctorWarnsAboutSpacesWithoutRepositories(t *testing.T) {
+	h := newHarness(t, baseConfig+"\n[[spaces]]\nkey = \"NOREPO\"\n")
+	h.exec("doctor")
+	if !strings.Contains(h.out.String(), "! repos      NOREPO has no configured repositories") {
+		t.Errorf("doctor output:\n%s", h.out)
+	}
+}

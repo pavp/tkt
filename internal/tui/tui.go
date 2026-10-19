@@ -683,7 +683,11 @@ func (m Model) header() string {
 	default:
 		top = title + "\n" + controls
 	}
-	return top + "\n" + dim.Render(strings.Repeat("─", m.width))
+	top += "\n" + dim.Render(strings.Repeat("─", m.width))
+	if len(m.snap.Warnings) > 0 {
+		top += "\n" + warn.Render(truncate("! "+strings.Join(m.snap.Warnings, " · "), m.width))
+	}
+	return top
 }
 
 type headerSpan struct {

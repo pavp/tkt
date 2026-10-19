@@ -964,3 +964,20 @@ func TestColumnsRequestOnANarrowPaneExplainsWhy(t *testing.T) {
 		t.Errorf("the explanation should clear on the next key:\n%s", v)
 	}
 }
+
+func TestBoardShowsSnapshotWarningsUnderTheHeader(t *testing.T) {
+	snap := snapshot()
+	snap.Warnings = []string{"DEMO has no repositories yet"}
+	m := New(board.Snapshot{}, false, &recorder{}, ViewColumns)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	next, _ = next.Update(SnapshotMsg{Snap: snap})
+	lines := strings.Split(stripANSI(next.View()), "\n")
+	if !strings.HasPrefix(strings.TrimSpace(lines[4]), "! DEMO has no repositories yet") {
+		t.Errorf("warning not under the header rule:\n%s", strings.Join(lines[:6], "\n"))
+	}
+	y := lineIndex(next.View(), "DEMO-2")
+	x := lipgloss.Width(lines[y][:strings.Index(lines[y], "DEMO-2")])
+	if v := stripANSI(click(next, x, y).View()); !strings.Contains(v, "▸ DEMO-2") {
+		t.Errorf("clicks should still map to cards under the warning:\n%s", v)
+	}
+}
