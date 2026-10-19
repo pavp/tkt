@@ -124,7 +124,7 @@ Events over WebSocket:
 
 ### Board scope
 
-- Tickets assigned to the user in open sprints across configured projects, plus pull requests where the user's review is requested.
+- Tickets assigned to the user in open sprints across configured projects, plus finished tickets the user once held (teams often reassign a ticket to QA or a reviewer when it is done), plus pull requests where the user's review is requested.
 - Each space has its own sprint; the UI shows the active sprints the user's tickets belong to (for example `DEMO S42 · 4d left`), read from the tickets' own Sprint field. Listing every board of a space shows other teams' sprints and costs one request per board, so it is avoided.
 - `reviews` in the configuration selects review requests: `direct` (default; requests addressed to the user in configured repositories), `team` (also requests to the user's teams, which include CODEOWNERS and dependabot traffic), or `off`.
 - "Needs you" means: one of my tickets has failing CI or requested changes, or my review is requested on a PR.

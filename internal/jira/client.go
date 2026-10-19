@@ -282,13 +282,15 @@ func (c *Client) Search(ctx context.Context, jql string, fields []string) ([]Iss
 	return nil, errors.New("jira search returned too many pages")
 }
 
-// MySprintJQL selects the user's tickets in open sprints of the given spaces.
+// MySprintJQL selects the user's tickets in open sprints of the given spaces: assigned to the user, plus
+// finished tickets the user once held, since teams often reassign a ticket (to QA, to a reviewer) when
+// it is done.
 func MySprintJQL(spaces []string) string {
 	quoted := make([]string, len(spaces))
 	for i, s := range spaces {
 		quoted[i] = `"` + s + `"`
 	}
-	return fmt.Sprintf("assignee = currentUser() AND sprint in openSprints() AND project in (%s) ORDER BY updated DESC", strings.Join(quoted, ", "))
+	return fmt.Sprintf("sprint in openSprints() AND project in (%s) AND (assignee = currentUser() OR (statusCategory = Done AND assignee WAS currentUser())) ORDER BY updated DESC", strings.Join(quoted, ", "))
 }
 
 // Issue fetches one issue with the board fields, its description, attachments, and any extra fields.

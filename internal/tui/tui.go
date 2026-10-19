@@ -588,7 +588,11 @@ func (m Model) reviewStrip() string {
 	row := []string{lipgloss.NewStyle().PaddingTop(1).Render(label)}
 	used := lipgloss.Width(label)
 	for i, pr := range m.snap.Reviews {
-		chip := reviewChip.Render(warn.Render("!") + fmt.Sprintf(" #%d · %s", pr.Number, truncate(pr.Title, 36)))
+		label := fmt.Sprintf(" #%d", pr.Number)
+		if keys := ticket.BranchKeys(pr.Branch); len(keys) > 0 {
+			label += " · " + string(keys[0])
+		}
+		chip := reviewChip.Render(warn.Render("!") + label)
 		if used+2+lipgloss.Width(chip) > m.width {
 			more := lipgloss.NewStyle().PaddingTop(1).Render(dim.Render(fmt.Sprintf("+%d more · press 3", len(m.snap.Reviews)-i)))
 			row = append(row, " ", more)
@@ -690,9 +694,10 @@ func coloredPRs(prs []ticket.PullRequest, width int) string {
 	if len(prs) == 0 {
 		return dim.Render("no PR yet")
 	}
+	open, merged, closed := ticket.SplitPRs(prs)
 	var parts []string
 	used := 0
-	for _, pr := range prs {
+	for _, pr := range open {
 		_, repo, _ := strings.Cut(pr.Repo, "/")
 		ref := fmt.Sprintf("%s#%d", repo, pr.Number)
 		if repo == "" {
@@ -720,6 +725,9 @@ func coloredPRs(prs []ticket.PullRequest, width int) string {
 		parts = append(parts, ref+" "+style.Render(markText))
 		used += w + 1
 	}
+	if f := ticket.FinishedSummary(merged, closed); f != "" && used+len(f) <= width {
+		parts = append(parts, ok.Render(f))
+	}
 	return strings.Join(parts, " ")
 }
 
@@ -740,9 +748,13 @@ func prRefs(prs []ticket.PullRequest) string {
 	if len(prs) == 0 {
 		return "no PR"
 	}
-	parts := make([]string, len(prs))
-	for i, pr := range prs {
-		parts[i] = prRef(pr)
+	open, merged, closed := ticket.SplitPRs(prs)
+	parts := make([]string, 0, len(open)+1)
+	for _, pr := range open {
+		parts = append(parts, prRef(pr))
+	}
+	if f := ticket.FinishedSummary(merged, closed); f != "" {
+		parts = append(parts, f)
 	}
 	return strings.Join(parts, " ")
 }

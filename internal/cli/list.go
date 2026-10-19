@@ -124,10 +124,14 @@ func prSummary(prs []ticket.PullRequest) string {
 	if len(prs) == 0 {
 		return "—"
 	}
-	parts := make([]string, 0, len(prs))
-	for _, pr := range prs {
+	open, merged, closed := ticket.SplitPRs(prs)
+	parts := make([]string, 0, len(open)+1)
+	for _, pr := range open {
 		_, repo, _ := strings.Cut(pr.Repo, "/")
 		parts = append(parts, fmt.Sprintf("%s#%d %s", repo, pr.Number, prMark(pr)))
+	}
+	if f := ticket.FinishedSummary(merged, closed); f != "" {
+		parts = append(parts, f)
 	}
 	return strings.Join(parts, " ")
 }

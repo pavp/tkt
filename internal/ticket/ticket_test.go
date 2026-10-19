@@ -142,3 +142,16 @@ func TestGroupSubtasks(t *testing.T) {
 		t.Errorf("DEMO-1 subtasks = %+v", got[0].Subtasks)
 	}
 }
+
+func TestSplitPRsAndSummary(t *testing.T) {
+	open, merged, closed := SplitPRs([]PullRequest{{Number: 1, State: PROpen}, {Number: 2, State: PRMerged}, {Number: 3, State: PRMerged}, {Number: 4, State: PRClosed}})
+	if len(open) != 1 || merged != 2 || closed != 1 {
+		t.Errorf("split = %v %d %d", open, merged, closed)
+	}
+	if got := FinishedSummary(merged, closed); got != "2 merged · 1 closed" {
+		t.Errorf("summary = %q", got)
+	}
+	if got := FinishedSummary(0, 0); got != "" {
+		t.Errorf("empty summary = %q", got)
+	}
+}

@@ -91,7 +91,7 @@ func TestSearchPaginatesAndDecodes(t *testing.T) {
 		t.Errorf("second = %+v", got[1])
 	}
 	body := (*calls)[0].body
-	if body["jql"] != `assignee = currentUser() AND sprint in openSprints() AND project in ("DEMO", "OPS") ORDER BY updated DESC` {
+	if body["jql"] != `sprint in openSprints() AND project in ("DEMO", "OPS") AND (assignee = currentUser() OR (statusCategory = Done AND assignee WAS currentUser())) ORDER BY updated DESC` {
 		t.Errorf("jql = %v", body["jql"])
 	}
 	if !strings.HasPrefix((*calls)[0].auth, "Basic ") {

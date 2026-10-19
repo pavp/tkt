@@ -101,7 +101,7 @@ func TestColumnsViewAndNavigation(t *testing.T) {
 	r := &recorder{}
 	m := loaded(r)
 	view := m.View()
-	for _, want := range []string{"To Do 1", "In Progress 1", "In Review 1", "Done 0", "— nothing here", "! CI failing", "#812 ✕", "Review requested", "#820 · Add pagination", "←↑↓→ wasd move"} {
+	for _, want := range []string{"To Do 1", "In Progress 1", "In Review 1", "Done 0", "— nothing here", "! CI failing", "#812 ✕", "Review requested", "! #820", "←↑↓→ wasd move"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("columns view missing %q", want)
 		}
@@ -466,8 +466,8 @@ func TestReviewsRenderLikeTheMockup(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	if !strings.Contains(view, "│! #820 · Add pagination│") && !strings.Contains(view, "│ ! #820 · Add pagination │") {
-		t.Errorf("review chip not boxed:\n%s", view)
+	if !strings.Contains(view, "│ ! #820 │") {
+		t.Errorf("review chip should be boxed with just the PR number:\n%s", view)
 	}
 	next = press(next, "3")
 	line := ""
@@ -520,5 +520,16 @@ func TestCardsShowDetailsAndDensityToggles(t *testing.T) {
 	next = click(next, 40, lineIndex(next.View(), "DEMO-1"))
 	if !strings.Contains(stripANSI(next.View()), "▸ DEMO-1") {
 		t.Error("click hit-testing broke in compact mode")
+	}
+}
+
+func TestReviewChipShowsTicketKey(t *testing.T) {
+	snap := snapshot()
+	snap.Reviews[0].Branch = "refactor/demo-170448-users"
+	m := New(board.Snapshot{}, false, &recorder{}, ViewColumns)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	next, _ = next.Update(SnapshotMsg{Snap: snap})
+	if v := stripANSI(next.View()); !strings.Contains(v, "! #820 · DEMO-170448") || strings.Contains(v, "Add pagination") {
+		t.Errorf("chip:\n%s", v)
 	}
 }

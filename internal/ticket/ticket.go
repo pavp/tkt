@@ -1,6 +1,7 @@
 package ticket
 
 import (
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -271,4 +272,31 @@ func GroupSubtasks(tickets []Ticket) []Ticket {
 		top[i].Subtasks = children[top[i].Key]
 	}
 	return top
+}
+
+// SplitPRs separates open pull requests from finished (merged or closed) ones, which lists summarize as a count.
+func SplitPRs(prs []PullRequest) (open []PullRequest, merged, closed int) {
+	for _, pr := range prs {
+		switch pr.State {
+		case PRMerged:
+			merged++
+		case PRClosed:
+			closed++
+		default:
+			open = append(open, pr)
+		}
+	}
+	return open, merged, closed
+}
+
+// FinishedSummary describes finished PRs briefly, such as "5 merged" or "2 merged · 1 closed".
+func FinishedSummary(merged, closed int) string {
+	var parts []string
+	if merged > 0 {
+		parts = append(parts, fmt.Sprintf("%d merged", merged))
+	}
+	if closed > 0 {
+		parts = append(parts, fmt.Sprintf("%d closed", closed))
+	}
+	return strings.Join(parts, " · ")
 }
