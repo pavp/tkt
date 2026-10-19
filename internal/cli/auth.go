@@ -81,8 +81,8 @@ func newAuthJiraCmd(a *App) *cobra.Command {
 	return cmd
 }
 
-// jiraAccount resolves the site and email from flags, the configuration and the last login; in a terminal
-// it asks for what is still missing, suggesting the git email.
+// jiraAccount resolves the site and email from flags and the configuration; in a terminal it asks for what
+// is still missing, offering the last login and then the git email as defaults.
 func (a *App) jiraAccount(ctx context.Context, site, email string) (string, string, error) {
 	if site == "" || email == "" {
 		c, err := a.LoadConfig()
@@ -92,18 +92,17 @@ func (a *App) jiraAccount(ctx context.Context, site, email string) (string, stri
 		if c != nil {
 			site, email = cmp.Or(site, c.Jira.Site), cmp.Or(email, c.Jira.Email)
 		}
-		st := a.loadState()
-		site, email = cmp.Or(site, st.JiraSite), cmp.Or(email, st.JiraEmail)
 	}
 	if (site == "" || email == "") && a.IsTerminal() {
+		st := a.loadState()
 		var err error
 		if site == "" {
-			if site, err = a.ask("Jira site (e.g. example.atlassian.net)", ""); err != nil {
+			if site, err = a.ask("Jira site (e.g. example.atlassian.net)", st.JiraSite); err != nil {
 				return "", "", err
 			}
 		}
 		if email == "" {
-			if email, err = a.ask("Atlassian account email", a.gitEmail(ctx)); err != nil {
+			if email, err = a.ask("Atlassian account email", cmp.Or(st.JiraEmail, a.gitEmail(ctx))); err != nil {
 				return "", "", err
 			}
 		}

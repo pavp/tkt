@@ -190,3 +190,13 @@ func TestInitInHerdrPausesThenOpensBoard(t *testing.T) {
 		t.Errorf("board not opened: %v", got)
 	}
 }
+
+func TestInitPipedDoesNotSuggestTheGitEmail(t *testing.T) {
+	h := newHarness(t, "")
+	h.run.out["git config user.email"] = "g@example.com\n"
+	h.app.Stdin = strings.NewReader("example.atlassian.net\n\n")
+	h.exec("init")
+	if strings.Contains(h.errOut.String(), "g@example.com") || !strings.Contains(h.errOut.String(), "an email is required") {
+		t.Errorf("piped init should not suggest the git email: %q", h.errOut)
+	}
+}

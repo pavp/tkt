@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -105,7 +104,10 @@ func (a *App) runInit(cmd *cobra.Command) error {
 		if siteURL, err = config.SiteURL(site); err != nil {
 			return err
 		}
-		if email, err = a.ask("Atlassian account email", cmp.Or(defEmail, a.gitEmail(ctx))); err != nil {
+		if defEmail == "" && a.IsTerminal() {
+			defEmail = a.gitEmail(ctx)
+		}
+		if email, err = a.ask("Atlassian account email", defEmail); err != nil {
 			return err
 		}
 		if email == "" {

@@ -415,3 +415,31 @@ func TestAuthJiraAsksForTheAccountWithGitEmailAsDefault(t *testing.T) {
 		t.Errorf("creds = %v", h.creds)
 	}
 }
+
+func TestAuthJiraPipedIgnoresTheLastLogin(t *testing.T) {
+	h := newHarness(t, "")
+	h.app.saveState(state{JiraSite: "https://example.atlassian.net", JiraEmail: "dev@example.com"})
+	h.app.Stdin = strings.NewReader("tok\n")
+	if code := h.exec("auth", "jira"); code == 0 || !strings.Contains(h.errOut.String(), "jira site and email are unknown") {
+		t.Errorf("piped auth should still need flags or a config: exit %d, %q", code, h.errOut)
+	}
+	if len(h.creds) != 0 {
+		t.Errorf("stored a token for the last login: %v", h.creds)
+	}
+}
+
+func TestAuthJiraOffersTheLastLoginInATerminal(t *testing.T) {
+	h := terminalHarness(t, "", "typed-token-value")
+	h.app.saveState(state{JiraSite: "https://example.atlassian.net", JiraEmail: "dev@example.com"})
+	h.run.out["git config user.email"] = "me@personal.example\n"
+	h.app.Stdin = strings.NewReader("\n\n")
+	if code := h.exec("auth", "jira"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if !strings.Contains(h.errOut.String(), "[https://example.atlassian.net]") || !strings.Contains(h.errOut.String(), "Atlassian account email [dev@example.com]") {
+		t.Errorf("last login should be offered as defaults: %q", h.errOut)
+	}
+	if h.creds["jira:example.atlassian.net:dev@example.com"] != "typed-token-value" {
+		t.Errorf("creds = %v", h.creds)
+	}
+}
