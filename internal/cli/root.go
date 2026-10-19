@@ -21,7 +21,7 @@ func NewRootCmd(a *App) *cobra.Command {
 	root.SetErr(a.Stderr)
 	root.PersistentFlags().StringVar(&a.configPath, "config", a.configPath, "config file (default ~/.config/tkt/config.toml)")
 	root.PersistentFlags().BoolVar(&a.jsonOut, "json", false, "print machine-readable JSON")
-	root.AddCommand(newAuthCmd(a), newDoctorCmd(a), newListCmd(a), newShowCmd(a), newContextCmd(a))
+	root.AddCommand(newAuthCmd(a), newDoctorCmd(a), newListCmd(a), newShowCmd(a), newContextCmd(a), newLinkCmd(a), newStartCmd(a), newInitCmd(a))
 	return root
 }
 
