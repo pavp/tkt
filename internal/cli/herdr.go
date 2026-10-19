@@ -353,6 +353,7 @@ func (a *App) herdrStart(cmd *cobra.Command, args, repoFlags []string, clone boo
 
 // startInWorkspace names the agent plain "claude", as Herdr shows agents it detects itself; the workspace
 // above it already names the ticket. Herdr wants agent names unique, so a taken name gets a number.
+// The prompt goes through agent.prompt, not as an argument: Herdr refuses multi-line arguments for the shell.
 func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, dir, label, prompt string, focus bool) error {
 	ws, pane, err := h.CreateWorkspace(ctx, dir, label, focus)
 	if err != nil {
@@ -360,14 +361,21 @@ func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, dir, label, prom
 	}
 	name := "claude"
 	for n := 2; ; n++ {
-		err := h.StartAgent(ctx, pane.ID, "claude", name, []string{prompt})
+		err := h.StartAgent(ctx, pane.ID, "claude", name, []string{})
 		if err == nil {
 			break
+		}
+		if notReady(err) {
+			a.printf("! Claude Code in workspace %s (%s) is waiting for an answer; once it is ready, give it this prompt:\n\n%s\n", label, ws.ID, prompt)
+			return nil
 		}
 		if n > 9 || !nameTaken(err) {
 			return err
 		}
 		name = fmt.Sprintf("claude-%d", n)
+	}
+	if err := h.Prompt(ctx, pane.ID, prompt); err != nil {
+		return fmt.Errorf("claude started in workspace %s but did not get its first prompt: %w", label, err)
 	}
 	a.printf("✓ Claude Code started in workspace %s (%s)\n", label, ws.ID)
 	return nil
@@ -676,4 +684,9 @@ func sidebarTokens(t ticket.Ticket) map[string]*string {
 func nameTaken(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "agent_name_taken") || strings.Contains(msg, "is already used")
+}
+
+// notReady means Herdr started the agent but it is showing a question, such as Claude Code's folder trust prompt.
+func notReady(err error) bool {
+	return strings.Contains(err.Error(), "agent_not_ready")
 }
