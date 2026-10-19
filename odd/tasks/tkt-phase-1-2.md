@@ -28,7 +28,7 @@ Forecast (items 1–23, see L5): 4,310–7,040 authored changed lines.
 | T1b | Credentials (incl. WSL), CLI root, `auth`, `doctor` | S4 S5 S12 | measured 1,272 | inline, no Writer reason | `feat/tkt-phase-1-2-1b-cli` (T1a) | done · 55 tests · RDD high (auth hot path), review deferred | c401219 fdfe4a7 b90fdfb |
 | T2a | Data clients: Jira, GitHub | S6 S13 | measured 1,169 | inline, no Writer reason | `feat/tkt-phase-1-2-2a-clients` (T1b) | done · RDD high (auth hot path), review deferred | b7e8045 02a5aed 17f0566 |
 | T2b | Cache, board assembly, `list` | S4 S10 | measured 910 | inline, no Writer reason | `feat/tkt-phase-1-2-2b-list` (T2a) | done · 84 tests · RDD medium, under budget (pending in slice) | 0bba4f9 87ec9c6 |
-| T3a | ADF, `show`, `context` | S4 | 1,100–1,700 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-3a-show` (T2b) | pending | |
+| T3a | ADF, `show`, `context` | S4 | measured 1,074 | inline, no Writer reason | `feat/tkt-phase-1-2-3a-show` (T2b) | done · RDD medium, under budget (pending in slice) | e88349d f3f4426 f2ce6d8 |
 | T3b | `init`, discovery, `link`, `start` | S2 S3 S4 S11 | 1,300–2,000 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-3b-work` (T3a) | pending | |
 | T4 | Herdr: client, `tkt herdr` commands, sidebar + agent state, manifest, setup action | S3 S11 | 1,200–2,000 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-4-herdr` (T3b) | pending | |
 | T5 | Board TUI, `f`, docs | S7 S8 S9 S10 | 1,300–2,000 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-5-board` (T4) | pending | |
