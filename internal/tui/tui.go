@@ -23,6 +23,8 @@ type Actions interface {
 	// Copy puts text on the clipboard; what names it in the confirmation, such as "key".
 	Copy(text, what string) tea.Cmd
 	CopyContext(key ticket.Key) tea.Cmd
+	// Detail renders a ticket for reading inside the board; the result arrives as a DetailMsg.
+	Detail(key ticket.Key) tea.Cmd
 }
 
 // SnapshotMsg delivers a fetched board; Stale explains why it came from the cache, Err why nothing came.
@@ -68,6 +70,7 @@ type Model struct {
 	now          func() time.Time
 	compact      bool
 	menu         *menu
+	detail       *detailView
 	// inStrip means the keyboard cursor is on the review chips above the columns, at stripSel.
 	inStrip  bool
 	stripSel int
@@ -237,6 +240,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reselect()
 	case StatusMsg:
 		m.status = string(msg)
+	case DetailMsg:
+		if m.detail == nil || m.detail.key != msg.Key {
+			return m, nil
+		}
+		if msg.Err != nil {
+			m.detail = nil
+			m.status = "could not load " + string(msg.Key) + ": " + msg.Err.Error()
+			return m, nil
+		}
+		m.detail.loading = false
+		m.detail.lines = strings.Split(strings.TrimRight(msg.Text, "\n"), "\n")
 	case tickMsg:
 		if !m.loading && m.now().Sub(m.snap.FetchedAt) >= refreshEvery {
 			m.loading = true
@@ -254,6 +268,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // mouse selects what is under a click and scrolls with the wheel. Clicks only select: actions stay on
 // the keyboard so a stray click never starts an agent.
 func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.detail != nil && m.menu == nil {
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.detail.offset = max(0, m.detail.offset-3)
+		case tea.MouseButtonWheelDown:
+			m.detail.offset = min(m.maxOffset(), m.detail.offset+3)
+		}
+		return m, nil
+	}
 	if m.menu != nil {
 		switch {
 		case msg.Button == tea.MouseButtonWheelUp:
@@ -367,6 +390,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.menu != nil {
 		return m.menuKey(k)
 	}
+	if m.detail != nil {
+		return m.detailKey(k)
+	}
 	switch k.String() {
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
@@ -425,7 +451,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "i":
 		if it, ok := m.current(); ok && it.ticket != nil {
-			return m, m.actions.TicketPane(it.key)
+			return m.openDetail(it.key)
 		}
 	case "o":
 		if it, ok := m.current(); ok && it.ticket != nil && it.ticket.URL != "" {
@@ -524,6 +550,15 @@ var (
 // scrolls so the selected card or row stays visible.
 func (m Model) View() string {
 	top := m.header()
+	if m.detail != nil && m.menu == nil {
+		body := m.detailBody()
+		bottom := m.detailFooter()
+		lines := strings.Split(body, "\n")
+		for len(lines) < m.detailHeight() {
+			lines = append(lines, "")
+		}
+		return top + "\n" + strings.Join(lines, "\n") + "\n\n" + bottom
+	}
 	var body string
 	bottom0 := m.preview() + "\n" + m.footer()
 	if m.menu != nil {

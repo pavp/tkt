@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
+	"github.com/pavp/tkt/internal/workspace"
 )
 
 func newBoardCmd(a *App) *cobra.Command {
@@ -98,17 +100,23 @@ func (b *boardActions) Start(key ticket.Key) tea.Cmd {
 	})
 }
 
+func (b *boardActions) Detail(key ticket.Key) tea.Cmd {
+	return func() tea.Msg {
+		d, err := b.a.loadDetail(b.ctx, b.c, key)
+		if err != nil {
+			return tui.DetailMsg{Key: key, Err: err}
+		}
+		var buf bytes.Buffer
+		b.a.renderShow(&buf, d)
+		return tui.DetailMsg{Key: key, Text: buf.String()}
+	}
+}
+
+// TicketPane closes the board and opens the live ticket pane in the ticket's own workspace, next to its
+// agent; without a worktree it opens in the current workspace. Outside Herdr it shows the ticket in place.
 func (b *boardActions) TicketPane(key ticket.Key) tea.Cmd {
 	if b.inHerdr() {
-		return func() tea.Msg {
-			err := b.a.NewHerdr().OpenPluginPane(b.ctx, herdr.PaneOpen{
-				PluginID: b.a.pluginID(), Entrypoint: "ticket", Env: map[string]string{"TKT_KEY": string(key)},
-			})
-			if err != nil {
-				return tui.StatusMsg("ticket pane: " + err.Error())
-			}
-			return tui.StatusMsg("opened the ticket pane for " + string(key))
-		}
+		return tea.Sequence(b.ticketPaneOpen(key), tea.Quit)
 	}
 	exe, err := b.a.Executable()
 	if err != nil {
@@ -120,6 +128,29 @@ func (b *boardActions) TicketPane(key ticket.Key) tea.Cmd {
 		}
 		return nil
 	})
+}
+
+func (b *boardActions) ticketPaneOpen(key ticket.Key) tea.Cmd {
+	return func() tea.Msg {
+		h := b.a.NewHerdr()
+		pane := herdr.PaneOpen{PluginID: b.a.pluginID(), Entrypoint: "ticket", Env: map[string]string{"TKT_KEY": string(key)}}
+		if all, err := b.a.allWork(b.ctx, b.c); err == nil {
+			for _, w := range workspace.For(all, key) {
+				if w.Path == "" {
+					continue
+				}
+				if ws, ok := workspaceAt(b.ctx, h, w.Path); ok {
+					_ = h.FocusWorkspace(b.ctx, ws.ID)
+					pane.WorkspaceID, pane.Cwd = ws.ID, w.Path
+					break
+				}
+			}
+		}
+		if err := h.OpenPluginPane(b.ctx, pane); err != nil {
+			return tui.StatusMsg("ticket pane: " + err.Error())
+		}
+		return nil
+	}
 }
 
 func (b *boardActions) Open(url string) tea.Cmd {

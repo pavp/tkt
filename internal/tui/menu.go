@@ -14,6 +14,8 @@ type menuItem struct {
 	label string
 	key   string
 	run   func() tea.Cmd
+	// detail, when set, opens that ticket's detail view instead of running an action.
+	detail ticket.Key
 }
 
 // menu lists what can be done with the selected ticket or review request.
@@ -39,7 +41,8 @@ func (m Model) buildMenu(it item) *menu {
 	t := *it.ticket
 	items := []menuItem{
 		{label: "Start · open the agent", run: func() tea.Cmd { return a.Start(t.Key) }},
-		{label: "Open the ticket pane", key: "i", run: func() tea.Cmd { return a.TicketPane(t.Key) }},
+		{label: "Show details", key: "i", detail: t.Key},
+		{label: "Open the ticket pane next to its agent", run: func() tea.Cmd { return a.TicketPane(t.Key) }},
 	}
 	if t.URL != "" {
 		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", run: func() tea.Cmd { return a.Open(t.URL) }})
@@ -87,9 +90,12 @@ func (m Model) runMenuItem(i int) (tea.Model, tea.Cmd) {
 	if m.menu == nil || i < 0 || i >= len(m.menu.items) {
 		return m, nil
 	}
-	run := m.menu.items[i].run
+	it := m.menu.items[i]
 	m.menu = nil
-	return m, run()
+	if it.detail != "" {
+		return m.openDetail(it.detail)
+	}
+	return m, it.run()
 }
 
 func (m Model) menuView() string {

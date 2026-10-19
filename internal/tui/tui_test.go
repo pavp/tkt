@@ -189,7 +189,6 @@ func TestActionKeys(t *testing.T) {
 	m := press(loaded(r), "l")
 	tests := []struct{ key, want string }{
 		{"f", "fix DEMO-1"},
-		{"i", "pane DEMO-1"},
 		{"o", "open https://example.atlassian.net/browse/DEMO-1"},
 		{"p", "open https://github.com/example-org/web/pull/812"},
 		{"g", "refresh"},
@@ -543,7 +542,7 @@ func TestActionsMenu(t *testing.T) {
 	r := &recorder{}
 	m := press(loaded(r), "l", "enter")
 	v := stripANSI(m.View())
-	for _, want := range []string{"Actions for DEMO-1", "Start · open the agent", "Open the ticket pane", "Open in Jira ↗", "Open #812 ✕ in GitHub ↗", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
+	for _, want := range []string{"Actions for DEMO-1", "Start · open the agent", "Show details", "Open the ticket pane next to its agent", "Open in Jira ↗", "Open #812 ✕ in GitHub ↗", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("menu missing %q:\n%s", want, v)
 		}
@@ -551,7 +550,7 @@ func TestActionsMenu(t *testing.T) {
 	if strings.Contains(v, "Send the review comments") {
 		t.Error("offered review comments for a ticket without requested changes")
 	}
-	m = press(m, "s", "s", "s", "s")
+	m = press(m, "s", "s", "s", "s", "s")
 	_, msg := run(m, "enter")
 	if r.last() != "fix DEMO-1" || msg != StatusMsg("fix DEMO-1") {
 		t.Errorf("fifth item ran %v", r.calls)
@@ -696,5 +695,52 @@ func TestKeyboardReachesReviewChips(t *testing.T) {
 	next = press(next, "s")
 	if v := stripANSI(next.View()); strings.Contains(v, "▸ #821") || !strings.Contains(v, "▸ DEMO-") {
 		t.Errorf("down should return to the columns:\n%s", v)
+	}
+}
+
+func (r *recorder) Detail(k ticket.Key) tea.Cmd {
+	r.calls = append(r.calls, "detail "+string(k))
+	return func() tea.Msg {
+		return DetailMsg{Key: k, Text: string(k) + " · Story · In Progress\nTitle line\n\nDescription\n" + strings.Repeat("body line\n", 60)}
+	}
+}
+
+func TestDetailViewInsideTheBoard(t *testing.T) {
+	r := &recorder{}
+	m := press(loaded(r), "l")
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	if !strings.Contains(stripANSI(m.View()), "loading DEMO-1") || cmd == nil {
+		t.Fatalf("i should start loading the detail:\n%s", stripANSI(m.View()))
+	}
+	m, _ = m.Update(cmd())
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "DEMO-1 · Story · In Progress") || !strings.Contains(v, "back to the board") || strings.Contains(v, "To Do 1") {
+		t.Fatalf("detail view:\n%s", v)
+	}
+	m = press(m, "s", "s", "s")
+	if !strings.Contains(stripANSI(m.View()), "line 4 of") {
+		t.Errorf("scrolling did not move:\n%s", stripANSI(m.View()))
+	}
+	m = press(m, "enter")
+	if !strings.Contains(stripANSI(m.View()), "Actions for DEMO-1") {
+		t.Errorf("enter in the detail should open the actions menu")
+	}
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if v := stripANSI(m.View()); !strings.Contains(v, "In Progress 1") {
+		t.Errorf("esc should return to the board:\n%s", v)
+	}
+}
+
+func TestMenuShowDetailsOpensTheDetail(t *testing.T) {
+	r := &recorder{}
+	m := press(loaded(r), "enter", "s")
+	m, cmd := run(m, "enter")
+	if cmd == nil || r.last() != "detail DEMO-3" {
+		t.Fatalf("show details ran %v", r.calls)
+	}
+	m, _ = m.Update(cmd)
+	if !strings.Contains(stripANSI(m.View()), "DEMO-3 · Story") {
+		t.Errorf("detail not shown:\n%s", stripANSI(m.View()))
 	}
 }
