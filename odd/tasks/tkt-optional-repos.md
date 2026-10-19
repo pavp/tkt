@@ -13,6 +13,7 @@ Forecast: 1210–2040 authored changed lines against the user's 2000-line budget
 - S6. `tkt start` derives the repository from the ticket's pull requests when its space has none; agreed: "En un espacio nuevo, sin ningún PR todavía ... `tkt start` preguntaría el repo la primera vez".
 - S7. "agrega uno settings para poder setear los repos desde el board": a Settings view in the board edits each space's repositories (add, remove, base branch).
 - S8. "al igual que la parte de los path locales": the same Settings view edits the local clone paths (`repo_roots` and each repository's `path`).
+- S9. "cuando verticalmente no cabe todas las cards o tickets en el board, se hace un scroll en todo el board, se podria hacer scroll solo en esa columna?" → agreed: each column scrolls on its own keeping the selected card visible, with `↑ N more` / `↓ N more` markers; header, review strip and legend stay; the wheel scrolls the column under the pointer.
 
 ## Tasks
 
@@ -25,6 +26,7 @@ Forecast: 1210–2040 authored changed lines against the user's 2000-line budget
 | T5 | S6 | 1 | inline, no Writer reason | done · RED `TestStartDerivesTheRepositoryFromTheTicketsPullRequests`, `TestStartAsksForARepositoryWhenNoneIsKnown` | b4dd320 |
 | T6 | S7 S8 | 2 | inline, no Writer reason · checks the prototype's Settings screen first | pending | |
 | T7 | S7 S8 | 2 | inline, no Writer reason · Risk item 1 (writes the user's config), own commit | pending | |
+| T8 | S9 | 2 | inline, no Writer reason | pending | |
 
 ## Log
 
@@ -35,3 +37,4 @@ Forecast: 1210–2040 authored changed lines against the user's 2000-line budget
 - L5 (2026-10-19) Mid-slice user reports, fixed on the slice-1 branch: "no sirve la opcion de cambiar vista en esa computadora" → the board forces the list below 100 columns and said nothing; `v` and the Columns button now explain why (3f6e5c1). "quiero que aumentes el tamano del board con respecto a herdr" → board popup 85% → 95% (a27d839; applies after `tkt herdr install`). "en la mac cuando le doy a start ... en la otra pc ... tkt: space acto has no repositories in the config" → covered by T5.
 - L6 (2026-10-19) Slice 1 complete: 795 authored changed lines (forecast 660–1150). RDD per commit: medium/under_budget for T1, the view fix, T3, T4, T5; T2 high (escalated item 2), consent declined by the user. Next: independent verifier for T2's risk, then slice 2.
 - L7 (2026-10-19) Independent verifier on slice 1: S1–S6 pass on the happy path; differential vs main identical for configured setups. Blockers: B1 `gh auth status` ran on every GitHub request (CachedTokens resolved the account before its cache), B2 account listing ignored stderr (gh prints the status there when any account fails). One correction batch with the verifier probes committed as regression tests (`TestCachedTokensResolvesEachOwnerOnce`, `TestTokenRequestsRunGhAuthStatusOnce`, `TestLoggedInAccountsReadsStatusFromTheError`, `TestStateHoldsOnlyAccountNames`); recheck: all pass, race clean. Advisories open: a wrongly cached account never re-detects; doctor/auth status ignore detected accounts and inferred owners; non-GitHub dev-status repos would be queried on GitHub; repo-level collaborators fall back to the active account. RDD consent for the whole slice declined by the user.
+- L8 (2026-10-19) User: "no, vamos con slice 2 y luego publicamos" (no release of slice 1 alone). User: "si implementa lo del scroll tambien" → S9/T8 added to slice 2; slice 2 re-forecast 700–1140 (scroll 150–250), within the 2000 budget. Settings design from the prototype's Settings screen ("Spaces & repositories": repository, base branch, remove, Add repository; "saved to ~/.config/tkt/config.toml"); local paths are not in the prototype, so the TUI adds a LOCAL PATH column and a "Local clones" section for repo_roots. Accounts section left out (not requested).

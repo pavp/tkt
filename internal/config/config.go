@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -235,6 +237,20 @@ func (r Repo) ShortName() string {
 }
 
 // GitHubAccount returns the gh account configured for owner; empty means gh's active account.
+// Clone returns a deep copy, so an editor can change it without touching the config in use.
+func (c Config) Clone() Config {
+	out := c
+	out.RepoRoots = slices.Clone(c.RepoRoots)
+	out.GitHub.Accounts = maps.Clone(c.GitHub.Accounts)
+	out.Spaces = make([]Space, len(c.Spaces))
+	for i, s := range c.Spaces {
+		s.StatusOverrides = maps.Clone(s.StatusOverrides)
+		s.Repos = slices.Clone(s.Repos)
+		out.Spaces[i] = s
+	}
+	return out
+}
+
 func (c *Config) GitHubAccount(owner string) string {
 	return c.GitHub.Accounts[owner]
 }

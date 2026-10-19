@@ -12,11 +12,31 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/ticket"
 )
 
-type recorder struct{ calls []string }
+type recorder struct {
+	calls []string
+	cfg   config.Config
+	saved []config.Config
+	// saveErr makes SaveConfig fail.
+	saveErr error
+}
+
+func (r *recorder) Config() config.Config { return r.cfg.Clone() }
+func (r *recorder) SaveConfig(c config.Config) tea.Cmd {
+	r.calls = append(r.calls, "save")
+	return func() tea.Msg {
+		if r.saveErr != nil {
+			return SettingsSavedMsg{Err: r.saveErr}
+		}
+		r.saved = append(r.saved, c.Clone())
+		r.cfg = c.Clone()
+		return SettingsSavedMsg{Config: c.Clone()}
+	}
+}
 
 func (r *recorder) cmd(s string) tea.Cmd {
 	r.calls = append(r.calls, s)

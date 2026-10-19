@@ -161,3 +161,20 @@ func TestExampleConfigIsValid(t *testing.T) {
 		t.Fatalf("docs/config.example.toml: %v", err)
 	}
 }
+
+func TestCloneIsIndependent(t *testing.T) {
+	c := Config{
+		RepoRoots: []string{"~/src"},
+		GitHub:    GitHub{Accounts: map[string]string{"example-org": "dev"}},
+		Spaces:    []Space{{Key: "DEMO", StatusOverrides: map[string]string{"Code Review": "review"}, Repos: []Repo{{Name: "example-org/web"}}}},
+	}
+	d := c.Clone()
+	d.RepoRoots[0] = "~/other"
+	d.GitHub.Accounts["example-org"] = "x"
+	d.Spaces[0].Repos[0].Name = "example-org/api"
+	d.Spaces[0].Repos = append(d.Spaces[0].Repos, Repo{Name: "example-org/new"})
+	d.Spaces[0].StatusOverrides["Code Review"] = "done"
+	if c.RepoRoots[0] != "~/src" || c.GitHub.Accounts["example-org"] != "dev" || c.Spaces[0].Repos[0].Name != "example-org/web" || len(c.Spaces[0].Repos) != 1 || c.Spaces[0].StatusOverrides["Code Review"] != "review" {
+		t.Errorf("clone shares state with the original: %+v", c)
+	}
+}

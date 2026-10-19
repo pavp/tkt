@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/ticket"
 )
 
@@ -26,6 +27,17 @@ type Actions interface {
 	CopyContext(key ticket.Key) tea.Cmd
 	// Detail renders a ticket for reading inside the board; the result arrives as a DetailMsg.
 	Detail(key ticket.Key) tea.Cmd
+	// Config returns a copy of the configuration in use, for the settings view to edit.
+	Config() config.Config
+	// SaveConfig writes the configuration; the outcome arrives as a SettingsSavedMsg.
+	SaveConfig(c config.Config) tea.Cmd
+}
+
+// SettingsSavedMsg reports a settings save: the configuration as written, with defaults filled in, or why
+// nothing was written.
+type SettingsSavedMsg struct {
+	Config config.Config
+	Err    error
 }
 
 // SnapshotMsg delivers a fetched board; Stale explains why it came from the cache, Err why nothing came.
