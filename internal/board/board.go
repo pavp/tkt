@@ -20,7 +20,9 @@ type Snapshot struct {
 	Tickets   []ticket.Ticket      `json:"tickets"`
 	Reviews   []ticket.PullRequest `json:"reviews"`
 	Sprints   []jira.Sprint        `json:"sprints"`
-	Warnings  []string             `json:"warnings,omitempty"`
+	// Repos lists each space's repositories, configured or inferred from Jira-linked pull requests.
+	Repos    map[string][]string `json:"repos,omitempty"`
+	Warnings []string            `json:"warnings,omitempty"`
 }
 
 type JiraSource interface {
@@ -60,11 +62,18 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 		}
 	}
 
-	repos := c.Repos()
-	names := make([]string, len(repos))
-	for i, r := range repos {
-		names[i] = r.Name
+	linked := map[ticket.Key][]jira.DevPullRequest{}
+	devFailed := map[ticket.Key]bool{}
+	for _, t := range tickets {
+		l, err := js.DevPullRequests(ctx, ids[t.Key])
+		if err != nil {
+			devFailed[t.Key] = true
+			continue
+		}
+		linked[t.Key] = l
 	}
+	snap.Repos = spaceRepos(c, linked)
+	names := allRepos(snap.Repos)
 	var prs []ticket.PullRequest
 	var prErr error
 	if len(names) > 0 {
@@ -74,17 +83,11 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 		}
 	}
 	attached := ticket.AttachPRs(tickets, prs)
-	linked := map[ticket.Key][]jira.DevPullRequest{}
 	var missing []string
 	for _, t := range attached {
-		l, err := js.DevPullRequests(ctx, ids[t.Key])
-		if err != nil {
-			if len(t.PRs) == 0 {
-				missing = append(missing, string(t.Key))
-			}
-			continue
+		if devFailed[t.Key] && len(t.PRs) == 0 {
+			missing = append(missing, string(t.Key))
 		}
-		linked[t.Key] = l
 	}
 	if len(missing) > 0 && len(names) > 0 && prErr == nil {
 		older, err := gh.PullRequestsForKeys(ctx, names, missing)
@@ -114,6 +117,45 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 		}
 	}
 	return snap, nil
+}
+
+// spaceRepos lists each space's repositories: the configured ones plus those holding the pull requests
+// Jira links to the user's tickets, so a space works without any configured repository.
+func spaceRepos(c *config.Config, linked map[ticket.Key][]jira.DevPullRequest) map[string][]string {
+	out := map[string][]string{}
+	add := func(space, repo string) {
+		if repo == "" || slices.ContainsFunc(out[space], func(r string) bool { return strings.EqualFold(r, repo) }) {
+			return
+		}
+		out[space] = append(out[space], repo)
+	}
+	for _, s := range c.Spaces {
+		for _, r := range s.Repos {
+			add(s.Key, r.Name)
+		}
+	}
+	for key, prs := range linked {
+		for _, p := range prs {
+			add(key.Space(), strings.ToLower(p.Repo))
+		}
+	}
+	for k := range out {
+		slices.Sort(out[k])
+	}
+	return out
+}
+
+func allRepos(bySpace map[string][]string) []string {
+	var out []string
+	for _, rs := range bySpace {
+		for _, r := range rs {
+			if !slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(o, r) }) {
+				out = append(out, r)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // mergeLinked adds the pull requests Jira links to a ticket, preferring the GitHub copy of each one
