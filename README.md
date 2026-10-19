@@ -44,6 +44,22 @@ GOPRIVATE=github.com/pavp/* go install github.com/pavp/tkt/cmd/tkt@latest
 
 Every command accepts `--json` and `--config <path>`.
 
+## Herdr
+
+```bash
+tkt herdr install
+```
+
+links the tkt plugin into the running Herdr (0.9.5 or later) and prints a keybinding to add to your Herdr config. The plugin gives you:
+
+- a board popup (`tkt.board` action; offers setup when tkt is not configured),
+- a live ticket pane for the current workspace (`tkt.ticket`),
+- Ctrl-click on Jira and pull request links to open their ticket,
+- sidebar labels such as `DEMO-1 · ✕ CI · #812 · claude working`, refreshed by `tkt list`, the `tkt.refresh` action, and at Herdr startup from the cache,
+- automatic `tkt link` when an agent creates a worktree with `herdr worktree create`.
+
+`tkt herdr start KEY` opens Claude Code in a new Herdr workspace per repository instead of the current terminal. `tkt herdr uninstall` removes the plugin.
+
 ## Develop
 
 ```bash

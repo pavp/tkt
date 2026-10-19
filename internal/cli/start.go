@@ -28,86 +28,109 @@ func newStartCmd(a *App) *cobra.Command {
 			"creates branches or changes Jira.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := a.LoadConfig()
+			plan, err := a.planStart(cmd, args, repoFlags, clone)
 			if err != nil {
 				return err
 			}
-			key, err := a.resolveKey(cmd.Context(), c, args)
-			if err != nil {
-				return err
+			if plan.Existing != nil {
+				a.printf("Opening Claude Code in %s (%s)\n", plan.Existing.Path, plan.Existing.Branch)
+				return a.Launch(plan.Existing.Path, "claude", []string{plan.Prompt})
 			}
-			space, ok := c.Space(key.Space())
-			if !ok {
-				return fmt.Errorf("space %s is not configured", key.Space())
+			for _, d := range plan.Dirs[1:] {
+				a.printf("Also start it in %s:\n  cd %q && claude %q\n", d, d, plan.Prompt)
 			}
-			js, err := a.jiraClient(c)
-			if err != nil {
-				return err
-			}
-			is, err := js.Issue(cmd.Context(), string(key))
-			if err != nil {
-				return err
-			}
-
-			if len(repoFlags) == 0 {
-				all, err := a.allWork(cmd.Context(), c)
-				if err != nil {
-					return err
-				}
-				var existing []workspace.Work
-				for _, w := range workspace.For(all, key) {
-					if w.Path != "" {
-						existing = append(existing, w)
-					}
-				}
-				if len(existing) > 0 {
-					w, err := a.pickWork(existing)
-					if err != nil {
-						return err
-					}
-					a.printf("Opening Claude Code in %s (%s)\n", w.Path, w.Branch)
-					return a.Launch(w.Path, "claude", []string{workspace.ContinuePrompt(key, is.Summary)})
-				}
-			}
-
-			selected, err := a.pickRepos(space, repoFlags)
-			if err != nil {
-				return err
-			}
-			st := a.loadState()
-			st.LastRepos[space.Key] = names(selected)
-			a.saveState(st)
-
-			res := a.Resolver(c)
-			var dirs []string
-			for _, r := range selected {
-				dir, err := res.Resolve(cmd.Context(), r)
-				if errors.Is(err, repos.ErrNotFound) {
-					dir, err = a.offerClone(cmd, res, r, clone)
-				}
-				if err != nil {
-					fmt.Fprintf(a.Stderr, "! skipping %s: %v\n", r.Name, err)
-					continue
-				}
-				dirs = append(dirs, dir)
-			}
-			if len(dirs) == 0 {
-				return errors.New("no repository to start in")
-			}
-			if cat := ticket.CategoryFor(is.Status, is.StatusCategory, space.Categories()); cat == ticket.ToDo {
-				a.printf("→ Suggested: move %s to In Progress in Jira (tkt does not change Jira yet)\n", key)
-			}
-			prompt := workspace.StartPrompt(key, is.Summary)
-			for _, d := range dirs[1:] {
-				a.printf("Also start it in %s:\n  cd %q && claude %q\n", d, d, prompt)
-			}
-			a.printf("Opening Claude Code in %s\n", dirs[0])
-			return a.Launch(dirs[0], "claude", []string{prompt})
+			a.printf("Opening Claude Code in %s\n", plan.Dirs[0])
+			return a.Launch(plan.Dirs[0], "claude", []string{plan.Prompt})
 		},
 	}
 	cmd.Flags().StringArrayVar(&repoFlags, "repo", nil, "repository to start in (owner/name or name); repeat for several")
 	cmd.Flags().BoolVar(&clone, "clone", false, "clone missing repositories without asking")
 	return cmd
+}
+
+// startPlan says where the agent should open: an existing worktree, or the local clones of the chosen
+// repositories, with the first prompt for the agent.
+type startPlan struct {
+	Key      ticket.Key
+	Summary  string
+	Existing *workspace.Work
+	Dirs     []string
+	Prompt   string
+}
+
+func (a *App) planStart(cmd *cobra.Command, args, repoFlags []string, clone bool) (startPlan, error) {
+	c, err := a.LoadConfig()
+	if err != nil {
+		return startPlan{}, err
+	}
+	key, err := a.resolveKey(cmd.Context(), c, args)
+	if err != nil {
+		return startPlan{}, err
+	}
+	space, ok := c.Space(key.Space())
+	if !ok {
+		return startPlan{}, fmt.Errorf("space %s is not configured", key.Space())
+	}
+	js, err := a.jiraClient(c)
+	if err != nil {
+		return startPlan{}, err
+	}
+	is, err := js.Issue(cmd.Context(), string(key))
+	if err != nil {
+		return startPlan{}, err
+	}
+	plan := startPlan{Key: key, Summary: is.Summary}
+
+	if len(repoFlags) == 0 {
+		all, err := a.allWork(cmd.Context(), c)
+		if err != nil {
+			return startPlan{}, err
+		}
+		var existing []workspace.Work
+		for _, w := range workspace.For(all, key) {
+			if w.Path != "" {
+				existing = append(existing, w)
+			}
+		}
+		if len(existing) > 0 {
+			w, err := a.pickWork(existing)
+			if err != nil {
+				return startPlan{}, err
+			}
+			plan.Existing = &w
+			plan.Prompt = workspace.ContinuePrompt(key, is.Summary)
+			return plan, nil
+		}
+	}
+
+	selected, err := a.pickRepos(space, repoFlags)
+	if err != nil {
+		return startPlan{}, err
+	}
+	st := a.loadState()
+	st.LastRepos[space.Key] = names(selected)
+	a.saveState(st)
+
+	res := a.Resolver(c)
+	for _, r := range selected {
+		dir, err := res.Resolve(cmd.Context(), r)
+		if errors.Is(err, repos.ErrNotFound) {
+			dir, err = a.offerClone(cmd, res, r, clone)
+		}
+		if err != nil {
+			fmt.Fprintf(a.Stderr, "! skipping %s: %v\n", r.Name, err)
+			continue
+		}
+		plan.Dirs = append(plan.Dirs, dir)
+	}
+	if len(plan.Dirs) == 0 {
+		return startPlan{}, errors.New("no repository to start in")
+	}
+	if cat := ticket.CategoryFor(is.Status, is.StatusCategory, space.Categories()); cat == ticket.ToDo {
+		a.printf("→ Suggested: move %s to In Progress in Jira (tkt does not change Jira yet)\n", key)
+	}
+	plan.Prompt = workspace.StartPrompt(key, is.Summary)
+	return plan, nil
 }
 
 func names(rs []config.Repo) []string {

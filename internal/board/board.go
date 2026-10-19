@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/pavp/tkt/internal/config"
@@ -206,4 +207,53 @@ func DaysLeft(end, now time.Time) int {
 		return 0
 	}
 	return int((end.Sub(now) + 24*time.Hour - time.Nanosecond) / (24 * time.Hour))
+}
+
+// SidebarLabel is the one-line status Herdr shows next to a ticket's workspace, at most 80 characters
+// (Herdr's token limit), such as "DEMO-1 · ✕ CI · #812 · claude working".
+func SidebarLabel(t ticket.Ticket, agentStatus string) string {
+	parts := []string{string(t.Key)}
+	reasons := t.Attention()
+	switch {
+	case len(reasons) > 0 && reasons[0] == ticket.ReasonCIFailing:
+		parts = append(parts, "✕ CI")
+	case len(reasons) > 0:
+		parts = append(parts, "changes requested")
+	case t.Checks() == ticket.ChecksPass:
+		parts = append(parts, "✓ CI")
+	default:
+		parts = append(parts, t.Status)
+	}
+	var prs []string
+	for _, pr := range t.PRs {
+		if pr.State == ticket.PROpen {
+			prs = append(prs, fmt.Sprintf("#%d", pr.Number))
+		}
+	}
+	if len(prs) > 0 {
+		parts = append(parts, strings.Join(prs, " "))
+	}
+	if agentStatus != "" {
+		parts = append(parts, "claude "+agentStatus)
+	}
+	label := strings.Join(parts, " · ")
+	if r := []rune(label); len(r) > 80 {
+		label = string(r[:79]) + "…"
+	}
+	return label
+}
+
+// Find returns the ticket with key, searching subtasks too.
+func (s Snapshot) Find(key ticket.Key) (ticket.Ticket, bool) {
+	for _, t := range s.Tickets {
+		if t.Key == key {
+			return t, true
+		}
+		for _, st := range t.Subtasks {
+			if st.Key == key {
+				return st, true
+			}
+		}
+	}
+	return ticket.Ticket{}, false
 }

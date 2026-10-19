@@ -208,3 +208,38 @@ func TestCacheRoundTrip(t *testing.T) {
 		t.Fatalf("Load = %+v, %v, %v", out, ok, err)
 	}
 }
+
+func TestSidebarLabel(t *testing.T) {
+	failing := ticket.Ticket{Key: "DEMO-1", Status: "In Progress", Category: ticket.InProgress, PRs: []ticket.PullRequest{
+		{Number: 812, State: ticket.PROpen, Checks: ticket.ChecksFail},
+		{Number: 790, State: ticket.PRMerged, Checks: ticket.ChecksPass},
+	}}
+	if got := SidebarLabel(failing, "working"); got != "DEMO-1 · ✕ CI · #812 · claude working" {
+		t.Errorf("failing = %q", got)
+	}
+	changes := ticket.Ticket{Key: "DEMO-2", Category: ticket.InReview, PRs: []ticket.PullRequest{{Number: 45, State: ticket.PROpen, Checks: ticket.ChecksPass, Review: ticket.ReviewChangesRequested}}}
+	if got := SidebarLabel(changes, ""); got != "DEMO-2 · changes requested · #45" {
+		t.Errorf("changes = %q", got)
+	}
+	green := ticket.Ticket{Key: "DEMO-3", Category: ticket.InReview, PRs: []ticket.PullRequest{{Number: 9, State: ticket.PROpen, Checks: ticket.ChecksPass}}}
+	if got := SidebarLabel(green, "idle"); got != "DEMO-3 · ✓ CI · #9 · claude idle" {
+		t.Errorf("green = %q", got)
+	}
+	if got := SidebarLabel(ticket.Ticket{Key: "DEMO-4", Status: "To Do"}, ""); got != "DEMO-4 · To Do" {
+		t.Errorf("todo = %q", got)
+	}
+	long := ticket.Ticket{Key: "DEMO-5", Status: strings.Repeat("x", 100)}
+	if got := SidebarLabel(long, ""); len([]rune(got)) != 80 || !strings.HasSuffix(got, "…") {
+		t.Errorf("long label = %d runes", len([]rune(got)))
+	}
+}
+
+func TestFind(t *testing.T) {
+	s := Snapshot{Tickets: []ticket.Ticket{{Key: "DEMO-1", Subtasks: []ticket.Ticket{{Key: "DEMO-2"}}}}}
+	if _, ok := s.Find("DEMO-2"); !ok {
+		t.Error("subtask not found")
+	}
+	if _, ok := s.Find("DEMO-9"); ok {
+		t.Error("found a missing ticket")
+	}
+}

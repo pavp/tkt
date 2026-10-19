@@ -39,6 +39,9 @@ func (a *App) resolveKey(ctx context.Context, c *config.Config, args []string) (
 		}
 		return keys[0], nil
 	}
+	if env := a.Env.Getenv("TKT_KEY"); env != "" {
+		return a.resolveKey(ctx, c, []string{env})
+	}
 	out, err := a.Run.Run(ctx, "", "git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, nil)
 	if err != nil {
 		return "", errors.New("no ticket key given and not inside a git checkout: pass a key like DEMO-123")

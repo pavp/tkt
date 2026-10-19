@@ -36,6 +36,9 @@ func newListCmd(a *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if stale == nil && !cached {
+				a.refreshSidebarQuietly(cmd.Context(), c, snap)
+			}
 			snap = snap.Filter(space)
 			if needsYou {
 				snap = onlyNeedsYou(snap)

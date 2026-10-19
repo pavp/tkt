@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/execx"
+	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/paths"
 	"github.com/pavp/tkt/internal/repos"
@@ -40,7 +42,9 @@ type App struct {
 	Now          func() time.Time
 	Sleep        func(ctx context.Context, d time.Duration) error
 	// Launch runs an interactive program attached to the terminal and waits for it.
-	Launch func(dir, name string, args []string) error
+	Launch     func(dir, name string, args []string) error
+	NewHerdr   func() HerdrAPI
+	Executable func() (string, error)
 
 	in *bufio.Reader
 
@@ -69,6 +73,8 @@ func NewApp() (*App, error) {
 		Launch:       launch,
 	}
 	a.NewGitHub = func(c *config.Config) GitHubAPI { return githubFor(c, a.Run) }
+	a.NewHerdr = func() HerdrAPI { return herdr.New(herdr.SocketPath(a.Env.Getenv, a.Env.Home)) }
+	a.Executable = executable
 	return a, nil
 }
 
@@ -146,4 +152,12 @@ func (a *App) readLine(prompt string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(line), nil
+}
+
+func executable() (string, error) {
+	p, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(p)
 }

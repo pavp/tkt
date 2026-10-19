@@ -1,0 +1,277 @@
+package cli
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/herdr/herdrtest"
+	"github.com/pavp/tkt/internal/ticket"
+	"github.com/pavp/tkt/internal/workspace"
+)
+
+func herdrHarness(t *testing.T) (*harness, *herdrtest.FakeServer, *[]launchCall) {
+	t.Helper()
+	h, calls := workHarness(t)
+	f := herdrtest.Start(t)
+	h.app.NewHerdr = func() HerdrAPI { return herdr.New(f.Path) }
+	h.app.Executable = func() (string, error) { return "/opt/tkt/bin/tkt", nil }
+	return h, f, calls
+}
+
+func count(f *herdrtest.FakeServer, method string) int {
+	n := 0
+	for _, r := range f.Requests {
+		if r["method"] == method {
+			n++
+		}
+	}
+	return n
+}
+
+func TestHerdrInstallWritesManifestAndLinks(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	if code := h.exec("herdr", "install"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	dir := filepath.Join(h.home, "data", "tkt", "herdr-plugin")
+	b, err := os.ReadFile(filepath.Join(dir, "herdr-plugin.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `command = ["/opt/tkt/bin/tkt", "board"]`) {
+		t.Errorf("manifest does not point at the binary:\n%s", b)
+	}
+	if got := f.Last("plugin.link"); got["path"] != dir || got["enabled"] != true {
+		t.Errorf("link params = %v", got)
+	}
+	if !strings.Contains(h.out.String(), `command = "tkt.board"`) {
+		t.Errorf("keybinding hint missing:\n%s", h.out)
+	}
+}
+
+func TestHerdrInstallReportsHerdrDown(t *testing.T) {
+	h, _, _ := herdrHarness(t)
+	h.app.NewHerdr = func() HerdrAPI { return herdr.New(filepath.Join(h.home, "no.sock")) }
+	if code := h.exec("herdr", "install"); code == 0 || !strings.Contains(h.errOut.String(), "herdr is not running") {
+		t.Errorf("exit %d, %q", code, h.errOut)
+	}
+}
+
+func TestHerdrStartCreatesWorkspacesWithAgents(t *testing.T) {
+	h, f, calls := herdrHarness(t)
+	web := h.clone(t, "web")
+	api := h.clone(t, "api")
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"},"tab":{}}`
+	h.app.Stdin = strings.NewReader("1,2\n")
+	if code := h.exec("herdr", "start", "DEMO-7"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if n := count(f, "workspace.create"); n != 2 {
+		t.Fatalf("workspaces created = %d", n)
+	}
+	var cwds []string
+	for _, r := range f.Requests {
+		if r["method"] == "workspace.create" {
+			p := r["params"].(map[string]any)
+			cwds = append(cwds, p["cwd"].(string)+"|"+p["label"].(string))
+		}
+	}
+	if cwds[0] != web+"|DEMO-7 · web" || cwds[1] != api+"|DEMO-7 · api" {
+		t.Errorf("workspaces = %v", cwds)
+	}
+	start := f.Last("agent.start")
+	if start["kind"] != "claude" || start["pane_id"] != "w9:p1" || !strings.Contains(start["args"].([]any)[0].(string), "Work on Jira ticket DEMO-7") {
+		t.Errorf("agent.start = %v", start)
+	}
+	if len(*calls) != 0 {
+		t.Error("launched a terminal agent instead of Herdr")
+	}
+}
+
+func TestHerdrStartFocusesExistingWorktree(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.clone(t, "web")
+	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1\nHEAD a\nbranch refs/heads/feature/DEMO-1-filter\n"
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w3","label":"web-DEMO-1","worktree":{"checkout_path":"/src/web-DEMO-1/"}}]}`
+	if code := h.exec("herdr", "start", "DEMO-1"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if got := f.Last("workspace.focus"); got["workspace_id"] != "w3" {
+		t.Errorf("focus = %v", got)
+	}
+	if count(f, "agent.start") != 0 {
+		t.Error("started a second agent")
+	}
+}
+
+func TestHerdrOpenBoardOrSetup(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	if code := h.exec("herdr", "open-board"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if got := f.Last("plugin.pane.open"); got["entrypoint"] != "board" || got["plugin_id"] != "tkt" {
+		t.Errorf("pane = %v", got)
+	}
+	os.Remove(h.app.configPath)
+	h.env["HERDR_PLUGIN_ID"] = "tkt-dev"
+	h.exec("herdr", "open-board")
+	if got := f.Last("plugin.pane.open"); got["entrypoint"] != "setup" || got["plugin_id"] != "tkt-dev" {
+		t.Errorf("unconfigured pane = %v", got)
+	}
+}
+
+func TestHerdrRefreshLabelsTicketWorkspaces(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[
+		{"workspace_id":"w1","label":"web-DEMO-1","worktree":{"checkout_path":"/src/web-DEMO-1"}},
+		{"workspace_id":"w2","label":"dotfiles"}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p1","workspace_id":"w1","agent":"claude","agent_status":"working"}]}`
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
+	if code := h.exec("herdr", "refresh"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	got := f.Last("workspace.report_metadata")
+	if got["workspace_id"] != "w1" || got["source"] != "plugin:tkt" || got["ttl_ms"] != float64(3600000) {
+		t.Errorf("report = %v", got)
+	}
+	if label := got["tokens"].(map[string]any)["tkt"]; label != "DEMO-1 · ✕ CI · #812 · claude working" {
+		t.Errorf("label = %v", label)
+	}
+	if count(f, "workspace.report_metadata") != 1 {
+		t.Error("labelled a workspace without a ticket")
+	}
+	if !strings.Contains(h.out.String(), "Updated 1 Herdr workspace") {
+		t.Errorf("output = %q", h.out)
+	}
+}
+
+func TestHerdrRestoreUsesCacheOnly(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w1","worktree":{"checkout_path":"/src/web-DEMO-1"}}]}`
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
+	if code := h.exec("herdr", "restore"); code != 0 || count(f, "workspace.report_metadata") != 0 {
+		t.Fatalf("restore without cache: exit %d, reports %d", code, count(f, "workspace.report_metadata"))
+	}
+	if err := h.app.cache().Save(board.Snapshot{Tickets: []ticket.Ticket{{Key: "DEMO-1", Status: "In Progress"}}}); err != nil {
+		t.Fatal(err)
+	}
+	h.jira.searchErr = os.ErrDeadlineExceeded
+	if code := h.exec("herdr", "restore"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if label := f.Last("workspace.report_metadata")["tokens"].(map[string]any)["tkt"]; label != "DEMO-1 · In Progress" {
+		t.Errorf("label = %v", label)
+	}
+}
+
+func TestHerdrOnWorktreeLinksKeyedBranches(t *testing.T) {
+	h, _, _ := herdrHarness(t)
+	h.inCheckout("feature/DEMO-7-export", "/src/web-DEMO-7", "git@github.com:example-org/web.git")
+	h.env["HERDR_PLUGIN_EVENT_JSON"] = `{"event":"worktree.created","data":{"worktree":{"path":"/src/web-DEMO-7","branch":"feature/DEMO-7-export"}}}`
+	if code := h.exec("herdr", "on-worktree"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	links, _ := h.app.links().Load()
+	if len(links) != 1 || links[0].Source != workspace.SourceHook || links[0].Key != "DEMO-7" {
+		t.Errorf("links = %+v", links)
+	}
+
+	h.inCheckout("spike", "/src/web-spike", "git@github.com:example-org/web.git")
+	h.env["HERDR_PLUGIN_EVENT_JSON"] = `{"workspace":{"worktree":{"checkout_path":"/src/web-spike"}}}`
+	if code := h.exec("herdr", "on-worktree"); code != 0 || !strings.Contains(h.errOut.String(), `branch "spike" in /src/web-spike carries no ticket key; not linked`) {
+		t.Errorf("unkeyed: exit %d, %q", code, h.errOut)
+	}
+	if links, _ := h.app.links().Load(); len(links) != 1 {
+		t.Errorf("unkeyed branch linked: %+v", links)
+	}
+}
+
+func TestWorktreePath(t *testing.T) {
+	for raw, want := range map[string]string{
+		`{"worktree":{"path":"/a"}}`:                                 "/a",
+		`{"data":{"workspace":{"worktree":{"checkout_path":"/b"}}}}`: "/b",
+		`{"path":"/not-a-worktree"}`:                                 "",
+		`not json`:                                                   "",
+	} {
+		if got := worktreePath(raw); got != want {
+			t.Errorf("worktreePath(%s) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+func TestHerdrOpenLinks(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.env["HERDR_PLUGIN_CLICKED_URL"] = "https://example.atlassian.net/browse/DEMO-7"
+	if code := h.exec("herdr", "open"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	got := f.Last("plugin.pane.open")
+	if got["entrypoint"] != "ticket-popup" || got["env"].(map[string]any)["TKT_KEY"] != "DEMO-7" {
+		t.Errorf("pane = %v", got)
+	}
+
+	snap := board.Snapshot{Tickets: []ticket.Ticket{{Key: "DEMO-1", PRs: []ticket.PullRequest{{URL: "https://github.com/example-org/web/pull/812"}}}}}
+	if err := h.app.cache().Save(snap); err != nil {
+		t.Fatal(err)
+	}
+	h.exec("herdr", "open", "https://github.com/example-org/web/pull/812/files")
+	if got := f.Last("plugin.pane.open"); got["env"].(map[string]any)["TKT_KEY"] != "DEMO-1" {
+		t.Errorf("PR link pane = %v", got)
+	}
+
+	h.exec("herdr", "open", "https://github.com/example-org/web/pull/999")
+	if got := f.Last("notification.show"); !strings.Contains(got["body"].(string), "No ticket found") {
+		t.Errorf("notification = %v", got)
+	}
+}
+
+func TestHerdrOpenTicketPane(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.env["HERDR_WORKSPACE_ID"] = "w1"
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w1","worktree":{"checkout_path":"/src/web-DEMO-1"}}]}`
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
+	if code := h.exec("herdr", "open-ticket"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	got := f.Last("plugin.pane.open")
+	if got["entrypoint"] != "ticket" || got["cwd"] != "/src/web-DEMO-1" || got["env"].(map[string]any)["TKT_KEY"] != "DEMO-1" {
+		t.Errorf("pane = %v", got)
+	}
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "main\n"
+	h.exec("herdr", "open-ticket")
+	if got := f.Last("notification.show"); got == nil || !strings.Contains(got["body"].(string), "carries no ticket key") {
+		t.Errorf("notification = %v", got)
+	}
+}
+
+func TestHerdrTicketPopupDeclines(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.env["TKT_KEY"] = "DEMO-7"
+	h.app.Stdin = strings.NewReader("n\n")
+	if code := h.exec("herdr", "ticket-popup"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if !strings.Contains(h.out.String(), "DEMO-7") || count(f, "workspace.create") != 0 {
+		t.Errorf("output %q, creates %d", h.out, count(f, "workspace.create"))
+	}
+}
+
+func TestShowUsesTKTKey(t *testing.T) {
+	h, _, _ := herdrHarness(t)
+	h.env["TKT_KEY"] = "DEMO-7"
+	if code := h.exec("show"); code != 0 || !strings.Contains(h.out.String(), "DEMO-7") {
+		t.Errorf("exit %d: %s", code, h.errOut)
+	}
+}
+
+func TestBoardOffersSetupWhenUnconfigured(t *testing.T) {
+	h, _, _ := herdrHarness(t)
+	os.Remove(h.app.configPath)
+	if code := h.exec("board"); code != 0 || !strings.Contains(h.errOut.String(), "tkt isn't set up") {
+		t.Errorf("exit %d, %q", code, h.errOut)
+	}
+}
