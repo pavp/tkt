@@ -476,7 +476,24 @@ func TestReviewsRenderLikeTheMockup(t *testing.T) {
 			line = l
 		}
 	}
-	if !strings.Contains(line, "✓") || strings.Contains(line, "example-org") {
-		t.Errorf("review row should show the CI mark, not the repo: %q", line)
+	if !strings.Contains(line, "web#820 ✓") || strings.Contains(line, "example-org") {
+		t.Errorf("review row should show repo#number and the CI mark: %q", line)
+	}
+	if !strings.Contains(stripANSI(next.View()), "CI passing ✓") {
+		t.Error("preview does not spell out the CI state")
+	}
+}
+
+func TestTicketRowsNameRepoAndPR(t *testing.T) {
+	snap := snapshot()
+	snap.Tickets[2].PRs = []ticket.PullRequest{
+		{Repo: "example-org/web", Number: 806, State: ticket.PROpen, Checks: ticket.ChecksPass},
+		{Repo: "example-org/api", Number: 311, State: ticket.PROpen, Checks: ticket.ChecksPending},
+	}
+	m := New(board.Snapshot{}, false, &recorder{}, ViewList)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	next, _ = next.Update(SnapshotMsg{Snap: snap})
+	if v := stripANSI(next.View()); !strings.Contains(v, "web#806 ✓ api#311 ○") || !strings.Contains(v, "no PR") {
+		t.Errorf("PR / CI column:\n%s", v)
 	}
 }

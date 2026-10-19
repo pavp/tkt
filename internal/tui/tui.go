@@ -654,6 +654,30 @@ func card(t ticket.Ticket, outer int, sel bool) string {
 	return st.Width(width).Render(content)
 }
 
+// prRef names a PR with its repository and state: "accounts-web#812 ✕", "web#790 merged".
+func prRef(pr ticket.PullRequest) string {
+	_, repo, _ := strings.Cut(pr.Repo, "/")
+	mark := checkMark(pr.Checks)
+	switch pr.State {
+	case ticket.PRMerged:
+		mark = "merged"
+	case ticket.PRClosed:
+		mark = "closed"
+	}
+	return fmt.Sprintf("%s#%d %s", repo, pr.Number, mark)
+}
+
+func prRefs(prs []ticket.PullRequest) string {
+	if len(prs) == 0 {
+		return "no PR"
+	}
+	parts := make([]string, len(prs))
+	for i, pr := range prs {
+		parts[i] = prRef(pr)
+	}
+	return strings.Join(parts, " ")
+}
+
 func checkMark(c ticket.CheckState) string {
 	switch c {
 	case ticket.ChecksFail:
@@ -692,7 +716,7 @@ func prMeta(t ticket.Ticket) string {
 const (
 	keyWidth    = 13
 	statusWidth = 18
-	prWidth     = 22
+	prWidth     = 30
 )
 
 // pad truncates s to n cells and fills the rest with spaces, so columns line up.
@@ -706,18 +730,26 @@ func (m Model) listView() string {
 	if len(items) == 0 {
 		return dim.Render("  nothing matches this filter")
 	}
-	titleWidth := max(10, m.width-2-keyWidth-statusWidth-prWidth-3)
+	// Narrow panes shrink PR / CI first, then STATUS, so the title always keeps some room.
+	statusW, prW := statusWidth, prWidth
+	const minTitle = 12
+	if short := minTitle - (m.width - 2 - keyWidth - statusW - prW - 3); short > 0 {
+		cut := min(short, prW-12)
+		prW -= cut
+		statusW -= min(short-cut, statusW-10)
+	}
+	titleWidth := max(minTitle, m.width-2-keyWidth-statusW-prW-3)
 	row := func(key, status, pr, title string) string {
-		return pad(key, keyWidth) + " " + pad(status, statusWidth) + " " + pad(pr, prWidth) + " " + truncate(title, titleWidth)
+		return pad(key, keyWidth) + " " + pad(status, statusW) + " " + pad(pr, prW) + " " + truncate(title, titleWidth)
 	}
 	var b strings.Builder
 	b.WriteString("  " + dim.Render(row("KEY", "STATUS", "PR / CI", "TITLE")) + "\n")
 	for i, it := range items {
 		var line string
 		if it.pr != nil {
-			line = row(string(it.key), "Review requested", checkMark(it.pr.Checks), it.pr.Title)
+			line = row(string(it.key), "Review requested", prRef(*it.pr), it.pr.Title)
 		} else {
-			line = row(string(it.key), it.ticket.Status, prMeta(*it.ticket), it.ticket.Summary)
+			line = row(string(it.key), it.ticket.Status, prRefs(it.ticket.PRs), it.ticket.Summary)
 		}
 		switch {
 		case i == m.row:
@@ -740,7 +772,7 @@ func (m Model) preview() string {
 		return dim.Render("nothing selected")
 	}
 	if it.pr != nil {
-		return truncate(fmt.Sprintf("%s · review requested by %s in %s · enter opens it ↗", it.key, orDash(it.pr.Author), it.pr.Repo), m.width)
+		return truncate(fmt.Sprintf("%s · review requested by %s in %s · CI %s · enter opens it ↗", it.key, orDash(it.pr.Author), it.pr.Repo, ciWord(it.pr.Checks)), m.width)
 	}
 	t := it.ticket
 	parts := []string{string(t.Key), t.Status}
@@ -754,6 +786,18 @@ func (m Model) preview() string {
 		parts = append(parts, hint)
 	}
 	return truncate(strings.Join(parts, " · "), m.width)
+}
+
+func ciWord(c ticket.CheckState) string {
+	switch c {
+	case ticket.ChecksFail:
+		return "failing ✕"
+	case ticket.ChecksPending:
+		return "running ○"
+	case ticket.ChecksPass:
+		return "passing ✓"
+	}
+	return "not reported"
 }
 
 // actionHint tells what the most useful key does for this ticket, as the mockup's preview line does.
