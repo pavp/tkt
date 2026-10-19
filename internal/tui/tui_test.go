@@ -98,7 +98,7 @@ func TestColumnsViewAndNavigation(t *testing.T) {
 	r := &recorder{}
 	m := loaded(r)
 	view := m.View()
-	for _, want := range []string{"To Do 1", "In Progress 1", "In Review 1", "Done 0", "— nothing here", "! CI failing", "#812 ✕", "Review requested", "#820 · Add pagination", "h/l j/k move"} {
+	for _, want := range []string{"To Do 1", "In Progress 1", "In Review 1", "Done 0", "— nothing here", "! CI failing", "#812 ✕", "Review requested", "#820 · Add pagination", "←↑↓→/wasd move"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("columns view missing %q", want)
 		}
@@ -124,7 +124,7 @@ func TestToggleViewKeepsSelection(t *testing.T) {
 	r := &recorder{}
 	m := press(loaded(r), "l", "v")
 	view := m.View()
-	if !strings.Contains(view, "[list]") || !strings.Contains(view, "▸ ") || !strings.Contains(view, "↑↓ move") {
+	if !strings.Contains(view, "[list]") || !strings.Contains(view, "▸ ") || !strings.Contains(view, "↑↓/ws move") {
 		t.Fatalf("not in list view:\n%s", view)
 	}
 	if line := selectedLine(view); !strings.Contains(line, "DEMO-1") {
@@ -233,5 +233,29 @@ func TestQuit(t *testing.T) {
 		if _, ok := cmd().(tea.QuitMsg); !ok {
 			t.Errorf("%s did not quit", k)
 		}
+	}
+}
+
+func TestArrowsAndWASDMove(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		right tea.KeyMsg
+		down  tea.KeyMsg
+	}{
+		{"arrows", tea.KeyMsg{Type: tea.KeyRight}, tea.KeyMsg{Type: tea.KeyDown}},
+		{"wasd", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")}, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := loaded(&recorder{})
+			m, _ = m.Update(tt.right)
+			if !strings.Contains(m.View(), "▸ DEMO-1") {
+				t.Fatalf("right did not move to In Progress")
+			}
+			m = press(m, "v")
+			m, _ = m.Update(tt.down)
+			if line := selectedLine(m.View()); !strings.Contains(line, "DEMO-2") {
+				t.Errorf("down in the list selected %q", line)
+			}
+		})
 	}
 }

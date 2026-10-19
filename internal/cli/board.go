@@ -24,7 +24,7 @@ func newBoardCmd(a *App) *cobra.Command {
 		Use:   "board",
 		Short: "Interactive board: columns or list, filters, start, fix CI (the Herdr popup)",
 		Long: "Interactive board. It opens instantly from the cached board and refreshes in the background.\n" +
-			"Keys: h/l j/k move · enter Open agent / Start · f send CI failures or review comments to the agent ·\n" +
+			"Keys: arrows, wasd or hjkl move · enter Open agent / Start · f send CI failures or review comments to the agent ·\n" +
 			"i ticket pane · o Jira · p pull request · n needs you · r reviews · v columns/list · g refresh · q close.\n" +
 			"When tkt is not configured, it offers to run the setup.",
 		Args: cobra.NoArgs,

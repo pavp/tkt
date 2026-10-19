@@ -219,16 +219,13 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filter = want
 		}
 		m.reselect()
-	case "a":
-		m.filter = FilterAll
-		m.reselect()
-	case "j", "down":
+	case "down", "s", "j":
 		m.move(0, 1)
-	case "k", "up":
+	case "up", "w", "k":
 		m.move(0, -1)
-	case "l", "right":
+	case "right", "d", "l":
 		m.move(1, 0)
-	case "h", "left":
+	case "left", "a", "h":
 		m.move(-1, 0)
 	case "g":
 		m.loading = true
@@ -492,9 +489,9 @@ func (m Model) preview() string {
 }
 
 func (m Model) footer() string {
-	move := "↑↓ move"
+	move := "↑↓/ws move"
 	if m.effectiveView() == ViewColumns {
-		move = "h/l j/k move"
+		move = "←↑↓→/wasd move"
 	}
 	keys := []string{move, "enter Open agent · Start", "f fix CI", "i ticket pane", "o Jira ↗", "p PR ↗", "n needs you", "r reviews", "v view", "g refresh", "q close"}
 	return dim.Render(strings.Join(keys, "  "))
