@@ -8,9 +8,23 @@ Status: early development. Design: [`docs/design.md`](docs/design.md).
 
 ## Install
 
+macOS, Linux, and Windows through WSL:
+
 ```bash
-GOPRIVATE=github.com/pavp/* go install github.com/pavp/tkt/cmd/tkt@latest
+brew install pavp/tap/tkt
 ```
+
+Or with Go 1.27+:
+
+```bash
+go install github.com/pavp/tkt/cmd/tkt@latest
+```
+
+Then, inside Herdr, `tkt herdr install` adds the board and ticket panes and offers the `prefix+t` / `prefix+i` shortcuts.
+
+### Releasing
+
+Push a `vX.Y.Z` tag: the release workflow runs GoReleaser, publishes the archives on GitHub Releases and updates the formula in `pavp/homebrew-tap`. It needs a `TKT_HOMEBREW_TAP_TOKEN` secret with write access to that tap. Validate locally with `goreleaser release --snapshot --clean --skip=publish`.
 
 ## Set up
 

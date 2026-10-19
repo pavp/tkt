@@ -190,8 +190,8 @@ One command installs `tkt`; the onboarding offers everything else.
 
 | When | How |
 |---|---|
-| Phase 1 (single user) | `go install github.com/pavp/tkt/cmd/tkt@latest`; the repository is private, so `GOPRIVATE=github.com/pavp/*` and git over SSH |
-| Once stable | GitHub Releases built with GoReleaser (macOS and Linux, arm64 and amd64) and a Homebrew tap, `brew install pavp/tap/tkt`, which also covers WSL through Linuxbrew. While the repository is private, Homebrew needs a GitHub token |
+| Phase 1 (single user) | `go install github.com/pavp/tkt/cmd/tkt@latest` (public repository) |
+| Releases | GitHub Releases built with GoReleaser (macOS and Linux, arm64 and amd64) on every `v*` tag, and the Homebrew formula in `pavp/homebrew-tap`: `brew install pavp/tap/tkt`, which also covers WSL through Linuxbrew |
 | First run | `tkt init` in the terminal, or the onboarding in the UI (same steps) |
 | Daemon (phase 3) | `tkt daemon install` registers a launchd agent (macOS) or a systemd user service (Linux; on WSL systemd must be enabled in `wsl.conf`) so the daemon starts at login; the tray app also starts it when `GET /health` does not answer |
 | Herdr plugin (phase 2) | `tkt herdr install` links the plugin shipped inside `tkt` |

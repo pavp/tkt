@@ -1,0 +1,42 @@
+version: 2
+project_name: tkt
+
+builds:
+  - id: tkt
+    main: ./cmd/tkt
+    binary: tkt
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X github.com/pavp/tkt/internal/cli.Version={{ .Version }}
+
+archives:
+  - id: tkt
+    ids: [tkt]
+    name_template: "tkt_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  use: github
+  filters:
+    exclude:
+      - "^docs\\(odd\\):"
+
+brews:
+  - name: tkt
+    repository:
+      owner: pavp
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/pavp/tkt"
+    description: "Sprint tickets across Jira spaces with GitHub PRs and CI, for agent-driven development"
+    test: |
+      system "#{bin}/tkt", "--version"
