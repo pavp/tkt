@@ -774,7 +774,7 @@ func (m Model) columnsView(height int) string {
 	inner := m.columnWidth()
 	rendered := make([]string, len(cols))
 	for ci, c := range ticket.Columns {
-		parts := columnHead(c.Title(), len(cols[ci]), inner, ci == m.col)
+		parts := columnHead(c.Title(), len(cols[ci]), inner)
 		if len(cols[ci]) == 0 {
 			parts = append(parts, " "+dim.Render("— nothing here"))
 		}
@@ -795,16 +795,12 @@ func (m Model) columnsView(height int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 }
 
-// columnHead is the prototype's column header: name left, count right, a rule below, and only the
-// column holding the selection lit.
-func columnHead(name string, count, width int, active bool) []string {
+// columnHead is a column's header: name left, count right, a rule below. Every column looks the same;
+// the box border alone shows where the selection is.
+func columnHead(name string, count, width int) []string {
 	n := strconv.Itoa(count)
 	line := " " + name + strings.Repeat(" ", max(1, width-2-lipgloss.Width(name)-len(n))) + n + " "
-	st := dim
-	if active {
-		st = selected
-	}
-	return []string{st.Render(line), dim.Render(strings.Repeat("─", width))}
+	return []string{bold.Render(line), dim.Render(strings.Repeat("─", width))}
 }
 
 var (
