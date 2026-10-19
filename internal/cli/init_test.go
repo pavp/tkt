@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,7 @@ func TestInitWritesConfig(t *testing.T) {
 		"example-org/web, example-org/api",
 		"",
 		"~/src",
+		"n",
 		"dev-work",
 	}, "\n") + "\n"
 	h := initHarness(t, answers)
@@ -106,7 +108,7 @@ func TestInitKeepsExistingConfigUnlessConfirmed(t *testing.T) {
 }
 
 func TestInitReusesStoredTokenAndDefaults(t *testing.T) {
-	h := initHarness(t, "y\nDEMO\n\n\n")
+	h := initHarness(t, "y\nDEMO\n\n\nn\n")
 	if err := os.MkdirAll(filepath.Dir(h.app.configPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +155,7 @@ func TestInitNamesTheEnvironmentToken(t *testing.T) {
 }
 
 func TestInitSkipsJiraQuestionsAfterAuth(t *testing.T) {
-	h := initHarness(t, "DEMO\nexample-org/web\n~/src\n\n")
+	h := initHarness(t, "DEMO\nexample-org/web\n~/src\nn\n\n")
 	h.creds["jira:example.atlassian.net:dev@example.com"] = "stored"
 	h.env["XDG_DATA_HOME"] = filepath.Join(h.home, "data")
 	h.app.saveState(state{JiraSite: "https://example.atlassian.net", JiraEmail: "dev@example.com"})
@@ -173,7 +175,7 @@ func TestInitSkipsJiraQuestionsAfterAuth(t *testing.T) {
 }
 
 func TestInitInHerdrPausesThenOpensBoard(t *testing.T) {
-	h := initHarness(t, "DEMO\n\n\n\n")
+	h := initHarness(t, "DEMO\n\n\nn\n\n")
 	h.creds["jira:example.atlassian.net:dev@example.com"] = "stored"
 	h.env["XDG_DATA_HOME"] = filepath.Join(h.home, "data")
 	h.env["HERDR_PLUGIN_ID"] = "tkt"
@@ -198,5 +200,55 @@ func TestInitPipedDoesNotSuggestTheGitEmail(t *testing.T) {
 	h.exec("init")
 	if strings.Contains(h.errOut.String(), "g@example.com") || !strings.Contains(h.errOut.String(), "an email is required") {
 		t.Errorf("piped init should not suggest the git email: %q", h.errOut)
+	}
+}
+
+func TestInitSuggestsReposAndDetectsTheGitHubAccount(t *testing.T) {
+	h := initHarness(t, "example.atlassian.net\ndev@example.com\ntok-1\n1\n\n~/src\n")
+	h.jira.issues = []jira.Issue{{ID: "101", Key: "DEMO-1"}, {ID: "102", Key: "DEMO-2"}}
+	h.jira.devPRs = map[string][]jira.DevPullRequest{
+		"101": {{Repo: "Example-Org/Web", Number: 9}},
+		"102": {{Repo: "example-org/web", Number: 3}, {Repo: "example-org/api", Number: 4}},
+	}
+	h.run.out["gh auth status --hostname github.com"] = "  ✓ Logged in to github.com account personal (keyring)\n  - Active account: true\n  ✓ Logged in to github.com account dev-work (keyring)\n  - Active account: false\n"
+	h.run.out["gh auth token --user personal"] = "t-personal"
+	h.app.OrgMember = func(_ context.Context, tok, org string) (bool, error) {
+		return tok == "gho_x" && org == "example-org", nil
+	}
+	if code := h.exec("init"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if !strings.Contains(h.errOut.String(), "Repositories for DEMO (owner/name, comma separated) [example-org/api, example-org/web]") {
+		t.Errorf("no repository suggestion:\n%s", h.errOut)
+	}
+	c, err := config.Load(h.app.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Spaces[0].Repos) != 2 || c.GitHubAccount("example-org") != "dev-work" {
+		t.Errorf("repos %+v, accounts %v", c.Spaces[0].Repos, c.GitHub.Accounts)
+	}
+	if !strings.Contains(h.errOut.String(), "✓ example-org via gh account dev-work") {
+		t.Errorf("detection not reported:\n%s", h.errOut)
+	}
+}
+
+func TestInitOffersGhLoginWithoutAnAccount(t *testing.T) {
+	h := initHarness(t, "example.atlassian.net\ndev@example.com\ntok-1\n1\nexample-org/web\n~/src\ny\n")
+	h.app.OrgMember = func(context.Context, string, string) (bool, error) { return true, nil }
+	var launched []string
+	h.app.Launch = func(_ string, name string, args []string) error {
+		launched = append(launched, name+" "+strings.Join(args, " "))
+		h.run.out["gh auth status --hostname github.com"] = "  ✓ Logged in to github.com account dev-work (keyring)\n  - Active account: true\n"
+		return nil
+	}
+	if code := h.exec("init"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if len(launched) != 1 || launched[0] != "gh auth login" {
+		t.Errorf("launched %v", launched)
+	}
+	if !strings.Contains(h.errOut.String(), "gh has no logged-in GitHub account") || !strings.Contains(h.errOut.String(), "✓ GitHub access for example-org") {
+		t.Errorf("stderr:\n%s", h.errOut)
 	}
 }

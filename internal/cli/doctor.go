@@ -116,6 +116,11 @@ func (a *App) doctor(cmd *cobra.Command) []check {
 			checks = append(checks, check{"repo", statusFail, err.Error(), "fix its path in the config"})
 		}
 	}
+	for _, s := range c.Spaces {
+		if len(s.Repos) == 0 {
+			checks = append(checks, check{"repos", statusWarn, s.Key + " has no configured repositories", "tkt infers them from the pull requests Jira links to your tickets; add one in the config to pin it"})
+		}
+	}
 	if len(c.Spaces) == 0 {
 		checks = append(checks, check{"spaces", statusWarn, "no Jira spaces configured", "add [[spaces]] to the config or run `tkt init`"})
 	}

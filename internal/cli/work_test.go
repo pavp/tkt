@@ -244,3 +244,55 @@ func TestLinkAcceptsLowercaseKeysInBranches(t *testing.T) {
 		t.Errorf("explicit key against a lowercase branch: exit %d, %s", code, h.errOut)
 	}
 }
+
+const noRepoConfig = `
+repo_roots = ["~/src"]
+
+[jira]
+site = "example.atlassian.net"
+email = "dev@example.com"
+
+[[spaces]]
+key = "DEMO"
+`
+
+func TestStartDerivesTheRepositoryFromTheTicketsPullRequests(t *testing.T) {
+	h, calls := workHarness(t)
+	if err := os.WriteFile(h.app.configPath, []byte(noRepoConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	web := h.clone(t, "web")
+	h.jira.details["DEMO-7"] = jira.Issue{ID: "107", Key: "DEMO-7", Summary: "Export users", Status: "To Do", StatusCategory: "new"}
+	h.jira.devPRs = map[string][]jira.DevPullRequest{"107": {{Repo: "Example-Org/Web", Number: 5}}}
+	if code := h.exec("start", "DEMO-7"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if len(*calls) != 1 || (*calls)[0].dir != web {
+		t.Errorf("launches = %+v", *calls)
+	}
+	if b, _ := os.ReadFile(h.app.configPath); string(b) != noRepoConfig {
+		t.Errorf("the config must stay untouched:\n%s", b)
+	}
+}
+
+func TestStartAsksForARepositoryWhenNoneIsKnown(t *testing.T) {
+	h, calls := workHarness(t)
+	if err := os.WriteFile(h.app.configPath, []byte(noRepoConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	api := h.clone(t, "api")
+	h.app.IsTerminal = func() bool { return true }
+	h.app.Stdin = strings.NewReader("example-org/api\n")
+	if code := h.exec("start", "DEMO-7"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if !strings.Contains(h.errOut.String(), "Repository for DEMO-7 (owner/name)") || len(*calls) != 1 || (*calls)[0].dir != api {
+		t.Errorf("stderr %q, launches %+v", h.errOut, *calls)
+	}
+
+	h.app.IsTerminal = func() bool { return false }
+	h.app.in = nil
+	if code := h.exec("start", "DEMO-7"); code == 0 || !strings.Contains(h.errOut.String(), "no repository known for DEMO-7: pass --repo owner/name or add one to space DEMO in the config") {
+		t.Errorf("piped: exit %d, %q", code, h.errOut)
+	}
+}

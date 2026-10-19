@@ -35,7 +35,7 @@ Push a `vX.Y.Z` tag: the release workflow runs GoReleaser, publishes the archive
    ```
 
    The token goes to macOS Keychain, the Linux Secret Service, or Windows Credential Manager under WSL. `TKT_JIRA_TOKEN` overrides it for tests and headless use. You can also write the config by hand from [`docs/config.example.toml`](docs/config.example.toml) and store the token with `tkt auth jira`.
-2. Make sure `gh auth login` covers every GitHub organization in the config.
+2. GitHub access comes from `gh`. Repositories are optional: tkt infers them from the pull requests Jira links to your tickets, and picks the logged-in `gh` account that can read each organization (setup offers `gh auth login` when none can). `[github.accounts]` in the config pins an account.
 3. Check everything:
 
    ```bash

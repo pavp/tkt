@@ -122,6 +122,17 @@ func (m Model) effectiveView() string {
 	return m.view
 }
 
+// explainList says why the board still shows the list after the user asked for columns.
+func (m *Model) explainList() {
+	switch {
+	case m.view != ViewColumns || m.effectiveView() == ViewColumns:
+	case m.filter == FilterReviews:
+		m.status = "the reviews filter always shows a list · press 1 for all tickets"
+	default:
+		m.status = fmt.Sprintf("columns need a pane at least %d columns wide (this one has %d) · showing the list", narrowWidth, m.width)
+	}
+}
+
 func (m Model) tickets() []ticket.Ticket {
 	if m.filter == FilterReviews {
 		return nil
@@ -405,6 +416,7 @@ func (m *Model) clickHeader(x int) {
 				m.view = sp.view
 			}
 			m.reselect()
+			m.explainList()
 			return
 		}
 	}
@@ -426,6 +438,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.detail != nil {
 		return m.detailKey(k)
 	}
+	if m.status != "loading…" {
+		m.status = ""
+	}
 	switch k.String() {
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
@@ -443,6 +458,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.view = ViewColumns
 		}
 		m.reselect()
+		m.explainList()
 	case "n", "r":
 		want := map[string]string{"n": FilterNeeds, "r": FilterReviews}[k.String()]
 		if m.filter == want {
@@ -667,7 +683,11 @@ func (m Model) header() string {
 	default:
 		top = title + "\n" + controls
 	}
-	return top + "\n" + dim.Render(strings.Repeat("─", m.width))
+	top += "\n" + dim.Render(strings.Repeat("─", m.width))
+	if len(m.snap.Warnings) > 0 {
+		top += "\n" + warn.Render(truncate("! "+strings.Join(m.snap.Warnings, " · "), m.width))
+	}
+	return top
 }
 
 type headerSpan struct {

@@ -356,3 +356,51 @@ func TestFetchFallsBackToKeySearchWithoutJiraPanel(t *testing.T) {
 		t.Errorf("key search = %v, warnings = %v", gh.keyCalls, snap.Warnings)
 	}
 }
+
+func TestFetchInfersRepositoriesFromJiraLinkedPRs(t *testing.T) {
+	c := &config.Config{
+		Jira: config.Jira{Site: "example.atlassian.net", Email: "dev@example.com"},
+		Spaces: []config.Space{
+			{Key: "DEMO"},
+			{Key: "OPS", Repos: []config.Repo{{Name: "example-org/ops"}}},
+		},
+	}
+	js := &stubJira{
+		issues: []jira.Issue{
+			{ID: "101", Key: "DEMO-1", Status: "In Progress", StatusCategory: "indeterminate"},
+			{ID: "102", Key: "DEMO-2", Status: "Done", StatusCategory: "done"},
+		},
+		linked: map[string][]jira.DevPullRequest{
+			"101": {{Repo: "example-org/web", Number: 9, Status: "OPEN"}},
+			"102": {{Repo: "Example-Org/Web", Number: 3, Status: "MERGED"}, {Repo: "example-org/api", Number: 4, Status: "MERGED"}},
+		},
+	}
+	gh := &stubGitHub{prs: []ticket.PullRequest{{Repo: "example-org/web", Number: 9, Branch: "x", State: ticket.PROpen, Checks: ticket.ChecksFail}}}
+	snap, err := Fetch(context.Background(), c, js, gh, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"example-org/api", "example-org/ops", "example-org/web"}
+	if !reflect.DeepEqual(gh.repos, want) || !reflect.DeepEqual(gh.reviewRepos, want) {
+		t.Errorf("GitHub queried %v and reviews %v, want %v", gh.repos, gh.reviewRepos, want)
+	}
+	if got := snap.Repos; !reflect.DeepEqual(got, map[string][]string{"DEMO": {"example-org/api", "example-org/web"}, "OPS": {"example-org/ops"}}) {
+		t.Errorf("snapshot repos = %v", got)
+	}
+	if prs := snap.Tickets[0].PRs; len(prs) != 1 || prs[0].Checks != ticket.ChecksFail {
+		t.Errorf("DEMO-1 should get CI from the inferred repo: %+v", prs)
+	}
+}
+
+func TestFetchWarnsAboutSpacesWithoutRepositories(t *testing.T) {
+	c := &config.Config{Spaces: []config.Space{{Key: "DEMO"}, {Key: "OPS", Repos: []config.Repo{{Name: "example-org/ops"}}}}}
+	js := &stubJira{issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Status: "To Do", StatusCategory: "new"}}, linked: map[string][]jira.DevPullRequest{}}
+	snap, err := Fetch(context.Background(), c, js, &stubGitHub{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "DEMO has no repositories yet: none of your tickets has a pull request, so CI and reviews are off; add one in the config"
+	if !reflect.DeepEqual(snap.Warnings, []string{want}) {
+		t.Errorf("warnings = %q", snap.Warnings)
+	}
+}

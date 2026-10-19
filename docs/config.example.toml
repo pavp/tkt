@@ -12,7 +12,8 @@ reviews = "direct"
 site = "example.atlassian.net"
 email = "you@example.com"
 
-# gh account whose token reads each GitHub organization (`gh auth status` lists them).
+# Optional: the gh account that reads each GitHub organization (`gh auth status` lists them).
+# Without it, tkt detects the logged-in account that belongs to the organization.
 [github.accounts]
 example-org = "your-gh-user"
 
@@ -29,6 +30,8 @@ name = "Demo space"
 [spaces.status_overrides]
 "Code Review" = "review"
 
+# Optional: tkt infers each space's repositories from the pull requests Jira links to your tickets.
+# List them here to add one with no pull requests yet, or to set its base branch or local path.
 [[spaces.repos]]
 repo = "example-org/web"
 base = "main"

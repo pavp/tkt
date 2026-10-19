@@ -1,15 +1,18 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/pavp/tkt/internal/config"
+	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/repos"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/workspace"
@@ -83,6 +86,16 @@ func (a *App) planStart(cmd *cobra.Command, args, repoFlags []string, clone bool
 		return startPlan{}, err
 	}
 	plan := startPlan{Key: key, Summary: is.Summary}
+	if len(space.Repos) == 0 {
+		if space.Repos, err = a.inferStartRepos(cmd.Context(), js, is, key, repoFlags); err != nil {
+			return startPlan{}, err
+		}
+		for i := range c.Spaces {
+			if c.Spaces[i].Key == space.Key {
+				c.Spaces[i].Repos = space.Repos
+			}
+		}
+	}
 
 	if len(repoFlags) == 0 {
 		all, err := a.allWork(cmd.Context(), c)
@@ -251,4 +264,50 @@ func (a *App) offerClone(cmd *cobra.Command, res repos.Resolver, r config.Repo, 
 	}
 	a.printf("Cloning %s…\n", r.Name)
 	return res.Clone(cmd.Context(), r)
+}
+
+// inferStartRepos finds repositories for a space that configures none: those of the ticket's Jira-linked
+// pull requests, those the board already knows for the space, owner/name --repo flags, or, in a
+// terminal, the user's answer. They live only in memory; the config is never written.
+func (a *App) inferStartRepos(ctx context.Context, js JiraAPI, is jira.Issue, key ticket.Key, flags []string) ([]config.Repo, error) {
+	var names []string
+	add := func(n string) {
+		n = strings.ToLower(strings.TrimSpace(n))
+		if n != "" && !slices.Contains(names, n) {
+			names = append(names, n)
+		}
+	}
+	if prs, err := js.DevPullRequests(ctx, is.ID); err == nil {
+		for _, p := range prs {
+			add(p.Repo)
+		}
+	}
+	if snap, ok, err := a.cache().Load(); err == nil && ok {
+		for _, r := range snap.Repos[key.Space()] {
+			add(r)
+		}
+	}
+	for _, f := range flags {
+		if strings.Count(f, "/") == 1 {
+			add(f)
+		}
+	}
+	if len(names) == 0 && a.IsTerminal() {
+		ans, err := a.ask("Repository for "+string(key)+" (owner/name)", "")
+		if err != nil {
+			return nil, err
+		}
+		if strings.Count(ans, "/") == 1 {
+			add(ans)
+		}
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("no repository known for %s: pass --repo owner/name or add one to space %s in the config", key, key.Space())
+	}
+	slices.Sort(names)
+	repos := make([]config.Repo, len(names))
+	for i, n := range names {
+		repos[i] = config.Repo{Name: n}
+	}
+	return repos, nil
 }

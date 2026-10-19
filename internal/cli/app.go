@@ -18,6 +18,7 @@ import (
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/execx"
+	"github.com/pavp/tkt/internal/github"
 	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/paths"
@@ -45,6 +46,8 @@ type App struct {
 	Launch     func(dir, name string, args []string) error
 	NewHerdr   func() HerdrAPI
 	Executable func() (string, error)
+	// OrgMember reports whether a gh token belongs to an active member of a GitHub organization.
+	OrgMember func(ctx context.Context, token, org string) (bool, error)
 
 	in *bufio.Reader
 
@@ -72,7 +75,8 @@ func NewApp() (*App, error) {
 		Sleep:        sleep,
 		Launch:       launch,
 	}
-	a.NewGitHub = func(c *config.Config) GitHubAPI { return githubFor(c, a.Run) }
+	a.NewGitHub = a.githubFor
+	a.OrgMember = github.New(nil).OrgMember
 	a.NewHerdr = func() HerdrAPI { return herdr.New(herdr.SocketPath(a.Env.Getenv, a.Env.Home)) }
 	a.Executable = executable
 	return a, nil

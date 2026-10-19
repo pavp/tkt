@@ -153,7 +153,7 @@ func TestReviewRequests(t *testing.T) {
 
 func TestCachedTokensFetchesOncePerAccount(t *testing.T) {
 	fetches := 0
-	tf := CachedTokens(func(owner string) string {
+	tf := CachedTokens(func(_ context.Context, owner string) string {
 		if owner == "example-org" || owner == "example-two" {
 			return "work"
 		}
@@ -190,5 +190,21 @@ func TestPullRequestsForKeysBatchesFiveKeys(t *testing.T) {
 	}
 	if q := (*calls)[1].vars["q"]; q != "is:pr repo:example-org/web repo:example-org/api DEMO-6" {
 		t.Errorf("second query = %v", q)
+	}
+}
+
+func TestCachedTokensResolvesEachOwnerOnce(t *testing.T) {
+	lookups := 0
+	tf := CachedTokens(func(context.Context, string) string {
+		lookups++
+		return ""
+	}, func(context.Context, string) (string, error) { return "tok", nil })
+	for i := 0; i < 10; i++ {
+		if _, err := tf(context.Background(), "example-org"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if lookups != 1 {
+		t.Errorf("account resolved %d times, want once per owner", lookups)
 	}
 }

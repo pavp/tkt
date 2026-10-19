@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -180,12 +182,12 @@ func (a *App) runInit(cmd *cobra.Command) error {
 	var ownerOrder []string
 	for i := range spaces {
 		s := &spaces[i]
-		ans, err := a.ask("Repositories for "+s.Key+" (owner/name, comma separated, empty for none)", "")
+		ans, err := a.ask("Repositories for "+s.Key+" (owner/name, comma separated)", strings.Join(suggestRepos(ctx, js, s.Key), ", "))
 		if err != nil {
 			return err
 		}
 		if len(splitList(ans)) == 0 {
-			fmt.Fprintf(a.Stderr, "! %s has no repositories: its pull requests and `tkt start` need at least one (add them later in the config)\n", s.Key)
+			fmt.Fprintf(a.Stderr, "! %s has no repositories yet: tkt infers them from the pull requests Jira links to your tickets\n", s.Key)
 		}
 		for _, name := range splitList(ans) {
 			r := config.Repo{Name: name}
@@ -216,9 +218,16 @@ func (a *App) runInit(cmd *cobra.Command) error {
 	}
 
 	fmt.Fprintln(a.Stderr, "\n4/4 GitHub")
+	logged := github.LoggedInAccounts(ctx, a.Run)
+	if len(logged) == 0 {
+		fmt.Fprintln(a.Stderr, "! gh has no logged-in GitHub account: pull requests, CI and reviews need one")
+		if logged, err = a.offerGhLogin(ctx); err != nil {
+			return err
+		}
+	}
 	accounts := map[string]string{}
 	for _, o := range ownerOrder {
-		acct, err := a.ask("gh account that reads "+o+" (empty = gh's active account)", "")
+		acct, err := a.pickAccount(ctx, logged, o)
 		if err != nil {
 			return err
 		}
@@ -266,4 +275,70 @@ func pickProject(projects []jira.Project, choice string) (jira.Project, bool) {
 		}
 	}
 	return jira.Project{}, false
+}
+
+// suggestRepos lists the repositories holding the pull requests Jira links to the user's sprint tickets
+// in space, so setup can propose them.
+func suggestRepos(ctx context.Context, js JiraAPI, space string) []string {
+	issues, err := js.Search(ctx, jira.MySprintJQL([]string{space}), jira.ListFields)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for i, is := range issues {
+		if i == 20 {
+			break
+		}
+		prs, err := js.DevPullRequests(ctx, is.ID)
+		if err != nil {
+			return out
+		}
+		for _, p := range prs {
+			if r := strings.ToLower(p.Repo); r != "" && !slices.Contains(out, r) {
+				out = append(out, r)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func (a *App) offerGhLogin(ctx context.Context) ([]string, error) {
+	ans, err := a.ask("Log in to GitHub with gh now? (Y/n)", "y")
+	if err != nil {
+		return nil, err
+	}
+	if strings.HasPrefix(strings.ToLower(ans), "n") {
+		return nil, nil
+	}
+	if err := a.Launch("", "gh", []string{"auth", "login"}); err != nil {
+		fmt.Fprintf(a.Stderr, "! gh auth login: %v\n", err)
+	}
+	return github.LoggedInAccounts(ctx, a.Run), nil
+}
+
+// pickAccount chooses the gh account for owner: the only one that can read it, or the user's pick when
+// several can. With none, it offers a login once, then falls back to asking.
+func (a *App) pickAccount(ctx context.Context, logged []string, owner string) (string, error) {
+	readers := a.readers(ctx, logged, owner)
+	if len(readers) == 0 && len(logged) > 0 {
+		fmt.Fprintf(a.Stderr, "! none of your gh accounts (%s) can read %s\n", strings.Join(logged, ", "), owner)
+		more, err := a.offerGhLogin(ctx)
+		if err != nil {
+			return "", err
+		}
+		readers = a.readers(ctx, more, owner)
+	}
+	switch len(readers) {
+	case 1:
+		fmt.Fprintf(a.Stderr, "✓ %s via gh account %s\n", owner, readers[0])
+		return readers[0], nil
+	case 0:
+		return a.ask("gh account that reads "+owner+" (empty = gh's active account)", "")
+	}
+	ans, err := a.ask(fmt.Sprintf("gh account for %s (%s)", owner, strings.Join(readers, ", ")), readers[0])
+	if err != nil {
+		return "", err
+	}
+	return ans, nil
 }
