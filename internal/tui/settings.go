@@ -384,8 +384,8 @@ func (m Model) settingsLines() ([]string, []int) {
 	}
 	lines := []string{bold.Render("Settings") + dim.Render(" · changes are saved to your config.toml"), strings.Join(tabs, " "), ""}
 	at := []int{-1, -1, -1}
-	repoW := max(24, min(44, m.width/2))
-	baseW := 10
+	repoW, baseW, pathW := m.settingsColumns()
+	rootW := m.rootsWidth()
 	for i, r := range s.rows() {
 		mark := "  "
 		if i == s.row {
@@ -403,31 +403,66 @@ func (m Model) settingsLines() ([]string, []int) {
 				name += dim.Render(" · " + sp.Name)
 			}
 			lines, at = append(lines, name), append(at, -1)
-			line = "  " + dim.Render(pad("REPOSITORY", repoW)+" "+pad("BASE", baseW)+" LOCAL PATH")
+			line = "  " + dim.Render(pad("REPOSITORY", repoW)+" "+pad("BASE", baseW)+" "+pad("LOCAL PATH", pathW))
 			lines, at = append(lines, line), append(at, -1)
 			continue
 		case rowRepo:
 			repo := s.cfg.Spaces[r.space].Repos[r.idx]
-			line = mark + pad(repo.Name, repoW) + " " + pad(orDash(repo.Base), baseW) + " " + orDash(repo.Path)
+			line = mark + pad(truncate(repo.Name, repoW), repoW) + " " + pad(orDash(repo.Base), baseW) + " " + pad(truncate(orDash(repo.Path), pathW), pathW) + " " + removeMark
 		case rowInferred:
 			line = mark + dim.Render(pad(r.name, repoW)+" inferred from your tickets' pull requests · enter to pin")
 		case rowAddRepo:
 			line = mark + keyDim.Render("+ Add repository")
 		case rowRoot:
-			line = mark + r.name
+			line = mark + pad(truncate(r.name, rootW), rootW) + " " + removeMark
 		case rowAddRoot:
 			line = mark + keyDim.Render("+ Add folder")
 		}
 		if s.section == sectionRoots && i == 0 {
 			lines, at = append(lines, dim.Render("Folders where tkt looks for your local clones")), append(at, -1)
 		}
-		line = truncate(line, m.width-3)
-		if r.kind == rowRepo || r.kind == rowRoot {
-			line = pad(line, m.width-2) + dim.Render("✕")
-		}
-		lines, at = append(lines, line), append(at, i)
+		lines, at = append(lines, truncate(line, m.width)), append(at, i)
 	}
 	return lines, at
+}
+
+var removeMark = lipgloss.NewStyle().Foreground(lipgloss.Color("167")).Render("✕")
+
+// settingsColumns sizes the repository, base and path columns to their longest value, within limits, so
+// the ✕ that removes a row sits right after them, at removeX.
+func (m Model) settingsColumns() (repoW, baseW, pathW int) {
+	repoW, baseW, pathW = len("REPOSITORY"), len("BASE"), len("LOCAL PATH")
+	for _, sp := range m.settings.cfg.Spaces {
+		for _, r := range sp.Repos {
+			repoW = max(repoW, lipgloss.Width(r.Name))
+			baseW = max(baseW, lipgloss.Width(r.Base))
+			pathW = max(pathW, lipgloss.Width(r.Path))
+		}
+		for _, name := range m.settings.inferred[sp.Key] {
+			repoW = max(repoW, lipgloss.Width(name))
+		}
+	}
+	repoW = min(repoW, max(24, m.width*2/5))
+	baseW = min(baseW, 16)
+	pathW = min(pathW, max(16, m.width-repoW-baseW-8))
+	return repoW, baseW, pathW
+}
+
+// rootsWidth is the width of the folder column in the local clones section.
+func (m Model) rootsWidth() int {
+	w := 10
+	for _, r := range m.settings.cfg.RepoRoots {
+		w = max(w, lipgloss.Width(r))
+	}
+	return min(w, m.width-6)
+}
+
+func (m Model) removeX() int {
+	if m.settings.section == sectionRoots {
+		return 2 + m.rootsWidth() + 1
+	}
+	repoW, baseW, pathW := m.settingsColumns()
+	return 2 + repoW + 1 + baseW + 1 + pathW + 1
 }
 
 func (m Model) settingsHeight() int {
@@ -523,7 +558,7 @@ func (m Model) settingsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	i := start + msg.Y - lineCount(m.header()) - 2
 	if i >= 0 && i < len(at) && at[i] >= 0 {
 		s.row = at[i]
-		if r, ok := s.current(); ok && (r.kind == rowRepo || r.kind == rowRoot) && msg.X >= m.width-3 {
+		if r, ok := s.current(); ok && (r.kind == rowRepo || r.kind == rowRoot) && msg.X >= m.removeX() && msg.X < m.removeX()+2 {
 			return m.settingsAction("d")
 		}
 	}

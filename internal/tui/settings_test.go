@@ -176,6 +176,9 @@ func TestSettingsShowsARemoveButtonOnConfiguredRows(t *testing.T) {
 	if y < 0 || !strings.HasSuffix(strings.TrimRight(lines[y], " "), "✕") {
 		t.Fatalf("no ✕ on the configured repository:\n%s", strings.Join(lines, "\n"))
 	}
+	if x := lipgloss.Width(lines[y][:strings.LastIndex(lines[y], "✕")]); x > 100 {
+		t.Errorf("the ✕ should sit next to the row's columns, not at the pane's edge (column %d of 140)", x)
+	}
 	if inf := lineIndex(m.View(), "inferred from your tickets"); strings.HasSuffix(strings.TrimRight(lines[inf], " "), "✕") {
 		t.Error("inferred repositories have nothing to remove")
 	}
