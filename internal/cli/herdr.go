@@ -103,7 +103,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 			}
 			return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: entry})
 		}},
-		&cobra.Command{Use: "setup", Short: "Open `tkt init` in a popup", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		&cobra.Command{Use: "setup", Short: "Open `tkt init` in a Herdr tab", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "setup"})
 		}},
 		&cobra.Command{Use: "open-ticket", Short: "Open the live ticket pane for the current workspace", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOpenTicket(cmd) }},
