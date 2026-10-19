@@ -24,9 +24,9 @@ Forecast (items 1–23, see L5): 4,310–7,040 authored changed lines.
 
 | ID | Slice | Specs | Forecast | Route | Branch (base) | Status | Commits |
 |---|---|---|---|---|---|---|---|
-| T1a | Core: paths, config + repo location, ticket domain, docs | S2 S12 S13 | measured 1,397 | inline, no Writer reason | `feat/tkt-phase-1-2-1a-core` (`main`) | in progress | |
-| T1b | Credentials (incl. WSL), CLI root, `auth`, `doctor` | S4 S5 S12 | measured 1,257 | inline, no Writer reason | `feat/tkt-phase-1-2-1b-cli` (T1a) | pending | |
-| T2a | Data clients: Jira, GitHub | S6 S13 | 1,300–2,000 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-2a-clients` (T1b) | pending | |
+| T1a | Core: paths, config + repo location, ticket domain, docs | S2 S12 S13 | measured 1,397 | inline, no Writer reason | `feat/tkt-phase-1-2-1a-core` (`main`) | done · 39 tests · RDD high (process boundary), review deferred | cd1579b 427ed55 e0e5891 |
+| T1b | Credentials (incl. WSL), CLI root, `auth`, `doctor` | S4 S5 S12 | measured 1,272 | inline, no Writer reason | `feat/tkt-phase-1-2-1b-cli` (T1a) | done · 55 tests · RDD high (auth hot path), review deferred | c401219 fdfe4a7 b90fdfb |
+| T2a | Data clients: Jira, GitHub | S6 S13 | measured 1,169 | inline, no Writer reason | `feat/tkt-phase-1-2-2a-clients` (T1b) | done · RDD high (auth hot path), review deferred | b7e8045 02a5aed 17f0566 |
 | T2b | Cache, board assembly, `list` | S4 S10 | 900–1,400 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-2b-list` (T2a) | pending | |
 | T3a | ADF, `show`, `context` | S4 | 1,100–1,700 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-3a-show` (T2b) | pending | |
 | T3b | `init`, discovery, `link`, `start` | S2 S3 S4 S11 | 1,300–2,000 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-3b-work` (T3a) | pending | |
