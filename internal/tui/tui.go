@@ -632,7 +632,7 @@ func (m Model) cardLines() int {
 	if m.compact {
 		return 4
 	}
-	return 6
+	return 7
 }
 
 // columnsView draws the four columns as boxes reaching height lines, each ticket in its own card.
@@ -690,7 +690,14 @@ func card(t ticket.Ticket, outer int, sel, compact bool) string {
 		head = selected.Render(fmt.Sprintf("%s %s", mark, t.Key))
 	}
 	gap := max(1, width-lipgloss.Width(head)-lipgloss.Width(flag))
-	lines := []string{head + strings.Repeat(" ", gap) + flag, "  " + titleStyle.Render(truncate(t.Summary, width-2))}
+	lines := []string{head + strings.Repeat(" ", gap) + flag}
+	titleLines := 1
+	if !compact {
+		titleLines = 2
+	}
+	for _, l := range wrapWords(t.Summary, width-2, titleLines) {
+		lines = append(lines, "  "+titleStyle.Render(l))
+	}
 	if !compact {
 		lines = append(lines, "  "+coloredPRs(t.PRs, width-2))
 		info := t.Type
@@ -710,6 +717,47 @@ func card(t ticket.Ticket, outer int, sel, compact bool) string {
 		st = cardBoxWarn
 	}
 	return st.Width(width).Render(strings.Join(lines, "\n"))
+}
+
+// wrapWords breaks s into at most n lines of width cells, cutting the last line with "…" when text
+// remains, and always returns n lines so cards keep the same height.
+func wrapWords(s string, width, n int) []string {
+	words := strings.Fields(s)
+	lines := make([]string, 0, n)
+	cur := ""
+	i := 0
+	for ; i < len(words) && len(lines) < n; i++ {
+		w := words[i]
+		switch {
+		case cur == "":
+			cur = w
+		case lipgloss.Width(cur)+1+lipgloss.Width(w) <= width:
+			cur += " " + w
+		default:
+			lines = append(lines, cur)
+			cur = w
+		}
+	}
+	if len(lines) < n {
+		lines = append(lines, cur)
+		cur = ""
+	} else if cur != "" {
+		i--
+	}
+	last := len(lines) - 1
+	if i < len(words) || cur != "" {
+		lines[last] = truncate(lines[last]+" "+strings.Join(words[i:], " "), width)
+		if lipgloss.Width(lines[last]) < width && !strings.HasSuffix(lines[last], "…") {
+			lines[last] = truncate(lines[last], width-1) + "…"
+		}
+	}
+	for j := range lines {
+		lines[j] = truncate(lines[j], width)
+	}
+	for len(lines) < n {
+		lines = append(lines, "")
+	}
+	return lines
 }
 
 // coloredPRs lists PRs as "repo#n" with the CI mark colored by state, cut to width.

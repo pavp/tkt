@@ -603,3 +603,29 @@ func TestPRColumnMatchesMockup(t *testing.T) {
 		}
 	}
 }
+
+func TestWrapWords(t *testing.T) {
+	cases := []struct {
+		s     string
+		width int
+		n     int
+		want  []string
+	}{
+		{"Filter accounts", 20, 2, []string{"Filter accounts", ""}},
+		{"Homogenize the organizations module (pilot)", 20, 2, []string{"Homogenize the", "organizations modul…"}},
+		{"Adapt tests outside modules", 14, 2, []string{"Adapt tests", "outside modul…"}},
+		{"short", 10, 1, []string{"short"}},
+		{"Supercalifragilisticexpialidocious word", 10, 2, []string{"Supercali…", "word"}},
+	}
+	for _, c := range cases {
+		got := wrapWords(c.s, c.width, c.n)
+		if strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("wrapWords(%q, %d, %d) = %q, want %q", c.s, c.width, c.n, got, c.want)
+		}
+		for _, l := range got {
+			if lipgloss.Width(l) > c.width {
+				t.Errorf("line %q exceeds %d", l, c.width)
+			}
+		}
+	}
+}
