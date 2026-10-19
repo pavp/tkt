@@ -20,6 +20,8 @@ type Snapshot struct {
 	Tickets   []ticket.Ticket      `json:"tickets"`
 	Reviews   []ticket.PullRequest `json:"reviews"`
 	Sprints   []jira.Sprint        `json:"sprints"`
+	// Agents holds the Herdr agent status of each ticket's workspace, when the board runs inside Herdr.
+	Agents map[string]string `json:"agents,omitempty"`
 	// Repos lists each space's repositories, configured or inferred from Jira-linked pull requests.
 	Repos    map[string][]string `json:"repos,omitempty"`
 	Warnings []string            `json:"warnings,omitempty"`

@@ -836,11 +836,11 @@ func TestCardLinesStartAtTheSameColumn(t *testing.T) {
 		}
 		return -1
 	}
-	plain := card(tk, 30, false, false)
+	plain := card(tk, 30, false, false, "")
 	if k, ti, ty := col(plain, "DEMO-1"), col(plain, "Filter"), col(plain, "Story"); k != ti || ti != ty {
 		t.Errorf("unselected card columns key=%d title=%d type=%d:\n%s", k, ti, ty, stripANSI(plain))
 	}
-	sel := card(tk, 30, true, false)
+	sel := card(tk, 30, true, false, "")
 	if m, ti := col(sel, "▸ DEMO-1"), col(sel, "Filter"); m != ti {
 		t.Errorf("selected card: mark at %d, title at %d:\n%s", m, ti, stripANSI(sel))
 	}
@@ -1100,5 +1100,20 @@ func TestReviewStripKeepsRoomForTheMoreLabel(t *testing.T) {
 		if w := lipgloss.Width(lines[y]); w > width {
 			t.Errorf("width %d: strip is %d wide", width, w)
 		}
+	}
+}
+
+func TestCardsShowTheAgentState(t *testing.T) {
+	snap := snapshot()
+	snap.Agents = map[string]string{"DEMO-1": "working", "DEMO-2": "blocked", "DEMO-3": "unknown"}
+	m := New(board.Snapshot{}, false, &recorder{}, ViewColumns)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	next, _ = next.Update(SnapshotMsg{Snap: snap})
+	v := stripANSI(next.View())
+	if !strings.Contains(v, "● claude working") || !strings.Contains(v, "! claude needs you") {
+		t.Errorf("cards should show their agent:\n%s", v)
+	}
+	if strings.Contains(v, "no agent") {
+		t.Errorf("cards without an agent say nothing about it:\n%s", v)
 	}
 }
