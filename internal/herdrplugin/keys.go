@@ -116,19 +116,7 @@ func AddBlock(config string, bindings []Binding) string {
 
 // RemoveBlock drops the managed block; ok is false when config has none.
 func RemoveBlock(config string) (string, bool) {
-	start := strings.Index(config, blockStart)
-	if start < 0 {
-		return config, false
-	}
-	end := strings.Index(config[start:], blockEnd)
-	if end < 0 {
-		return config, false
-	}
-	end += start + len(blockEnd)
-	if end < len(config) && config[end] == '\n' {
-		end++
-	}
-	return strings.TrimRight(config[:start], "\n") + "\n" + config[end:], true
+	return removeBetween(config, blockStart, blockEnd)
 }
 
 // Describe lists bindings as "prefix+t (tkt board), prefix+i (tkt ticket pane)".
