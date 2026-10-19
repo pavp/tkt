@@ -18,11 +18,11 @@ Forecast: 1210–2040 authored changed lines against the user's 2000-line budget
 
 | ID | Specs | Slice | Route | Status | Commit |
 |---|---|---|---|---|---|
-| T1 | S1 S2 | 1 | inline, no Writer reason | pending | |
-| T2 | S3 | 1 | inline, no Writer reason · Risk item 2 (credentials), own commit | pending | |
-| T3 | S4 | 1 | inline, no Writer reason | pending | |
-| T4 | S5 | 1 | inline, no Writer reason | pending | |
-| T5 | S6 | 1 | inline, no Writer reason | pending | |
+| T1 | S1 S2 | 1 | inline, no Writer reason | done · RED `TestFetchInfersRepositoriesFromJiraLinkedPRs` | 5942a5f |
+| T2 | S3 | 1 | inline, no Writer reason · Risk item 2 (credentials), own commit | done · RED accounts tests · RDD high, consent declined | 5b09bec |
+| T3 | S4 | 1 | inline, no Writer reason | done · RED `TestInitSuggestsReposAndDetectsTheGitHubAccount`, `TestInitOffersGhLoginWithoutAnAccount` | dad3b16 |
+| T4 | S5 | 1 | inline, no Writer reason | done · RED board/tui/doctor warning tests | a266c7c |
+| T5 | S6 | 1 | inline, no Writer reason | done · RED `TestStartDerivesTheRepositoryFromTheTicketsPullRequests`, `TestStartAsksForARepositoryWhenNoneIsKnown` | b4dd320 |
 | T6 | S7 S8 | 2 | inline, no Writer reason · checks the prototype's Settings screen first | pending | |
 | T7 | S7 S8 | 2 | inline, no Writer reason · Risk item 1 (writes the user's config), own commit | pending | |
 
@@ -32,3 +32,5 @@ Forecast: 1210–2040 authored changed lines against the user's 2000-line budget
 - L2 (2026-10-19) Trigger: on the second PC (WSL) `tkt init` left ACTO without repositories, so no GitHub calls ran and the 8 review requests were missing; the GitHub step was skipped entirely because it iterates organizations of configured repositories.
 - L3 (2026-10-19) Slice plan confirmed, delivery "ok stacked". Native grouping once both PRs are open: `gh stack link <pr-1> <pr-2>`.
 - L4 (2026-10-19) Engram mirror pending: `mem_save` rejected project "tkt" as unknown (mem_current_project resolves it from the git remote, but no session backs it yet); auto-detect would file it under another project. Resync when available.
+- L5 (2026-10-19) Mid-slice user reports, fixed on the slice-1 branch: "no sirve la opcion de cambiar vista en esa computadora" → the board forces the list below 100 columns and said nothing; `v` and the Columns button now explain why (3f6e5c1). "quiero que aumentes el tamano del board con respecto a herdr" → board popup 85% → 95% (a27d839; applies after `tkt herdr install`). "en la mac cuando le doy a start ... en la otra pc ... tkt: space acto has no repositories in the config" → covered by T5.
+- L6 (2026-10-19) Slice 1 complete: 795 authored changed lines (forecast 660–1150). RDD per commit: medium/under_budget for T1, the view fix, T3, T4, T5; T2 high (escalated item 2), consent declined by the user. Next: independent verifier for T2's risk, then slice 2.
