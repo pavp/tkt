@@ -122,7 +122,6 @@ func newHerdrCmd(a *App) *cobra.Command {
 		&cobra.Command{Use: "refresh", Short: "Fetch fresh data and update the Herdr sidebar", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrSidebar(cmd, false) }},
 		&cobra.Command{Use: "restore", Short: "Update the Herdr sidebar from the cache (startup hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrSidebar(cmd, true) }},
 		&cobra.Command{Use: "on-worktree", Short: "Link a worktree Herdr just created (event hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOnWorktree(cmd) }},
-		&cobra.Command{Use: "on-agent", Short: "Relabel workspaces when an agent's status changes (event hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOnAgent(cmd) }},
 	)
 	return cmd
 }
@@ -566,7 +565,7 @@ func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Sn
 		if agent != "" {
 			agents[string(key)] = board.MostUrgentAgent([]string{agents[string(key)], agent})
 		}
-		if err := h.ReportWorkspaceTokens(ctx, ws.ID, sidebarSource, sidebarTokens(t, agent), sidebarTTL); err != nil {
+		if err := h.ReportWorkspaceTokens(ctx, ws.ID, sidebarSource, sidebarTokens(t), sidebarTTL); err != nil {
 			return n, agents, err
 		}
 		n++
@@ -601,21 +600,6 @@ func worktreePath(raw string) string {
 		return ""
 	}
 	return walk(v, false)
-}
-
-// herdrOnAgent relabels workspaces from the cached board: agent statuses change often and need only
-// Herdr's own state, never a Jira or GitHub round trip.
-func (a *App) herdrOnAgent(cmd *cobra.Command) error {
-	c, err := a.LoadConfig()
-	if err != nil {
-		return nil
-	}
-	snap, ok, err := a.cache().Load()
-	if err != nil || !ok {
-		return nil
-	}
-	_, _, _ = a.updateSidebar(cmd.Context(), c, snap)
-	return nil
 }
 
 func (a *App) herdrOnWorktree(cmd *cobra.Command) error {
@@ -661,32 +645,20 @@ func (a *App) refreshSidebarQuietly(ctx context.Context, c *config.Config, snap 
 	return agents
 }
 
-// Herdr colors a token, not a value, so each line is reported under the token whose color fits it and
-// the others are cleared; the sidebar rows tkt herdr install adds show whichever is set.
+// Herdr colors a token, not a value, so the ticket line is reported under the token whose color fits it
+// and the other is cleared; the sidebar row tkt herdr install adds shows whichever is set.
 const (
 	tokenTicket      = "tkt"
 	tokenTicketAlert = "tkt_alert"
-	tokenAgent       = "tkt_agent"
-	tokenAgentAlert  = "tkt_agent_alert"
-	tokenAgentIdle   = "tkt_agent_idle"
 )
 
-func sidebarTokens(t ticket.Ticket, agentStatus string) map[string]*string {
-	tokens := map[string]*string{tokenTicket: nil, tokenTicketAlert: nil, tokenAgent: nil, tokenAgentAlert: nil, tokenAgentIdle: nil}
+func sidebarTokens(t ticket.Ticket) map[string]*string {
+	tokens := map[string]*string{tokenTicket: nil, tokenTicketAlert: nil}
 	line, alert := board.TicketLine(t)
 	if alert {
 		tokens[tokenTicketAlert] = &line
 	} else {
 		tokens[tokenTicket] = &line
-	}
-	agent, kind := board.AgentLine(agentStatus)
-	switch kind {
-	case board.AgentWorking:
-		tokens[tokenAgent] = &agent
-	case board.AgentNeedsYou:
-		tokens[tokenAgentAlert] = &agent
-	default:
-		tokens[tokenAgentIdle] = &agent
 	}
 	return tokens
 }

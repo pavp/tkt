@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -215,7 +214,7 @@ func TestHerdrRefreshLabelsTicketWorkspaces(t *testing.T) {
 		t.Errorf("report = %v", got)
 	}
 	tokens := got["tokens"].(map[string]any)
-	want := map[string]any{"tkt": nil, "tkt_alert": "✕ CI · #812", "tkt_agent": "● claude working", "tkt_agent_alert": nil, "tkt_agent_idle": nil}
+	want := map[string]any{"tkt": nil, "tkt_alert": "✕ CI · #812"}
 	if !reflect.DeepEqual(tokens, want) {
 		t.Errorf("tokens = %v, want %v", tokens, want)
 	}
@@ -402,7 +401,7 @@ func TestHerdrInstallAddsAndUninstallRemovesSidebarRows(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
 	b, _ := os.ReadFile(cfg)
-	if !strings.Contains(string(b), `token = "$tkt_agent"`) || strings.Contains(string(b), "tkt.board") {
+	if !strings.Contains(string(b), `token = "$tkt_alert"`) || strings.Contains(string(b), "tkt_agent") || strings.Contains(string(b), "tkt.board") {
 		t.Errorf("config:\n%s", b)
 	}
 	if !strings.Contains(h.errOut.String(), "Show each ticket and its agent in Herdr's sidebar?") || !strings.Contains(h.out.String(), "✓ Added tkt's ticket and agent lines to Herdr's sidebar") {
@@ -528,30 +527,16 @@ func TestHerdrRefreshLabelsWorkspacesOpenedOnAPlainCheckout(t *testing.T) {
 	if got == nil || got["workspace_id"] != "w9" {
 		t.Fatalf("a workspace on a plain checkout should be labelled from its pane's folder: %v", got)
 	}
-	if tok := got["tokens"].(map[string]any)["tkt_agent_idle"]; tok != "no agent" {
+	if tok := got["tokens"].(map[string]any)["tkt_alert"]; tok != "✕ CI · #812" {
 		t.Errorf("tokens = %v", got["tokens"])
 	}
 }
 
-func TestHerdrOnAgentRelabelsFromTheCache(t *testing.T) {
-	h, f, _ := herdrHarness(t)
+func TestHerdrManifestHasNoAgentEvent(t *testing.T) {
+	h, _, _ := herdrHarness(t)
 	h.exec("herdr", "install", "--no-keys", "--no-sidebar")
 	b, _ := os.ReadFile(filepath.Join(h.app.Env.DataDir(), "herdr-plugin", herdrplugin.FileName))
-	if !strings.Contains(string(b), "on = \"pane.agent_status_changed\"\ncommand = [\"/opt/tkt/bin/tkt\", \"herdr\", \"on-agent\"]") {
-		t.Fatalf("manifest should follow agent status changes:\n%s", b)
-	}
-	if code := h.exec("list"); code != 0 {
-		t.Fatalf("list: %s", h.errOut)
-	}
-	h.jira.searchErr = errors.New("on-agent must not call Jira")
-	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w1","label":"web-DEMO-1","worktree":{"checkout_path":"/src/web-DEMO-1"}}]}`
-	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p1","workspace_id":"w1","agent":"claude","agent_status":"working"}]}`
-	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
-	if code := h.exec("herdr", "on-agent"); code != 0 {
-		t.Fatalf("exit %d: %s", code, h.errOut)
-	}
-	got := f.Last("workspace.report_metadata")
-	if got == nil || got["tokens"].(map[string]any)["tkt_agent"] != "● claude working" {
-		t.Errorf("report = %v", got)
+	if strings.Contains(string(b), "pane.agent_status_changed") || strings.Contains(string(b), "on-agent") {
+		t.Errorf("Herdr shows agent states itself; the plugin should not follow them:\n%s", b)
 	}
 }

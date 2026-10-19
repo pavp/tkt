@@ -26,7 +26,7 @@ func TestSidebarBlockAddsValidRowsAndRemovesCleanly(t *testing.T) {
 		t.Fatalf("the block is not valid TOML: %v\n%s", err, added)
 	}
 	rows := parsed.UI.Sidebar.Spaces.Rows
-	if len(rows) != 3 || len(rows[2]) != 5 || !strings.Contains(added, `token = "$tkt_alert"`) || !strings.Contains(added, `token = "$tkt_agent_idle"`) {
+	if len(rows) != 3 || len(rows[2]) != 2 || !strings.Contains(added, `token = "$tkt_alert"`) || strings.Contains(added, "tkt_agent") {
 		t.Errorf("rows = %v\n%s", rows, added)
 	}
 	if PlanSidebar(added) != SidebarPresent {
