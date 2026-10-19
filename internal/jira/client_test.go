@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -234,5 +235,46 @@ func TestDownload(t *testing.T) {
 	}
 	if err := c.Download(context.Background(), c.base+"/att/1", &buf, 3); err == nil || !strings.Contains(err.Error(), "larger than 3 bytes") {
 		t.Errorf("size limit err = %v", err)
+	}
+}
+
+func TestDevPullRequests(t *testing.T) {
+	c, calls := server(t, map[string]string{
+		"GET /rest/dev-status/latest/issue/summary": `{"summary":{"pullrequest":{"overall":{"count":2},"byInstanceType":{"oAuth-example.github":{"count":2}}}}}`,
+		"GET /rest/dev-status/latest/issue/detail": `{"detail":[{"pullRequests":[
+			{"id":"#593","name":"fix: DEMO-1 widths","url":"https://github.com/example-org/web/pull/593","status":"MERGED","repositoryName":"example-org/web","source":{"branch":"fix/demo-1-widths"}}]}]}`,
+	})
+	got, err := c.DevPullRequests(context.Background(), "101")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []DevPullRequest{{Repo: "example-org/web", Number: 593, Title: "fix: DEMO-1 widths", URL: "https://github.com/example-org/web/pull/593", Branch: "fix/demo-1-widths", Status: "MERGED"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v", got)
+	}
+	if _, err := c.DevPullRequests(context.Background(), "102"); err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for _, r := range *calls {
+		paths = append(paths, r.path+"?"+r.query)
+	}
+	wantPaths := []string{
+		"/rest/dev-status/latest/issue/summary?issueId=101",
+		"/rest/dev-status/latest/issue/detail?applicationType=oAuth-example.github&dataType=pullrequest&issueId=101",
+		"/rest/dev-status/latest/issue/detail?applicationType=oAuth-example.github&dataType=pullrequest&issueId=102",
+	}
+	if !reflect.DeepEqual(paths, wantPaths) {
+		t.Errorf("calls = %v", paths)
+	}
+}
+
+func TestDevPullRequestsSkipsDetailWithoutPRs(t *testing.T) {
+	c, calls := server(t, map[string]string{
+		"GET /rest/dev-status/latest/issue/summary": `{"summary":{"pullrequest":{"overall":{"count":0},"byInstanceType":{}}}}`,
+	})
+	got, err := c.DevPullRequests(context.Background(), "101")
+	if err != nil || got != nil || len(*calls) != 1 {
+		t.Errorf("got %v, %v after %d calls", got, err, len(*calls))
 	}
 }

@@ -18,6 +18,8 @@ type stubJira struct {
 	issues []jira.Issue
 	err    error
 	jql    string
+	// linked maps issue ids to their development-panel PRs; nil means the panel is unavailable.
+	linked map[string][]jira.DevPullRequest
 }
 
 func (s *stubJira) Search(_ context.Context, jql string, _ []string) ([]jira.Issue, error) {
@@ -25,6 +27,12 @@ func (s *stubJira) Search(_ context.Context, jql string, _ []string) ([]jira.Iss
 	return s.issues, s.err
 }
 func (s *stubJira) BrowseURL(k string) string { return "https://example.atlassian.net/browse/" + k }
+func (s *stubJira) DevPullRequests(_ context.Context, id string) ([]jira.DevPullRequest, error) {
+	if s.linked == nil {
+		return nil, errors.New("dev-status: 404")
+	}
+	return s.linked[id], nil
+}
 
 type stubGitHub struct {
 	prs         []ticket.PullRequest
@@ -279,5 +287,72 @@ func TestSprintLabel(t *testing.T) {
 		if got := SprintLabel(tt.sp, now); got != tt.want {
 			t.Errorf("SprintLabel = %q, want %q", got, tt.want)
 		}
+	}
+}
+
+type countingGitHub struct {
+	stubGitHub
+	keyCalls [][]string
+}
+
+func (c *countingGitHub) PullRequestsForKeys(_ context.Context, _ []string, keys []string) ([]ticket.PullRequest, error) {
+	c.keyCalls = append(c.keyCalls, keys)
+	return nil, nil
+}
+
+func TestFetchTakesLinkedPullRequestsFromJira(t *testing.T) {
+	js := &stubJira{
+		issues: []jira.Issue{
+			{ID: "101", Key: "DEMO-1", Status: "In Progress", StatusCategory: "indeterminate"},
+			{ID: "102", Key: "DEMO-2", Status: "Done", StatusCategory: "done"},
+		},
+		linked: map[string][]jira.DevPullRequest{
+			"101": {{Repo: "example-org/web", Number: 9, Status: "OPEN"}},
+			"102": {
+				{Repo: "example-org/other", Number: 3, Title: "Old work", URL: "https://github.com/example-org/other/pull/3", Branch: "fix/x", Status: "MERGED"},
+				{Repo: "example-org/web", Number: 4, Status: "DECLINED"},
+			},
+		},
+	}
+	gh := &countingGitHub{stubGitHub: stubGitHub{prs: []ticket.PullRequest{
+		{Repo: "example-org/web", Number: 9, Branch: "no-key-here", State: ticket.PROpen, Checks: ticket.ChecksFail},
+	}}}
+	snap, err := Fetch(context.Background(), cfg(), js, gh, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[ticket.Key][]ticket.PullRequest{}
+	for _, tk := range snap.Tickets {
+		got[tk.Key] = tk.PRs
+	}
+	if prs := got["DEMO-1"]; len(prs) != 1 || prs[0].Checks != ticket.ChecksFail {
+		t.Errorf("DEMO-1 should carry GitHub's copy with its checks: %+v", prs)
+	}
+	want := []ticket.PullRequest{
+		{Repo: "example-org/other", Number: 3, Title: "Old work", URL: "https://github.com/example-org/other/pull/3", Branch: "fix/x", State: ticket.PRMerged},
+		{Repo: "example-org/web", Number: 4, State: ticket.PRClosed},
+	}
+	if !reflect.DeepEqual(got["DEMO-2"], want) {
+		t.Errorf("DEMO-2 PRs = %+v, want %+v", got["DEMO-2"], want)
+	}
+	if len(gh.keyCalls) != 0 || len(snap.Warnings) != 0 {
+		t.Errorf("key search %v and warnings %v should not happen when Jira answered", gh.keyCalls, snap.Warnings)
+	}
+}
+
+func TestFetchFallsBackToKeySearchWithoutJiraPanel(t *testing.T) {
+	js := &stubJira{issues: []jira.Issue{
+		{ID: "101", Key: "DEMO-1", Status: "In Progress", StatusCategory: "indeterminate"},
+		{ID: "102", Key: "DEMO-2", Status: "Done", StatusCategory: "done"},
+	}}
+	gh := &countingGitHub{stubGitHub: stubGitHub{prs: []ticket.PullRequest{
+		{Repo: "example-org/web", Number: 9, Branch: "feature/DEMO-1-a", State: ticket.PROpen},
+	}}}
+	snap, err := Fetch(context.Background(), cfg(), js, gh, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gh.keyCalls, [][]string{{"DEMO-2"}}) || len(snap.Warnings) != 0 {
+		t.Errorf("key search = %v, warnings = %v", gh.keyCalls, snap.Warnings)
 	}
 }

@@ -56,6 +56,10 @@ func (f *fakeJira) Statuses(_ context.Context, p string) ([]jira.Status, error) 
 func (f *fakeJira) Projects(context.Context) ([]jira.Project, error) { return f.projects, nil }
 func (f *fakeJira) BrowseURL(key string) string                      { return "https://example.atlassian.net/browse/" + key }
 
+func (f *fakeJira) DevPullRequests(context.Context, string) ([]jira.DevPullRequest, error) {
+	return nil, errors.New("no development panel")
+}
+
 func (f *fakeJira) Download(_ context.Context, url string, w io.Writer, _ int64) error {
 	body, ok := f.files[url]
 	if !ok {

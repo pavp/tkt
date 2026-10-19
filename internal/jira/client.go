@@ -25,6 +25,9 @@ type Client struct {
 	// sprintField is the id of the site's Sprint custom field; it differs between Jira sites.
 	sprintField  string
 	sprintLooked bool
+
+	// devApps are the development-tool integrations that hold this site's pull requests.
+	devApps []string
 }
 
 // New builds a read-only client for site (for example "https://example.atlassian.net").
@@ -113,6 +116,7 @@ func (c *Client) Myself(ctx context.Context) (User, error) {
 }
 
 type Issue struct {
+	ID             string
 	Key            string
 	Summary        string
 	Type           string
@@ -135,6 +139,7 @@ type Attachment struct {
 }
 
 type rawIssue struct {
+	ID     string                     `json:"id"`
 	Key    string                     `json:"key"`
 	Fields map[string]json.RawMessage `json:"fields"`
 }
@@ -169,6 +174,7 @@ func (r rawIssue) decode(sprintField string) (Issue, error) {
 		return Issue{}, fmt.Errorf("decode %s: %w", r.Key, err)
 	}
 	is := Issue{
+		ID:             r.ID,
 		Key:            r.Key,
 		Summary:        f.Summary,
 		Type:           f.IssueType.Name,

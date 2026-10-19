@@ -22,6 +22,7 @@ type JiraAPI interface {
 	Statuses(ctx context.Context, project string) ([]jira.Status, error)
 	Projects(ctx context.Context) ([]jira.Project, error)
 	BrowseURL(key string) string
+	DevPullRequests(ctx context.Context, issueID string) ([]jira.DevPullRequest, error)
 	Download(ctx context.Context, url string, w io.Writer, maxBytes int64) error
 }
 

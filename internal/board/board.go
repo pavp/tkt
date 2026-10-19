@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ type Snapshot struct {
 type JiraSource interface {
 	Search(ctx context.Context, jql string, fields []string) ([]jira.Issue, error)
 	BrowseURL(key string) string
+	DevPullRequests(ctx context.Context, issueID string) ([]jira.DevPullRequest, error)
 }
 
 type GitHubSource interface {
@@ -45,9 +47,11 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 		return snap, err
 	}
 	tickets := make([]ticket.Ticket, 0, len(issues))
+	ids := make(map[ticket.Key]string, len(issues))
 	seenSprint := map[string]bool{}
 	for _, is := range issues {
 		tickets = append(tickets, ToTicket(c, is, js.BrowseURL(is.Key)))
+		ids[ticket.Key(is.Key)] = is.ID
 		for _, sp := range is.Sprints {
 			if sp.State == "active" && !seenSprint[sp.Name] {
 				seenSprint[sp.Name] = true
@@ -61,26 +65,38 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 	for i, r := range repos {
 		names[i] = r.Name
 	}
+	var prs []ticket.PullRequest
+	var prErr error
 	if len(names) > 0 {
-		prs, err := gh.PullRequests(ctx, names)
-		if err != nil {
-			snap.Warnings = append(snap.Warnings, "pull requests unavailable: "+err.Error())
+		prs, prErr = gh.PullRequests(ctx, names)
+		if prErr != nil {
+			snap.Warnings = append(snap.Warnings, "pull requests unavailable: "+prErr.Error())
 		}
-		tickets = ticket.AttachPRs(tickets, prs)
-		var missing []string
-		for _, t := range tickets {
+	}
+	attached := ticket.AttachPRs(tickets, prs)
+	linked := map[ticket.Key][]jira.DevPullRequest{}
+	var missing []string
+	for _, t := range attached {
+		l, err := js.DevPullRequests(ctx, ids[t.Key])
+		if err != nil {
 			if len(t.PRs) == 0 {
 				missing = append(missing, string(t.Key))
 			}
+			continue
 		}
-		if len(missing) > 0 && err == nil {
-			older, err := gh.PullRequestsForKeys(ctx, names, missing)
-			if err != nil {
-				snap.Warnings = append(snap.Warnings, "older pull requests unavailable: "+err.Error())
-			}
-			tickets = ticket.AttachPRs(tickets, append(prs, older...))
-		}
+		linked[t.Key] = l
 	}
+	if len(missing) > 0 && len(names) > 0 && prErr == nil {
+		older, err := gh.PullRequestsForKeys(ctx, names, missing)
+		if err != nil {
+			snap.Warnings = append(snap.Warnings, "older pull requests unavailable: "+err.Error())
+		}
+		attached = ticket.AttachPRs(tickets, append(prs, older...))
+	}
+	for i := range attached {
+		attached[i].PRs = mergeLinked(attached[i].PRs, linked[attached[i].Key], prs)
+	}
+	tickets = attached
 	snap.Tickets = ticket.GroupSubtasks(tickets)
 
 	if mode := c.ReviewMode(); mode != config.ReviewsOff && len(names) > 0 {
@@ -98,6 +114,40 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 		}
 	}
 	return snap, nil
+}
+
+// mergeLinked adds the pull requests Jira links to a ticket, preferring the GitHub copy of each one
+// because only GitHub knows its checks and review state.
+func mergeLinked(attached []ticket.PullRequest, linked []jira.DevPullRequest, fromGitHub []ticket.PullRequest) []ticket.PullRequest {
+	out := attached
+	has := func(repo string, n int) bool {
+		return slices.ContainsFunc(out, func(p ticket.PullRequest) bool { return strings.EqualFold(p.Repo, repo) && p.Number == n })
+	}
+	for _, l := range linked {
+		if l.Number == 0 || has(l.Repo, l.Number) {
+			continue
+		}
+		i := slices.IndexFunc(fromGitHub, func(p ticket.PullRequest) bool { return strings.EqualFold(p.Repo, l.Repo) && p.Number == l.Number })
+		if i >= 0 {
+			out = append(out, fromGitHub[i])
+			continue
+		}
+		state := ticket.PROpen
+		switch l.Status {
+		case "MERGED":
+			state = ticket.PRMerged
+		case "DECLINED":
+			state = ticket.PRClosed
+		}
+		out = append(out, ticket.PullRequest{Repo: l.Repo, Number: l.Number, Title: l.Title, URL: l.URL, Branch: l.Branch, State: state})
+	}
+	slices.SortStableFunc(out, func(a, b ticket.PullRequest) int {
+		if c := strings.Compare(a.Repo, b.Repo); c != 0 {
+			return c
+		}
+		return a.Number - b.Number
+	})
+	return out
 }
 
 // ToTicket converts a Jira issue into a board ticket using its space's status overrides.
