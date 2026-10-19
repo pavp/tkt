@@ -922,9 +922,13 @@ func (m Model) reviewChips() (string, []chipSpan) {
 		if m.inStrip && len(spans) == m.stripSel {
 			chip = reviewChip.BorderForeground(lipgloss.Color("111")).Render(selected.Render("▸" + text))
 		}
-		if used+2+lipgloss.Width(chip) > m.width {
-			more := lipgloss.NewStyle().PaddingTop(1).Render(dim.Render(fmt.Sprintf("+%d more · press 3", len(m.snap.Reviews)-i)))
-			row = append(row, " ", more)
+		// A chip only fits if the "+N more" label for the chips after it still fits beside it.
+		need := used + 2 + lipgloss.Width(chip)
+		if rest := len(m.snap.Reviews) - i - 1; rest > 0 {
+			need += 1 + lipgloss.Width(moreReviews(rest))
+		}
+		if need > m.width {
+			row = append(row, " ", lipgloss.NewStyle().PaddingTop(1).Render(dim.Render(moreReviews(len(m.snap.Reviews)-i))))
 			break
 		}
 		row = append(row, "  ", chip)
@@ -933,6 +937,8 @@ func (m Model) reviewChips() (string, []chipSpan) {
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, row...), spans
 }
+
+func moreReviews(n int) string { return fmt.Sprintf("+%d more · press 3", n) }
 
 // cardLines is how many lines one bordered card takes: two border lines plus its content lines.
 func (m Model) cardLines() int {

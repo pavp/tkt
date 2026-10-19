@@ -1078,3 +1078,27 @@ func TestWheelScrollsTheColumnUnderThePointer(t *testing.T) {
 		t.Errorf("a click on a scrolled column should select the card under it:\n%s", v)
 	}
 }
+
+func TestReviewStripKeepsRoomForTheMoreLabel(t *testing.T) {
+	snap := snapshot()
+	snap.Reviews = nil
+	for i := 0; i < 8; i++ {
+		snap.Reviews = append(snap.Reviews, ticket.PullRequest{Repo: "example-org/web", Number: 700 + i, Branch: fmt.Sprintf("feature/DEMO-17044%d", i), State: ticket.PROpen})
+	}
+	for _, width := range []int{120, 140, 160, 200} {
+		m := New(board.Snapshot{}, false, &recorder{}, ViewColumns)
+		next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+		next, _ = next.Update(SnapshotMsg{Snap: snap})
+		lines := strings.Split(stripANSI(next.View()), "\n")
+		y := lineIndex(next.View(), "Review requested")
+		if y < 0 {
+			t.Fatalf("width %d: no review strip", width)
+		}
+		if !strings.Contains(lines[y], "more · press 3") {
+			t.Errorf("width %d: the more label is cut: %q", width, lines[y])
+		}
+		if w := lipgloss.Width(lines[y]); w > width {
+			t.Errorf("width %d: strip is %d wide", width, w)
+		}
+	}
+}
