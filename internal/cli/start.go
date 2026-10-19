@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/pavp/tkt/internal/jira"
 	"io"
 	"slices"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pavp/tkt/internal/config"
+	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/repos"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/workspace"

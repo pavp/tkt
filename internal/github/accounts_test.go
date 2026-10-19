@@ -74,3 +74,10 @@ func TestDetectAccount(t *testing.T) {
 		}
 	}
 }
+
+func TestLoggedInAccountsReadsStatusFromTheError(t *testing.T) {
+	r := &ghRunner{err: errors.New("gh: exit status 1: " + authStatus)}
+	if got := LoggedInAccounts(context.Background(), r); !reflect.DeepEqual(got, []string{"personal-dev", "work-dev"}) {
+		t.Errorf("gh writes the status to stderr when an account fails: got %v", got)
+	}
+}

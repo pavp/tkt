@@ -14,13 +14,17 @@ import (
 
 var accountLine = regexp.MustCompile(`Logged in to github\.com account (\S+)`)
 
-// LoggedInAccounts lists gh's github.com accounts, the active one first. gh exits non-zero when any
-// account has a problem, so its output is read either way.
+// LoggedInAccounts lists gh's github.com accounts, the active one first. When any account has a problem
+// gh exits non-zero and prints the whole status to stderr, which the runner folds into its error.
 func LoggedInAccounts(ctx context.Context, run execx.Runner) []string {
-	out, _ := run.Run(ctx, "", "gh", []string{"auth", "status", "--hostname", "github.com"}, nil)
+	out, err := run.Run(ctx, "", "gh", []string{"auth", "status", "--hostname", "github.com"}, nil)
+	text := string(out)
+	if err != nil {
+		text += "\n" + err.Error()
+	}
 	var accounts []string
 	active := -1
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(text, "\n") {
 		if m := accountLine.FindStringSubmatch(line); m != nil {
 			accounts = append(accounts, m[1])
 			continue

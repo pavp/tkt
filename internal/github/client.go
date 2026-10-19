@@ -50,10 +50,15 @@ func (c *Client) WithEndpoints(base string, h *http.Client) *Client {
 func CachedTokens(accountFor func(ctx context.Context, owner string) string, fetch func(ctx context.Context, account string) (string, error)) TokenFunc {
 	var mu sync.Mutex
 	cache := map[string]string{}
+	accounts := map[string]string{}
 	return func(ctx context.Context, owner string) (string, error) {
 		mu.Lock()
 		defer mu.Unlock()
-		account := accountFor(ctx, owner)
+		account, ok := accounts[owner]
+		if !ok {
+			account = accountFor(ctx, owner)
+			accounts[owner] = account
+		}
 		if t, ok := cache[account]; ok {
 			return t, nil
 		}
