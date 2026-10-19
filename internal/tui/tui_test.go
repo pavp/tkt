@@ -952,3 +952,15 @@ func TestBackButtonLeavesTheDetail(t *testing.T) {
 		t.Errorf("clicking back should return to the board:\n%s", stripANSI(m.View()))
 	}
 }
+
+func TestColumnsRequestOnANarrowPaneExplainsWhy(t *testing.T) {
+	m := New(snapshot(), true, &recorder{}, ViewList)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 90, Height: 40})
+	next = press(next, "v")
+	if v := stripANSI(next.View()); !strings.Contains(v, "columns need a pane at least 100 columns wide") {
+		t.Errorf("v on a narrow pane should say why the list stays:\n%s", v)
+	}
+	if v := stripANSI(press(next, "s").View()); strings.Contains(v, "columns need a pane") {
+		t.Errorf("the explanation should clear on the next key:\n%s", v)
+	}
+}
