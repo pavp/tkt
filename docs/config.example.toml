@@ -1,0 +1,35 @@
+# Copy to ~/.config/tkt/config.toml (or let `tkt init` write it).
+# Secrets never go here: store the Jira token with `tkt auth jira`.
+
+# Folders where tkt looks for local clones of the repositories below.
+repo_roots = ["~/dev/work"]
+
+[jira]
+site = "example.atlassian.net"
+email = "you@example.com"
+
+# gh account whose token reads each GitHub organization (`gh auth status` lists them).
+[github.accounts]
+example-org = "your-gh-user"
+
+[context]
+comments = 5
+
+[[spaces]]
+key = "DEMO"
+name = "Demo space"
+# Optional custom field holding acceptance criteria.
+# acceptance_field = "customfield_10042"
+
+# Board column for statuses Jira's own category gets wrong: todo, in_progress, review or done.
+[spaces.status_overrides]
+"Code Review" = "review"
+
+[[spaces.repos]]
+repo = "example-org/web"
+base = "main"
+
+[[spaces.repos]]
+repo = "example-org/api"
+base = "develop"
+# path = "~/src/api"   # only when the clone lives outside repo_roots

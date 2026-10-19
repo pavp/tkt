@@ -1,0 +1,141 @@
+package ticket
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestKeysIn(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []Key
+	}{
+		{"feature/DEMO-123-add-filter", []Key{"DEMO-123"}},
+		{"fix/DEMO-1", []Key{"DEMO-1"}},
+		{"DEMO-12_OPS-7", []Key{"DEMO-12", "OPS-7"}},
+		{"DEMO-12 and DEMO-12 again", []Key{"DEMO-12"}},
+		{"fix-123-lowercase", nil},
+		{"release-2026", nil},
+		{"XDEMO-1", []Key{"XDEMO-1"}},
+		{"DEMO-12345678x", []Key{"DEMO-12345678"}},
+		{"A1DEMO-5", []Key{"A1DEMO-5"}},
+		{"", nil},
+	}
+	for _, tt := range tests {
+		if got := KeysIn(tt.in); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("KeysIn(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestKeyInBranchFiltersBySpace(t *testing.T) {
+	spaces := []string{"DEMO", "OPS"}
+	tests := []struct {
+		branch string
+		want   Key
+		ok     bool
+	}{
+		{"feature/DEMO-170450-filter", "DEMO-170450", true},
+		{"chore/UTF-8-cleanup", "", false},
+		{"feature/UTF-8-OPS-9", "OPS-9", true},
+		{"fix-date-filter", "", false},
+	}
+	for _, tt := range tests {
+		got, ok := KeyInBranch(tt.branch, spaces)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("KeyInBranch(%q) = %q, %v; want %q, %v", tt.branch, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+func TestCategoryFor(t *testing.T) {
+	overrides := map[string]Category{"Code Review": InReview}
+	tests := []struct {
+		status, category string
+		want             Category
+	}{
+		{"To Do", "new", ToDo},
+		{"In Progress", "indeterminate", InProgress},
+		{"Code Review", "indeterminate", InReview},
+		{"Done", "done", Done},
+		{"Weird", "", ToDo},
+	}
+	for _, tt := range tests {
+		if got := CategoryFor(tt.status, tt.category, overrides); got != tt.want {
+			t.Errorf("CategoryFor(%q, %q) = %q, want %q", tt.status, tt.category, got, tt.want)
+		}
+	}
+}
+
+func TestWorstChecks(t *testing.T) {
+	if got := WorstChecks(ChecksPass, ChecksFail, ChecksPending); got != ChecksFail {
+		t.Errorf("got %q, want fail", got)
+	}
+	if got := WorstChecks(ChecksPass, ChecksPending); got != ChecksPending {
+		t.Errorf("got %q, want pending", got)
+	}
+	if got := WorstChecks(); got != ChecksNone {
+		t.Errorf("got %q, want none", got)
+	}
+}
+
+func TestAttention(t *testing.T) {
+	tests := []struct {
+		name string
+		t    Ticket
+		want []Reason
+	}{
+		{"failing CI", Ticket{Category: InProgress, PRs: []PullRequest{{State: PROpen, Checks: ChecksFail}}}, []Reason{ReasonCIFailing}},
+		{"changes requested", Ticket{Category: InReview, PRs: []PullRequest{{State: PROpen, Checks: ChecksPass, Review: ReviewChangesRequested}}}, []Reason{ReasonChangesRequested}},
+		{"both across repos", Ticket{Category: InReview, PRs: []PullRequest{{State: PROpen, Checks: ChecksFail}, {State: PROpen, Review: ReviewChangesRequested}}}, []Reason{ReasonCIFailing, ReasonChangesRequested}},
+		{"merged PR ignored", Ticket{Category: InReview, PRs: []PullRequest{{State: PRMerged, Checks: ChecksFail}}}, nil},
+		{"done ticket ignored", Ticket{Category: Done, PRs: []PullRequest{{State: PROpen, Checks: ChecksFail}}}, nil},
+		{"no PRs", Ticket{Category: ToDo}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.t.Attention(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Attention() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAttachPRs(t *testing.T) {
+	tickets := []Ticket{{Key: "DEMO-1"}, {Key: "DEMO-2"}, {Key: "OPS-3"}}
+	prs := []PullRequest{
+		{Repo: "example-org/web", Number: 9, Branch: "feature/DEMO-1-a"},
+		{Repo: "example-org/api", Number: 4, Branch: "feature/DEMO-1-a"},
+		{Repo: "example-org/web", Number: 10, Branch: "fix/DEMO-2-OPS-3"},
+		{Repo: "example-org/web", Number: 11, Branch: "chore/no-key"},
+	}
+	got := AttachPRs(tickets, prs)
+	want := map[Key][]int{"DEMO-1": {4, 9}, "DEMO-2": {10}, "OPS-3": {10}}
+	for _, tk := range got {
+		var nums []int
+		for _, pr := range tk.PRs {
+			nums = append(nums, pr.Number)
+		}
+		if !reflect.DeepEqual(nums, want[tk.Key]) {
+			t.Errorf("%s PRs = %v, want %v", tk.Key, nums, want[tk.Key])
+		}
+	}
+	if len(tickets[0].PRs) != 0 {
+		t.Error("AttachPRs mutated its input")
+	}
+}
+
+func TestGroupSubtasks(t *testing.T) {
+	in := []Ticket{
+		{Key: "DEMO-1"},
+		{Key: "DEMO-2", Parent: "DEMO-1"},
+		{Key: "DEMO-3", Parent: "DEMO-99"},
+	}
+	got := GroupSubtasks(in)
+	if len(got) != 2 || got[0].Key != "DEMO-1" || got[1].Key != "DEMO-3" {
+		t.Fatalf("top level = %+v", got)
+	}
+	if len(got[0].Subtasks) != 1 || got[0].Subtasks[0].Key != "DEMO-2" {
+		t.Errorf("DEMO-1 subtasks = %+v", got[0].Subtasks)
+	}
+}
