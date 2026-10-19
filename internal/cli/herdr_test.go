@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -157,7 +156,7 @@ func TestHerdrStartCreatesWorkspacesWithAgents(t *testing.T) {
 		t.Errorf("workspaces = %v", cwds)
 	}
 	start := f.Last("agent.start")
-	if start["kind"] != "claude" || start["name"] != "claude-demo-7-api" || start["pane_id"] != "w9:p1" || !strings.Contains(start["args"].([]any)[0].(string), "Work on Jira ticket DEMO-7") {
+	if start["kind"] != "claude" || start["name"] != "claude" || start["pane_id"] != "w9:p1" || !strings.Contains(start["args"].([]any)[0].(string), "Work on Jira ticket DEMO-7") {
 		t.Errorf("agent.start = %v", start)
 	}
 	if len(*calls) != 0 {
@@ -542,21 +541,33 @@ func TestHerdrManifestHasNoAgentEvent(t *testing.T) {
 	}
 }
 
-func TestAgentNameFollowsHerdrRules(t *testing.T) {
-	valid := regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
-	tests := []struct {
-		key  ticket.Key
-		dir  string
-		want string
-	}{
-		{"ACTO-170450", "/src/cloud-uac-accounts-web", "claude-acto-170450-cloud-uac-acc"},
-		{"DEMO-1", "/src/Web App", "claude-demo-1-web-app"},
-		{"DEMO-1", "/src/web.", "claude-demo-1-web"},
+func TestHerdrStartNamesAgentsClaudeAndNumbersTakenNames(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+	f.Errors["agent.start"] = "agent name claude is already used; candidates: pane_id=w1:p1"
+	h.app.NewHerdr = func() HerdrAPI { return takenOnce{HerdrAPI: herdr.New(f.Path), f: f} }
+	if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "prompt", true); err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		got := agentName(tt.key, tt.dir)
-		if got != tt.want || !valid.MatchString(got) {
-			t.Errorf("agentName(%s, %s) = %q, want %q (valid: %v)", tt.key, tt.dir, got, tt.want, valid.MatchString(got))
+	var names []string
+	for _, r := range f.Requests {
+		if r["method"] == "agent.start" {
+			names = append(names, r["params"].(map[string]any)["name"].(string))
 		}
 	}
+	if strings.Join(names, ",") != "claude,claude-2" {
+		t.Errorf("names tried = %v", names)
+	}
+}
+
+// takenOnce lets the first agent.start fail with agent_name_taken and the next ones succeed.
+type takenOnce struct {
+	HerdrAPI
+	f *herdrtest.FakeServer
+}
+
+func (o takenOnce) StartAgent(ctx context.Context, paneID, kind, name string, args []string) error {
+	err := o.HerdrAPI.StartAgent(ctx, paneID, kind, name, args)
+	delete(o.f.Errors, "agent.start")
+	return err
 }
