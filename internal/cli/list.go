@@ -55,14 +55,14 @@ func newListCmd(a *App) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&space, "space", "", "only this Jira space, e.g. DEMO")
-	cmd.Flags().BoolVar(&needsYou, "needs-you", false, "only items that need you (failing CI, requested changes, review requests)")
+	cmd.Flags().BoolVar(&needsYou, "needs-you", false, "only tickets blocked on you (failing CI or requested changes)")
 	cmd.Flags().BoolVar(&cached, "cached", false, "show the cached board without contacting Jira or GitHub")
 	return cmd
 }
 
 func onlyNeedsYou(s board.Snapshot) board.Snapshot {
 	out := s
-	out.Tickets = nil
+	out.Tickets, out.Reviews = nil, nil
 	for _, t := range s.Tickets {
 		if len(t.Attention()) > 0 {
 			out.Tickets = append(out.Tickets, t)
@@ -86,11 +86,17 @@ func (a *App) renderList(s board.Snapshot, stale error) {
 		a.printf("NEEDS YOU\n")
 		tw := tabwriter.NewWriter(a.Stdout, 0, 2, 2, ' ', 0)
 		for _, n := range needs {
-			title := n.Title
-			if n.PR != nil {
-				title = n.PR.Repo + " · " + title
-			}
-			fmt.Fprintf(tw, "  !\t%s\t%s\t%s\n", n.Ref, n.Reason, truncate(title, 60))
+			fmt.Fprintf(tw, "  !\t%s\t%s\t%s\n", n.Ref, n.Reason, truncate(n.Title, 60))
+		}
+		tw.Flush()
+		a.printf("\n")
+	}
+
+	if len(s.Reviews) > 0 {
+		a.printf("REVIEW REQUESTED\n")
+		tw := tabwriter.NewWriter(a.Stdout, 0, 2, 2, ' ', 0)
+		for _, pr := range s.Reviews {
+			fmt.Fprintf(tw, "  #%d\t%s\n", pr.Number, truncate(pr.Repo+" · "+pr.Title, 70))
 		}
 		tw.Flush()
 		a.printf("\n")

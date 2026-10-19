@@ -94,7 +94,7 @@ func TestListShowsNeedsYouFirst(t *testing.T) {
 		"NEEDS YOU",
 		"!  DEMO-1  CI failing",
 		"!  OPS-4   Changes requested",
-		"!  #820    Review requested   example-org/web · Add pagination",
+		"REVIEW REQUESTED\n  #820  example-org/web · Add pagination",
 		"web#812 ✕",
 		"↳ DEMO-2",
 		"synced just now",
@@ -102,6 +102,9 @@ func TestListShowsNeedsYouFirst(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
+	}
+	if needs := out[:strings.Index(out, "REVIEW REQUESTED")]; strings.Contains(needs, "#820") {
+		t.Errorf("review requests listed under NEEDS YOU:\n%s", out)
 	}
 	if i, j := strings.Index(out, "\nDEMO-1 "), strings.Index(out, "\nDEMO-3 "); i < 0 || j < 0 || i > j {
 		t.Errorf("tickets not ordered by attention and column:\n%s", out)
@@ -118,7 +121,7 @@ func TestListFilters(t *testing.T) {
 		t.Errorf("--space OPS:\n%s", out)
 	}
 	h.exec("list", "--needs-you")
-	if out := h.out.String(); strings.Contains(out, "DEMO-3") || !strings.Contains(out, "DEMO-1") {
+	if out := h.out.String(); strings.Contains(out, "DEMO-3") || !strings.Contains(out, "DEMO-1") || strings.Contains(out, "#820") {
 		t.Errorf("--needs-you:\n%s", out)
 	}
 	if code := h.exec("list", "--space", "NOPE"); code == 0 || !strings.Contains(h.errOut.String(), "space NOPE is not configured (configured: DEMO, OPS)") {
@@ -141,7 +144,7 @@ func TestListJSON(t *testing.T) {
 	if err := json.Unmarshal(h.out.Bytes(), &got); err != nil {
 		t.Fatalf("%v\n%s", err, h.out)
 	}
-	if len(got.Snapshot.Tickets) != 3 || len(got.NeedsYou) != 3 || got.Stale {
+	if len(got.Snapshot.Tickets) != 3 || len(got.NeedsYou) != 2 || got.Stale {
 		t.Errorf("json = %+v", got)
 	}
 }

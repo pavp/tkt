@@ -178,7 +178,7 @@ func TestNeedsYouAndSorted(t *testing.T) {
 	for _, a := range snap.NeedsYou() {
 		refs = append(refs, a.Ref+":"+string(a.Reason))
 	}
-	if !reflect.DeepEqual(refs, []string{"DEMO-3:Changes requested", "DEMO-1:CI failing", "#20:Review requested"}) {
+	if !reflect.DeepEqual(refs, []string{"DEMO-3:Changes requested", "DEMO-1:CI failing"}) {
 		t.Errorf("NeedsYou = %v", refs)
 	}
 	var keys []ticket.Key

@@ -36,7 +36,7 @@ GOPRIVATE=github.com/pavp/* go install github.com/pavp/tkt/cmd/tkt@latest
 | `tkt auth jira [--site S --email E]` | Store the Jira API token (hidden prompt, or stdin when piped) |
 | `tkt auth status` | Show which credentials tkt can use, without printing them |
 | `tkt doctor` | Check config, credentials, tools (`git`, `gh`, `claude`, `herdr`) and local clones |
-| `tkt list [--space S] [--needs-you] [--cached]` | Your open-sprint tickets with PRs and CI; failing CI, requested changes and review requests first. Falls back to the cached board when offline |
+| `tkt list [--space S] [--needs-you] [--cached]` | Your open-sprint tickets with PRs and CI; tickets with failing CI or requested changes first, then review requests. Falls back to the cached board when offline |
 | `tkt show [KEY] [--watch]` | One ticket: PRs and CI, description, acceptance criteria, attachments, latest comments. Without `KEY`, uses the current branch |
 | `tkt context [KEY] [--images DIR]` | The ticket as Markdown for an agent (`> .ticket.md`); `--images` downloads image attachments |
 | `tkt start KEY [--repo R] [--clone]` | Open Claude Code on a ticket: in its worktree if it has one, otherwise in the chosen repositories with instructions to create the branch per project rules |

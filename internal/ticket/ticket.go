@@ -193,7 +193,6 @@ type Reason string
 const (
 	ReasonCIFailing        Reason = "CI failing"
 	ReasonChangesRequested Reason = "Changes requested"
-	ReasonReviewRequested  Reason = "Review requested"
 )
 
 // Attention lists why an open ticket needs the user: failing CI or requested changes on any open PR.

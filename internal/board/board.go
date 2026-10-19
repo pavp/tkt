@@ -165,17 +165,16 @@ func ToTicket(c *config.Config, is jira.Issue, url string) ticket.Ticket {
 	return t
 }
 
-// Attention is one item that needs the user: a ticket with failing CI or requested changes, or a PR
-// awaiting the user's review.
+// Attention is one of the user's tickets blocked on them: failing CI or requested changes.
 type Attention struct {
-	Ref    string              `json:"ref"`
-	Title  string              `json:"title"`
-	Reason ticket.Reason       `json:"reason"`
-	Ticket *ticket.Ticket      `json:"ticket,omitempty"`
-	PR     *ticket.PullRequest `json:"pr,omitempty"`
+	Ref    string         `json:"ref"`
+	Title  string         `json:"title"`
+	Reason ticket.Reason  `json:"reason"`
+	Ticket *ticket.Ticket `json:"ticket,omitempty"`
 }
 
-// NeedsYou lists attention items: tickets first (in board order), then review requests.
+// NeedsYou lists the user's tickets that are blocked on them: failing CI or requested changes, in board
+// order. Review requests are listed apart, in Reviews.
 func (s Snapshot) NeedsYou() []Attention {
 	var out []Attention
 	for i := range s.Tickets {
@@ -183,10 +182,6 @@ func (s Snapshot) NeedsYou() []Attention {
 		for _, r := range t.Attention() {
 			out = append(out, Attention{Ref: string(t.Key), Title: t.Summary, Reason: r, Ticket: t})
 		}
-	}
-	for i := range s.Reviews {
-		pr := &s.Reviews[i]
-		out = append(out, Attention{Ref: fmt.Sprintf("#%d", pr.Number), Title: pr.Title, Reason: ticket.ReasonReviewRequested, PR: pr})
 	}
 	return out
 }

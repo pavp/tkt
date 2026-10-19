@@ -152,6 +152,9 @@ func (m Model) listItems() []item {
 		t := t
 		out = append(out, item{key: t.Key, ticket: &t})
 	}
+	if m.filter == FilterNeeds {
+		return out
+	}
 	for i := range m.snap.Reviews {
 		pr := m.snap.Reviews[i]
 		out = append(out, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr})
@@ -776,7 +779,7 @@ type chipSpan struct {
 
 // reviewChips renders the strip and returns each visible chip's horizontal span.
 func (m Model) reviewChips() (string, []chipSpan) {
-	if len(m.snap.Reviews) == 0 {
+	if len(m.snap.Reviews) == 0 || m.filter == FilterNeeds {
 		return "", nil
 	}
 	label := dim.Render("Review requested")

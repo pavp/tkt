@@ -166,8 +166,11 @@ func TestFilters(t *testing.T) {
 	r := &recorder{}
 	m := press(loaded(r), "n", "v")
 	view := m.View()
-	if strings.Contains(view, "DEMO-3") || !strings.Contains(view, "DEMO-1") || !strings.Contains(view, "#820") {
-		t.Errorf("needs-you filter:\n%s", view)
+	if strings.Contains(view, "DEMO-3") || !strings.Contains(view, "DEMO-1") || strings.Contains(view, "#820") {
+		t.Errorf("needs-you filter should hold my blocked tickets only, no review requests:\n%s", view)
+	}
+	if v := stripANSI(press(loaded(r), "n").View()); strings.Contains(v, "#820") || !strings.Contains(v, "2 Needs you 1") {
+		t.Errorf("needs-you columns should hide the review strip and count only tickets:\n%s", v)
 	}
 	m = press(m, "r")
 	view = m.View()
@@ -332,7 +335,7 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "synced 3 min ago", "1 All 4", "2 Needs you 2", "│ Columns │ │ List │", "DEMO-3 · Export CSV\n To Do · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "synced 3 min ago", "1 All 4", "2 Needs you 1", "│ Columns │ │ List │", "DEMO-3 · Export CSV\n To Do · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
