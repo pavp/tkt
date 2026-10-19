@@ -198,3 +198,23 @@ func TestProjectsAndMyself(t *testing.T) {
 		t.Error("browse URL")
 	}
 }
+
+func TestDownload(t *testing.T) {
+	c, calls := server(t, map[string]string{"GET /att/1": "PNGDATA"})
+	var buf strings.Builder
+	if err := c.Download(context.Background(), c.base+"/att/1", &buf, 100); err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != "PNGDATA" || !strings.HasPrefix((*calls)[0].auth, "Basic ") {
+		t.Errorf("got %q, auth %q", buf.String(), (*calls)[0].auth)
+	}
+	if err := c.Download(context.Background(), "https://evil.example.com/att/1", &buf, 100); err == nil || !strings.Contains(err.Error(), "outside") {
+		t.Errorf("foreign host err = %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Error("credentials sent to a foreign host")
+	}
+	if err := c.Download(context.Background(), c.base+"/att/1", &buf, 3); err == nil || !strings.Contains(err.Error(), "larger than 3 bytes") {
+		t.Errorf("size limit err = %v", err)
+	}
+}

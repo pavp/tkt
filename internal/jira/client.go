@@ -366,3 +366,40 @@ func (c *Client) ActiveSprints(ctx context.Context, project string) ([]Sprint, e
 	}
 	return out, nil
 }
+
+// Download writes an attachment to w. It refuses URLs outside the Jira site so the credentials are never
+// sent elsewhere, and stops after maxBytes.
+func (c *Client) Download(ctx context.Context, rawURL string, w io.Writer, maxBytes int64) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("attachment URL %q: %w", rawURL, err)
+	}
+	base, _ := url.Parse(c.base)
+	if u.Scheme != base.Scheme || u.Host != base.Host {
+		return fmt.Errorf("attachment URL %s is outside %s", rawURL, c.base)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(c.email, c.token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("download %s: %w", rawURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return ErrUnauthorized
+	}
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("download %s: %d %s", rawURL, resp.StatusCode, http.StatusText(resp.StatusCode))
+	}
+	n, err := io.Copy(w, io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return fmt.Errorf("download %s: %w", rawURL, err)
+	}
+	if n > maxBytes {
+		return fmt.Errorf("download %s: larger than %d bytes", rawURL, maxBytes)
+	}
+	return nil
+}
