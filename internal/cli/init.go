@@ -97,7 +97,7 @@ func (a *App) runInit(cmd *cobra.Command) error {
 		}
 	}
 	if token == "" {
-		site, err := a.ask("Jira site (e.g. example.atlassian.net)", defSite)
+		site, err := a.ask("Jira site, e.g. example.atlassian.net (or paste any Jira link)", defSite)
 		if err != nil {
 			return err
 		}

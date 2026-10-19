@@ -97,7 +97,7 @@ func (a *App) jiraAccount(ctx context.Context, site, email string) (string, stri
 		st := a.loadState()
 		var err error
 		if site == "" {
-			if site, err = a.ask("Jira site (e.g. example.atlassian.net)", st.JiraSite); err != nil {
+			if site, err = a.ask("Jira site, e.g. example.atlassian.net (or paste any Jira link)", st.JiraSite); err != nil {
 				return "", "", err
 			}
 		}
