@@ -12,14 +12,14 @@ const (
 	sidebarEnd   = "# <<< tkt sidebar"
 )
 
-// SidebarRows are Herdr's default space rows plus one row with tkt's ticket and agent; Herdr joins a
-// row's parts with " · ". It styles a token, not a value, so each part has one token per color and tkt
-// reports only the one that applies.
+// SidebarRows are Herdr's default space rows plus a row with the ticket's state; the agent's state is
+// already Herdr's state_icon. Herdr styles a token, not a value, so the ticket line has one token per
+// color and tkt reports only the one that applies.
 const SidebarRows = `[ui.sidebar.spaces]
 rows = [
   ["state_icon", "workspace"],
   ["branch", "git_status"],
-  [{ token = "$tkt", fg = "#8DBBFF" }, { token = "$tkt_alert", fg = "#F5B970" }, { token = "$tkt_agent", fg = "#8DBBFF" }, { token = "$tkt_agent_alert", fg = "#F5B970" }, { token = "$tkt_agent_idle", dim = true }],
+  [{ token = "$tkt", fg = "#8DBBFF" }, { token = "$tkt_alert", fg = "#F5B970" }],
 ]
 `
 

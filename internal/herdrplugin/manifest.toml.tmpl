@@ -39,11 +39,6 @@ command = [{{TKT}}, "herdr", "open"]
 on = "worktree.created"
 command = [{{TKT}}, "herdr", "on-worktree"]
 
-# Keeps the sidebar's agent line current between board refreshes, from the cached board only.
-[[events]]
-on = "pane.agent_status_changed"
-command = [{{TKT}}, "herdr", "on-agent"]
-
 [[panes]]
 id = "board"
 title = "tkt board"
