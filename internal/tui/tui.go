@@ -224,8 +224,97 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tick()
 	case tea.KeyMsg:
 		return m.key(msg)
+	case tea.MouseMsg:
+		return m.mouse(msg)
 	}
 	return m, nil
+}
+
+// mouse selects what is under a click and scrolls with the wheel. Clicks only select: actions stay on
+// the keyboard so a stray click never starts an agent.
+func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		m.move(0, -1)
+		return m, nil
+	case tea.MouseButtonWheelDown:
+		m.move(0, 1)
+		return m, nil
+	case tea.MouseButtonLeft:
+	default:
+		return m, nil
+	}
+	if msg.Action != tea.MouseActionPress {
+		return m, nil
+	}
+	headerLines := 1 + strings.Count(wrap(m.headerItems(), m.width), "\n") + 1
+	if msg.Y == 1 {
+		m.clickHeader(msg.X)
+		return m, nil
+	}
+	body := msg.Y - headerLines
+	if body < 0 {
+		return m, nil
+	}
+	if m.effectiveView() == ViewList {
+		items := m.listItems()
+		if i := body - 1; i >= 0 && i < len(items) {
+			m.row = i
+			m.remember()
+		}
+		return m, nil
+	}
+	if strip := m.reviewStrip(); strip != "" {
+		body -= strings.Count(strip, "\n") + 1
+	}
+	cols := m.columns()
+	colWidth := m.columnWidth() + 2
+	c := msg.X / colWidth
+	// Inside a column box: top border, the column title, then four lines per card.
+	r := (body - 2) / 4
+	if body >= 2 && c >= 0 && c < len(cols) && r < len(cols[c]) {
+		m.col, m.row = c, r
+		m.remember()
+	}
+	return m, nil
+}
+
+// clickHeader switches filter or view when x falls on one of the header buttons (first header line).
+func (m *Model) clickHeader(x int) {
+	items := m.headerItems()
+	spec := m.headerSpec()
+	pos := 0
+	for i, it := range items {
+		w := lipgloss.Width(it)
+		if i < 3 {
+			if x >= pos && x < pos+w {
+				m.filter = spec[i].filter
+				m.reselect()
+				return
+			}
+		} else {
+			start := pos + 1
+			for _, v := range spec[3:] {
+				vw := lipgloss.Width(v.label)
+				if x >= start && x < start+vw {
+					m.view = v.view
+					m.reselect()
+					return
+				}
+				start += vw
+			}
+		}
+		pos += w + 2
+	}
+}
+
+// columnWidth is the inner width of one column box.
+func (m Model) columnWidth() int {
+	w := (m.width - 2) / len(ticket.Columns)
+	if w < 20 {
+		w = 20
+	}
+	return w - 4
 }
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -359,20 +448,50 @@ var (
 	boxSel   = box.BorderForeground(lipgloss.Color("111"))
 )
 
+// View pins the header to the top and the preview and key legend to the bottom; the board in between
+// scrolls so the selected card or row stays visible.
 func (m Model) View() string {
-	var b strings.Builder
-	b.WriteString(m.header())
-	b.WriteString("\n")
+	top := m.header()
+	var body string
 	if m.effectiveView() == ViewColumns {
 		if strip := m.reviewStrip(); strip != "" {
-			b.WriteString(strip + "\n")
+			body = strip + "\n"
 		}
-		b.WriteString(m.columnsView())
+		body += m.columnsView()
 	} else {
-		b.WriteString(m.listView())
+		body = m.listView()
 	}
-	b.WriteString("\n" + m.preview() + "\n" + m.footer())
-	return b.String()
+	bottom := m.preview() + "\n" + m.footer()
+	avail := m.height - lineCount(top) - lineCount(bottom)
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	if avail > 0 && len(lines) > avail {
+		lines = window(lines, avail)
+	}
+	for avail > 0 && len(lines) < avail {
+		lines = append(lines, "")
+	}
+	return top + "\n" + strings.Join(lines, "\n") + "\n" + bottom
+}
+
+func lineCount(s string) int { return strings.Count(s, "\n") + 1 }
+
+// window keeps n lines around the selection marker, so scrolling never hides the selected item.
+func window(lines []string, n int) []string {
+	sel := 0
+	for i, l := range lines {
+		if strings.Contains(l, "▸") {
+			sel = i
+			break
+		}
+	}
+	start := sel - n/2
+	if start < 0 {
+		start = 0
+	}
+	if start+n > len(lines) {
+		start = len(lines) - n
+	}
+	return lines[start : start+n]
 }
 
 func (m Model) header() string {
@@ -389,25 +508,42 @@ func (m Model) header() string {
 	if gap < 2 {
 		gap = 2
 	}
-	var filters []string
-	for i, f := range []struct{ id, label string }{{FilterAll, fmt.Sprintf("All %d", len(m.snap.Tickets)+len(m.snap.Reviews))}, {FilterNeeds, fmt.Sprintf("Needs you %d", len(m.snap.NeedsYou()))}, {FilterReviews, fmt.Sprintf("Reviews %d", len(m.snap.Reviews))}} {
-		label := fmt.Sprintf(" %d %s ", i+1, f.label)
-		if m.filter == f.id {
-			filters = append(filters, selected.Render(label))
-		} else {
-			filters = append(filters, dim.Render(label))
-		}
-	}
-	views := []string{}
-	for _, v := range []struct{ id, label string }{{ViewColumns, " Columns "}, {ViewList, " List "}} {
-		if m.effectiveView() == v.id {
-			views = append(views, selected.Render(v.label))
-		} else {
-			views = append(views, dim.Render(v.label))
-		}
-	}
-	line2 := wrap(append(filters, "   "+strings.Join(views, "")+dim.Render(" v")), m.width)
+	line2 := wrap(m.headerItems(), m.width)
 	return title + strings.Repeat(" ", gap) + sync + "\n" + line2
+}
+
+type headerItem struct {
+	filter, view string
+	label        string
+}
+
+func (m Model) headerSpec() []headerItem {
+	return []headerItem{
+		{filter: FilterAll, label: fmt.Sprintf(" 1 All %d ", len(m.snap.Tickets)+len(m.snap.Reviews))},
+		{filter: FilterNeeds, label: fmt.Sprintf(" 2 Needs you %d ", len(m.snap.NeedsYou()))},
+		{filter: FilterReviews, label: fmt.Sprintf(" 3 Reviews %d ", len(m.snap.Reviews))},
+		{view: ViewColumns, label: " Columns "},
+		{view: ViewList, label: " List "},
+	}
+}
+
+// headerItems renders the filter and view buttons; views sit together after a wider gap.
+func (m Model) headerItems() []string {
+	var out []string
+	views := ""
+	for _, it := range m.headerSpec() {
+		on := (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView())
+		r := dim.Render(it.label)
+		if on {
+			r = selected.Render(it.label)
+		}
+		if it.view != "" {
+			views += r
+			continue
+		}
+		out = append(out, r)
+	}
+	return append(out, " "+views+dim.Render(" v"))
 }
 
 // syncLabel says how fresh the board is: refreshing, synced N min ago, or cached when the last refresh failed.
@@ -443,11 +579,7 @@ func (m Model) reviewStrip() string {
 
 func (m Model) columnsView() string {
 	cols := m.columns()
-	w := (m.width - 2) / len(cols)
-	if w < 20 {
-		w = 20
-	}
-	inner := w - 4
+	inner := m.columnWidth()
 	rendered := make([]string, len(cols))
 	for ci, c := range ticket.Columns {
 		lines := []string{bold.Render(fmt.Sprintf("%s %d", c.Title(), len(cols[ci])))}
@@ -603,7 +735,7 @@ func (m Model) footer() string {
 	if m.effectiveView() == ViewColumns {
 		move = "←↑↓→/wasd move"
 	}
-	keys := []string{move, "enter Open agent · Start", "f fix CI", "i ticket pane", "o Jira ↗", "p PR ↗", "tab/1-3 filter", "v view", "g refresh", "q close"}
+	keys := []string{move, "click selects", "enter Open agent · Start", "f fix CI", "i ticket pane", "o Jira ↗", "p PR ↗", "tab/1-3 filter", "v view", "g refresh", "q close"}
 	return dim.Render(wrap(keys, m.width))
 }
 

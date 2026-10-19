@@ -44,7 +44,7 @@ func newBoardCmd(a *App) *cobra.Command {
 				return err
 			}
 			model := tui.New(snap, have, &boardActions{a: a, c: c, ctx: cmd.Context()}, view)
-			_, err = tea.NewProgram(model, tea.WithAltScreen(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context())).Run()
+			_, err = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context())).Run()
 			if errors.Is(err, tea.ErrProgramKilled) {
 				return nil
 			}

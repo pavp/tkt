@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -368,5 +369,91 @@ func TestTickRefreshesWhenStale(t *testing.T) {
 	next, _ = next.Update(tickMsg(clock))
 	if r.last() != "refresh" || !strings.Contains(stripANSI(next.View()), "refreshing…") {
 		t.Errorf("stale board not refreshed: %v", r.calls)
+	}
+}
+
+func click(m tea.Model, x, y int) tea.Model {
+	m, _ = m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	return m
+}
+
+func lineIndex(view, needle string) int {
+	for i, l := range strings.Split(stripANSI(view), "\n") {
+		if strings.Contains(l, needle) {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestMouseSelectsCardsRowsAndFilters(t *testing.T) {
+	m := loaded(&recorder{})
+	view := m.View()
+	y := lineIndex(view, "DEMO-2")
+	x := strings.Index(strings.Split(stripANSI(view), "\n")[y], "DEMO-2")
+	m = click(m, lipgloss.Width(strings.Split(stripANSI(view), "\n")[y][:x]), y)
+	if !strings.Contains(stripANSI(m.View()), "▸ DEMO-2") {
+		t.Fatalf("click on DEMO-2's card did not select it:\n%s", stripANSI(m.View()))
+	}
+
+	header := strings.Split(stripANSI(m.View()), "\n")[1]
+	m = click(m, strings.Index(header, "List")+1, 1)
+	if !strings.Contains(stripANSI(m.View()), "↑↓/ws move") {
+		t.Fatalf("click on List did not switch view:\n%s", header)
+	}
+	view = m.View()
+	y = lineIndex(view, "DEMO-3")
+	m = click(m, 5, y)
+	if line := selectedLine(m.View()); !strings.Contains(line, "DEMO-3") {
+		t.Errorf("click on DEMO-3's row selected %q", line)
+	}
+
+	header = strings.Split(stripANSI(m.View()), "\n")[1]
+	m = click(m, strings.Index(header, "Needs you"), 1)
+	if v := stripANSI(m.View()); strings.Contains(v, "DEMO-3") || !strings.Contains(v, "DEMO-1") {
+		t.Errorf("click on Needs you did not filter:\n%s", v)
+	}
+}
+
+func TestMouseWheelMoves(t *testing.T) {
+	m := press(loaded(&recorder{}), "v")
+	m, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	if line := selectedLine(m.View()); !strings.Contains(line, "DEMO-2") {
+		t.Errorf("wheel down selected %q", line)
+	}
+	m, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	if line := selectedLine(m.View()); !strings.Contains(line, "DEMO-1") {
+		t.Errorf("wheel up selected %q", line)
+	}
+}
+
+func TestFooterStaysAtTheBottom(t *testing.T) {
+	m := loaded(&recorder{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 50})
+	lines := strings.Split(stripANSI(m.View()), "\n")
+	if len(lines) != 50 {
+		t.Fatalf("view has %d lines, want the full height 50", len(lines))
+	}
+	if !strings.Contains(lines[len(lines)-1], "q close") {
+		t.Errorf("last line = %q", lines[len(lines)-1])
+	}
+}
+
+func TestBoardScrollsToKeepSelectionVisible(t *testing.T) {
+	r := &recorder{}
+	snap := snapshot()
+	for i := 10; i < 40; i++ {
+		snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: ticket.Key(fmt.Sprintf("DEMO-%d", i)), Summary: "filler", Status: "To Do", Category: ticket.ToDo})
+	}
+	m := New(board.Snapshot{}, false, r, ViewList)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 15})
+	next, _ = next.Update(SnapshotMsg{Snap: snap})
+	for i := 0; i < 25; i++ {
+		next = press(next, "s")
+	}
+	view := stripANSI(next.View())
+	lines := strings.Split(view, "\n")
+	if len(lines) != 15 || !strings.Contains(view, "▸ ") || !strings.Contains(lines[len(lines)-1], "close") || !strings.HasPrefix(lines[0], "tkt") {
+		t.Errorf("scrolled view lost the header, selection or legend:\n%s", view)
 	}
 }
