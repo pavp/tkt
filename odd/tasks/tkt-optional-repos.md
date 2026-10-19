@@ -35,9 +35,9 @@ Forecast: 1210–2040 authored changed lines against the user's 2000-line budget
 | T9 | S10 | 2 | inline, no Writer reason | done · RED `TestSettingsShowsARemoveButtonOnConfiguredRows` | (feat(tui): remove buttons…) |
 | T10 | S11 | 2 | inline, no Writer reason | done · RED `TestFindAllListsEveryClone`, `TestRepoAt`, `TestSettingsFillsTheLocalPathFromFoundClones`, `TestBoardFindsClonesAndReadsOrigins` | (same) |
 | T11 | S12 | 2 | inline, no Writer reason | done · RED `TestWSLPath`, `TestFolderPickerCommand`, `TestPickedPath`, `TestPickerCancelled`, `TestSettingsFillsTheRepositoryFromThePickedFolder`, `TestSettingsPicksACloneFolder`; AppleScript checked with osacompile; WSL and Linux dialogs not run here | (same) |
-| T12 | S13 | 3 | inline, no Writer reason | pending | |
-| T13 | S14 | 3 | inline, no Writer reason · Risk item 5 (edits the user's Herdr config), own commit, verifier | pending | |
-| T14 | S15 | 3 | inline, no Writer reason | pending | |
+| T12 | S13 | 3 | inline, no Writer reason | done · RED `TestTicketLine`, `TestAgentLine`, `TestMostUrgentAgent` | 2e73b16 |
+| T13 | S14 | 3 | inline, no Writer reason · Risk item 5 (edits the user's Herdr config), own commit, verifier | done · RED sidebar block and install tests; verifier running | 7a837a0 |
+| T14 | S15 | 3 | inline, no Writer reason | done · RED `TestCardsShowTheAgentState`, `TestBoardRefreshCarriesAgentStatesInsideHerdr` | (feat(tui): show each ticket's agent state…) |
 | T8 | S9 | 2 | inline, no Writer reason | done · RED `TestColumnsScrollOnTheirOwn`, `TestWheelScrollsTheColumnUnderThePointer` | (this commit) |
 
 ## Log
