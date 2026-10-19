@@ -270,8 +270,8 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	cols := m.columns()
 	colWidth := m.columnWidth() + 2
 	c := msg.X / colWidth
-	// Inside a column box: top border, the column title, then four lines per card.
-	r := (body - 2) / 4
+	// Inside a column box: top border, the column title, then one bordered card after another.
+	r := (body - 2) / cardLines
 	if body >= 2 && c >= 0 && c < len(cols) && r < len(cols[c]) {
 		m.col, m.row = c, r
 		m.remember()
@@ -308,13 +308,13 @@ func (m *Model) clickHeader(x int) {
 	}
 }
 
-// columnWidth is the inner width of one column box.
+// columnWidth is the width of one column box without its border, so four boxes fill the pane.
 func (m Model) columnWidth() int {
-	w := (m.width - 2) / len(ticket.Columns)
+	w := m.width / len(ticket.Columns)
 	if w < 20 {
 		w = 20
 	}
-	return w - 4
+	return w - 2
 }
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -453,11 +453,14 @@ var (
 func (m Model) View() string {
 	top := m.header()
 	var body string
+	bottom0 := m.preview() + "\n" + m.footer()
 	if m.effectiveView() == ViewColumns {
+		height := m.height - lineCount(top) - lineCount(bottom0)
 		if strip := m.reviewStrip(); strip != "" {
 			body = strip + "\n"
+			height -= lineCount(strip)
 		}
-		body += m.columnsView()
+		body += m.columnsView(height)
 	} else {
 		body = m.listView()
 	}
@@ -577,31 +580,43 @@ func (m Model) reviewStrip() string {
 	return wrap(append(parts, dim.Render("(r to select)")), m.width)
 }
 
-func (m Model) columnsView() string {
+// cardLines is how many lines one bordered card takes: border, key, title, meta, border.
+const cardLines = 5
+
+// columnsView draws the four columns as boxes reaching height lines, each ticket in its own card.
+func (m Model) columnsView(height int) string {
 	cols := m.columns()
 	inner := m.columnWidth()
 	rendered := make([]string, len(cols))
 	for ci, c := range ticket.Columns {
-		lines := []string{bold.Render(fmt.Sprintf("%s %d", c.Title(), len(cols[ci])))}
+		parts := []string{bold.Render(fmt.Sprintf("%s %d", c.Title(), len(cols[ci])))}
 		if len(cols[ci]) == 0 {
-			lines = append(lines, dim.Render("— nothing here"))
+			parts = append(parts, dim.Render("— nothing here"))
 		}
 		for ri, it := range cols[ci] {
-			sel := ci == m.col && ri == m.row
-			lines = append(lines, card(*it.ticket, inner, sel)...)
+			parts = append(parts, card(*it.ticket, inner-2, ci == m.col && ri == m.row))
 		}
 		st := box
 		if ci == m.col {
 			st = boxSel
 		}
-		rendered[ci] = st.Width(inner).Render(strings.Join(lines, "\n"))
+		st = st.Width(inner)
+		if height > 2 {
+			st = st.Height(height - 2)
+		}
+		rendered[ci] = st.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 }
 
-func card(t ticket.Ticket, boxWidth int, sel bool) []string {
-	// The column box spends two cells on padding, so lines must fit the narrower content area.
-	width := boxWidth - 2
+var (
+	cardBox    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238"))
+	cardBoxSel = cardBox.BorderForeground(lipgloss.Color("111"))
+)
+
+// card renders one ticket in its own bordered box of the given outer width.
+func card(t ticket.Ticket, outer int, sel bool) string {
+	width := outer - 2
 	mark := " "
 	if sel {
 		mark = "▸"
@@ -615,12 +630,16 @@ func card(t ticket.Ticket, boxWidth int, sel bool) []string {
 		head = selected.Render(head)
 	}
 	gap := max(1, width-lipgloss.Width(head)-lipgloss.Width(flag))
-	title := truncate(t.Summary, width-2)
 	meta := prMeta(t)
 	if len(t.Subtasks) > 0 {
 		meta = strings.TrimSpace(meta + fmt.Sprintf(" · %d subtasks", len(t.Subtasks)))
 	}
-	return []string{head + strings.Repeat(" ", gap) + flag, "  " + title, "  " + dim.Render(truncate(meta, width-2)), ""}
+	content := head + strings.Repeat(" ", gap) + flag + "\n" + "  " + truncate(t.Summary, width-2) + "\n" + "  " + dim.Render(truncate(meta, width-2))
+	st := cardBox
+	if sel {
+		st = cardBoxSel
+	}
+	return st.Width(width).Render(content)
 }
 
 func prMeta(t ticket.Ticket) string {
