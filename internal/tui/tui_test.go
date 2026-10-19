@@ -457,3 +457,26 @@ func TestBoardScrollsToKeepSelectionVisible(t *testing.T) {
 		t.Errorf("scrolled view lost the header, selection or legend:\n%s", view)
 	}
 }
+
+func TestReviewsRenderLikeTheMockup(t *testing.T) {
+	r := &recorder{}
+	snap := snapshot()
+	snap.Reviews[0].Checks = ticket.ChecksPass
+	m := New(board.Snapshot{}, false, r, ViewColumns)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	next, _ = next.Update(SnapshotMsg{Snap: snap})
+	view := stripANSI(next.View())
+	if !strings.Contains(view, "│! #820 · Add pagination│") && !strings.Contains(view, "│ ! #820 · Add pagination │") {
+		t.Errorf("review chip not boxed:\n%s", view)
+	}
+	next = press(next, "3")
+	line := ""
+	for _, l := range strings.Split(stripANSI(next.View()), "\n") {
+		if strings.Contains(l, "#820") && strings.Contains(l, "Review requested") {
+			line = l
+		}
+	}
+	if !strings.Contains(line, "✓") || strings.Contains(line, "example-org") {
+		t.Errorf("review row should show the CI mark, not the repo: %q", line)
+	}
+}

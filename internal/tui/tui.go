@@ -569,15 +569,27 @@ func (m Model) syncLabel() string {
 	return "synced " + m.snap.FetchedAt.Local().Format("15:04")
 }
 
+var reviewChip = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("214")).Padding(0, 1)
+
+// reviewStrip shows review requests above the columns, each in its own orange chip as in the mockup.
 func (m Model) reviewStrip() string {
 	if len(m.snap.Reviews) == 0 {
 		return ""
 	}
-	parts := []string{dim.Render("Review requested")}
-	for _, pr := range m.snap.Reviews {
-		parts = append(parts, warn.Render("!")+fmt.Sprintf(" #%d · %s", pr.Number, truncate(pr.Title, 40)))
+	label := dim.Render("Review requested")
+	row := []string{lipgloss.NewStyle().PaddingTop(1).Render(label)}
+	used := lipgloss.Width(label)
+	for i, pr := range m.snap.Reviews {
+		chip := reviewChip.Render(warn.Render("!") + fmt.Sprintf(" #%d · %s", pr.Number, truncate(pr.Title, 36)))
+		if used+2+lipgloss.Width(chip) > m.width {
+			more := lipgloss.NewStyle().PaddingTop(1).Render(dim.Render(fmt.Sprintf("+%d more · press 3", len(m.snap.Reviews)-i)))
+			row = append(row, " ", more)
+			break
+		}
+		row = append(row, "  ", chip)
+		used += 2 + lipgloss.Width(chip)
 	}
-	return wrap(append(parts, dim.Render("(r to select)")), m.width)
+	return lipgloss.JoinHorizontal(lipgloss.Top, row...)
 }
 
 // cardLines is how many lines one bordered card takes: border, key, title, meta, border.
@@ -642,6 +654,18 @@ func card(t ticket.Ticket, outer int, sel bool) string {
 	return st.Width(width).Render(content)
 }
 
+func checkMark(c ticket.CheckState) string {
+	switch c {
+	case ticket.ChecksFail:
+		return "✕"
+	case ticket.ChecksPending:
+		return "○"
+	case ticket.ChecksPass:
+		return "✓"
+	}
+	return "—"
+}
+
 func prMeta(t ticket.Ticket) string {
 	var parts []string
 	for _, pr := range t.PRs {
@@ -691,8 +715,7 @@ func (m Model) listView() string {
 	for i, it := range items {
 		var line string
 		if it.pr != nil {
-			_, repo, _ := strings.Cut(it.pr.Repo, "/")
-			line = row(string(it.key), "Review requested", repo, it.pr.Title)
+			line = row(string(it.key), "Review requested", checkMark(it.pr.Checks), it.pr.Title)
 		} else {
 			line = row(string(it.key), it.ticket.Status, prMeta(*it.ticket), it.ticket.Summary)
 		}
