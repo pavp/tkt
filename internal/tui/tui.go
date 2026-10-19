@@ -88,6 +88,7 @@ type Model struct {
 	compact      bool
 	menu         *menu
 	detail       *detailView
+	settings     *settingsView
 	// inStrip means the keyboard cursor is on the review chips above the columns, at stripSel.
 	inStrip  bool
 	stripSel int
@@ -260,6 +261,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = max(0, msg.Width-2*margin), msg.Height
 		m.reselect()
+	case SettingsSavedMsg:
+		return m.settingsSaved(msg)
 	case SnapshotMsg:
 		m.loading = false
 		if msg.Err != nil {
@@ -300,6 +303,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // the keyboard so a stray click never starts an agent.
 func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	msg.X -= margin
+	if m.settings != nil {
+		return m.settingsMouse(msg)
+	}
 	if m.detail != nil && m.menu == nil {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
@@ -444,6 +450,9 @@ func (m Model) columnWidth() int {
 }
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.settings != nil {
+		return m.settingsKey(k)
+	}
 	if m.menu != nil {
 		return m.menuKey(k)
 	}
@@ -508,6 +517,8 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.actions.Refresh()
 	case "enter", " ":
 		m.openMenu()
+	case ",":
+		return m.openSettings()
 	case "i":
 		if it, ok := m.current(); ok && it.ticket != nil {
 			return m.openDetail(it.key)
@@ -622,6 +633,9 @@ func (m Model) View() string {
 
 func (m Model) board() string {
 	top := m.header()
+	if m.settings != nil {
+		return top + "\n" + m.detailBack() + "\n\n" + m.settingsBody() + "\n\n" + m.settingsFooter()
+	}
 	if m.detail != nil && m.menu == nil {
 		body := m.detailBody()
 		bottom := m.detailFooter()
@@ -1286,7 +1300,7 @@ func (m Model) footer() string {
 	}
 	legend := [][2]string{
 		{move, "move · ↑ to reviews"}, {"click", "select · open review"}, {"double-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
-		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
+		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
 	}
 	items := make([]string, len(legend))
 	for i, k := range legend {
