@@ -744,3 +744,24 @@ func TestMenuShowDetailsOpensTheDetail(t *testing.T) {
 		t.Errorf("detail not shown:\n%s", stripANSI(m.View()))
 	}
 }
+
+func TestListSeparatesMyTicketsFromReviews(t *testing.T) {
+	m := press(loaded(&recorder{}), "v")
+	v := stripANSI(m.View())
+	mine, reviews := strings.Index(v, "My tickets · 3"), strings.Index(v, "Review requested · 1")
+	if mine < 0 || reviews < 0 || mine > reviews {
+		t.Fatalf("sections missing or out of order:\n%s", v)
+	}
+	if i := strings.Index(v, "#820"); i < reviews {
+		t.Errorf("review listed before its section:\n%s", v)
+	}
+	y := lineIndex(m.View(), "#820          Review requested")
+	m = click(m, 6, y)
+	if line := selectedLine(m.View()); !strings.Contains(line, "#820") {
+		t.Errorf("click on the review row selected %q", line)
+	}
+	m = press(m, "1")
+	if !strings.Contains(stripANSI(m.View()), "▸ ") {
+		t.Error("lost the selection")
+	}
+}

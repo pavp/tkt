@@ -317,9 +317,15 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.effectiveView() == ViewList {
-		items := m.listItems()
-		if i := body - 1; i >= 0 && i < len(items) {
-			m.row = i
+		lines := strings.Split(strings.TrimRight(m.listView(), "\n"), "\n")
+		_, at := m.listLines(func(k, s, p, t string) string { return "" }, func(item) string { return "" })
+		avail := m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer())
+		start := 0
+		if avail > 0 && len(lines) > avail {
+			start = windowStart(lines, avail)
+		}
+		if i := start + body; i >= 0 && i < len(at) && at[i] >= 0 {
+			m.row = at[i]
 			m.remember()
 		}
 		return m, nil
@@ -590,6 +596,11 @@ func lineCount(s string) int { return strings.Count(s, "\n") + 1 }
 
 // window keeps n lines around the selection marker, so scrolling never hides the selected item.
 func window(lines []string, n int) []string {
+	start := windowStart(lines, n)
+	return lines[start : start+n]
+}
+
+func windowStart(lines []string, n int) int {
 	sel := 0
 	for i, l := range lines {
 		if strings.Contains(l, "▸") {
@@ -604,7 +615,7 @@ func window(lines []string, n int) []string {
 	if start+n > len(lines) {
 		start = len(lines) - n
 	}
-	return lines[start : start+n]
+	return start
 }
 
 func (m Model) header() string {
@@ -1010,9 +1021,38 @@ func (m Model) listView() string {
 	row := func(key, status, pr, title string) string {
 		return pad(key, keyWidth) + " " + pad(status, statusW) + " " + pad(pr, prW) + " " + truncate(title, titleWidth)
 	}
-	var b strings.Builder
-	b.WriteString("  " + dim.Render(row("KEY", "STATUS", "PR / CI", "TITLE")) + "\n")
+	lines, _ := m.listLines(row, prText)
+	return strings.Join(lines, "\n") + "\n"
+}
+
+var sectionStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
+
+// listLines lays the list out in two sections, the user's tickets and review requests, and returns for
+// every line the index of the item on it (-1 for titles and spacing), so clicks map back to items.
+func (m Model) listLines(row func(key, status, pr, title string) string, prText func(item) string) ([]string, []int) {
+	items := m.listItems()
+	lines := []string{"  " + dim.Render(row("KEY", "STATUS", "PR / CI", "TITLE"))}
+	at := []int{-1}
+	nTickets := 0
+	for _, it := range items {
+		if it.ticket != nil {
+			nTickets++
+		}
+	}
+	section := func(title string, n int) {
+		if len(lines) > 1 {
+			lines, at = append(lines, ""), append(at, -1)
+		}
+		lines = append(lines, sectionStyle.Render(fmt.Sprintf("%s · %d", title, n)))
+		at = append(at, -1)
+	}
 	for i, it := range items {
+		if i == 0 && it.ticket != nil {
+			section("My tickets", nTickets)
+		}
+		if it.pr != nil && (i == 0 || items[i-1].pr == nil) {
+			section("Review requested", len(items)-nTickets)
+		}
 		var line string
 		if it.pr != nil {
 			line = row(string(it.key), "Review requested", prText(it), it.pr.Title)
@@ -1021,14 +1061,15 @@ func (m Model) listView() string {
 		}
 		switch {
 		case i == m.row:
-			b.WriteString("▸ " + selected.Render(line) + "\n")
+			line = "▸ " + selected.Render(line)
 		case it.pr != nil || len(it.ticket.Attention()) > 0:
-			b.WriteString(warn.Render("!") + " " + line + "\n")
+			line = warn.Render("!") + " " + line
 		default:
-			b.WriteString("  " + line + "\n")
+			line = "  " + line
 		}
+		lines, at = append(lines, line), append(at, i)
 	}
-	return b.String()
+	return lines, at
 }
 
 func (m Model) preview() string {
