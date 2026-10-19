@@ -1,0 +1,52 @@
+# tkt — phases 1 and 2 (CLI + Herdr plugin)
+
+Objective: a working `tkt` CLI (phase 1) and Herdr plugin (phase 2) per `docs/design.md`. Branch chain `feat/tkt-phase-1-2-<n>-<slug>`, delivery **Stacked** PRs to `main`, budget **2000** authored changed lines per slice (user: "2000 lineas"). Test runner: `go test ./...`.
+
+## Specs
+
+- S1 Scope: "ok ahora que tenemos todo el panorama para una primera fase quiero implementar solo hasta el plugin de herdr" — phases 1 and 2 of `docs/design.md` §11, nothing from phase 3+ (no daemon, no web UI).
+- S2 Repository location: "me parece bien combinar las 3" — explicit `path`, else scan `repo_roots` for a clone whose remote matches, else offer `gh repo clone` (design §4).
+- S3 Branches: tkt never creates branches or worktrees; "y si el agente crea todo y le pasa la info a tkt y este actualiza en su UI?" — the agent creates them and registers with `tkt link`; discovery by ticket key as fallback (design §5).
+- S4 CLI: "dejemoslo como el original pero si cambia lo de el agente crea la rama y avisa" — human-oriented CLI (`init`, `auth`, `list`, `show`, `context`, `start`, `link`, `doctor`) with `--json` (design §5, §11).
+- S5 Secrets: macOS Keychain, Linux Secret Service, WSL Windows Credential Manager via `powershell.exe`, `TKT_JIRA_TOKEN` fallback (design §7).
+- S6 GitHub: "API directa + token de gh (Recomendado)" — `gh auth token --user <account>` per organization (design §6).
+- S7 Herdr board: "si, añadelo al prototipo. Poder alternar entre las dos vistas" — `tkt board` TUI with columns and list views toggled with `v`; list fallback on narrow terminals (design §6).
+- S8 Reviews: "Solo filtro (Recomendado)" — review-requested PRs never in columns; strip, "Needs you", and `r` filter.
+- S9 Fix CI: "Sí, en fase 2 (Recomendado)" — `f` sends the failing check log or requested-change comments to the ticket's agent via `agent.prompt`; no Jira/GitHub writes.
+- S10 Cache: "Sí (Recomendado)" — local disk cache so the board opens instantly; background refresh.
+- S11 Setup from Herdr: "el plugin de herdr deberia de poder iniciar toda la configuracion?" — plugin action and first-run detection open `tkt init` in a popup; logic stays in the CLI.
+- S12 Read-only: only reads against real Jira and GitHub during development; ask before any write (CLAUDE.md).
+- S13 Org-agnostic: no space keys, orgs, URLs, or real data in code or tests; fixtures use `DEMO-123`, `example-org` (CLAUDE.md).
+
+## Tasks
+
+Forecast (items 1–23, see L5): 4,310–7,040 authored changed lines.
+
+| ID | Slice | Specs | Forecast | Route | Branch (base) | Status | Commits |
+|---|---|---|---|---|---|---|---|
+| T1a | Core: paths, config + repo location, ticket domain, docs | S2 S12 S13 | measured 1,397 | inline, no Writer reason | `feat/tkt-phase-1-2-1a-core` (`main`) | in progress | |
+| T1b | Credentials (incl. WSL), CLI root, `auth`, `doctor` | S4 S5 S12 | measured 1,257 | inline, no Writer reason | `feat/tkt-phase-1-2-1b-cli` (T1a) | pending | |
+| T2a | Data clients: Jira, GitHub | S6 S13 | 1,300–2,000 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-2a-clients` (T1b) | pending | |
+| T2b | Cache, board assembly, `list` | S4 S10 | 900–1,400 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-2b-list` (T2a) | pending | |
+| T3a | ADF, `show`, `context` | S4 | 1,100–1,700 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-3a-show` (T2b) | pending | |
+| T3b | `init`, discovery, `link`, `start` | S2 S3 S4 S11 | 1,300–2,000 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-3b-work` (T3a) | pending | |
+| T4 | Herdr: client, `tkt herdr` commands, sidebar + agent state, manifest, setup action | S3 S11 | 1,200–2,000 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-4-herdr` (T3b) | pending | |
+| T5 | Board TUI, `f`, docs | S7 S8 S9 S10 | 1,300–2,000 (re-forecast) | inline, no Writer reason | `feat/tkt-phase-1-2-5-board` (T4) | pending | |
+
+High-risk units get their own commit: secrets (T1, item 2), new dependencies (T1, item 5), `tkt herdr install` (T4, item 5).
+
+Native grouping: once T5's PR is open, group with `gh stack link <T1a-pr> <T1b-pr> <T2a-pr> <T2b-pr> <T3a-pr> <T3b-pr> <T4-pr> <T5-pr>`; merging any PR then takes every unmerged PR below it. Every branch must live in this one repository; after grouping, read back each PR's base and diff and report what was observed (a PR whose diff grew is mis-grouped; `gh stack unstack <stack>` dissolves the stack before any base can be corrected).
+
+> Before each commit, run `git diff --numstat main` and sum additions + deletions, skipping binary rows (`-\t-`) and generated paths (lockfiles, `__snapshots__/`, files marked `linguist-generated` in `.gitattributes`); if the current work unit — slice or single unit — is over 2000 real changed lines, stop: hand the accumulated diff to `slice-diff` (budget 2000), then re-forecast every slice not yet started with `slice-plan` (budget 2000) — a slice that overran invalidates the estimates that assumed its size, not just its own. Slices already merged stay as they are.
+
+Per-slice base for the checkpoint: each slice's base is the previous slice's branch (T1a: `main`).
+
+## Log
+
+- L1 (2026-10-19) User's original request: the pasted tkt brief (phases, decisions, security, Herdr plugin, LLM integration) — see `docs/design.md`, which records it and every later decision.
+- L2 (2026-10-19) "ok ahora que tenemos todo el panorama para una primera fase quiero implementar solo hasta el plugin de herdr, que necesitariamos?"
+- L3 (2026-10-19) Decisions: reviews "Solo filtro (Recomendado)"; `f` "Sí, en fase 2 (Recomendado)"; cache "Sí (Recomendado)"; budget "2000 lineas"; repo location "me parece bien combinar las 3"; setup from Herdr asked and recommended (plugin opens `tkt init`).
+- L4 (2026-10-19) Delivery: "ok vamos con stacked".
+- L5 (2026-10-19) Forecast items: 1 skeleton 60–120 · 2 config + repo location 260–400 · 3 secrets + auth 100–190 · 4 WSL backend 100–180 · 5 domain 200–320 · 6 Jira client 340–540 · 7 ADF 300–460 · 8 GitHub client 360–560 · 9 cache 150–250 · 10 list 180–300 · 11 show 140–250 · 12 context 140–220 · 13 init 220–380 · 14 discovery + link 220–340 · 15 start 160–260 · 16 doctor 80–150 · 17 Herdr client 120–200 · 18 `tkt herdr` 280–440 · 19 sidebar + agent 150–250 · 20 board TUI 450–700 · 21 `f` 160–260 · 22 manifest 80–150 · 23 docs 60–120.
+- L6 Next: T1.
+- L7 (2026-10-19) Checkpoint fired: slice 1 measured 2,621 authored changed lines against the 2,000 budget (forecast 800–1,360; tests run about as long as the code, so estimates were roughly half). Split into T1a/T1b along the core vs. credentials-and-CLI boundary; every slice not yet started re-forecast at about 1.9× and cut so each stays within 2,000. Still Stacked and linear. A user permission rule denies Read/Edit on `**/secrets/*`, so the credential package is `internal/credstore`.
