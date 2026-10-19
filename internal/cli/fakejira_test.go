@@ -21,6 +21,8 @@ type fakeJira struct {
 	statuses  map[string][]jira.Status
 	projects  []jira.Project
 	files     map[string]string
+	// devPRs maps issue ids to development-panel PRs; nil means the panel is unavailable.
+	devPRs map[string][]jira.DevPullRequest
 }
 
 func (f *fakeJira) Myself(context.Context) (jira.User, error) {
@@ -56,8 +58,11 @@ func (f *fakeJira) Statuses(_ context.Context, p string) ([]jira.Status, error) 
 func (f *fakeJira) Projects(context.Context) ([]jira.Project, error) { return f.projects, nil }
 func (f *fakeJira) BrowseURL(key string) string                      { return "https://example.atlassian.net/browse/" + key }
 
-func (f *fakeJira) DevPullRequests(context.Context, string) ([]jira.DevPullRequest, error) {
-	return nil, errors.New("no development panel")
+func (f *fakeJira) DevPullRequests(_ context.Context, id string) ([]jira.DevPullRequest, error) {
+	if f.devPRs == nil {
+		return nil, errors.New("no development panel")
+	}
+	return f.devPRs[id], nil
 }
 
 func (f *fakeJira) Download(_ context.Context, url string, w io.Writer, _ int64) error {
