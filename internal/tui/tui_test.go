@@ -145,7 +145,7 @@ func TestToggleViewKeepsSelection(t *testing.T) {
 
 func selectedLine(view string) string {
 	for _, l := range strings.Split(view, "\n") {
-		if strings.HasPrefix(l, "▸ ") {
+		if strings.HasPrefix(l, " ▸ ") {
 			return l
 		}
 	}
@@ -277,7 +277,7 @@ func TestListColumnsLineUp(t *testing.T) {
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	var titleCols []int
 	for _, l := range strings.Split(stripANSI(next.View()), "\n") {
-		isRow := strings.HasPrefix(l, "▸ ") || strings.HasPrefix(l, "! ") || strings.HasPrefix(l, "  ")
+		isRow := strings.HasPrefix(l, " ▸ ") || strings.HasPrefix(l, " ! ") || strings.HasPrefix(l, "   ")
 		for _, word := range []string{"TITLE", "Filter accounts", "Keep sort", "Export CSV", "Long title"} {
 			if i := strings.Index(l, word); i >= 0 && isRow {
 				titleCols = append(titleCols, lipgloss.Width(l[:i]))
@@ -331,13 +331,13 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "synced 3 min ago", "1 All 4", "2 Needs you 2", " Columns  List ", "DEMO-3 · Export CSV\nTo Do · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "synced 3 min ago", "1 All 4", "2 Needs you 2", " Columns  List ", "DEMO-3 · Export CSV\n To Do · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
 	}
 	next = press(next, "l")
-	if !strings.Contains(stripANSI(next.View()), "DEMO-1 · Filter accounts\nIn Progress · CI failing · #812 · f sends the failure to the agent") {
+	if !strings.Contains(stripANSI(next.View()), "DEMO-1 · Filter accounts\n In Progress · CI failing · #812 · f sends the failure to the agent") {
 		t.Errorf("preview hint missing:\n%s", stripANSI(next.View()))
 	}
 }
@@ -457,7 +457,7 @@ func TestBoardScrollsToKeepSelectionVisible(t *testing.T) {
 	}
 	view := stripANSI(next.View())
 	lines := strings.Split(view, "\n")
-	if len(lines) != 15 || !strings.Contains(view, "▸ ") || !strings.Contains(lines[len(lines)-1], "close") || !strings.HasPrefix(lines[0], "tkt") {
+	if len(lines) != 15 || !strings.Contains(view, "▸ ") || !strings.Contains(lines[len(lines)-1], "close") || !strings.HasPrefix(lines[0], " tkt") {
 		t.Errorf("scrolled view lost the header, selection or legend:\n%s", view)
 	}
 }
@@ -763,5 +763,26 @@ func TestListSeparatesMyTicketsFromReviews(t *testing.T) {
 	m = press(m, "1")
 	if !strings.Contains(stripANSI(m.View()), "▸ ") {
 		t.Error("lost the selection")
+	}
+}
+
+func TestEveryRowSharesOneLeftMargin(t *testing.T) {
+	for _, view := range []string{ViewColumns, ViewList} {
+		m := tea.Model(New(snapshot(), true, &recorder{}, view))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+		for i, line := range strings.Split(stripANSI(m.View()), "\n") {
+			if line == "" {
+				continue
+			}
+			if !strings.HasPrefix(line, " ") || strings.HasPrefix(line, "  tkt") {
+				t.Errorf("%s line %d lacks the one-column margin: %q", view, i, line)
+			}
+			if w := lipgloss.Width(line); w > 120 {
+				t.Errorf("%s line %d is %d wide: %q", view, i, w, line)
+			}
+		}
+		if !strings.HasPrefix(stripANSI(m.View()), " tkt") {
+			t.Errorf("%s header should start at the margin: %q", view, strings.SplitN(stripANSI(m.View()), "\n", 2)[0])
+		}
 	}
 }

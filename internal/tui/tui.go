@@ -227,7 +227,7 @@ func (m *Model) remember() {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
+		m.width, m.height = max(0, msg.Width-2*margin), msg.Height
 		m.reselect()
 	case SnapshotMsg:
 		m.loading = false
@@ -268,6 +268,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // mouse selects what is under a click and scrolls with the wheel. Clicks only select: actions stay on
 // the keyboard so a stray click never starts an agent.
 func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	msg.X -= margin
 	if m.detail != nil && m.menu == nil {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
@@ -554,7 +555,20 @@ var (
 
 // View pins the header to the top and the preview and key legend to the bottom; the board in between
 // scrolls so the selected card or row stays visible.
+// margin is the left and right padding around the whole board, like the prototype's popup padding;
+// m.width is the width inside it.
+const margin = 1
+
 func (m Model) View() string {
+	pad := strings.Repeat(" ", margin)
+	lines := strings.Split(m.board(), "\n")
+	for i, l := range lines {
+		lines[i] = pad + l
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) board() string {
 	top := m.header()
 	if m.detail != nil && m.menu == nil {
 		body := m.detailBody()
