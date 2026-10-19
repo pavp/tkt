@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -156,7 +157,7 @@ func TestHerdrStartCreatesWorkspacesWithAgents(t *testing.T) {
 		t.Errorf("workspaces = %v", cwds)
 	}
 	start := f.Last("agent.start")
-	if start["kind"] != "claude" || start["pane_id"] != "w9:p1" || !strings.Contains(start["args"].([]any)[0].(string), "Work on Jira ticket DEMO-7") {
+	if start["kind"] != "claude" || start["name"] != "claude-demo-7-api" || start["pane_id"] != "w9:p1" || !strings.Contains(start["args"].([]any)[0].(string), "Work on Jira ticket DEMO-7") {
 		t.Errorf("agent.start = %v", start)
 	}
 	if len(*calls) != 0 {
@@ -538,5 +539,24 @@ func TestHerdrManifestHasNoAgentEvent(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(h.app.Env.DataDir(), "herdr-plugin", herdrplugin.FileName))
 	if strings.Contains(string(b), "pane.agent_status_changed") || strings.Contains(string(b), "on-agent") {
 		t.Errorf("Herdr shows agent states itself; the plugin should not follow them:\n%s", b)
+	}
+}
+
+func TestAgentNameFollowsHerdrRules(t *testing.T) {
+	valid := regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+	tests := []struct {
+		key  ticket.Key
+		dir  string
+		want string
+	}{
+		{"ACTO-170450", "/src/cloud-uac-accounts-web", "claude-acto-170450-cloud-uac-acc"},
+		{"DEMO-1", "/src/Web App", "claude-demo-1-web-app"},
+		{"DEMO-1", "/src/web.", "claude-demo-1-web"},
+	}
+	for _, tt := range tests {
+		got := agentName(tt.key, tt.dir)
+		if got != tt.want || !valid.MatchString(got) {
+			t.Errorf("agentName(%s, %s) = %q, want %q (valid: %v)", tt.key, tt.dir, got, tt.want, valid.MatchString(got))
+		}
 	}
 }

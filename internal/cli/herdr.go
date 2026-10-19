@@ -340,23 +340,23 @@ func (a *App) herdrStart(cmd *cobra.Command, args, repoFlags []string, clone boo
 			a.printf("Focusing %s\n", ws.Label)
 			return h.FocusWorkspace(ctx, ws.ID)
 		}
-		return a.startInWorkspace(ctx, h, plan.Existing.Path, string(plan.Key), plan.Prompt, true)
+		return a.startInWorkspace(ctx, h, plan.Key, plan.Existing.Path, string(plan.Key), plan.Prompt, true)
 	}
 	for i, dir := range plan.Dirs {
 		label := string(plan.Key) + " · " + filepath.Base(dir)
-		if err := a.startInWorkspace(ctx, h, dir, label, plan.Prompt, i == 0); err != nil {
+		if err := a.startInWorkspace(ctx, h, plan.Key, dir, label, plan.Prompt, i == 0); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, dir, label, prompt string, focus bool) error {
+func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, key ticket.Key, dir, label, prompt string, focus bool) error {
 	ws, pane, err := h.CreateWorkspace(ctx, dir, label, focus)
 	if err != nil {
 		return err
 	}
-	if err := h.StartAgent(ctx, pane.ID, "claude", label, []string{prompt}); err != nil {
+	if err := h.StartAgent(ctx, pane.ID, "claude", agentName(key, dir), []string{prompt}); err != nil {
 		return err
 	}
 	a.printf("✓ Claude Code started in workspace %s (%s)\n", label, ws.ID)
@@ -661,4 +661,21 @@ func sidebarTokens(t ticket.Ticket) map[string]*string {
 		tokens[tokenTicket] = &line
 	}
 	return tokens
+}
+
+var nameUnsafe = regexp.MustCompile(`[^a-z0-9_-]+`)
+
+// agentName builds the agent's name in Herdr's Agents list from the ticket and the checkout. Herdr
+// requires a unique name of lowercase letters, digits, "-" and "_", starting with a letter, at most 32
+// characters, so the workspace label cannot be used.
+func agentName(key ticket.Key, dir string) string {
+	repo := strings.Trim(nameUnsafe.ReplaceAllString(strings.ToLower(filepath.Base(dir)), "-"), "-_")
+	name := "claude-" + nameUnsafe.ReplaceAllString(strings.ToLower(string(key)), "-")
+	if repo != "" {
+		name += "-" + repo
+	}
+	if len(name) > 32 {
+		name = name[:32]
+	}
+	return strings.TrimRight(name, "-_")
 }
