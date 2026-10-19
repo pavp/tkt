@@ -878,3 +878,32 @@ func TestListHeaderHasARuleAndNeutralSections(t *testing.T) {
 		}
 	}
 }
+
+func rightClick(m tea.Model, x, y int) (tea.Model, tea.Cmd) {
+	return m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonRight, Action: tea.MouseActionPress})
+}
+
+func TestRightClickOpensTheActionsMenu(t *testing.T) {
+	r := &recorder{}
+	m := loaded(r)
+	lines := strings.Split(stripANSI(m.View()), "\n")
+	y := lineIndex(m.View(), "DEMO-2")
+	m, _ = rightClick(m, lipgloss.Width(lines[y][:strings.Index(lines[y], "DEMO-2")]), y)
+	if v := stripANSI(m.View()); !strings.Contains(v, "Actions for DEMO-2") {
+		t.Fatalf("right click on a card should open its menu:\n%s", v)
+	}
+
+	m = press(loaded(r), "v")
+	y = lineIndex(m.View(), "DEMO-3")
+	if m, _ = rightClick(m, 5, y); !strings.Contains(stripANSI(m.View()), "Actions for DEMO-3") {
+		t.Errorf("right click on a list row should open its menu:\n%s", stripANSI(m.View()))
+	}
+
+	m = loaded(r)
+	lines = strings.Split(stripANSI(m.View()), "\n")
+	y = lineIndex(m.View(), "#820")
+	m, cmd := rightClick(m, lipgloss.Width(lines[y][:strings.Index(lines[y], "#820")]), y)
+	if cmd != nil || !strings.Contains(stripANSI(m.View()), "Review request #820") {
+		t.Errorf("right click on a review chip should open its menu, not the PR:\n%s", stripANSI(m.View()))
+	}
+}

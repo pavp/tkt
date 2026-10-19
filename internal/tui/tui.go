@@ -305,16 +305,20 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case tea.MouseButtonWheelDown:
 		m.move(0, 1)
 		return m, nil
-	case tea.MouseButtonLeft:
+	case tea.MouseButtonLeft, tea.MouseButtonRight:
 	default:
 		return m, nil
 	}
 	if msg.Action != tea.MouseActionPress {
 		return m, nil
 	}
+	// A right click selects what is under the pointer and opens its menu, like enter.
+	right := msg.Button == tea.MouseButtonRight
 	headerLines := lineCount(m.header())
 	if _, _, x, y, h, _ := m.headerLayout(); msg.Y >= y && msg.Y < y+h {
-		m.clickHeader(msg.X - x)
+		if !right {
+			m.clickHeader(msg.X - x)
+		}
 		return m, nil
 	}
 	body := msg.Y - headerLines
@@ -332,14 +336,22 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if i := start + body; i >= 0 && i < len(at) && at[i] >= 0 {
 			m.row = at[i]
 			m.remember()
+			if right {
+				m.openMenu()
+			}
 		}
 		return m, nil
 	}
 	if strip, spans := m.reviewChips(); strip != "" {
 		if body < lineCount(strip) {
 			// A click on a review chip opens that pull request: following a link is harmless, unlike starting an agent.
-			for _, sp := range spans {
+			for i, sp := range spans {
 				if msg.X >= sp.start && msg.X < sp.start+sp.width {
+					if right {
+						m.inStrip, m.stripSel = true, i
+						m.openMenu()
+						return m, nil
+					}
 					return m, m.actions.Open(sp.pr.URL)
 				}
 			}
@@ -355,8 +367,18 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if body >= 3 && c >= 0 && c < len(cols) && r < len(cols[c]) {
 		m.col, m.row = c, r
 		m.remember()
+		if right {
+			m.inStrip = false
+			m.openMenu()
+		}
 	}
 	return m, nil
+}
+
+func (m *Model) openMenu() {
+	if it, ok := m.current(); ok {
+		m.menu = m.buildMenu(it)
+	}
 }
 
 // clickHeader switches filter or view when x, relative to where the controls start, falls on a button.
@@ -444,9 +466,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = "refreshing…"
 		return m, m.actions.Refresh()
 	case "enter", " ":
-		if it, ok := m.current(); ok {
-			m.menu = m.buildMenu(it)
-		}
+		m.openMenu()
 	case "i":
 		if it, ok := m.current(); ok && it.ticket != nil {
 			return m.openDetail(it.key)
@@ -1220,7 +1240,7 @@ func (m Model) footer() string {
 		move = "←↑↓→ wasd"
 	}
 	legend := [][2]string{
-		{move, "move · ↑ to reviews"}, {"click", "select · open review"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
+		{move, "move · ↑ to reviews"}, {"click", "select · open review"}, {"right-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
 		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
 	}
 	items := make([]string, len(legend))
