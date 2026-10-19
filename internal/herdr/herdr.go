@@ -172,6 +172,20 @@ func (c *Client) StartAgent(ctx context.Context, paneID, kind, name string, args
 	return c.Call(ctx, "agent.start", map[string]any{"pane_id": paneID, "kind": kind, "name": name, "args": args}, nil)
 }
 
+// SplitPane opens a new pane at cwd to the right of paneID, without moving the focus.
+func (c *Client) SplitPane(ctx context.Context, paneID, cwd string) (Pane, error) {
+	var r struct {
+		Pane Pane `json:"pane"`
+	}
+	err := c.Call(ctx, "pane.split", map[string]any{"target_pane_id": paneID, "direction": "right", "cwd": cwd}, &r)
+	return r.Pane, err
+}
+
+// WaitAgent blocks until the agent in target reaches status, or fails after timeout.
+func (c *Client) WaitAgent(ctx context.Context, target, status string, timeout time.Duration) error {
+	return c.Call(ctx, "agent.wait", map[string]any{"target": target, "until": []string{status}, "timeout_ms": timeout.Milliseconds()}, nil)
+}
+
 // Prompt submits text to an agent; target is a pane id.
 func (c *Client) Prompt(ctx context.Context, target, text string) error {
 	return c.Call(ctx, "agent.prompt", map[string]any{"target": target, "text": text}, nil)

@@ -160,7 +160,7 @@ func TestHerdrStartCreatesWorkspacesWithAgents(t *testing.T) {
 		t.Errorf("agent.start = %v", start)
 	}
 	prompt := f.Last("agent.prompt")
-	if text, _ := prompt["text"].(string); prompt["target"] != "w9:p1" || !strings.Contains(text, "Work on Jira ticket DEMO-7") || !strings.Contains(text, "\n") {
+	if text, _ := prompt["text"].(string); prompt["target"] != "claude" || !strings.Contains(text, "Work on Jira ticket DEMO-7") || !strings.Contains(text, "herdr worktree create") {
 		t.Errorf("agent.prompt = %v", prompt)
 	}
 	if len(*calls) != 0 {
@@ -564,18 +564,108 @@ func TestHerdrStartNamesAgentsClaudeAndNumbersTakenNames(t *testing.T) {
 	}
 }
 
-func TestHerdrStartLeavesPromptToUserWhenAgentIsBlocked(t *testing.T) {
+func TestHerdrStartReusesOpenWorkspaceWithoutAgent(t *testing.T) {
+	tests := []struct {
+		name      string
+		agents    string
+		startErr  string
+		splitErr  string
+		wantReuse bool
+		wantPane  string
+	}{
+		{name: "idle workspace", agents: `[]`, wantReuse: true, wantPane: "w4:p1"},
+		{name: "agent already there", agents: `[{"pane_id":"w4:p2","workspace_id":"w4","agent":"claude"}]`, wantPane: "w9:p1"},
+		{name: "pane busy gets a split", agents: `[]`, startErr: "pane is not at an interactive shell prompt", wantReuse: true, wantPane: "w4:p3"},
+		{name: "split refused", agents: `[]`, startErr: "pane is not at an interactive shell prompt", splitErr: "no room", wantPane: "w9:p1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, f, _ := herdrHarness(t)
+			f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+			f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w3:p1","workspace_id":"w3","cwd":"/src/api"},{"pane_id":"w4:p1","workspace_id":"w4","cwd":"/src/web/"}]}`
+			f.Results["agent.list"] = `{"type":"agent_list","agents":` + tt.agents + `}`
+			f.Results["pane.split"] = `{"type":"pane_info","pane":{"pane_id":"w4:p3","workspace_id":"w4","cwd":"/src/web"}}`
+			if tt.splitErr != "" {
+				f.Errors["pane.split"] = tt.splitErr
+			}
+			h.app.NewHerdr = func() HerdrAPI { return herdr.New(f.Path) }
+			if tt.startErr != "" {
+				f.Errors["agent.start"] = tt.startErr
+				h.app.NewHerdr = func() HerdrAPI { return takenOnce{HerdrAPI: herdr.New(f.Path), f: f} }
+			}
+			if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", true); err != nil {
+				t.Fatal(err)
+			}
+			wantPane := tt.wantPane
+			if tt.startErr != "" {
+				if got := f.Last("pane.split"); got["target_pane_id"] != "w4:p1" || got["cwd"] != "/src/web" {
+					t.Errorf("pane.split = %v", got)
+				}
+			}
+			if tt.wantReuse {
+				if got := f.Last("workspace.focus"); got["workspace_id"] != "w4" {
+					t.Errorf("focus = %v", got)
+				}
+			}
+			if created := count(f, "workspace.create") == 1; created == tt.wantReuse {
+				t.Errorf("workspace.create calls = %d", count(f, "workspace.create"))
+			}
+			if got := f.Last("agent.start"); got["pane_id"] != wantPane {
+				t.Errorf("agent.start = %v", got)
+			}
+			if got := f.Last("agent.prompt"); got["target"] != "claude" {
+				t.Errorf("agent.prompt = %v", got)
+			}
+		})
+	}
+}
+
+func TestHerdrStartHandsPromptToUserWhenHerdrRefusesIt(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
-	f.Errors["agent.start"] = "agent_not_ready: claude is blocked"
+	f.Errors["agent.prompt"] = "agent_not_ready: agent claude is not an active named agent"
 	if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", true); err != nil {
 		t.Fatal(err)
 	}
-	if count(f, "agent.prompt") != 0 {
-		t.Error("prompted a blocked agent")
-	}
-	if out := h.out.String(); !strings.Contains(out, "waiting for an answer") || !strings.Contains(out, "Work on DEMO-7") {
+	if out := h.out.String(); !strings.Contains(out, "did not get its first prompt") || !strings.Contains(out, "give it this prompt:\n\nWork on DEMO-7") {
 		t.Errorf("output = %q", out)
+	}
+}
+
+func TestHerdrStartWaitsForBlockedAgentBeforePrompting(t *testing.T) {
+	tests := []struct {
+		name       string
+		waitErr    string
+		wantPrompt bool
+	}{
+		{name: "user answers", wantPrompt: true},
+		{name: "nobody answers", waitErr: "timeout: agent did not reach idle"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, f, _ := herdrHarness(t)
+			f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+			f.Errors["agent.start"] = "agent_not_ready: claude is blocked"
+			if tt.waitErr != "" {
+				f.Errors["agent.wait"] = tt.waitErr
+			}
+			if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", true); err != nil {
+				t.Fatal(err)
+			}
+			if got := f.Last("agent.wait"); got["target"] != "claude" || got["until"].([]any)[0] != "idle" {
+				t.Errorf("agent.wait = %v", got)
+			}
+			out := h.out.String()
+			if !strings.Contains(out, "answer it there") {
+				t.Errorf("output = %q", out)
+			}
+			if got := f.Last("agent.prompt"); (got["text"] == "Work on DEMO-7") != tt.wantPrompt {
+				t.Errorf("agent.prompt = %v", got)
+			}
+			if !tt.wantPrompt && !strings.Contains(out, "give it this prompt:\n\nWork on DEMO-7") {
+				t.Errorf("prompt not handed to the user: %q", out)
+			}
+		})
 	}
 }
 

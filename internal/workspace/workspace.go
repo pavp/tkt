@@ -212,6 +212,11 @@ func StartPrompt(key ticket.Key, summary string) string {
 4. Then implement the ticket.`, key, summary)
 }
 
+// HerdrStartPrompt is StartPrompt for an agent inside Herdr, which only shows worktrees it created as workspaces.
+func HerdrStartPrompt(key ticket.Key, summary string) string {
+	return StartPrompt(key, summary) + "\n\nYou are running inside Herdr: create the worktree with `herdr worktree create --cwd <this repository> --branch <branch> [--base <base>]` instead of `git worktree add`, so Herdr opens it as its own workspace."
+}
+
 // ContinuePrompt is the first message when the agent opens in an existing worktree.
 func ContinuePrompt(key ticket.Key, summary string) string {
 	return fmt.Sprintf("Continue work on Jira ticket %s: %s. Refresh the context with `tkt context %s --images .ticket-assets > .ticket.md` and read .ticket.md first.", key, summary, key)
