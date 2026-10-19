@@ -251,10 +251,10 @@ func TestTicketLine(t *testing.T) {
 		want  string
 		alert bool
 	}{
-		{"failing CI", failing, "DEMO-1 · ✕ CI · #812", true},
-		{"changes requested", ticket.Ticket{Key: "DEMO-2", Category: ticket.InReview, PRs: []ticket.PullRequest{{Number: 45, State: ticket.PROpen, Checks: ticket.ChecksPass, Review: ticket.ReviewChangesRequested}}}, "DEMO-2 · changes requested · #45", true},
-		{"green", ticket.Ticket{Key: "DEMO-3", Category: ticket.InReview, PRs: []ticket.PullRequest{{Number: 9, State: ticket.PROpen, Checks: ticket.ChecksPass}}}, "DEMO-3 · ✓ CI · #9", false},
-		{"no PRs", ticket.Ticket{Key: "DEMO-4", Status: "To Do"}, "DEMO-4 · To Do", false},
+		{"failing CI", failing, "✕ CI · #812", true},
+		{"changes requested", ticket.Ticket{Key: "DEMO-2", Category: ticket.InReview, PRs: []ticket.PullRequest{{Number: 45, State: ticket.PROpen, Checks: ticket.ChecksPass, Review: ticket.ReviewChangesRequested}}}, "changes requested · #45", true},
+		{"green", ticket.Ticket{Key: "DEMO-3", Category: ticket.InReview, PRs: []ticket.PullRequest{{Number: 9, State: ticket.PROpen, Checks: ticket.ChecksPass}}}, "✓ CI · #9", false},
+		{"no PRs", ticket.Ticket{Key: "DEMO-4", Status: "To Do"}, "To Do", false},
 	}
 	for _, tt := range tests {
 		got, alert := TicketLine(tt.t)
