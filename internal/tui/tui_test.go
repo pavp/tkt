@@ -1001,3 +1001,65 @@ func TestBoardShowsSnapshotWarningsUnderTheHeader(t *testing.T) {
 		t.Errorf("clicks should still map to cards under the warning:\n%s", v)
 	}
 }
+
+func tallBoard(t *testing.T) tea.Model {
+	t.Helper()
+	snap := snapshot()
+	for i := 10; i < 22; i++ {
+		snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: ticket.Key(fmt.Sprintf("DEMO-%d", i)), Summary: "filler", Status: "To Do", Category: ticket.ToDo})
+	}
+	m := New(board.Snapshot{}, false, &recorder{}, ViewColumns)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	next, _ = next.Update(SnapshotMsg{Snap: snap})
+	return next
+}
+
+func TestColumnsScrollOnTheirOwn(t *testing.T) {
+	m := tallBoard(t)
+	v := stripANSI(m.View())
+	lines := strings.Split(v, "\n")
+	if len(lines) != 40 || !strings.Contains(lines[1], "tkt") || !strings.Contains(lines[len(lines)-1], "close") {
+		t.Fatalf("header or legend scrolled away (%d lines):\n%s", len(lines), v)
+	}
+	if !strings.Contains(v, "↓ ") || !strings.Contains(v, " more") || !strings.Contains(v, "Filter accounts") {
+		t.Errorf("the tall column should mark hidden cards while the others stay:\n%s", v)
+	}
+	for i := 0; i < 12; i++ {
+		m = press(m, "s")
+	}
+	v = stripANSI(m.View())
+	if !strings.Contains(v, "▸ DEMO-") || !strings.Contains(v, "↑ ") || !strings.Contains(v, "In Progress") {
+		t.Errorf("moving down should scroll only that column and keep the selection visible:\n%s", v)
+	}
+	if lines := strings.Split(v, "\n"); !strings.Contains(lines[1], "tkt") {
+		t.Errorf("the header moved:\n%s", v)
+	}
+}
+
+func TestWheelScrollsTheColumnUnderThePointer(t *testing.T) {
+	m := tallBoard(t)
+	m = press(m, "l")
+	if !strings.Contains(stripANSI(m.View()), "▸ DEMO-1") {
+		t.Fatalf("selection should be in In Progress:\n%s", stripANSI(m.View()))
+	}
+	y := lineIndex(m.View(), "To Do") + 3
+	m, _ = m.Update(tea.MouseMsg{X: 5, Y: y, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "↑ 1 more") || !strings.Contains(v, "▸ DEMO-1") {
+		t.Errorf("the wheel over To Do should scroll To Do and leave the selection:\n%s", v)
+	}
+	lines := strings.Split(v, "\n")
+	cy := -1
+	for i, l := range lines {
+		if strings.Contains(l, "DEMO-11") {
+			cy = i
+			break
+		}
+	}
+	if cy < 0 {
+		t.Fatalf("DEMO-11 not visible after scrolling:\n%s", v)
+	}
+	if v := stripANSI(click(m, 5, cy).View()); !strings.Contains(v, "▸ DEMO-11") {
+		t.Errorf("a click on a scrolled column should select the card under it:\n%s", v)
+	}
+}

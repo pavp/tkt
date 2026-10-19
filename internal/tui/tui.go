@@ -89,6 +89,8 @@ type Model struct {
 	menu         *menu
 	detail       *detailView
 	settings     *settingsView
+	// colOffset is how far each column is scrolled; an array so copies of the model never share it.
+	colOffset [8]int
 	// inStrip means the keyboard cursor is on the review chips above the columns, at stripSel.
 	inStrip  bool
 	stripSel int
@@ -336,11 +338,20 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch msg.Button {
-	case tea.MouseButtonWheelUp:
-		m.move(0, -1)
-		return m, nil
-	case tea.MouseButtonWheelDown:
-		m.move(0, 1)
+	case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+		d := 1
+		if msg.Button == tea.MouseButtonWheelUp {
+			d = -1
+		}
+		if c := msg.X / (m.columnWidth() + 2); m.effectiveView() == ViewColumns && !m.inStrip && c != m.col && c >= 0 && c < len(m.colOffset) {
+			cols := m.columns()
+			if c < len(cols) {
+				capacity, _ := m.columnCapacity(m.columnsHeight(), len(cols[c]))
+				m.colOffset[c] = clamp(m.columnOffset(c, len(cols[c]), capacity)+d, 0, len(cols[c])-capacity)
+			}
+			return m, nil
+		}
+		m.move(0, d)
 		return m, nil
 	case tea.MouseButtonLeft:
 	default:
@@ -388,9 +399,23 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	cols := m.columns()
 	colWidth := m.columnWidth() + 2
 	c := msg.X / colWidth
-	// Inside a column box: top border, the column title and its rule, then one bordered card after another.
-	r := (body - 3) / m.cardLines()
-	if body >= 3 && c >= 0 && c < len(cols) && r < len(cols[c]) {
+	// Inside a column box: top border, the column title and its rule, the "↑ more" line when cards are
+	// hidden above, then one bordered card after another.
+	first := 3
+	r := -1
+	if c >= 0 && c < len(cols) {
+		capacity, _ := m.columnCapacity(m.columnsHeight(), len(cols[c]))
+		off := m.columnOffset(c, len(cols[c]), capacity)
+		if off > 0 {
+			first++
+		}
+		if body >= first {
+			if i := (body - first) / m.cardLines(); i < capacity {
+				r = off + i
+			}
+		}
+	}
+	if r >= 0 && c >= 0 && c < len(cols) && r < len(cols[c]) {
 		m.col, m.row = c, r
 		m.inStrip = false
 		m.remember()
@@ -895,6 +920,39 @@ func (m Model) cardLines() int {
 }
 
 // columnsView draws the four columns as boxes reaching height lines, each ticket in its own card.
+// columnsHeight is the height the column boxes get between the header, the review strip and the legend.
+func (m Model) columnsHeight() int {
+	h := m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer())
+	if strip := m.reviewStrip(); strip != "" {
+		h -= lineCount(strip)
+	}
+	return h
+}
+
+// columnCapacity says how many of n cards fit in a column box of height lines; when they do not all
+// fit, a line above and below is kept for the "more" markers.
+func (m Model) columnCapacity(height, n int) (int, bool) {
+	inner := height - 4
+	if n == 0 || n*m.cardLines() <= inner {
+		return n, false
+	}
+	return max(1, (inner-2)/m.cardLines()), true
+}
+
+// columnOffset is the first visible card of column ci: its own scroll, moved just enough to keep the
+// selected card visible when the selection is in that column.
+func (m Model) columnOffset(ci, n, capacity int) int {
+	off := 0
+	if ci < len(m.colOffset) {
+		off = m.colOffset[ci]
+	}
+	if ci == m.col && !m.inStrip {
+		off = min(off, m.row)
+		off = max(off, m.row-capacity+1)
+	}
+	return clamp(off, 0, n-capacity)
+}
+
 func (m Model) columnsView(height int) string {
 	cols := m.columns()
 	inner := m.columnWidth()
@@ -904,8 +962,18 @@ func (m Model) columnsView(height int) string {
 		if len(cols[ci]) == 0 {
 			parts = append(parts, " "+dim.Render("— nothing here"))
 		}
-		for ri, it := range cols[ci] {
-			parts = append(parts, card(*it.ticket, inner, ci == m.col && ri == m.row && !m.inStrip, m.compact))
+		n := len(cols[ci])
+		capacity, scroll := m.columnCapacity(height, n)
+		off := m.columnOffset(ci, n, capacity)
+		end := min(n, off+capacity)
+		if off > 0 {
+			parts = append(parts, moreLine("↑", off))
+		}
+		for ri := off; ri < end; ri++ {
+			parts = append(parts, card(*cols[ci][ri].ticket, inner, ci == m.col && ri == m.row && !m.inStrip, m.compact))
+		}
+		if scroll {
+			parts = append(parts, moreLine("↓", n-end))
 		}
 		// Cards run edge to edge inside their column, with no padding between them and the border.
 		st := box.Padding(0)
@@ -919,6 +987,13 @@ func (m Model) columnsView(height int) string {
 		rendered[ci] = st.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
+}
+
+func moreLine(arrow string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return dim.Render(fmt.Sprintf(" %s %d more", arrow, n))
 }
 
 // columnHead is a column's header: name left, count right, a rule below. Every column looks the same;
