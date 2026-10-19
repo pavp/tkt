@@ -4,13 +4,16 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/herdr/herdrtest"
+	"github.com/pavp/tkt/internal/herdrplugin"
 	"github.com/pavp/tkt/internal/ticket"
+	"github.com/pavp/tkt/internal/tui"
 	"github.com/pavp/tkt/internal/workspace"
 )
 
@@ -153,7 +156,7 @@ func TestHerdrStartCreatesWorkspacesWithAgents(t *testing.T) {
 		t.Errorf("workspaces = %v", cwds)
 	}
 	start := f.Last("agent.start")
-	if start["kind"] != "claude" || start["pane_id"] != "w9:p1" || !strings.Contains(start["args"].([]any)[0].(string), "Work on Jira ticket DEMO-7") {
+	if start["kind"] != "claude" || start["name"] != "claude" || start["pane_id"] != "w9:p1" || !strings.Contains(start["args"].([]any)[0].(string), "Work on Jira ticket DEMO-7") {
 		t.Errorf("agent.start = %v", start)
 	}
 	if len(*calls) != 0 {
@@ -198,7 +201,10 @@ func TestHerdrRefreshLabelsTicketWorkspaces(t *testing.T) {
 	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[
 		{"workspace_id":"w1","label":"web-DEMO-1","worktree":{"checkout_path":"/src/web-DEMO-1"}},
 		{"workspace_id":"w2","label":"dotfiles"}]}`
-	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p1","workspace_id":"w1","agent":"claude","agent_status":"working"}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[
+		{"pane_id":"w1:p1","workspace_id":"w1","agent":"claude","agent_status":"idle"},
+		{"pane_id":"w1:p2","workspace_id":"w1","agent":"claude","agent_status":"working"},
+		{"pane_id":"w1:p3","workspace_id":"w1","agent_status":"unknown"}]}`
 	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
 	if code := h.exec("herdr", "refresh"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
@@ -207,8 +213,10 @@ func TestHerdrRefreshLabelsTicketWorkspaces(t *testing.T) {
 	if got["workspace_id"] != "w1" || got["source"] != "plugin:tkt" || got["ttl_ms"] != float64(3600000) {
 		t.Errorf("report = %v", got)
 	}
-	if label := got["tokens"].(map[string]any)["tkt"]; label != "DEMO-1 · ✕ CI · #812 · claude working" {
-		t.Errorf("label = %v", label)
+	tokens := got["tokens"].(map[string]any)
+	want := map[string]any{"tkt": nil, "tkt_alert": "✕ CI · #812"}
+	if !reflect.DeepEqual(tokens, want) {
+		t.Errorf("tokens = %v, want %v", tokens, want)
 	}
 	if count(f, "workspace.report_metadata") != 1 {
 		t.Error("labelled a workspace without a ticket")
@@ -232,7 +240,7 @@ func TestHerdrRestoreUsesCacheOnly(t *testing.T) {
 	if code := h.exec("herdr", "restore"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	if label := f.Last("workspace.report_metadata")["tokens"].(map[string]any)["tkt"]; label != "DEMO-1 · In Progress" {
+	if label := f.Last("workspace.report_metadata")["tokens"].(map[string]any)["tkt"]; label != "In Progress" {
 		t.Errorf("label = %v", label)
 	}
 }
@@ -370,4 +378,196 @@ func TestEnsureJiraTokenConnectsBeforeTheBoard(t *testing.T) {
 	if ok, err := h.app.ensureJiraToken(context.Background(), c); err != nil || !ok || strings.Count(h.errOut.String(), "press Enter to connect Jira") != 1 {
 		t.Errorf("a stored token should open the board without asking: %v, %v", ok, err)
 	}
+}
+
+func herdrConfig(t *testing.T, h *harness, content string) string {
+	t.Helper()
+	cfg := filepath.Join(h.home, ".config", "herdr", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func TestHerdrInstallAddsAndUninstallRemovesSidebarRows(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	original := "[theme]\nname = \"catppuccin\"\n"
+	cfg := herdrConfig(t, h, original)
+	h.app.Stdin = strings.NewReader("n\n\n")
+	if code := h.exec("herdr", "install"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	b, _ := os.ReadFile(cfg)
+	if !strings.Contains(string(b), `token = "$tkt_alert"`) || strings.Contains(string(b), "tkt_agent") || strings.Contains(string(b), "tkt.board") {
+		t.Errorf("config:\n%s", b)
+	}
+	if !strings.Contains(h.errOut.String(), "Show each ticket and its agent in Herdr's sidebar?") || !strings.Contains(h.out.String(), "✓ Added tkt's ticket and agent lines to Herdr's sidebar") {
+		t.Errorf("stderr %q, stdout %q", h.errOut, h.out)
+	}
+	if count(f, "server.reload_config") != 2 {
+		t.Error("config should be reloaded before (to learn its warnings) and after writing the rows")
+	}
+	if code := h.exec("herdr", "uninstall"); code != 0 {
+		t.Fatalf("uninstall exit %d: %s", code, h.errOut)
+	}
+	if b, _ := os.ReadFile(cfg); string(b) != original {
+		t.Errorf("uninstall left:\n%s", b)
+	}
+}
+
+func TestHerdrInstallLeavesTheUsersSidebarRowsAlone(t *testing.T) {
+	h, _, _ := herdrHarness(t)
+	own := "[ui.sidebar.spaces]\nrows = [[\"workspace\"]]\n"
+	cfg := herdrConfig(t, h, own)
+	if code := h.exec("herdr", "install", "--no-keys", "--sidebar"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if b, _ := os.ReadFile(cfg); string(b) != own {
+		t.Errorf("own rows rewritten:\n%s", b)
+	}
+	if !strings.Contains(h.out.String(), "you configure [ui.sidebar.spaces] yourself") || !strings.Contains(h.out.String(), `token = "$tkt"`) {
+		t.Errorf("should show the rows to add:\n%s", h.out)
+	}
+}
+
+func TestHerdrInstallUndoesSidebarRowsHerdrRejects(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	original := "[theme]\nname = \"catppuccin\"\n"
+	cfg := herdrConfig(t, h, original)
+	f.Results["server.reload_config"] = `{"type":"config_reload","status":"failed","diagnostics":["ui.sidebar.spaces.rows: unknown token"]}`
+	if code := h.exec("herdr", "install", "--no-keys", "--sidebar"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if b, _ := os.ReadFile(cfg); string(b) != original {
+		t.Errorf("rejected rows should be undone:\n%s", b)
+	}
+	if !strings.Contains(h.out.String(), "Herdr rejected the sidebar rows (ui.sidebar.spaces.rows: unknown token); your config is back as it was") {
+		t.Errorf("stdout = %q", h.out)
+	}
+}
+
+func TestBoardRefreshCarriesAgentStatesInsideHerdr(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.env["HERDR_ENV"] = "1"
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[
+		{"workspace_id":"w1","label":"web-DEMO-1","worktree":{"checkout_path":"/src/web-DEMO-1"}}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p1","workspace_id":"w1","agent":"claude","agent_status":"blocked"}]}`
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	msg, ok := b.Refresh()().(tui.SnapshotMsg)
+	if !ok || msg.Err != nil {
+		t.Fatalf("refresh = %+v", msg)
+	}
+	if got := msg.Snap.Agents["DEMO-1"]; got != "blocked" {
+		t.Errorf("agents = %v", msg.Snap.Agents)
+	}
+}
+
+func TestHerdrInstallKeepsSidebarRowsDespiteUnrelatedWarnings(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	cfg := herdrConfig(t, h, "[toast]\nenabled = true\n")
+	f.Results["server.reload_config"] = `{"type":"config_reload","status":"partial","diagnostics":["[toast] is not a known section"]}`
+	if code := h.exec("herdr", "install", "--no-keys", "--sidebar"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if b, _ := os.ReadFile(cfg); !strings.Contains(string(b), `token = "$tkt"`) {
+		t.Errorf("a warning that was there before should not undo the rows:\n%s\n%s", b, h.out)
+	}
+}
+
+func TestHerdrInstallUndoesSidebarRowsThatAddWarnings(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	original := "[toast]\nenabled = true\n"
+	cfg := herdrConfig(t, h, original)
+	f.Results["server.reload_config"] = `{"type":"config_reload","status":"partial","diagnostics":["[toast] is not a known section"]}`
+	h.app.NewHerdr = func() HerdrAPI { return reloadSequence{HerdrAPI: herdr.New(f.Path), f: f} }
+	if code := h.exec("herdr", "install", "--no-keys", "--sidebar"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if b, _ := os.ReadFile(cfg); string(b) != original {
+		t.Errorf("rows that add a warning should be undone:\n%s", b)
+	}
+	if !strings.Contains(h.out.String(), "ui.sidebar.spaces.rows: unknown style") {
+		t.Errorf("stdout = %q", h.out)
+	}
+}
+
+// reloadSequence makes the second reload (after tkt writes its rows) report a new warning.
+type reloadSequence struct {
+	HerdrAPI
+	f *herdrtest.FakeServer
+}
+
+func (r reloadSequence) ReloadConfig(ctx context.Context) error {
+	if count(r.f, "server.reload_config") == 1 {
+		r.f.Results["server.reload_config"] = `{"type":"config_reload","status":"partial","diagnostics":["[toast] is not a known section","ui.sidebar.spaces.rows: unknown style"]}`
+	}
+	return r.HerdrAPI.ReloadConfig(ctx)
+}
+
+func TestHerdrRefreshLabelsWorkspacesOpenedOnAPlainCheckout(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w9","label":"live test"}]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[
+		{"pane_id":"w9:p1","workspace_id":"w9","cwd":"/src/web"},
+		{"pane_id":"w8:p1","workspace_id":"w8","cwd":"/elsewhere"}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[]}`
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
+	if code := h.exec("herdr", "refresh"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	got := f.Last("workspace.report_metadata")
+	if got == nil || got["workspace_id"] != "w9" {
+		t.Fatalf("a workspace on a plain checkout should be labelled from its pane's folder: %v", got)
+	}
+	if tok := got["tokens"].(map[string]any)["tkt_alert"]; tok != "✕ CI · #812" {
+		t.Errorf("tokens = %v", got["tokens"])
+	}
+}
+
+func TestHerdrManifestHasNoAgentEvent(t *testing.T) {
+	h, _, _ := herdrHarness(t)
+	h.exec("herdr", "install", "--no-keys", "--no-sidebar")
+	b, _ := os.ReadFile(filepath.Join(h.app.Env.DataDir(), "herdr-plugin", herdrplugin.FileName))
+	if strings.Contains(string(b), "pane.agent_status_changed") || strings.Contains(string(b), "on-agent") {
+		t.Errorf("Herdr shows agent states itself; the plugin should not follow them:\n%s", b)
+	}
+}
+
+func TestHerdrStartNamesAgentsClaudeAndNumbersTakenNames(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+	f.Errors["agent.start"] = "agent name claude is already used; candidates: pane_id=w1:p1"
+	h.app.NewHerdr = func() HerdrAPI { return takenOnce{HerdrAPI: herdr.New(f.Path), f: f} }
+	if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "prompt", true); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range f.Requests {
+		if r["method"] == "agent.start" {
+			names = append(names, r["params"].(map[string]any)["name"].(string))
+		}
+	}
+	if strings.Join(names, ",") != "claude,claude-2" {
+		t.Errorf("names tried = %v", names)
+	}
+}
+
+// takenOnce lets the first agent.start fail with agent_name_taken and the next ones succeed.
+type takenOnce struct {
+	HerdrAPI
+	f *herdrtest.FakeServer
+}
+
+func (o takenOnce) StartAgent(ctx context.Context, paneID, kind, name string, args []string) error {
+	err := o.HerdrAPI.StartAgent(ctx, paneID, kind, name, args)
+	delete(o.f.Errors, "agent.start")
+	return err
 }

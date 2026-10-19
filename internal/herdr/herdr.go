@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -104,6 +105,14 @@ type Workspace struct {
 	Worktree *Worktree         `json:"worktree"`
 }
 
+func (c *Client) Panes(ctx context.Context) ([]Pane, error) {
+	var r struct {
+		Panes []Pane `json:"panes"`
+	}
+	err := c.Call(ctx, "pane.list", nil, &r)
+	return r.Panes, err
+}
+
 func (c *Client) Workspaces(ctx context.Context) ([]Workspace, error) {
 	var r struct {
 		Workspaces []Workspace `json:"workspaces"`
@@ -113,8 +122,9 @@ func (c *Client) Workspaces(ctx context.Context) ([]Workspace, error) {
 }
 
 type Pane struct {
-	ID  string `json:"pane_id"`
-	Cwd string `json:"cwd"`
+	ID          string `json:"pane_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Cwd         string `json:"cwd"`
 }
 
 // CreateWorkspace opens a workspace at cwd and returns it with its root pane.
@@ -194,7 +204,27 @@ func (c *Client) UnlinkPlugin(ctx context.Context, id string) error {
 	return c.Call(ctx, "plugin.unlink", map[string]any{"plugin_id": id}, nil)
 }
 
-// ReloadConfig makes the running server reread config.toml.
+// ReloadRejected means Herdr read its config but did not apply all of it.
+type ReloadRejected struct {
+	Status      string
+	Diagnostics []string
+}
+
+func (e *ReloadRejected) Error() string {
+	return fmt.Sprintf("herdr config reload %s: %s", e.Status, strings.Join(e.Diagnostics, "; "))
+}
+
+// ReloadConfig asks Herdr to reread its config; a failed or partial reload returns *ReloadRejected.
 func (c *Client) ReloadConfig(ctx context.Context) error {
-	return c.Call(ctx, "server.reload_config", nil, nil)
+	var r struct {
+		Status      string   `json:"status"`
+		Diagnostics []string `json:"diagnostics"`
+	}
+	if err := c.Call(ctx, "server.reload_config", nil, &r); err != nil {
+		return err
+	}
+	if r.Status == "failed" || r.Status == "partial" {
+		return &ReloadRejected{Status: r.Status, Diagnostics: r.Diagnostics}
+	}
+	return nil
 }

@@ -155,7 +155,7 @@ func (b *boardActions) Refresh() tea.Cmd {
 		defer cancel()
 		snap, stale, err := b.a.loadSnapshot(ctx, b.cfg(), false)
 		if err == nil && stale == nil {
-			b.a.refreshSidebarQuietly(ctx, b.cfg(), snap)
+			snap.Agents = b.a.refreshSidebarQuietly(ctx, b.cfg(), snap)
 		}
 		return tui.SnapshotMsg{Snap: snap, Stale: stale, Err: err}
 	}

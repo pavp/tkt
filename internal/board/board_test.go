@@ -240,28 +240,70 @@ func TestCacheRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSidebarLabel(t *testing.T) {
+func TestTicketLine(t *testing.T) {
 	failing := ticket.Ticket{Key: "DEMO-1", Status: "In Progress", Category: ticket.InProgress, PRs: []ticket.PullRequest{
 		{Number: 812, State: ticket.PROpen, Checks: ticket.ChecksFail},
 		{Number: 790, State: ticket.PRMerged, Checks: ticket.ChecksPass},
 	}}
-	if got := SidebarLabel(failing, "working"); got != "DEMO-1 · ✕ CI · #812 · claude working" {
-		t.Errorf("failing = %q", got)
+	tests := []struct {
+		name  string
+		t     ticket.Ticket
+		want  string
+		alert bool
+	}{
+		{"failing CI", failing, "✕ CI · #812", true},
+		{"changes requested", ticket.Ticket{Key: "DEMO-2", Category: ticket.InReview, PRs: []ticket.PullRequest{{Number: 45, State: ticket.PROpen, Checks: ticket.ChecksPass, Review: ticket.ReviewChangesRequested}}}, "changes requested · #45", true},
+		{"green", ticket.Ticket{Key: "DEMO-3", Category: ticket.InReview, PRs: []ticket.PullRequest{{Number: 9, State: ticket.PROpen, Checks: ticket.ChecksPass}}}, "✓ CI · #9", false},
+		{"no PRs", ticket.Ticket{Key: "DEMO-4", Status: "To Do"}, "To Do", false},
 	}
-	changes := ticket.Ticket{Key: "DEMO-2", Category: ticket.InReview, PRs: []ticket.PullRequest{{Number: 45, State: ticket.PROpen, Checks: ticket.ChecksPass, Review: ticket.ReviewChangesRequested}}}
-	if got := SidebarLabel(changes, ""); got != "DEMO-2 · changes requested · #45" {
-		t.Errorf("changes = %q", got)
+	for _, tt := range tests {
+		got, alert := TicketLine(tt.t)
+		if got != tt.want || alert != tt.alert {
+			t.Errorf("%s: got %q, %v; want %q, %v", tt.name, got, alert, tt.want, tt.alert)
+		}
 	}
-	green := ticket.Ticket{Key: "DEMO-3", Category: ticket.InReview, PRs: []ticket.PullRequest{{Number: 9, State: ticket.PROpen, Checks: ticket.ChecksPass}}}
-	if got := SidebarLabel(green, "idle"); got != "DEMO-3 · ✓ CI · #9 · claude idle" {
-		t.Errorf("green = %q", got)
+	long, _ := TicketLine(ticket.Ticket{Key: "DEMO-5", Status: strings.Repeat("x", 100)})
+	if len([]rune(long)) != 80 || !strings.HasSuffix(long, "…") {
+		t.Errorf("long line = %d runes", len([]rune(long)))
 	}
-	if got := SidebarLabel(ticket.Ticket{Key: "DEMO-4", Status: "To Do"}, ""); got != "DEMO-4 · To Do" {
-		t.Errorf("todo = %q", got)
+}
+
+func TestAgentLine(t *testing.T) {
+	tests := []struct {
+		status, want string
+		kind         AgentKind
+	}{
+		{"working", "● claude working", AgentWorking},
+		{"blocked", "! claude needs you", AgentNeedsYou},
+		{"idle", "○ claude idle", AgentIdle},
+		{"done", "○ claude idle", AgentIdle},
+		{"unknown", "no agent", AgentNone},
+		{"", "no agent", AgentNone},
 	}
-	long := ticket.Ticket{Key: "DEMO-5", Status: strings.Repeat("x", 100)}
-	if got := SidebarLabel(long, ""); len([]rune(got)) != 80 || !strings.HasSuffix(got, "…") {
-		t.Errorf("long label = %d runes", len([]rune(got)))
+	for _, tt := range tests {
+		got, kind := AgentLine(tt.status)
+		if got != tt.want || kind != tt.kind {
+			t.Errorf("%q: got %q, %v; want %q, %v", tt.status, got, kind, tt.want, tt.kind)
+		}
+	}
+}
+
+func TestMostUrgentAgent(t *testing.T) {
+	tests := []struct {
+		in   []string
+		want string
+	}{
+		{[]string{"idle", "working"}, "working"},
+		{[]string{"working", "blocked", "idle"}, "blocked"},
+		{[]string{"done", "idle"}, "idle"},
+		{[]string{"unknown"}, ""},
+		{nil, ""},
+	}
+	for _, tt := range tests {
+		got, _ := AgentLine(MostUrgentAgent(tt.in))
+		if want, _ := AgentLine(tt.want); got != want {
+			t.Errorf("%v: got %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }
 

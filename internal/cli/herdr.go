@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ type HerdrAPI interface {
 	FocusWorkspace(ctx context.Context, id string) error
 	ReportWorkspaceTokens(ctx context.Context, workspaceID, source string, tokens map[string]*string, ttl time.Duration) error
 	Agents(ctx context.Context) ([]herdr.Agent, error)
+	Panes(ctx context.Context) ([]herdr.Pane, error)
 	StartAgent(ctx context.Context, paneID, kind, name string, args []string) error
 	Prompt(ctx context.Context, target, text string) error
 	OpenPluginPane(ctx context.Context, p herdr.PaneOpen) error
@@ -40,7 +42,6 @@ type HerdrAPI interface {
 }
 
 const (
-	sidebarToken  = "tkt"
 	sidebarSource = "plugin:tkt"
 	// sidebarTTL lets labels fade instead of lying when nothing refreshes them, since plugins cannot run daemons.
 	sidebarTTL = time.Hour
@@ -73,18 +74,24 @@ func newHerdrCmd(a *App) *cobra.Command {
 	start.Flags().StringArrayVar(&repoFlags, "repo", nil, "repository to start in; repeat for several")
 	start.Flags().BoolVar(&clone, "clone", false, "clone missing repositories without asking")
 
-	var keysFlag, noKeys bool
+	var keysFlag, noKeys, sidebarFlag, noSidebar bool
 	installCmd := &cobra.Command{
 		Use:   "install",
 		Short: "Link the tkt plugin into the running Herdr and offer keybindings",
 		Long: "Link the tkt plugin into the running Herdr. Herdr plugins cannot bring their own keys, so install\n" +
 			"offers to add prefix+t (board) and prefix+i (ticket pane) to your Herdr config when those keys are free,\n" +
-			"backing the config up first. --keys adds them without asking; --no-keys skips them.",
+			"backing the config up first. --keys adds them without asking; --no-keys skips them.\n" +
+			"It also offers sidebar rows that show each workspace's ticket and agent (Herdr only shows tkt's lines\n" +
+			"when its config lists them); --sidebar adds them without asking, --no-sidebar skips them.",
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrInstall(cmd, keysFlag, noKeys) },
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return a.herdrInstall(cmd, keysFlag, noKeys, sidebarFlag, noSidebar)
+		},
 	}
 	installCmd.Flags().BoolVar(&keysFlag, "keys", false, "add the keybindings without asking")
 	installCmd.Flags().BoolVar(&noKeys, "no-keys", false, "do not add keybindings")
+	installCmd.Flags().BoolVar(&sidebarFlag, "sidebar", false, "add the sidebar rows without asking")
+	installCmd.Flags().BoolVar(&noSidebar, "no-sidebar", false, "do not add sidebar rows")
 
 	cmd.AddCommand(
 		start,
@@ -94,7 +101,10 @@ func newHerdrCmd(a *App) *cobra.Command {
 				return err
 			}
 			a.printf("✓ Unlinked the tkt plugin from Herdr\n")
-			return a.removeHerdrKeys(cmd)
+			if err := a.removeHerdrKeys(cmd); err != nil {
+				return err
+			}
+			return a.removeHerdrSidebar(cmd)
 		}},
 		&cobra.Command{Use: "open-board", Short: "Open the board popup (setup when tkt is not configured)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			entry := "board"
@@ -116,7 +126,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 	return cmd
 }
 
-func (a *App) herdrInstall(cmd *cobra.Command, keys, noKeys bool) error {
+func (a *App) herdrInstall(cmd *cobra.Command, keys, noKeys, sidebar, noSidebar bool) error {
 	exe, err := a.Executable()
 	if err != nil {
 		return fmt.Errorf("locate the tkt binary: %w", err)
@@ -129,10 +139,111 @@ func (a *App) herdrInstall(cmd *cobra.Command, keys, noKeys bool) error {
 		return err
 	}
 	a.printf("✓ Linked the tkt plugin into Herdr (%s)\n", dir)
-	if noKeys {
+	if !noKeys {
+		if err := a.addHerdrKeys(cmd, keys); err != nil {
+			return err
+		}
+	}
+	if noSidebar {
 		return nil
 	}
-	return a.addHerdrKeys(cmd, keys)
+	return a.addHerdrSidebar(cmd, sidebar)
+}
+
+// addHerdrSidebar adds the rows that show tkt's ticket and agent lines, never touching space rows the
+// user configures, and undoes the change when Herdr rejects it so its next start still works.
+func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
+	path := a.herdrConfigPath()
+	current, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	next := herdrplugin.AddSidebarBlock(string(current))
+	done := "✓ Added tkt's ticket and agent lines to Herdr's sidebar"
+	switch herdrplugin.PlanSidebar(string(current)) {
+	case herdrplugin.SidebarPresent:
+		a.printf("✓ tkt's sidebar lines are already in %s\n", path)
+		return nil
+	case herdrplugin.SidebarConflict:
+		a.printf("! you configure [ui.sidebar.spaces] yourself; add tkt's rows to show each ticket and its agent:\n%s", herdrplugin.SidebarRows)
+		return nil
+	case herdrplugin.SidebarOutdated:
+		next, done, yes = herdrplugin.UpdateSidebarBlock(string(current)), "✓ Updated tkt's sidebar lines", true
+	}
+	if !yes {
+		ans, err := a.readLine("Show each ticket and its agent in Herdr's sidebar? [Y/n] ")
+		if err != nil || strings.HasPrefix(strings.ToLower(ans), "n") {
+			a.printf("Skipped sidebar lines; `tkt herdr install --sidebar` adds them later\n")
+			return nil
+		}
+	}
+	if len(current) > 0 {
+		if err := os.WriteFile(path+".bak-tkt", current, 0o644); err != nil {
+			return fmt.Errorf("back up %s: %w", path, err)
+		}
+	}
+	h := a.NewHerdr()
+	// Warnings the config already causes are not tkt's doing; only new ones mean Herdr rejected the rows.
+	known := map[string]bool{}
+	var before *herdr.ReloadRejected
+	if errors.As(h.ReloadConfig(cmd.Context()), &before) {
+		for _, d := range before.Diagnostics {
+			known[d] = true
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
+		return err
+	}
+	err = h.ReloadConfig(cmd.Context())
+	var rejected *herdr.ReloadRejected
+	if errors.As(err, &rejected) {
+		var added []string
+		for _, d := range rejected.Diagnostics {
+			if !known[d] {
+				added = append(added, d)
+			}
+		}
+		if rejected.Status == "failed" || len(added) > 0 {
+			if werr := os.WriteFile(path, current, 0o644); werr != nil {
+				return fmt.Errorf("restore %s after Herdr rejected it: %w", path, werr)
+			}
+			_ = h.ReloadConfig(cmd.Context())
+			if len(added) == 0 {
+				added = rejected.Diagnostics
+			}
+			a.printf("! Herdr rejected the sidebar rows (%s); your config is back as it was\n", strings.Join(added, "; "))
+			return nil
+		}
+		err = nil
+	}
+	switch {
+	case err != nil:
+		a.printf("! sidebar lines saved; reload Herdr's config to see them (%v)\n", err)
+		return nil
+	}
+	a.printf("%s (%s)\n", done, path)
+	return nil
+}
+
+func (a *App) removeHerdrSidebar(cmd *cobra.Command) error {
+	path := a.herdrConfigPath()
+	current, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	updated, ok := herdrplugin.RemoveSidebarBlock(string(current))
+	if !ok {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		return err
+	}
+	_ = a.NewHerdr().ReloadConfig(cmd.Context())
+	a.printf("✓ Removed tkt's sidebar lines from %s\n", path)
+	return nil
 }
 
 func (a *App) herdrConfigPath() string {
@@ -240,13 +351,23 @@ func (a *App) herdrStart(cmd *cobra.Command, args, repoFlags []string, clone boo
 	return nil
 }
 
+// startInWorkspace names the agent plain "claude", as Herdr shows agents it detects itself; the workspace
+// above it already names the ticket. Herdr wants agent names unique, so a taken name gets a number.
 func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, dir, label, prompt string, focus bool) error {
 	ws, pane, err := h.CreateWorkspace(ctx, dir, label, focus)
 	if err != nil {
 		return err
 	}
-	if err := h.StartAgent(ctx, pane.ID, "claude", label, []string{prompt}); err != nil {
-		return err
+	name := "claude"
+	for n := 2; ; n++ {
+		err := h.StartAgent(ctx, pane.ID, "claude", name, []string{prompt})
+		if err == nil {
+			break
+		}
+		if n > 9 || !nameTaken(err) {
+			return err
+		}
+		name = fmt.Sprintf("claude-%d", n)
 	}
 	a.printf("✓ Claude Code started in workspace %s (%s)\n", label, ws.ID)
 	return nil
@@ -396,7 +517,7 @@ func (a *App) herdrSidebar(cmd *cobra.Command, cachedOnly bool) error {
 		}
 		return err
 	}
-	n, err := a.updateSidebar(cmd.Context(), c, snap)
+	n, _, err := a.updateSidebar(cmd.Context(), c, snap)
 	if err != nil {
 		return err
 	}
@@ -404,26 +525,45 @@ func (a *App) herdrSidebar(cmd *cobra.Command, cachedOnly bool) error {
 	return nil
 }
 
-func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Snapshot) (int, error) {
+// updateSidebar labels every workspace that holds a ticket and returns the agent status shown for each.
+func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Snapshot) (int, map[string]string, error) {
 	h := a.NewHerdr()
 	all, err := h.Workspaces(ctx)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	status := map[string]string{}
+	statuses := map[string][]string{}
 	if agents, err := h.Agents(ctx); err == nil {
 		for _, ag := range agents {
-			if ag.Agent != "" && status[ag.WorkspaceID] == "" {
-				status[ag.WorkspaceID] = ag.Status
+			if ag.Agent != "" {
+				statuses[ag.WorkspaceID] = append(statuses[ag.WorkspaceID], ag.Status)
+			}
+		}
+	}
+	// Herdr reports a worktree only for workspaces it manages as git worktrees; one opened on a plain
+	// checkout (as tkt herdr start does) is found through its panes' folders.
+	paneDirs := map[string][]string{}
+	if panes, err := h.Panes(ctx); err == nil {
+		for _, p := range panes {
+			if p.Cwd != "" && !slices.Contains(paneDirs[p.WorkspaceID], p.Cwd) {
+				paneDirs[p.WorkspaceID] = append(paneDirs[p.WorkspaceID], p.Cwd)
 			}
 		}
 	}
 	n := 0
+	agents := map[string]string{}
 	for _, ws := range all {
-		if ws.Worktree == nil {
-			continue
+		dirs := paneDirs[ws.ID]
+		if ws.Worktree != nil {
+			dirs = []string{ws.Worktree.CheckoutPath}
 		}
-		key, ok := a.keyAt(ctx, c, ws.Worktree.CheckoutPath)
+		var key ticket.Key
+		ok := false
+		for _, dir := range dirs {
+			if key, ok = a.keyAt(ctx, c, dir); ok {
+				break
+			}
+		}
 		if !ok {
 			continue
 		}
@@ -431,13 +571,16 @@ func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Sn
 		if !ok {
 			t = ticket.Ticket{Key: key, Status: "not in your sprint"}
 		}
-		label := board.SidebarLabel(t, status[ws.ID])
-		if err := h.ReportWorkspaceTokens(ctx, ws.ID, sidebarSource, map[string]*string{sidebarToken: &label}, sidebarTTL); err != nil {
-			return n, err
+		agent := board.MostUrgentAgent(statuses[ws.ID])
+		if agent != "" {
+			agents[string(key)] = board.MostUrgentAgent([]string{agents[string(key)], agent})
+		}
+		if err := h.ReportWorkspaceTokens(ctx, ws.ID, sidebarSource, sidebarTokens(t), sidebarTTL); err != nil {
+			return n, agents, err
 		}
 		n++
 	}
-	return n, nil
+	return n, agents, nil
 }
 
 // worktreePath digs the checkout path out of a worktree.created event payload without depending on its
@@ -495,18 +638,42 @@ func (a *App) herdrOnWorktree(cmd *cobra.Command) error {
 	}
 	a.printf("✓ %s ← %s (%s)\n", key, co.branch, co.repo)
 	if snap, ok, _ := a.cache().Load(); ok {
-		_, _ = a.updateSidebar(cmd.Context(), c, snap)
+		_, _, _ = a.updateSidebar(cmd.Context(), c, snap)
 	}
 	return nil
 }
 
 // refreshSidebarQuietly updates Herdr labels after a fresh fetch when tkt runs inside Herdr; any failure
 // is ignored because the sidebar is a convenience, never a reason for a command to fail.
-func (a *App) refreshSidebarQuietly(ctx context.Context, c *config.Config, snap board.Snapshot) {
+func (a *App) refreshSidebarQuietly(ctx context.Context, c *config.Config, snap board.Snapshot) map[string]string {
 	if a.Env.Getenv("HERDR_ENV") != "1" || a.NewHerdr == nil {
-		return
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	_, _ = a.updateSidebar(ctx, c, snap)
+	_, agents, _ := a.updateSidebar(ctx, c, snap)
+	return agents
+}
+
+// Herdr colors a token, not a value, so the ticket line is reported under the token whose color fits it
+// and the other is cleared; the sidebar row tkt herdr install adds shows whichever is set.
+const (
+	tokenTicket      = "tkt"
+	tokenTicketAlert = "tkt_alert"
+)
+
+func sidebarTokens(t ticket.Ticket) map[string]*string {
+	tokens := map[string]*string{tokenTicket: nil, tokenTicketAlert: nil}
+	line, alert := board.TicketLine(t)
+	if alert {
+		tokens[tokenTicketAlert] = &line
+	} else {
+		tokens[tokenTicket] = &line
+	}
+	return tokens
+}
+
+func nameTaken(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "agent_name_taken") || strings.Contains(msg, "is already used")
 }
