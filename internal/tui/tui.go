@@ -3,6 +3,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -346,9 +347,9 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	cols := m.columns()
 	colWidth := m.columnWidth() + 2
 	c := msg.X / colWidth
-	// Inside a column box: top border, the column title, then one bordered card after another.
-	r := (body - 2) / m.cardLines()
-	if body >= 2 && c >= 0 && c < len(cols) && r < len(cols[c]) {
+	// Inside a column box: top border, the column title and its rule, then one bordered card after another.
+	r := (body - 3) / m.cardLines()
+	if body >= 3 && c >= 0 && c < len(cols) && r < len(cols[c]) {
 		m.col, m.row = c, r
 		m.remember()
 	}
@@ -773,7 +774,7 @@ func (m Model) columnsView(height int) string {
 	inner := m.columnWidth()
 	rendered := make([]string, len(cols))
 	for ci, c := range ticket.Columns {
-		parts := []string{" " + bold.Render(fmt.Sprintf("%s %d", c.Title(), len(cols[ci])))}
+		parts := columnHead(c.Title(), len(cols[ci]), inner, ci == m.col)
 		if len(cols[ci]) == 0 {
 			parts = append(parts, " "+dim.Render("— nothing here"))
 		}
@@ -792,6 +793,18 @@ func (m Model) columnsView(height int) string {
 		rendered[ci] = st.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
+}
+
+// columnHead is the prototype's column header: name left, count right, a rule below, and only the
+// column holding the selection lit.
+func columnHead(name string, count, width int, active bool) []string {
+	n := strconv.Itoa(count)
+	line := " " + name + strings.Repeat(" ", max(1, width-2-lipgloss.Width(name)-len(n))) + n + " "
+	st := dim
+	if active {
+		st = selected
+	}
+	return []string{st.Render(line), dim.Render(strings.Repeat("─", width))}
 }
 
 var (

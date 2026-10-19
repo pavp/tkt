@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -101,7 +102,7 @@ func TestColumnsViewAndNavigation(t *testing.T) {
 	r := &recorder{}
 	m := loaded(r)
 	view := m.View()
-	for _, want := range []string{"To Do 1", "In Progress 1", "In Review 1", "Done 0", "— nothing here", "! CI failing", "#812 ✕", "Review requested", "! #820", "←↑↓→ wasd move"} {
+	for _, want := range []string{"To Do", "In Progress", "In Review", "Done", "— nothing here", "! CI failing", "#812 ✕", "Review requested", "! #820", "←↑↓→ wasd move"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("columns view missing %q", want)
 		}
@@ -727,7 +728,7 @@ func TestDetailViewInsideTheBoard(t *testing.T) {
 	}
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if v := stripANSI(m.View()); !strings.Contains(v, "In Progress 1") {
+	if v := stripANSI(m.View()); !strings.Contains(v, "In Progress") || strings.Contains(v, "Actions for") {
 		t.Errorf("esc should return to the board:\n%s", v)
 	}
 }
@@ -832,5 +833,23 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 		if lipgloss.Width(l) > 60 {
 			t.Errorf("line wider than the pane: %q", l)
 		}
+	}
+}
+
+func TestColumnTitlesPutTheCountRightAboveARule(t *testing.T) {
+	lines := strings.Split(stripANSI(loaded(&recorder{}).View()), "\n")
+	y := lineIndex(strings.Join(lines, "\n"), "In Progress")
+	if y < 0 || y+1 >= len(lines) {
+		t.Fatalf("no column titles:\n%s", strings.Join(lines, "\n"))
+	}
+	for _, seg := range strings.Split(strings.Trim(strings.TrimSpace(lines[y]), "│"), "││") {
+		f := strings.Fields(seg)
+		count := f[len(f)-1]
+		if _, err := strconv.Atoi(count); err != nil || !strings.HasSuffix(strings.TrimRight(seg, " "), "  "+count) || len(seg)-len(strings.TrimRight(seg, " ")) > 1 {
+			t.Errorf("count should sit at the right edge, apart from the name: %q", seg)
+		}
+	}
+	if strings.Count(lines[y+1], "│──") < 4 {
+		t.Errorf("no rule under the column titles: %q", lines[y+1])
 	}
 }
