@@ -55,6 +55,7 @@ type Space struct {
 
 type Repo struct {
 	Name string `toml:"repo"`
+	// Base is accepted for older configs; nothing reads it, since agents pick base branches per project.
 	Base string `toml:"base,omitempty"`
 	Path string `toml:"path,omitempty"`
 }
@@ -125,13 +126,7 @@ func (c *Config) applyDefaults() {
 	if c.Context.Comments == 0 {
 		c.Context.Comments = DefaultComments
 	}
-	for i := range c.Spaces {
-		for j := range c.Spaces[i].Repos {
-			if c.Spaces[i].Repos[j].Base == "" {
-				c.Spaces[i].Repos[j].Base = "main"
-			}
-		}
-	}
+
 }
 
 func (c *Config) Validate() error {

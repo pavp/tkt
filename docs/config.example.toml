@@ -31,12 +31,10 @@ name = "Demo space"
 "Code Review" = "review"
 
 # Optional: tkt infers each space's repositories from the pull requests Jira links to your tickets.
-# List them here to add one with no pull requests yet, or to set its base branch or local path.
+# List them here to add one with no pull requests yet, or to set its local path.
 [[spaces.repos]]
 repo = "example-org/web"
-base = "main"
 
 [[spaces.repos]]
 repo = "example-org/api"
-base = "develop"
 # path = "~/src/api"   # only when the clone lives outside repo_roots

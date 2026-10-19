@@ -28,10 +28,10 @@ func TestBoardSaveConfigWritesAndSwapsTheConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(saved.Spaces[0].Repos) != 2 || saved.Spaces[0].Repos[1].Path != "~/code/api" || saved.Spaces[0].Repos[1].Base != "main" || len(saved.RepoRoots) != 2 {
+	if len(saved.Spaces[0].Repos) != 2 || saved.Spaces[0].Repos[1].Path != "~/code/api" || saved.Spaces[0].Repos[1].Base != "" || len(saved.RepoRoots) != 2 {
 		t.Errorf("saved = %+v", saved)
 	}
-	if got := b.Config(); len(got.Spaces[0].Repos) != 2 || msg.Config.Spaces[0].Repos[1].Base != "main" {
+	if got := b.Config(); len(got.Spaces[0].Repos) != 2 || len(msg.Config.Spaces[0].Repos) != 2 {
 		t.Errorf("board keeps the old config: %+v", got)
 	}
 	if fi, _ := os.Stat(h.app.configPath); fi.Mode().Perm() != 0o600 {

@@ -53,6 +53,9 @@ var (
 func TestSettingsListsConfiguredAndInferredRepositories(t *testing.T) {
 	m, _ := settingsBoard(t)
 	v := stripANSI(m.View())
+	if strings.Contains(v, "BASE") {
+		t.Errorf("the base branch is unused and should not be shown:\n%s", v)
+	}
 	for _, want := range []string{"← Back to the board", "Settings", "Spaces & repositories", "Local clones", "DEMO · Demo", "REPOSITORY", "LOCAL PATH", "▸ example-org/web", "example-org/api", "inferred from your tickets' pull requests · enter to pin", "+ Add repository"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("settings missing %q:\n%s", want, v)
@@ -60,7 +63,7 @@ func TestSettingsListsConfiguredAndInferredRepositories(t *testing.T) {
 	}
 }
 
-func TestSettingsAddsARepositoryWithBaseAndPath(t *testing.T) {
+func TestSettingsAddsARepositoryWithItsPath(t *testing.T) {
 	m, r := settingsBoard(t)
 	m = press(m, "a")
 	if !strings.Contains(stripANSI(m.View()), "Add a repository to DEMO") {
@@ -68,15 +71,13 @@ func TestSettingsAddsARepositoryWithBaseAndPath(t *testing.T) {
 	}
 	m = typeText(m, "example-org/docs")
 	m = send(m, keyTab)
-	m = typeText(m, "develop")
-	m = send(m, keyTab)
 	m = typeText(m, "~/code/docs")
 	m = send(m, keyEnter)
 	if len(r.saved) != 1 {
 		t.Fatalf("saved %d times", len(r.saved))
 	}
 	repos := r.saved[0].Spaces[0].Repos
-	if len(repos) != 2 || repos[1] != (config.Repo{Name: "example-org/docs", Base: "develop", Path: "~/code/docs"}) {
+	if len(repos) != 2 || repos[1] != (config.Repo{Name: "example-org/docs", Path: "~/code/docs"}) {
 		t.Errorf("repos = %+v", repos)
 	}
 	v := stripANSI(m.View())
@@ -206,7 +207,7 @@ func TestSettingsFillsTheLocalPathFromFoundClones(t *testing.T) {
 		t.Errorf("ctrl+n should switch to the next clone:\n%s", stripANSI(m.View()))
 	}
 	send(m, keyEnter)
-	if len(r.saved) != 1 || r.saved[0].Spaces[0].Repos[0].Path != "~/work/web" {
+	if len(r.saved) != 1 || r.saved[0].Spaces[0].Repos[0].Path != "~/work/web" || r.saved[0].Spaces[0].Repos[0].Base != "main" {
 		t.Errorf("saved = %+v", r.saved)
 	}
 }
@@ -216,7 +217,6 @@ func TestSettingsFillsTheRepositoryFromThePickedFolder(t *testing.T) {
 	r.picked = "~/code/docs"
 	r.origins = map[string]string{"~/code/docs": "example-org/docs"}
 	m = press(m, "a")
-	m = send(m, keyTab)
 	m = send(m, keyTab)
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlO})
 	v := stripANSI(m.View())

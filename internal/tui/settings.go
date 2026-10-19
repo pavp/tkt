@@ -66,7 +66,7 @@ type settingsForm struct {
 
 const (
 	fieldRepo = 0
-	fieldPath = 2
+	fieldPath = 1
 )
 
 // pathField is the field ctrl+o fills: the local path of a repository, or the folder itself.
@@ -281,10 +281,10 @@ func repoForm(title string, r config.Repo, set func(c *config.Config, r config.R
 	return &settingsForm{
 		repo:   true,
 		title:  title,
-		labels: []string{"Repository (owner/name)", "Base branch", "Local path (optional)"},
-		values: []string{r.Name, r.Base, r.Path},
+		labels: []string{"Repository (owner/name)", "Local path (optional)"},
+		values: []string{r.Name, r.Path},
 		apply: func(c *config.Config, v []string) {
-			set(c, config.Repo{Name: v[0], Base: v[1], Path: v[2]})
+			set(c, config.Repo{Name: v[fieldRepo], Path: v[fieldPath], Base: r.Base})
 		},
 	}
 }
@@ -384,7 +384,7 @@ func (m Model) settingsLines() ([]string, []int) {
 	}
 	lines := []string{bold.Render("Settings") + dim.Render(" · changes are saved to your config.toml"), strings.Join(tabs, " "), ""}
 	at := []int{-1, -1, -1}
-	repoW, baseW, pathW := m.settingsColumns()
+	repoW, pathW := m.settingsColumns()
 	rootW := m.rootsWidth()
 	for i, r := range s.rows() {
 		mark := "  "
@@ -403,12 +403,12 @@ func (m Model) settingsLines() ([]string, []int) {
 				name += dim.Render(" · " + sp.Name)
 			}
 			lines, at = append(lines, name), append(at, -1)
-			line = "  " + dim.Render(pad("REPOSITORY", repoW)+" "+pad("BASE", baseW)+" "+pad("LOCAL PATH", pathW))
+			line = "  " + dim.Render(pad("REPOSITORY", repoW)+" "+pad("LOCAL PATH", pathW))
 			lines, at = append(lines, line), append(at, -1)
 			continue
 		case rowRepo:
 			repo := s.cfg.Spaces[r.space].Repos[r.idx]
-			line = mark + pad(truncate(repo.Name, repoW), repoW) + " " + pad(orDash(repo.Base), baseW) + " " + pad(truncate(orDash(repo.Path), pathW), pathW) + " " + removeMark
+			line = mark + pad(truncate(repo.Name, repoW), repoW) + " " + pad(truncate(orDash(repo.Path), pathW), pathW) + " " + removeMark
 		case rowInferred:
 			line = mark + dim.Render(pad(r.name, repoW)+" inferred from your tickets' pull requests · enter to pin")
 		case rowAddRepo:
@@ -428,14 +428,13 @@ func (m Model) settingsLines() ([]string, []int) {
 
 var removeMark = lipgloss.NewStyle().Foreground(lipgloss.Color("167")).Render("✕")
 
-// settingsColumns sizes the repository, base and path columns to their longest value, within limits, so
-// the ✕ that removes a row sits right after them, at removeX.
-func (m Model) settingsColumns() (repoW, baseW, pathW int) {
-	repoW, baseW, pathW = len("REPOSITORY"), len("BASE"), len("LOCAL PATH")
+// settingsColumns sizes the repository and path columns to their longest value, within limits, so the
+// ✕ that removes a row sits right after them, at removeX.
+func (m Model) settingsColumns() (repoW, pathW int) {
+	repoW, pathW = len("REPOSITORY"), len("LOCAL PATH")
 	for _, sp := range m.settings.cfg.Spaces {
 		for _, r := range sp.Repos {
 			repoW = max(repoW, lipgloss.Width(r.Name))
-			baseW = max(baseW, lipgloss.Width(r.Base))
 			pathW = max(pathW, lipgloss.Width(r.Path))
 		}
 		for _, name := range m.settings.inferred[sp.Key] {
@@ -443,9 +442,8 @@ func (m Model) settingsColumns() (repoW, baseW, pathW int) {
 		}
 	}
 	repoW = min(repoW, max(24, m.width*2/5))
-	baseW = min(baseW, 16)
-	pathW = min(pathW, max(16, m.width-repoW-baseW-8))
-	return repoW, baseW, pathW
+	pathW = min(pathW, max(16, m.width-repoW-8))
+	return repoW, pathW
 }
 
 // rootsWidth is the width of the folder column in the local clones section.
@@ -461,8 +459,8 @@ func (m Model) removeX() int {
 	if m.settings.section == sectionRoots {
 		return 2 + m.rootsWidth() + 1
 	}
-	repoW, baseW, pathW := m.settingsColumns()
-	return 2 + repoW + 1 + baseW + 1 + pathW + 1
+	repoW, pathW := m.settingsColumns()
+	return 2 + repoW + 1 + pathW + 1
 }
 
 func (m Model) settingsHeight() int {

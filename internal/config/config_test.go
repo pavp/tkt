@@ -63,7 +63,7 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if !ok {
 		t.Fatal("DEMO missing")
 	}
-	if demo.Repos[0].Base != "main" || demo.Repos[1].Base != "develop" {
+	if demo.Repos[0].Base != "" || demo.Repos[1].Base != "develop" {
 		t.Errorf("bases = %q, %q", demo.Repos[0].Base, demo.Repos[1].Base)
 	}
 	if got := demo.Categories()["Code Review"]; got != ticket.InReview {
@@ -144,7 +144,7 @@ func TestSaveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Spaces[0].Repos[0].Base != "main" || got.Jira.Email != "dev@example.com" {
+	if got.Spaces[0].Repos[0].Base != "" || got.Jira.Email != "dev@example.com" {
 		t.Errorf("round trip = %+v", got)
 	}
 }
