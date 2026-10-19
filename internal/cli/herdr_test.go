@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -198,7 +199,10 @@ func TestHerdrRefreshLabelsTicketWorkspaces(t *testing.T) {
 	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[
 		{"workspace_id":"w1","label":"web-DEMO-1","worktree":{"checkout_path":"/src/web-DEMO-1"}},
 		{"workspace_id":"w2","label":"dotfiles"}]}`
-	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p1","workspace_id":"w1","agent":"claude","agent_status":"working"}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[
+		{"pane_id":"w1:p1","workspace_id":"w1","agent":"claude","agent_status":"idle"},
+		{"pane_id":"w1:p2","workspace_id":"w1","agent":"claude","agent_status":"working"},
+		{"pane_id":"w1:p3","workspace_id":"w1","agent_status":"unknown"}]}`
 	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
 	if code := h.exec("herdr", "refresh"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
@@ -207,8 +211,10 @@ func TestHerdrRefreshLabelsTicketWorkspaces(t *testing.T) {
 	if got["workspace_id"] != "w1" || got["source"] != "plugin:tkt" || got["ttl_ms"] != float64(3600000) {
 		t.Errorf("report = %v", got)
 	}
-	if label := got["tokens"].(map[string]any)["tkt"]; label != "DEMO-1 · ✕ CI · #812 · claude working" {
-		t.Errorf("label = %v", label)
+	tokens := got["tokens"].(map[string]any)
+	want := map[string]any{"tkt": nil, "tkt_alert": "DEMO-1 · ✕ CI · #812", "tkt_agent": "● claude working", "tkt_agent_alert": nil, "tkt_agent_idle": nil}
+	if !reflect.DeepEqual(tokens, want) {
+		t.Errorf("tokens = %v, want %v", tokens, want)
 	}
 	if count(f, "workspace.report_metadata") != 1 {
 		t.Error("labelled a workspace without a ticket")

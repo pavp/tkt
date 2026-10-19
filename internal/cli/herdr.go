@@ -40,7 +40,6 @@ type HerdrAPI interface {
 }
 
 const (
-	sidebarToken  = "tkt"
 	sidebarSource = "plugin:tkt"
 	// sidebarTTL lets labels fade instead of lying when nothing refreshes them, since plugins cannot run daemons.
 	sidebarTTL = time.Hour
@@ -410,11 +409,11 @@ func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Sn
 	if err != nil {
 		return 0, err
 	}
-	status := map[string]string{}
+	statuses := map[string][]string{}
 	if agents, err := h.Agents(ctx); err == nil {
 		for _, ag := range agents {
-			if ag.Agent != "" && status[ag.WorkspaceID] == "" {
-				status[ag.WorkspaceID] = ag.Status
+			if ag.Agent != "" {
+				statuses[ag.WorkspaceID] = append(statuses[ag.WorkspaceID], ag.Status)
 			}
 		}
 	}
@@ -431,8 +430,7 @@ func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Sn
 		if !ok {
 			t = ticket.Ticket{Key: key, Status: "not in your sprint"}
 		}
-		label := board.SidebarLabel(t, status[ws.ID])
-		if err := h.ReportWorkspaceTokens(ctx, ws.ID, sidebarSource, map[string]*string{sidebarToken: &label}, sidebarTTL); err != nil {
+		if err := h.ReportWorkspaceTokens(ctx, ws.ID, sidebarSource, sidebarTokens(t, board.MostUrgentAgent(statuses[ws.ID])), sidebarTTL); err != nil {
 			return n, err
 		}
 		n++
@@ -509,4 +507,34 @@ func (a *App) refreshSidebarQuietly(ctx context.Context, c *config.Config, snap 
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	_, _ = a.updateSidebar(ctx, c, snap)
+}
+
+// Herdr colors a token, not a value, so each line is reported under the token whose color fits it and
+// the others are cleared; the sidebar rows tkt herdr install adds show whichever is set.
+const (
+	tokenTicket      = "tkt"
+	tokenTicketAlert = "tkt_alert"
+	tokenAgent       = "tkt_agent"
+	tokenAgentAlert  = "tkt_agent_alert"
+	tokenAgentIdle   = "tkt_agent_idle"
+)
+
+func sidebarTokens(t ticket.Ticket, agentStatus string) map[string]*string {
+	tokens := map[string]*string{tokenTicket: nil, tokenTicketAlert: nil, tokenAgent: nil, tokenAgentAlert: nil, tokenAgentIdle: nil}
+	line, alert := board.TicketLine(t)
+	if alert {
+		tokens[tokenTicketAlert] = &line
+	} else {
+		tokens[tokenTicket] = &line
+	}
+	agent, kind := board.AgentLine(agentStatus)
+	switch kind {
+	case board.AgentWorking:
+		tokens[tokenAgent] = &agent
+	case board.AgentNeedsYou:
+		tokens[tokenAgentAlert] = &agent
+	default:
+		tokens[tokenAgentIdle] = &agent
+	}
+	return tokens
 }
