@@ -4,6 +4,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -61,20 +62,41 @@ type Model struct {
 	width        int
 	height       int
 	status       string
+	now          func() time.Time
+}
+
+// tickMsg drives the "synced … ago" label and the periodic refresh.
+type tickMsg time.Time
+
+const (
+	tickEvery    = 30 * time.Second
+	refreshEvery = 2 * time.Minute
+)
+
+var filterOrder = []string{FilterAll, FilterNeeds, FilterReviews}
+
+func tick() tea.Cmd {
+	return tea.Tick(tickEvery, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
 func New(snap board.Snapshot, haveSnap bool, actions Actions, view string) Model {
 	if view != ViewList {
 		view = ViewColumns
 	}
-	m := Model{snap: snap, loading: true, actions: actions, view: view, filter: FilterAll, width: 160, height: 40}
+	m := Model{snap: snap, loading: true, actions: actions, view: view, filter: FilterAll, width: 160, height: 40, now: time.Now}
 	if !haveSnap {
 		m.status = "loading…"
 	}
 	return m
 }
 
-func (m Model) Init() tea.Cmd { return m.actions.Refresh() }
+func (m Model) Init() tea.Cmd { return tea.Batch(m.actions.Refresh(), tick()) }
+
+// WithClock replaces the clock, for tests.
+func (m Model) WithClock(now func() time.Time) Model {
+	m.now = now
+	return m
+}
 
 // effectiveView falls back to the list when columns would not fit or when showing reviews.
 func (m Model) effectiveView() string {
@@ -194,6 +216,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reselect()
 	case StatusMsg:
 		m.status = string(msg)
+	case tickMsg:
+		if !m.loading && m.now().Sub(m.snap.FetchedAt) >= refreshEvery {
+			m.loading = true
+			return m, tea.Batch(m.actions.Refresh(), tick())
+		}
+		return m, tick()
 	case tea.KeyMsg:
 		return m.key(msg)
 	}
@@ -218,6 +246,21 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.filter = want
 		}
+		m.reselect()
+	case "tab", "shift+tab":
+		step := 1
+		if k.String() == "shift+tab" {
+			step = len(filterOrder) - 1
+		}
+		for i, f := range filterOrder {
+			if f == m.filter {
+				m.filter = filterOrder[(i+step)%len(filterOrder)]
+				break
+			}
+		}
+		m.reselect()
+	case "1", "2", "3":
+		m.filter = filterOrder[k.String()[0]-'1']
 		m.reselect()
 	case "down", "s", "j":
 		m.move(0, 1)
@@ -335,36 +378,67 @@ func (m Model) View() string {
 func (m Model) header() string {
 	parts := []string{bold.Render("tkt")}
 	for _, sp := range m.snap.Sprints {
-		parts = append(parts, board.SprintLabel(sp, m.snap.FetchedAt))
+		parts = append(parts, sp.Space+" · "+board.SprintLabel(sp, m.snap.FetchedAt))
 	}
-	filters := []string{}
-	for _, f := range []struct{ id, label string }{{FilterAll, fmt.Sprintf("All %d", len(m.snap.Tickets))}, {FilterNeeds, fmt.Sprintf("Needs you %d", len(m.snap.NeedsYou()))}, {FilterReviews, fmt.Sprintf("Reviews %d", len(m.snap.Reviews))}} {
+	title := truncate(strings.Join(parts, " · "), m.width-28)
+	sync := dim.Render(m.syncLabel())
+	if m.stale != nil {
+		sync = warn.Render(m.syncLabel())
+	}
+	gap := m.width - lipgloss.Width(title) - lipgloss.Width(sync)
+	if gap < 2 {
+		gap = 2
+	}
+	var filters []string
+	for i, f := range []struct{ id, label string }{{FilterAll, fmt.Sprintf("All %d", len(m.snap.Tickets)+len(m.snap.Reviews))}, {FilterNeeds, fmt.Sprintf("Needs you %d", len(m.snap.NeedsYou()))}, {FilterReviews, fmt.Sprintf("Reviews %d", len(m.snap.Reviews))}} {
+		label := fmt.Sprintf(" %d %s ", i+1, f.label)
 		if m.filter == f.id {
-			filters = append(filters, selected.Render(" "+f.label+" "))
+			filters = append(filters, selected.Render(label))
 		} else {
-			filters = append(filters, dim.Render(" "+f.label+" "))
+			filters = append(filters, dim.Render(label))
 		}
 	}
-	views := dim.Render("[" + m.effectiveView() + "]")
-	sync := dim.Render("synced")
+	views := []string{}
+	for _, v := range []struct{ id, label string }{{ViewColumns, " Columns "}, {ViewList, " List "}} {
+		if m.effectiveView() == v.id {
+			views = append(views, selected.Render(v.label))
+		} else {
+			views = append(views, dim.Render(v.label))
+		}
+	}
+	line2 := wrap(append(filters, "   "+strings.Join(views, "")+dim.Render(" v")), m.width)
+	return title + strings.Repeat(" ", gap) + sync + "\n" + line2
+}
+
+// syncLabel says how fresh the board is: refreshing, synced N min ago, or cached when the last refresh failed.
+func (m Model) syncLabel() string {
 	switch {
 	case m.loading:
-		sync = dim.Render("refreshing…")
+		return "refreshing…"
+	case m.snap.FetchedAt.IsZero():
+		return "not synced yet"
 	case m.stale != nil:
-		sync = warn.Render("cached · " + m.snap.FetchedAt.Local().Format("15:04"))
+		return "cached · " + m.snap.FetchedAt.Local().Format("15:04")
 	}
-	return strings.Join(parts, dim.Render(" · ")) + "   " + strings.Join(filters, " ") + "   " + views + "  " + sync
+	d := m.now().Sub(m.snap.FetchedAt)
+	switch {
+	case d < time.Minute:
+		return "synced just now"
+	case d < time.Hour:
+		return fmt.Sprintf("synced %d min ago", int(d.Minutes()))
+	}
+	return "synced " + m.snap.FetchedAt.Local().Format("15:04")
 }
 
 func (m Model) reviewStrip() string {
 	if len(m.snap.Reviews) == 0 {
 		return ""
 	}
-	var parts []string
+	parts := []string{dim.Render("Review requested")}
 	for _, pr := range m.snap.Reviews {
 		parts = append(parts, warn.Render("!")+fmt.Sprintf(" #%d · %s", pr.Number, truncate(pr.Title, 40)))
 	}
-	return dim.Render("Review requested  ") + strings.Join(parts, "   ") + dim.Render("   (r to select)")
+	return wrap(append(parts, dim.Render("(r to select)")), m.width)
 }
 
 func (m Model) columnsView() string {
@@ -393,7 +467,9 @@ func (m Model) columnsView() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 }
 
-func card(t ticket.Ticket, width int, sel bool) []string {
+func card(t ticket.Ticket, boxWidth int, sel bool) []string {
+	// The column box spends two cells on padding, so lines must fit the narrower content area.
+	width := boxWidth - 2
 	mark := " "
 	if sel {
 		mark = "▸"
@@ -403,16 +479,16 @@ func card(t ticket.Ticket, width int, sel bool) []string {
 		flag = warn.Render("! " + string(r[0]))
 	}
 	head := fmt.Sprintf("%s %s", mark, t.Key)
+	if sel {
+		head = selected.Render(head)
+	}
+	gap := max(1, width-lipgloss.Width(head)-lipgloss.Width(flag))
 	title := truncate(t.Summary, width-2)
 	meta := prMeta(t)
 	if len(t.Subtasks) > 0 {
 		meta = strings.TrimSpace(meta + fmt.Sprintf(" · %d subtasks", len(t.Subtasks)))
 	}
-	lines := []string{head + "  " + flag, "  " + title, "  " + dim.Render(truncate(meta, width-2)), ""}
-	if sel {
-		lines[0] = selected.Render(head) + "  " + flag
-	}
-	return lines
+	return []string{head + strings.Repeat(" ", gap) + flag, "  " + title, "  " + dim.Render(truncate(meta, width-2)), ""}
 }
 
 func prMeta(t ticket.Ticket) string {
@@ -437,29 +513,45 @@ func prMeta(t ticket.Ticket) string {
 	return strings.Join(parts, " ")
 }
 
+// List column widths, in terminal cells.
+const (
+	keyWidth    = 13
+	statusWidth = 18
+	prWidth     = 22
+)
+
+// pad truncates s to n cells and fills the rest with spaces, so columns line up.
+func pad(s string, n int) string {
+	s = truncate(s, n)
+	return s + strings.Repeat(" ", max(0, n-lipgloss.Width(s)))
+}
+
 func (m Model) listView() string {
 	items := m.listItems()
 	if len(items) == 0 {
 		return dim.Render("  nothing matches this filter")
 	}
+	titleWidth := max(10, m.width-2-keyWidth-statusWidth-prWidth-3)
+	row := func(key, status, pr, title string) string {
+		return pad(key, keyWidth) + " " + pad(status, statusWidth) + " " + pad(pr, prWidth) + " " + truncate(title, titleWidth)
+	}
 	var b strings.Builder
-	b.WriteString(dim.Render(fmt.Sprintf("    %-14s %-16s %-16s %s", "KEY", "STATUS", "PR / CI", "TITLE")) + "\n")
+	b.WriteString("  " + dim.Render(row("KEY", "STATUS", "PR / CI", "TITLE")) + "\n")
 	for i, it := range items {
 		var line string
 		if it.pr != nil {
-			line = fmt.Sprintf("%-14s %-16s %-16s %s", it.key, "Review requested", it.pr.Repo, it.pr.Title)
+			_, repo, _ := strings.Cut(it.pr.Repo, "/")
+			line = row(string(it.key), "Review requested", repo, it.pr.Title)
 		} else {
-			line = fmt.Sprintf("%-14s %-16s %-16s %s", it.key, truncate(it.ticket.Status, 16), truncate(prMeta(*it.ticket), 16), it.ticket.Summary)
+			line = row(string(it.key), it.ticket.Status, prMeta(*it.ticket), it.ticket.Summary)
 		}
-		line = truncate(line, m.width-6)
-		mark := "  "
-		if (it.ticket != nil && len(it.ticket.Attention()) > 0) || it.pr != nil {
-			mark = warn.Render("! ")
-		}
-		if i == m.row {
+		switch {
+		case i == m.row:
 			b.WriteString("▸ " + selected.Render(line) + "\n")
-		} else {
-			b.WriteString(mark + line + "\n")
+		case it.pr != nil || len(it.ticket.Attention()) > 0:
+			b.WriteString(warn.Render("!") + " " + line + "\n")
+		default:
+			b.WriteString("  " + line + "\n")
 		}
 	}
 	return b.String()
@@ -467,25 +559,43 @@ func (m Model) listView() string {
 
 func (m Model) preview() string {
 	if m.status != "" {
-		return m.status
+		return truncate(m.status, m.width)
 	}
 	it, okSel := m.current()
 	if !okSel {
 		return dim.Render("nothing selected")
 	}
 	if it.pr != nil {
-		return fmt.Sprintf("%s · review requested by %s in %s · Enter opens it ↗", it.key, orDash(it.pr.Author), it.pr.Repo)
+		return truncate(fmt.Sprintf("%s · review requested by %s in %s · enter opens it ↗", it.key, orDash(it.pr.Author), it.pr.Repo), m.width)
 	}
 	t := it.ticket
 	parts := []string{string(t.Key), t.Status}
 	for _, r := range t.Attention() {
-		parts = append(parts, warn.Render(string(r)))
+		parts = append(parts, string(r))
 	}
 	if len(t.Attention()) == 0 && t.Checks() == ticket.ChecksPass {
-		parts = append(parts, ok.Render("checks pass"))
+		parts = append(parts, "checks pass")
 	}
-	parts = append(parts, t.Summary)
+	if hint := actionHint(*t); hint != "" {
+		parts = append(parts, hint)
+	}
 	return truncate(strings.Join(parts, " · "), m.width)
+}
+
+// actionHint tells what the most useful key does for this ticket, as the mockup's preview line does.
+func actionHint(t ticket.Ticket) string {
+	reasons := t.Attention()
+	switch {
+	case len(reasons) > 0 && reasons[0] == ticket.ReasonCIFailing:
+		return "f sends the failure to the agent"
+	case len(reasons) > 0:
+		return "f sends the review comments to the agent"
+	case len(t.PRs) == 0 && t.Category == ticket.ToDo:
+		return "enter asks for repos and opens Claude Code"
+	case len(t.PRs) == 0:
+		return "enter opens the agent"
+	}
+	return "p opens the PR ↗"
 }
 
 func (m Model) footer() string {
@@ -493,8 +603,26 @@ func (m Model) footer() string {
 	if m.effectiveView() == ViewColumns {
 		move = "←↑↓→/wasd move"
 	}
-	keys := []string{move, "enter Open agent · Start", "f fix CI", "i ticket pane", "o Jira ↗", "p PR ↗", "n needs you", "r reviews", "v view", "g refresh", "q close"}
-	return dim.Render(strings.Join(keys, "  "))
+	keys := []string{move, "enter Open agent · Start", "f fix CI", "i ticket pane", "o Jira ↗", "p PR ↗", "tab/1-3 filter", "v view", "g refresh", "q close"}
+	return dim.Render(wrap(keys, m.width))
+}
+
+// wrap joins items with two spaces, starting a new line instead of overflowing width.
+func wrap(items []string, width int) string {
+	var lines []string
+	cur := ""
+	for _, it := range items {
+		switch {
+		case cur == "":
+			cur = it
+		case lipgloss.Width(cur)+2+lipgloss.Width(it) <= width:
+			cur += "  " + it
+		default:
+			lines = append(lines, cur)
+			cur = it
+		}
+	}
+	return strings.Join(append(lines, cur), "\n")
 }
 
 func truncate(s string, n int) string {

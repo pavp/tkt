@@ -7,8 +7,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/ticket"
 )
 
@@ -124,14 +126,14 @@ func TestToggleViewKeepsSelection(t *testing.T) {
 	r := &recorder{}
 	m := press(loaded(r), "l", "v")
 	view := m.View()
-	if !strings.Contains(view, "[list]") || !strings.Contains(view, "▸ ") || !strings.Contains(view, "↑↓/ws move") {
+	if !strings.Contains(view, "▸ ") || !strings.Contains(view, "↑↓/ws move") {
 		t.Fatalf("not in list view:\n%s", view)
 	}
 	if line := selectedLine(view); !strings.Contains(line, "DEMO-1") {
 		t.Errorf("selection lost after toggling: %q", line)
 	}
 	m = press(m, "v")
-	if !strings.Contains(m.View(), "[columns]") || !strings.Contains(m.View(), "▸ DEMO-1") {
+	if !strings.Contains(m.View(), "←↑↓→/wasd move") || !strings.Contains(m.View(), "▸ DEMO-1") {
 		t.Error("toggling back lost the columns or the selection")
 	}
 }
@@ -149,7 +151,7 @@ func TestNarrowTerminalUsesList(t *testing.T) {
 	r := &recorder{}
 	m := loaded(r)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
-	if !strings.Contains(m.View(), "[list]") {
+	if !strings.Contains(m.View(), "↑↓/ws move") {
 		t.Error("narrow terminal did not fall back to the list")
 	}
 }
@@ -163,7 +165,7 @@ func TestFilters(t *testing.T) {
 	}
 	m = press(m, "r")
 	view = m.View()
-	if strings.Contains(view, "DEMO-1") || !strings.Contains(view, "#820") || !strings.Contains(view, "[list]") {
+	if strings.Contains(view, "DEMO-1") || !strings.Contains(view, "#820") || !strings.Contains(view, "↑↓/ws move") {
 		t.Errorf("reviews filter:\n%s", view)
 	}
 	_, _ = run(m, "enter")
@@ -257,5 +259,114 @@ func TestArrowsAndWASDMove(t *testing.T) {
 				t.Errorf("down in the list selected %q", line)
 			}
 		})
+	}
+}
+
+func TestListColumnsLineUp(t *testing.T) {
+	r := &recorder{}
+	snap := snapshot()
+	snap.Reviews[0].Repo = "example-organization/a-really-long-repository-name"
+	snap.Reviews[0].Title = strings.Repeat("Long title ", 20)
+	m := New(board.Snapshot{}, false, r, ViewList)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	next, _ = next.Update(SnapshotMsg{Snap: snap})
+	var titleCols []int
+	for _, l := range strings.Split(stripANSI(next.View()), "\n") {
+		isRow := strings.HasPrefix(l, "▸ ") || strings.HasPrefix(l, "! ") || strings.HasPrefix(l, "  ")
+		for _, word := range []string{"TITLE", "Filter accounts", "Keep sort", "Export CSV", "Long title"} {
+			if i := strings.Index(l, word); i >= 0 && isRow {
+				titleCols = append(titleCols, lipgloss.Width(l[:i]))
+				break
+			}
+		}
+		if lipgloss.Width(l) > 120 {
+			t.Errorf("line wider than the terminal (%d): %q", lipgloss.Width(l), l)
+		}
+	}
+	if len(titleCols) != 5 {
+		t.Fatalf("found %d title columns: %v\n%s", len(titleCols), titleCols, stripANSI(next.View()))
+	}
+	for _, c := range titleCols {
+		if c != titleCols[0] {
+			t.Errorf("titles start at different columns: %v", titleCols)
+			break
+		}
+	}
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b {
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+func TestFooterWrapsToWidth(t *testing.T) {
+	m := loaded(&recorder{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 70, Height: 30})
+	for _, l := range strings.Split(stripANSI(m.View()), "\n") {
+		if lipgloss.Width(l) > 70 {
+			t.Errorf("line wider than 70 cells: %q", l)
+		}
+	}
+}
+
+func TestMatchesMockupDetails(t *testing.T) {
+	r := &recorder{}
+	snap := snapshot()
+	snap.Sprints = []jira.Sprint{{Space: "DEMO", Name: "DEMO S42", End: snap.FetchedAt.Add(4 * 24 * time.Hour)}}
+	m := New(board.Snapshot{}, false, r, ViewColumns).WithClock(func() time.Time { return snap.FetchedAt.Add(3 * time.Minute) })
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	next, _ = next.Update(SnapshotMsg{Snap: snap})
+	view := stripANSI(next.View())
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "synced 3 min ago", "1 All 4", "2 Needs you 2", " Columns  List ", "DEMO-3 · To Do · enter asks for repos and opens Claude Code"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("view missing %q:\n%s", want, view)
+		}
+	}
+	next = press(next, "l")
+	if !strings.Contains(stripANSI(next.View()), "DEMO-1 · In Progress · CI failing · f sends the failure to the agent") {
+		t.Errorf("preview hint missing:\n%s", stripANSI(next.View()))
+	}
+}
+
+func TestTabCyclesFiltersAndNumbersJump(t *testing.T) {
+	m := loaded(&recorder{})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if !strings.Contains(stripANSI(m.View()), "▸ DEMO-1") || strings.Contains(stripANSI(m.View()), "DEMO-3") {
+		t.Errorf("tab should switch to Needs you:\n%s", stripANSI(m.View()))
+	}
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	if !strings.Contains(stripANSI(m.View()), "DEMO-3") {
+		t.Error("shift+tab should go back to All")
+	}
+	m = press(m, "3")
+	if v := stripANSI(m.View()); strings.Contains(v, "DEMO-1") || !strings.Contains(v, "#820") {
+		t.Errorf("3 should show reviews:\n%s", v)
+	}
+}
+
+func TestTickRefreshesWhenStale(t *testing.T) {
+	r := &recorder{}
+	base := snapshot().FetchedAt
+	clock := base.Add(time.Minute)
+	m := New(board.Snapshot{}, false, r, ViewColumns).WithClock(func() time.Time { return clock })
+	next, _ := m.Update(SnapshotMsg{Snap: snapshot()})
+	r.calls = nil
+	next, _ = next.Update(tickMsg(clock))
+	if len(r.calls) != 0 {
+		t.Errorf("refreshed a fresh board: %v", r.calls)
+	}
+	clock = base.Add(3 * time.Minute)
+	next, _ = next.Update(tickMsg(clock))
+	if r.last() != "refresh" || !strings.Contains(stripANSI(next.View()), "refreshing…") {
+		t.Errorf("stale board not refreshed: %v", r.calls)
 	}
 }
