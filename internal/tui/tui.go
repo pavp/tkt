@@ -944,10 +944,12 @@ func (m Model) preview() string {
 		return dim.Render("nothing selected")
 	}
 	if it.pr != nil {
-		return truncate(fmt.Sprintf("%s · review requested by %s in %s · CI %s · enter opens it ↗", it.key, orDash(it.pr.Author), it.pr.Repo, ciWord(it.pr.Checks)), m.width)
+		title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s", it.key, it.pr.Title), m.width))
+		return title + "\n" + dim.Render(truncate(fmt.Sprintf("review requested by %s in %s · CI %s · enter for actions", orDash(it.pr.Author), it.pr.Repo, ciWord(it.pr.Checks)), m.width))
 	}
 	t := it.ticket
-	parts := []string{string(t.Key), t.Status}
+	title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s", t.Key, t.Summary), m.width))
+	parts := []string{t.Status}
 	for _, r := range t.Attention() {
 		parts = append(parts, string(r))
 	}
@@ -962,7 +964,7 @@ func (m Model) preview() string {
 	if hint := actionHint(*t); hint != "" {
 		parts = append(parts, hint)
 	}
-	return truncate(strings.Join(parts, " · "), m.width)
+	return title + "\n" + dim.Render(truncate(strings.Join(parts, " · "), m.width))
 }
 
 func ciWord(c ticket.CheckState) string {
