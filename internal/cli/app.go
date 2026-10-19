@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"golang.org/x/term"
@@ -36,6 +39,10 @@ type App struct {
 	NewGitHub    func(c *config.Config) GitHubAPI
 	Now          func() time.Time
 	Sleep        func(ctx context.Context, d time.Duration) error
+	// Launch runs an interactive program attached to the terminal and waits for it.
+	Launch func(dir, name string, args []string) error
+
+	in *bufio.Reader
 
 	configPath string
 	jsonOut    bool
@@ -59,6 +66,7 @@ func NewApp() (*App, error) {
 		NewJira:      func(site, email, token string) JiraAPI { return jira.New(site, email, token) },
 		Now:          time.Now,
 		Sleep:        sleep,
+		Launch:       launch,
 	}
 	a.NewGitHub = func(c *config.Config) GitHubAPI { return githubFor(c, a.Run) }
 	return a, nil
@@ -116,4 +124,26 @@ func sleep(ctx context.Context, d time.Duration) error {
 	case <-t.C:
 		return nil
 	}
+}
+
+func launch(dir, name string, args []string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
+// readLine prints prompt on stderr and reads one answer line; io.EOF means no more input.
+func (a *App) readLine(prompt string) (string, error) {
+	if a.in == nil {
+		a.in = bufio.NewReader(a.Stdin)
+	}
+	if prompt != "" {
+		fmt.Fprint(a.Stderr, prompt)
+	}
+	line, err := a.in.ReadString('\n')
+	if err != nil && line == "" {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
 }

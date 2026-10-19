@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"sort"
@@ -107,8 +106,8 @@ func (a *App) readToken(email string) (string, error) {
 		}
 		raw = string(b)
 	} else {
-		line, err := bufio.NewReader(a.Stdin).ReadString('\n')
-		if err != nil && line == "" {
+		line, err := a.readLine("")
+		if err != nil {
 			return "", errors.New("no token on stdin")
 		}
 		raw = line
