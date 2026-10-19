@@ -12,6 +12,7 @@ import (
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/github"
+	"github.com/pavp/tkt/internal/jira"
 )
 
 const atlassianTokenURL = "https://id.atlassian.com/manage-profile/security/api-tokens"
@@ -43,11 +44,22 @@ func newAuthJiraCmd(a *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			user, err := a.NewJira(s, e, token).Myself(cmd.Context())
+			if errors.Is(err, jira.ErrUnauthorized) {
+				return errors.New("jira rejected this token for " + e + "; nothing was saved")
+			}
+			verified := err == nil
+			if !verified {
+				fmt.Fprintf(a.Stderr, "! could not reach Jira to check the token (%v); saving it anyway\n", err)
+			}
 			if err := a.Creds.Set(credstore.JiraKey(s, e), token); err != nil {
 				return err
 			}
 			if a.jsonOut {
-				return a.printJSON(map[string]any{"saved": true, "store": a.Creds.Name(), "site": s, "email": e})
+				return a.printJSON(map[string]any{"saved": true, "verified": verified, "user": user.DisplayName, "store": a.Creds.Name(), "site": s, "email": e})
+			}
+			if verified {
+				a.printf("✓ Connected to %s as %s\n", s, user.DisplayName)
 			}
 			a.printf("✓ Jira token saved in %s for %s on %s\n", a.Creds.Name(), e, s)
 			return nil

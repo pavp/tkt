@@ -12,6 +12,7 @@ import (
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/execx"
+	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/paths"
 	"github.com/pavp/tkt/internal/repos"
 )
@@ -29,6 +30,7 @@ type App struct {
 
 	IsTerminal   func() bool
 	ReadPassword func() ([]byte, error)
+	NewJira      func(site, email, token string) JiraAPI
 
 	configPath string
 	jsonOut    bool
@@ -49,6 +51,7 @@ func NewApp() (*App, error) {
 		Creds:        credstore.Default(env.GOOS),
 		IsTerminal:   func() bool { return term.IsTerminal(stdin) },
 		ReadPassword: func() ([]byte, error) { return term.ReadPassword(stdin) },
+		NewJira:      func(site, email, token string) JiraAPI { return jira.New(site, email, token) },
 	}, nil
 }
 

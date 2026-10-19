@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/pavp/tkt/internal/credstore"
+	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/paths"
 )
 
@@ -63,6 +64,7 @@ type harness struct {
 	run    *fakeRunner
 	env    map[string]string
 	home   string
+	jira   *fakeJira
 }
 
 func newHarness(t *testing.T, configTOML string) *harness {
@@ -81,6 +83,7 @@ func newHarness(t *testing.T, configTOML string) *harness {
 		run:    &fakeRunner{out: map[string]string{}, missing: map[string]bool{}},
 		env:    map[string]string{},
 		home:   home,
+		jira:   &fakeJira{},
 	}
 	h.app = &App{
 		Stdin:        strings.NewReader(""),
@@ -91,7 +94,11 @@ func newHarness(t *testing.T, configTOML string) *harness {
 		Creds:        h.creds,
 		IsTerminal:   func() bool { return false },
 		ReadPassword: func() ([]byte, error) { return nil, errors.New("no terminal") },
-		configPath:   cfgPath,
+		NewJira: func(_, _, token string) JiraAPI {
+			h.jira.token = token
+			return h.jira
+		},
+		configPath: cfgPath,
 	}
 	return h
 }
@@ -128,8 +135,12 @@ func TestAuthJiraStoresTokenFromStdin(t *testing.T) {
 	if got := h.creds["jira:example.atlassian.net:dev@example.com"]; got != "tok-123" {
 		t.Errorf("stored %q", got)
 	}
-	if !strings.Contains(h.out.String(), "✓ Jira token saved in test store for dev@example.com on https://example.atlassian.net") {
+	if !strings.Contains(h.out.String(), "✓ Connected to https://example.atlassian.net as Dev Example") ||
+		!strings.Contains(h.out.String(), "✓ Jira token saved in test store for dev@example.com on https://example.atlassian.net") {
 		t.Errorf("output = %q", h.out)
+	}
+	if h.jira.token != "tok-123" {
+		t.Errorf("validated with %q", h.jira.token)
 	}
 	if strings.Contains(h.out.String()+h.errOut.String(), "tok-123") {
 		t.Error("token printed")
@@ -174,6 +185,33 @@ func TestAuthJiraErrors(t *testing.T) {
 	}
 	if len(h.creds) != 0 {
 		t.Error("stored an empty token")
+	}
+}
+
+func TestAuthJiraRejectedTokenIsNotSaved(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	h.jira.myselfErr = jira.ErrUnauthorized
+	h.app.Stdin = strings.NewReader("wrong\n")
+	if code := h.exec("auth", "jira"); code == 0 || !strings.Contains(h.errOut.String(), "jira rejected this token for dev@example.com; nothing was saved") {
+		t.Fatalf("exit %d, %q", code, h.errOut)
+	}
+	if len(h.creds) != 0 {
+		t.Error("rejected token was saved")
+	}
+}
+
+func TestAuthJiraUnreachableStillSaves(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	h.jira.myselfErr = errors.New("dial tcp: no route")
+	h.app.Stdin = strings.NewReader("tok\n")
+	if code := h.exec("auth", "jira"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if !strings.Contains(h.errOut.String(), "could not reach Jira") || h.creds["jira:example.atlassian.net:dev@example.com"] != "tok" {
+		t.Errorf("stderr %q, creds %v", h.errOut, h.creds)
+	}
+	if strings.Contains(h.out.String(), "Connected") {
+		t.Error("claimed a verified connection")
 	}
 }
 
