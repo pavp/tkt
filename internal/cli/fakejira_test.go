@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"errors"
+	"io"
+	"strings"
 
 	"github.com/pavp/tkt/internal/jira"
 )
@@ -19,6 +21,7 @@ type fakeJira struct {
 	statuses  map[string][]jira.Status
 	projects  []jira.Project
 	sprints   map[string][]jira.Sprint
+	files     map[string]string
 }
 
 func (f *fakeJira) Myself(context.Context) (jira.User, error) {
@@ -56,3 +59,12 @@ func (f *fakeJira) ActiveSprints(_ context.Context, p string) ([]jira.Sprint, er
 	return f.sprints[p], nil
 }
 func (f *fakeJira) BrowseURL(key string) string { return "https://example.atlassian.net/browse/" + key }
+
+func (f *fakeJira) Download(_ context.Context, url string, w io.Writer, _ int64) error {
+	body, ok := f.files[url]
+	if !ok {
+		return errors.New("download " + url + ": 404")
+	}
+	_, err := io.Copy(w, strings.NewReader(body))
+	return err
+}

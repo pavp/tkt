@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,7 @@ type App struct {
 	NewJira      func(site, email, token string) JiraAPI
 	NewGitHub    func(c *config.Config) GitHubAPI
 	Now          func() time.Time
+	Sleep        func(ctx context.Context, d time.Duration) error
 
 	configPath string
 	jsonOut    bool
@@ -56,6 +58,7 @@ func NewApp() (*App, error) {
 		ReadPassword: func() ([]byte, error) { return term.ReadPassword(stdin) },
 		NewJira:      func(site, email, token string) JiraAPI { return jira.New(site, email, token) },
 		Now:          time.Now,
+		Sleep:        sleep,
 	}
 	a.NewGitHub = func(c *config.Config) GitHubAPI { return githubFor(c, a.Run) }
 	return a, nil
@@ -103,3 +106,14 @@ func (a *App) printf(format string, args ...any) {
 
 // errQuiet ends a command with a non-zero exit status after it already explained the problem.
 var errQuiet = errors.New("quiet failure")
+
+func sleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}

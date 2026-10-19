@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"io"
 
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
@@ -22,6 +23,7 @@ type JiraAPI interface {
 	Projects(ctx context.Context) ([]jira.Project, error)
 	ActiveSprints(ctx context.Context, project string) ([]jira.Sprint, error)
 	BrowseURL(key string) string
+	Download(ctx context.Context, url string, w io.Writer, maxBytes int64) error
 }
 
 // jiraClient builds a Jira client from the configuration and the stored token.
