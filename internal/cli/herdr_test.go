@@ -156,8 +156,12 @@ func TestHerdrStartCreatesWorkspacesWithAgents(t *testing.T) {
 		t.Errorf("workspaces = %v", cwds)
 	}
 	start := f.Last("agent.start")
-	if start["kind"] != "claude" || start["name"] != "claude" || start["pane_id"] != "w9:p1" || !strings.Contains(start["args"].([]any)[0].(string), "Work on Jira ticket DEMO-7") {
+	if start["kind"] != "claude" || start["name"] != "claude" || start["pane_id"] != "w9:p1" || len(start["args"].([]any)) != 0 {
 		t.Errorf("agent.start = %v", start)
+	}
+	prompt := f.Last("agent.prompt")
+	if text, _ := prompt["text"].(string); prompt["target"] != "w9:p1" || !strings.Contains(text, "Work on Jira ticket DEMO-7") || !strings.Contains(text, "\n") {
+		t.Errorf("agent.prompt = %v", prompt)
 	}
 	if len(*calls) != 0 {
 		t.Error("launched a terminal agent instead of Herdr")
@@ -557,6 +561,21 @@ func TestHerdrStartNamesAgentsClaudeAndNumbersTakenNames(t *testing.T) {
 	}
 	if strings.Join(names, ",") != "claude,claude-2" {
 		t.Errorf("names tried = %v", names)
+	}
+}
+
+func TestHerdrStartLeavesPromptToUserWhenAgentIsBlocked(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+	f.Errors["agent.start"] = "agent_not_ready: claude is blocked"
+	if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", true); err != nil {
+		t.Fatal(err)
+	}
+	if count(f, "agent.prompt") != 0 {
+		t.Error("prompted a blocked agent")
+	}
+	if out := h.out.String(); !strings.Contains(out, "waiting for an answer") || !strings.Contains(out, "Work on DEMO-7") {
+		t.Errorf("output = %q", out)
 	}
 }
 
