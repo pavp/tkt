@@ -53,7 +53,7 @@ func TestInitWritesConfig(t *testing.T) {
 	if len(c.Spaces) != 2 || c.Spaces[0].Key != "DEMO" || c.Spaces[1].Key != "OPS" {
 		t.Fatalf("spaces = %+v", c.Spaces)
 	}
-	if len(c.Spaces[0].Repos) != 2 || c.Spaces[0].Repos[1].Name != "example-org/api" || c.Spaces[0].Repos[0].Base != "main" {
+	if len(c.Spaces[0].Repos) != 2 || c.Spaces[0].Repos[1].Name != "example-org/api" {
 		t.Errorf("repos = %+v", c.Spaces[0].Repos)
 	}
 	if c.Spaces[0].StatusOverrides["Code Review"] != "review" {

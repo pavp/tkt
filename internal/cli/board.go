@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -83,11 +84,67 @@ func (a *App) ensureJiraToken(ctx context.Context, c *config.Config) (bool, erro
 	return true, nil
 }
 
-// boardActions carries out what the board asks for.
+// boardActions carries out what the board asks for. Its commands run on their own goroutines, so the
+// configuration, which the settings view can replace, is read through cfg.
 type boardActions struct {
 	a   *App
 	c   *config.Config
 	ctx context.Context
+	mu  sync.Mutex
+}
+
+func (b *boardActions) cfg() *config.Config {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.c
+}
+
+// Config returns the configuration as written on disk, with "~" unexpanded, so saving it keeps the
+// user's paths portable; the board itself runs on an expanded copy.
+func (b *boardActions) Config() config.Config {
+	if c, err := config.Load(b.a.ConfigPath()); err == nil {
+		return *c
+	}
+	return b.cfg().Clone()
+}
+
+func (b *boardActions) FindClones(repo string) tea.Cmd {
+	return func() tea.Msg {
+		paths := b.a.Resolver(b.cfg()).FindAll(b.ctx, repo)
+		for i, p := range paths {
+			paths[i] = b.a.tildePath(p)
+		}
+		return tui.ClonesFoundMsg{Repo: repo, Paths: paths}
+	}
+}
+
+func (b *boardActions) RepoAt(path string) tea.Cmd {
+	return func() tea.Msg {
+		repo, _ := b.a.Resolver(b.cfg()).RepoAt(b.ctx, b.a.Env.ExpandHome(path))
+		return tui.RepoFoundMsg{Path: path, Repo: repo}
+	}
+}
+
+func (b *boardActions) PickFolder(start string) tea.Cmd {
+	return func() tea.Msg {
+		p, err := b.a.pickFolder(b.ctx, start)
+		return tui.FolderPickedMsg{Path: p, Err: err}
+	}
+}
+
+func (b *boardActions) SaveConfig(c config.Config) tea.Cmd {
+	return func() tea.Msg {
+		c = c.Clone()
+		if err := config.Save(b.a.ConfigPath(), &c); err != nil {
+			return tui.SettingsSavedMsg{Err: err}
+		}
+		inUse := c.Clone()
+		b.a.expandPaths(&inUse)
+		b.mu.Lock()
+		b.c = &inUse
+		b.mu.Unlock()
+		return tui.SettingsSavedMsg{Config: c.Clone()}
+	}
 }
 
 func (b *boardActions) inHerdr() bool { return b.a.Env.Getenv("HERDR_ENV") == "1" }
@@ -96,9 +153,9 @@ func (b *boardActions) Refresh() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(b.ctx, time.Minute)
 		defer cancel()
-		snap, stale, err := b.a.loadSnapshot(ctx, b.c, false)
+		snap, stale, err := b.a.loadSnapshot(ctx, b.cfg(), false)
 		if err == nil && stale == nil {
-			b.a.refreshSidebarQuietly(ctx, b.c, snap)
+			b.a.refreshSidebarQuietly(ctx, b.cfg(), snap)
 		}
 		return tui.SnapshotMsg{Snap: snap, Stale: stale, Err: err}
 	}
@@ -124,7 +181,7 @@ func (b *boardActions) Start(key ticket.Key) tea.Cmd {
 
 func (b *boardActions) Detail(key ticket.Key) tea.Cmd {
 	return func() tea.Msg {
-		d, err := b.a.loadDetail(b.ctx, b.c, key)
+		d, err := b.a.loadDetail(b.ctx, b.cfg(), key)
 		if err != nil {
 			return tui.DetailMsg{Key: key, Err: err}
 		}
@@ -156,7 +213,7 @@ func (b *boardActions) ticketPaneOpen(key ticket.Key) tea.Cmd {
 	return func() tea.Msg {
 		h := b.a.NewHerdr()
 		pane := herdr.PaneOpen{PluginID: b.a.pluginID(), Entrypoint: "ticket", Env: map[string]string{"TKT_KEY": string(key)}}
-		if all, err := b.a.allWork(b.ctx, b.c); err == nil {
+		if all, err := b.a.allWork(b.ctx, b.cfg()); err == nil {
 			for _, w := range workspace.For(all, key) {
 				if w.Path == "" {
 					continue
@@ -186,7 +243,7 @@ func (b *boardActions) Open(url string) tea.Cmd {
 
 func (b *boardActions) Fix(key ticket.Key) tea.Cmd {
 	return func() tea.Msg {
-		msg, err := b.a.sendFeedback(b.ctx, b.c, key, false)
+		msg, err := b.a.sendFeedback(b.ctx, b.cfg(), key, false)
 		if err != nil {
 			return tui.StatusMsg(err.Error())
 		}
@@ -208,7 +265,7 @@ func (b *boardActions) Copy(text, what string) tea.Cmd {
 
 func (b *boardActions) CopyContext(key ticket.Key) tea.Cmd {
 	return func() tea.Msg {
-		d, err := b.a.loadDetail(b.ctx, b.c, key)
+		d, err := b.a.loadDetail(b.ctx, b.cfg(), key)
 		if err != nil {
 			return tui.StatusMsg(err.Error())
 		}

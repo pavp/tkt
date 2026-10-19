@@ -12,11 +12,46 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/ticket"
 )
 
-type recorder struct{ calls []string }
+type recorder struct {
+	calls []string
+	cfg   config.Config
+	saved []config.Config
+	// saveErr makes SaveConfig fail.
+	saveErr error
+	clones  map[string][]string
+	origins map[string]string
+	picked  string
+	starts  []string
+}
+
+func (r *recorder) FindClones(repo string) tea.Cmd {
+	return func() tea.Msg { return ClonesFoundMsg{Repo: repo, Paths: r.clones[repo]} }
+}
+func (r *recorder) RepoAt(path string) tea.Cmd {
+	return func() tea.Msg { return RepoFoundMsg{Path: path, Repo: r.origins[path]} }
+}
+func (r *recorder) PickFolder(start string) tea.Cmd {
+	r.starts = append(r.starts, start)
+	return func() tea.Msg { return FolderPickedMsg{Path: r.picked} }
+}
+
+func (r *recorder) Config() config.Config { return r.cfg.Clone() }
+func (r *recorder) SaveConfig(c config.Config) tea.Cmd {
+	r.calls = append(r.calls, "save")
+	return func() tea.Msg {
+		if r.saveErr != nil {
+			return SettingsSavedMsg{Err: r.saveErr}
+		}
+		r.saved = append(r.saved, c.Clone())
+		r.cfg = c.Clone()
+		return SettingsSavedMsg{Config: c.Clone()}
+	}
+}
 
 func (r *recorder) cmd(s string) tea.Cmd {
 	r.calls = append(r.calls, s)
@@ -979,5 +1014,91 @@ func TestBoardShowsSnapshotWarningsUnderTheHeader(t *testing.T) {
 	x := lipgloss.Width(lines[y][:strings.Index(lines[y], "DEMO-2")])
 	if v := stripANSI(click(next, x, y).View()); !strings.Contains(v, "▸ DEMO-2") {
 		t.Errorf("clicks should still map to cards under the warning:\n%s", v)
+	}
+}
+
+func tallBoard(t *testing.T) tea.Model {
+	t.Helper()
+	snap := snapshot()
+	for i := 10; i < 22; i++ {
+		snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: ticket.Key(fmt.Sprintf("DEMO-%d", i)), Summary: "filler", Status: "To Do", Category: ticket.ToDo})
+	}
+	m := New(board.Snapshot{}, false, &recorder{}, ViewColumns)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	next, _ = next.Update(SnapshotMsg{Snap: snap})
+	return next
+}
+
+func TestColumnsScrollOnTheirOwn(t *testing.T) {
+	m := tallBoard(t)
+	v := stripANSI(m.View())
+	lines := strings.Split(v, "\n")
+	if len(lines) != 40 || !strings.Contains(lines[1], "tkt") || !strings.Contains(lines[len(lines)-1], "close") {
+		t.Fatalf("header or legend scrolled away (%d lines):\n%s", len(lines), v)
+	}
+	if !strings.Contains(v, "↓ ") || !strings.Contains(v, " more") || !strings.Contains(v, "Filter accounts") {
+		t.Errorf("the tall column should mark hidden cards while the others stay:\n%s", v)
+	}
+	for i := 0; i < 12; i++ {
+		m = press(m, "s")
+	}
+	v = stripANSI(m.View())
+	if !strings.Contains(v, "▸ DEMO-") || !strings.Contains(v, "↑ ") || !strings.Contains(v, "In Progress") {
+		t.Errorf("moving down should scroll only that column and keep the selection visible:\n%s", v)
+	}
+	if lines := strings.Split(v, "\n"); !strings.Contains(lines[1], "tkt") {
+		t.Errorf("the header moved:\n%s", v)
+	}
+}
+
+func TestWheelScrollsTheColumnUnderThePointer(t *testing.T) {
+	m := tallBoard(t)
+	m = press(m, "l")
+	if !strings.Contains(stripANSI(m.View()), "▸ DEMO-1") {
+		t.Fatalf("selection should be in In Progress:\n%s", stripANSI(m.View()))
+	}
+	y := lineIndex(m.View(), "To Do") + 3
+	m, _ = m.Update(tea.MouseMsg{X: 5, Y: y, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "↑ 1 more") || !strings.Contains(v, "▸ DEMO-1") {
+		t.Errorf("the wheel over To Do should scroll To Do and leave the selection:\n%s", v)
+	}
+	lines := strings.Split(v, "\n")
+	cy := -1
+	for i, l := range lines {
+		if strings.Contains(l, "DEMO-11") {
+			cy = i
+			break
+		}
+	}
+	if cy < 0 {
+		t.Fatalf("DEMO-11 not visible after scrolling:\n%s", v)
+	}
+	if v := stripANSI(click(m, 5, cy).View()); !strings.Contains(v, "▸ DEMO-11") {
+		t.Errorf("a click on a scrolled column should select the card under it:\n%s", v)
+	}
+}
+
+func TestReviewStripKeepsRoomForTheMoreLabel(t *testing.T) {
+	snap := snapshot()
+	snap.Reviews = nil
+	for i := 0; i < 8; i++ {
+		snap.Reviews = append(snap.Reviews, ticket.PullRequest{Repo: "example-org/web", Number: 700 + i, Branch: fmt.Sprintf("feature/DEMO-17044%d", i), State: ticket.PROpen})
+	}
+	for _, width := range []int{120, 140, 160, 200} {
+		m := New(board.Snapshot{}, false, &recorder{}, ViewColumns)
+		next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+		next, _ = next.Update(SnapshotMsg{Snap: snap})
+		lines := strings.Split(stripANSI(next.View()), "\n")
+		y := lineIndex(next.View(), "Review requested")
+		if y < 0 {
+			t.Fatalf("width %d: no review strip", width)
+		}
+		if !strings.Contains(lines[y], "more · press 3") {
+			t.Errorf("width %d: the more label is cut: %q", width, lines[y])
+		}
+		if w := lipgloss.Width(lines[y]); w > width {
+			t.Errorf("width %d: strip is %d wide", width, w)
+		}
 	}
 }

@@ -126,3 +126,31 @@ func TestClone(t *testing.T) {
 		t.Error("cloning without roots should fail")
 	}
 }
+
+func TestFindAllListsEveryClone(t *testing.T) {
+	root := t.TempDir()
+	a := mkClone(t, filepath.Join(root, "web"))
+	b := mkClone(t, filepath.Join(root, "work", "web-copy"))
+	other := mkClone(t, filepath.Join(root, "api"))
+	f := &fakeRunner{remotes: map[string]string{
+		a:     "git@github.com:example-org/web.git",
+		b:     "https://github.com/Example-Org/web",
+		other: "git@github.com:example-org/api.git",
+	}}
+	got := Resolver{Roots: []string{root}, Run: f}.FindAll(context.Background(), "example-org/web")
+	if strings.Join(got, ",") != a+","+b {
+		t.Errorf("FindAll = %v", got)
+	}
+}
+
+func TestRepoAt(t *testing.T) {
+	dir := mkClone(t, filepath.Join(t.TempDir(), "web"))
+	f := &fakeRunner{remotes: map[string]string{dir: "git@github.com:example-org/web.git"}}
+	r := Resolver{Run: f}
+	if got, ok := r.RepoAt(context.Background(), dir); !ok || got != "example-org/web" {
+		t.Errorf("RepoAt = %q, %v", got, ok)
+	}
+	if _, ok := r.RepoAt(context.Background(), t.TempDir()); ok {
+		t.Error("a folder without a GitHub origin has no repository")
+	}
+}

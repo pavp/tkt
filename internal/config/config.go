@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -53,6 +55,7 @@ type Space struct {
 
 type Repo struct {
 	Name string `toml:"repo"`
+	// Base is accepted for older configs; nothing reads it, since agents pick base branches per project.
 	Base string `toml:"base,omitempty"`
 	Path string `toml:"path,omitempty"`
 }
@@ -123,13 +126,7 @@ func (c *Config) applyDefaults() {
 	if c.Context.Comments == 0 {
 		c.Context.Comments = DefaultComments
 	}
-	for i := range c.Spaces {
-		for j := range c.Spaces[i].Repos {
-			if c.Spaces[i].Repos[j].Base == "" {
-				c.Spaces[i].Repos[j].Base = "main"
-			}
-		}
-	}
+
 }
 
 func (c *Config) Validate() error {
@@ -232,6 +229,20 @@ func (r Repo) Owner() string {
 func (r Repo) ShortName() string {
 	_, name, _ := strings.Cut(r.Name, "/")
 	return name
+}
+
+// Clone returns a deep copy, so an editor can change it without touching the config in use.
+func (c Config) Clone() Config {
+	out := c
+	out.RepoRoots = slices.Clone(c.RepoRoots)
+	out.GitHub.Accounts = maps.Clone(c.GitHub.Accounts)
+	out.Spaces = make([]Space, len(c.Spaces))
+	for i, s := range c.Spaces {
+		s.StatusOverrides = maps.Clone(s.StatusOverrides)
+		s.Repos = slices.Clone(s.Repos)
+		out.Spaces[i] = s
+	}
+	return out
 }
 
 // GitHubAccount returns the gh account configured for owner; empty means gh's active account.

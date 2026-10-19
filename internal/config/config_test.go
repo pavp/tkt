@@ -63,7 +63,7 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if !ok {
 		t.Fatal("DEMO missing")
 	}
-	if demo.Repos[0].Base != "main" || demo.Repos[1].Base != "develop" {
+	if demo.Repos[0].Base != "" || demo.Repos[1].Base != "develop" {
 		t.Errorf("bases = %q, %q", demo.Repos[0].Base, demo.Repos[1].Base)
 	}
 	if got := demo.Categories()["Code Review"]; got != ticket.InReview {
@@ -144,7 +144,7 @@ func TestSaveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Spaces[0].Repos[0].Base != "main" || got.Jira.Email != "dev@example.com" {
+	if got.Spaces[0].Repos[0].Base != "" || got.Jira.Email != "dev@example.com" {
 		t.Errorf("round trip = %+v", got)
 	}
 }
@@ -159,5 +159,22 @@ func TestSaveRejectsInvalid(t *testing.T) {
 func TestExampleConfigIsValid(t *testing.T) {
 	if _, err := Load(filepath.Join("..", "..", "docs", "config.example.toml")); err != nil {
 		t.Fatalf("docs/config.example.toml: %v", err)
+	}
+}
+
+func TestCloneIsIndependent(t *testing.T) {
+	c := Config{
+		RepoRoots: []string{"~/src"},
+		GitHub:    GitHub{Accounts: map[string]string{"example-org": "dev"}},
+		Spaces:    []Space{{Key: "DEMO", StatusOverrides: map[string]string{"Code Review": "review"}, Repos: []Repo{{Name: "example-org/web"}}}},
+	}
+	d := c.Clone()
+	d.RepoRoots[0] = "~/other"
+	d.GitHub.Accounts["example-org"] = "x"
+	d.Spaces[0].Repos[0].Name = "example-org/api"
+	d.Spaces[0].Repos = append(d.Spaces[0].Repos, Repo{Name: "example-org/new"})
+	d.Spaces[0].StatusOverrides["Code Review"] = "done"
+	if c.RepoRoots[0] != "~/src" || c.GitHub.Accounts["example-org"] != "dev" || c.Spaces[0].Repos[0].Name != "example-org/web" || len(c.Spaces[0].Repos) != 1 || c.Spaces[0].StatusOverrides["Code Review"] != "review" {
+		t.Errorf("clone shares state with the original: %+v", c)
 	}
 }

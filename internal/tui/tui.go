@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/ticket"
 )
 
@@ -26,6 +27,38 @@ type Actions interface {
 	CopyContext(key ticket.Key) tea.Cmd
 	// Detail renders a ticket for reading inside the board; the result arrives as a DetailMsg.
 	Detail(key ticket.Key) tea.Cmd
+	// Config returns a copy of the configuration in use, for the settings view to edit.
+	Config() config.Config
+	// SaveConfig writes the configuration; the outcome arrives as a SettingsSavedMsg.
+	SaveConfig(c config.Config) tea.Cmd
+	// FindClones looks for local clones of repo ("owner/name"); they arrive as a ClonesFoundMsg.
+	FindClones(repo string) tea.Cmd
+	// RepoAt reads the GitHub repository a folder's origin points to; it arrives as a RepoFoundMsg.
+	RepoAt(path string) tea.Cmd
+	// PickFolder shows the system's folder chooser; the choice arrives as a FolderPickedMsg.
+	PickFolder(start string) tea.Cmd
+}
+
+type ClonesFoundMsg struct {
+	Repo  string
+	Paths []string
+}
+
+type RepoFoundMsg struct {
+	Path, Repo string
+}
+
+// FolderPickedMsg carries the chosen folder; an empty Path means the user cancelled.
+type FolderPickedMsg struct {
+	Path string
+	Err  error
+}
+
+// SettingsSavedMsg reports a settings save: the configuration as written, with defaults filled in, or why
+// nothing was written.
+type SettingsSavedMsg struct {
+	Config config.Config
+	Err    error
 }
 
 // SnapshotMsg delivers a fetched board; Stale explains why it came from the cache, Err why nothing came.
@@ -76,6 +109,9 @@ type Model struct {
 	compact      bool
 	menu         *menu
 	detail       *detailView
+	settings     *settingsView
+	// colOffset is how far each column is scrolled; an array so copies of the model never share it.
+	colOffset [8]int
 	// inStrip means the keyboard cursor is on the review chips above the columns, at stripSel.
 	inStrip  bool
 	stripSel int
@@ -248,6 +284,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = max(0, msg.Width-2*margin), msg.Height
 		m.reselect()
+	case SettingsSavedMsg:
+		return m.settingsSaved(msg)
+	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg:
+		return m.settingsLookup(msg)
 	case SnapshotMsg:
 		m.loading = false
 		if msg.Err != nil {
@@ -288,6 +328,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // the keyboard so a stray click never starts an agent.
 func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	msg.X -= margin
+	if m.settings != nil {
+		return m.settingsMouse(msg)
+	}
 	if m.detail != nil && m.menu == nil {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
@@ -318,11 +361,20 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch msg.Button {
-	case tea.MouseButtonWheelUp:
-		m.move(0, -1)
-		return m, nil
-	case tea.MouseButtonWheelDown:
-		m.move(0, 1)
+	case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+		d := 1
+		if msg.Button == tea.MouseButtonWheelUp {
+			d = -1
+		}
+		if c := msg.X / (m.columnWidth() + 2); m.effectiveView() == ViewColumns && !m.inStrip && c != m.col && c >= 0 && c < len(m.colOffset) {
+			cols := m.columns()
+			if c < len(cols) {
+				capacity, _ := m.columnCapacity(m.columnsHeight(), len(cols[c]))
+				m.colOffset[c] = clamp(m.columnOffset(c, len(cols[c]), capacity)+d, 0, len(cols[c])-capacity)
+			}
+			return m, nil
+		}
+		m.move(0, d)
 		return m, nil
 	case tea.MouseButtonLeft:
 	default:
@@ -370,9 +422,23 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	cols := m.columns()
 	colWidth := m.columnWidth() + 2
 	c := msg.X / colWidth
-	// Inside a column box: top border, the column title and its rule, then one bordered card after another.
-	r := (body - 3) / m.cardLines()
-	if body >= 3 && c >= 0 && c < len(cols) && r < len(cols[c]) {
+	// Inside a column box: top border, the column title and its rule, the "↑ more" line when cards are
+	// hidden above, then one bordered card after another.
+	first := 3
+	r := -1
+	if c >= 0 && c < len(cols) {
+		capacity, _ := m.columnCapacity(m.columnsHeight(), len(cols[c]))
+		off := m.columnOffset(c, len(cols[c]), capacity)
+		if off > 0 {
+			first++
+		}
+		if body >= first {
+			if i := (body - first) / m.cardLines(); i < capacity {
+				r = off + i
+			}
+		}
+	}
+	if r >= 0 && c >= 0 && c < len(cols) && r < len(cols[c]) {
 		m.col, m.row = c, r
 		m.inStrip = false
 		m.remember()
@@ -432,6 +498,9 @@ func (m Model) columnWidth() int {
 }
 
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.settings != nil {
+		return m.settingsKey(k)
+	}
 	if m.menu != nil {
 		return m.menuKey(k)
 	}
@@ -496,6 +565,8 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.actions.Refresh()
 	case "enter", " ":
 		m.openMenu()
+	case ",":
+		return m.openSettings()
 	case "i":
 		if it, ok := m.current(); ok && it.ticket != nil {
 			return m.openDetail(it.key)
@@ -610,6 +681,9 @@ func (m Model) View() string {
 
 func (m Model) board() string {
 	top := m.header()
+	if m.settings != nil {
+		return top + "\n" + m.detailBack() + "\n\n" + m.settingsBody() + "\n\n" + m.settingsFooter()
+	}
 	if m.detail != nil && m.menu == nil {
 		body := m.detailBody()
 		bottom := m.detailFooter()
@@ -848,9 +922,13 @@ func (m Model) reviewChips() (string, []chipSpan) {
 		if m.inStrip && len(spans) == m.stripSel {
 			chip = reviewChip.BorderForeground(lipgloss.Color("111")).Render(selected.Render("▸" + text))
 		}
-		if used+2+lipgloss.Width(chip) > m.width {
-			more := lipgloss.NewStyle().PaddingTop(1).Render(dim.Render(fmt.Sprintf("+%d more · press 3", len(m.snap.Reviews)-i)))
-			row = append(row, " ", more)
+		// A chip only fits if the "+N more" label for the chips after it still fits beside it.
+		need := used + 2 + lipgloss.Width(chip)
+		if rest := len(m.snap.Reviews) - i - 1; rest > 0 {
+			need += 1 + lipgloss.Width(moreReviews(rest))
+		}
+		if need > m.width {
+			row = append(row, " ", lipgloss.NewStyle().PaddingTop(1).Render(dim.Render(moreReviews(len(m.snap.Reviews)-i))))
 			break
 		}
 		row = append(row, "  ", chip)
@@ -859,6 +937,8 @@ func (m Model) reviewChips() (string, []chipSpan) {
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, row...), spans
 }
+
+func moreReviews(n int) string { return fmt.Sprintf("+%d more · press 3", n) }
 
 // cardLines is how many lines one bordered card takes: two border lines plus its content lines.
 func (m Model) cardLines() int {
@@ -869,6 +949,39 @@ func (m Model) cardLines() int {
 }
 
 // columnsView draws the four columns as boxes reaching height lines, each ticket in its own card.
+// columnsHeight is the height the column boxes get between the header, the review strip and the legend.
+func (m Model) columnsHeight() int {
+	h := m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer())
+	if strip := m.reviewStrip(); strip != "" {
+		h -= lineCount(strip)
+	}
+	return h
+}
+
+// columnCapacity says how many of n cards fit in a column box of height lines; when they do not all
+// fit, a line above and below is kept for the "more" markers.
+func (m Model) columnCapacity(height, n int) (int, bool) {
+	inner := height - 4
+	if n == 0 || n*m.cardLines() <= inner {
+		return n, false
+	}
+	return max(1, (inner-2)/m.cardLines()), true
+}
+
+// columnOffset is the first visible card of column ci: its own scroll, moved just enough to keep the
+// selected card visible when the selection is in that column.
+func (m Model) columnOffset(ci, n, capacity int) int {
+	off := 0
+	if ci < len(m.colOffset) {
+		off = m.colOffset[ci]
+	}
+	if ci == m.col && !m.inStrip {
+		off = min(off, m.row)
+		off = max(off, m.row-capacity+1)
+	}
+	return clamp(off, 0, n-capacity)
+}
+
 func (m Model) columnsView(height int) string {
 	cols := m.columns()
 	inner := m.columnWidth()
@@ -878,8 +991,18 @@ func (m Model) columnsView(height int) string {
 		if len(cols[ci]) == 0 {
 			parts = append(parts, " "+dim.Render("— nothing here"))
 		}
-		for ri, it := range cols[ci] {
-			parts = append(parts, card(*it.ticket, inner, ci == m.col && ri == m.row && !m.inStrip, m.compact))
+		n := len(cols[ci])
+		capacity, scroll := m.columnCapacity(height, n)
+		off := m.columnOffset(ci, n, capacity)
+		end := min(n, off+capacity)
+		if off > 0 {
+			parts = append(parts, moreLine("↑", off))
+		}
+		for ri := off; ri < end; ri++ {
+			parts = append(parts, card(*cols[ci][ri].ticket, inner, ci == m.col && ri == m.row && !m.inStrip, m.compact))
+		}
+		if scroll {
+			parts = append(parts, moreLine("↓", n-end))
 		}
 		// Cards run edge to edge inside their column, with no padding between them and the border.
 		st := box.Padding(0)
@@ -893,6 +1016,13 @@ func (m Model) columnsView(height int) string {
 		rendered[ci] = st.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
+}
+
+func moreLine(arrow string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return dim.Render(fmt.Sprintf(" %s %d more", arrow, n))
 }
 
 // columnHead is a column's header: name left, count right, a rule below. Every column looks the same;
@@ -1274,7 +1404,7 @@ func (m Model) footer() string {
 	}
 	legend := [][2]string{
 		{move, "move · ↑ to reviews"}, {"click", "select · open review"}, {"double-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
-		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
+		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
 	}
 	items := make([]string, len(legend))
 	for i, k := range legend {

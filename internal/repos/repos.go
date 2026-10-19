@@ -36,11 +36,33 @@ func (r Resolver) Resolve(ctx context.Context, repo config.Repo) (string, error)
 		return repo.Path, nil
 	}
 	for _, root := range r.Roots {
-		if dir, ok := r.scan(ctx, root, repo.Name); ok {
-			return dir, nil
+		if found := r.scan(ctx, root, repo.Name, 1); len(found) > 0 {
+			return found[0], nil
 		}
 	}
 	return "", fmt.Errorf("%s: %w in %s", repo.Name, ErrNotFound, describeRoots(r.Roots))
+}
+
+// FindAll lists every clone of repo under Roots, in walk order.
+func (r Resolver) FindAll(ctx context.Context, repo string) []string {
+	var out []string
+	for _, root := range r.Roots {
+		out = append(out, r.scan(ctx, root, repo, 0)...)
+	}
+	return out
+}
+
+// RepoAt returns the GitHub repository ("owner/name") that dir's origin remote points to.
+func (r Resolver) RepoAt(ctx context.Context, dir string) (string, bool) {
+	out, err := r.Run.Run(ctx, dir, "git", []string{"remote", "get-url", "origin"}, nil)
+	if err != nil {
+		return "", false
+	}
+	owner, name, ok := ParseRemote(strings.TrimSpace(string(out)))
+	if !ok {
+		return "", false
+	}
+	return owner + "/" + name, true
 }
 
 func describeRoots(roots []string) string {
@@ -50,8 +72,9 @@ func describeRoots(roots []string) string {
 	return strings.Join(roots, ", ")
 }
 
-func (r Resolver) scan(ctx context.Context, root, want string) (string, bool) {
-	var found string
+// scan walks root for clones of want, stopping after limit matches (0 means all).
+func (r Resolver) scan(ctx context.Context, root, want string, limit int) []string {
+	var found []string
 	rootDepth := strings.Count(filepath.Clean(root), string(filepath.Separator))
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || !d.IsDir() {
@@ -63,8 +86,10 @@ func (r Resolver) scan(ctx context.Context, root, want string) (string, bool) {
 		}
 		if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
 			if r.matches(ctx, path, want) {
-				found = path
-				return filepath.SkipAll
+				found = append(found, path)
+				if limit > 0 && len(found) >= limit {
+					return filepath.SkipAll
+				}
 			}
 			return filepath.SkipDir
 		}
@@ -73,16 +98,12 @@ func (r Resolver) scan(ctx context.Context, root, want string) (string, bool) {
 		}
 		return nil
 	})
-	return found, found != ""
+	return found
 }
 
 func (r Resolver) matches(ctx context.Context, dir, want string) bool {
-	out, err := r.Run.Run(ctx, dir, "git", []string{"remote", "get-url", "origin"}, nil)
-	if err != nil {
-		return false
-	}
-	owner, name, ok := ParseRemote(strings.TrimSpace(string(out)))
-	return ok && strings.EqualFold(owner+"/"+name, want)
+	got, ok := r.RepoAt(ctx, dir)
+	return ok && strings.EqualFold(got, want)
 }
 
 // Clone clones repo into the first root with gh and returns the new checkout.
