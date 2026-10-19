@@ -786,3 +786,23 @@ func TestEveryRowSharesOneLeftMargin(t *testing.T) {
 		}
 	}
 }
+
+func TestCardLinesStartAtTheSameColumn(t *testing.T) {
+	tk := ticket.Ticket{Key: "DEMO-1", Summary: "Filter accounts", Type: "Story", Category: ticket.InProgress}
+	col := func(s, sub string) int {
+		for _, l := range strings.Split(stripANSI(s), "\n") {
+			if i := strings.Index(l, sub); i >= 0 {
+				return lipgloss.Width(l[:i])
+			}
+		}
+		return -1
+	}
+	plain := card(tk, 30, false, false)
+	if k, ti, ty := col(plain, "DEMO-1"), col(plain, "Filter"), col(plain, "Story"); k != ti || ti != ty {
+		t.Errorf("unselected card columns key=%d title=%d type=%d:\n%s", k, ti, ty, stripANSI(plain))
+	}
+	sel := card(tk, 30, true, false)
+	if m, ti := col(sel, "▸ DEMO-1"), col(sel, "Filter"); m != ti {
+		t.Errorf("selected card: mark at %d, title at %d:\n%s", m, ti, stripANSI(sel))
+	}
+}

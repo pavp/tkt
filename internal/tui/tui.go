@@ -799,29 +799,26 @@ var (
 // its pull requests with colored CI marks and a dimmed line with type and subtasks.
 func card(t ticket.Ticket, outer int, sel, compact bool) string {
 	width := outer - 2
-	mark := " "
-	if sel {
-		mark = "▸"
-	}
+	inner := width - 2
 	flag := ""
 	if r := t.Attention(); len(r) > 0 {
 		flag = warn.Render("! " + string(r[0]))
 	}
-	head := keyDim.Render(fmt.Sprintf("%s %s", mark, t.Key))
+	head := keyDim.Render(string(t.Key))
 	if sel {
-		head = selected.Render(fmt.Sprintf("%s %s", mark, t.Key))
+		head = selected.Render("▸ " + string(t.Key))
 	}
-	gap := max(1, width-lipgloss.Width(head)-lipgloss.Width(flag))
+	gap := max(1, inner-lipgloss.Width(head)-lipgloss.Width(flag))
 	lines := []string{head + strings.Repeat(" ", gap) + flag}
 	titleLines := 1
 	if !compact {
 		titleLines = 2
 	}
-	for _, l := range wrapWords(t.Summary, width-2, titleLines) {
-		lines = append(lines, "  "+titleStyle.Render(l))
+	for _, l := range wrapWords(t.Summary, inner, titleLines) {
+		lines = append(lines, titleStyle.Render(l))
 	}
 	if !compact {
-		lines = append(lines, "  "+coloredPRs(t.PRs, width-2))
+		lines = append(lines, coloredPRs(t.PRs, inner))
 		info := t.Type
 		if len(t.Subtasks) > 0 {
 			info = strings.TrimSpace(fmt.Sprintf("%s · %d subtasks", info, len(t.Subtasks)))
@@ -829,7 +826,10 @@ func card(t ticket.Ticket, outer int, sel, compact bool) string {
 		if info == "" {
 			info = t.Status
 		}
-		lines = append(lines, "  "+dim.Render(truncate(info, width-2)))
+		lines = append(lines, dim.Render(truncate(info, inner)))
+	}
+	for i, l := range lines {
+		lines[i] = " " + l
 	}
 	st := cardBox
 	switch {
