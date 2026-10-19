@@ -217,6 +217,19 @@ func HerdrStartPrompt(key ticket.Key, summary string) string {
 	return StartPrompt(key, summary) + "\n\nYou are running inside Herdr: create the worktree with `herdr worktree create --cwd <this repository> --branch <branch> [--base <base>]` instead of `git worktree add`, so Herdr opens it as its own workspace."
 }
 
+// HerdrBranchPrompt is the first message for an agent that opens in a free checkout (no other agent, no local
+// changes, on its default branch): it works there on a new branch instead of a worktree.
+func HerdrBranchPrompt(key ticket.Key, summary string) string {
+	return fmt.Sprintf(`Work on Jira ticket %[1]s: %[2]s
+
+This checkout is free (no other agent, no local changes), so work in it and do not create a worktree.
+1. Create a branch for this ticket in this checkout, following this repository's own conventions for branch names, base branch and tooling. The branch name must contain %[1]s.
+2. Save the ticket context and read it: tkt context %[1]s --images .ticket-assets > .ticket.md
+   Keep .ticket.md and .ticket-assets/ out of git by adding them to .git/info/exclude.
+3. Register the work: tkt link %[1]s
+4. Then implement the ticket.`, key, summary)
+}
+
 // ContinuePrompt is the first message when the agent opens in an existing worktree.
 func ContinuePrompt(key ticket.Key, summary string) string {
 	return fmt.Sprintf("Continue work on Jira ticket %s: %s. Refresh the context with `tkt context %s --images .ticket-assets > .ticket.md` and read .ticket.md first.", key, summary, key)

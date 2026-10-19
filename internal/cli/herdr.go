@@ -342,12 +342,13 @@ func (a *App) herdrStart(cmd *cobra.Command, args, repoFlags []string, clone boo
 			a.printf("Focusing %s\n", ws.Label)
 			return h.FocusWorkspace(ctx, ws.ID)
 		}
-		return a.startInWorkspace(ctx, h, plan.Existing.Path, string(plan.Key), plan.Prompt, true)
+		return a.startInWorkspace(ctx, h, plan.Existing.Path, string(plan.Key), plan.Prompt, "", true)
 	}
 	plan.Prompt = workspace.HerdrStartPrompt(plan.Key, plan.Summary)
+	inPlace := workspace.HerdrBranchPrompt(plan.Key, plan.Summary)
 	for i, dir := range plan.Dirs {
 		label := string(plan.Key) + " · " + filepath.Base(dir)
-		if err := a.startInWorkspace(ctx, h, dir, label, plan.Prompt, i == 0); err != nil {
+		if err := a.startInWorkspace(ctx, h, dir, label, plan.Prompt, inPlace, i == 0); err != nil {
 			return err
 		}
 	}
@@ -358,9 +359,13 @@ func (a *App) herdrStart(cmd *cobra.Command, args, repoFlags []string, clone boo
 // above it already names the ticket. Herdr wants agent names unique, so a taken name gets a number.
 // The prompt goes through agent.prompt, not as an argument: Herdr refuses multi-line arguments for the shell.
 // An open workspace at dir with no agent is reused; when its pane is busy (an editor, a server), claude gets a
-// split next to it, and only when that fails a new workspace opens.
-func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, dir, label, prompt string, focus bool) error {
+// split next to it, and only when that fails a new workspace opens. A reused workspace whose checkout is free
+// gets inPlacePrompt (when set), so the agent branches there instead of creating a worktree.
+func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, dir, label, prompt, inPlacePrompt string, focus bool) error {
 	if p, ok := idlePaneAt(ctx, h, dir); ok {
+		if inPlacePrompt != "" && a.checkoutFree(ctx, dir) {
+			prompt = inPlacePrompt
+		}
 		name, err := startClaude(ctx, h, p.ID)
 		if err != nil && !notReady(err) {
 			if split, serr := h.SplitPane(ctx, p.ID, dir); serr == nil {
@@ -428,6 +433,24 @@ func (a *App) promptWhenNamed(ctx context.Context, h HerdrAPI, agent, prompt str
 		}
 	}
 	return err
+}
+
+// checkoutFree reports whether dir has no local changes and sits on the branch origin/HEAD points to.
+func (a *App) checkoutFree(ctx context.Context, dir string) bool {
+	git := func(args ...string) (string, bool) {
+		out, err := a.Run.Run(ctx, dir, "git", args, nil)
+		return strings.TrimSpace(string(out)), err == nil
+	}
+	status, ok := git("status", "--porcelain")
+	if !ok || status != "" {
+		return false
+	}
+	head, ok := git("rev-parse", "--abbrev-ref", "HEAD")
+	if !ok {
+		return false
+	}
+	def, ok := git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+	return ok && def == "origin/"+head
 }
 
 // idlePaneAt finds a pane at dir in a workspace where no agent runs.

@@ -552,7 +552,7 @@ func TestHerdrStartNamesAgentsClaudeAndNumbersTakenNames(t *testing.T) {
 	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
 	f.Errors["agent.start"] = "agent name claude is already used; candidates: pane_id=w1:p1"
 	h.app.NewHerdr = func() HerdrAPI { return takenOnce{HerdrAPI: herdr.New(f.Path), f: f} }
-	if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "prompt", true); err != nil {
+	if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "prompt", "", true); err != nil {
 		t.Fatal(err)
 	}
 	var names []string
@@ -595,7 +595,7 @@ func TestHerdrStartReusesOpenWorkspaceWithoutAgent(t *testing.T) {
 				f.Errors["agent.start"] = tt.startErr
 				h.app.NewHerdr = func() HerdrAPI { return takenOnce{HerdrAPI: herdr.New(f.Path), f: f} }
 			}
-			if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", true); err != nil {
+			if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", "", true); err != nil {
 				t.Fatal(err)
 			}
 			wantPane := tt.wantPane
@@ -622,6 +622,42 @@ func TestHerdrStartReusesOpenWorkspaceWithoutAgent(t *testing.T) {
 	}
 }
 
+func TestHerdrStartBranchesInPlaceOnlyInAFreeCheckout(t *testing.T) {
+	tests := []struct {
+		name    string
+		agents  string
+		status  string
+		head    string
+		inPlace bool
+	}{
+		{name: "free workspace, clean checkout on its default branch", agents: `[]`, head: "main", inPlace: true},
+		{name: "local changes", agents: `[]`, status: " M src/app.ts", head: "main"},
+		{name: "on another branch", agents: `[]`, head: "feature/DEMO-1-filter"},
+		{name: "workspace has an agent", agents: `[{"pane_id":"w4:p2","workspace_id":"w4","agent":"claude"}]`, head: "main"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, f, _ := herdrHarness(t)
+			f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+			f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w4:p1","workspace_id":"w4","cwd":"/src/web"}]}`
+			f.Results["agent.list"] = `{"type":"agent_list","agents":` + tt.agents + `}`
+			h.run.out["git status --porcelain"] = tt.status
+			h.run.out["git rev-parse --abbrev-ref HEAD"] = tt.head + "\n"
+			h.run.out["git symbolic-ref --short refs/remotes/origin/HEAD"] = "origin/main\n"
+			if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "worktree prompt", "branch prompt", true); err != nil {
+				t.Fatal(err)
+			}
+			want := "worktree prompt"
+			if tt.inPlace {
+				want = "branch prompt"
+			}
+			if got := f.Last("agent.prompt"); got["text"] != want {
+				t.Errorf("prompt = %v, want %q", got["text"], want)
+			}
+		})
+	}
+}
+
 func TestHerdrStartRetriesPromptUntilAgentNameIsActive(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
@@ -634,7 +670,7 @@ func TestHerdrStartRetriesPromptUntilAgentNameIsActive(t *testing.T) {
 		}
 		return nil
 	}
-	if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", true); err != nil {
+	if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", "", true); err != nil {
 		t.Fatal(err)
 	}
 	if n := count(f, "agent.prompt"); n != 4 || len(slept) != 3 {
@@ -649,7 +685,7 @@ func TestHerdrStartHandsPromptToUserWhenHerdrRefusesIt(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
 	f.Errors["agent.prompt"] = "agent_not_ready: agent claude is not an active named agent"
-	if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", true); err != nil {
+	if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", "", true); err != nil {
 		t.Fatal(err)
 	}
 	if out := h.out.String(); !strings.Contains(out, "did not get its first prompt") || !strings.Contains(out, "give it this prompt:\n\nWork on DEMO-7") {
@@ -674,7 +710,7 @@ func TestHerdrStartWaitsForBlockedAgentBeforePrompting(t *testing.T) {
 			if tt.waitErr != "" {
 				f.Errors["agent.wait"] = tt.waitErr
 			}
-			if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", true); err != nil {
+			if err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", "", true); err != nil {
 				t.Fatal(err)
 			}
 			if got := f.Last("agent.wait"); got["target"] != "claude" || got["until"].([]any)[0] != "idle" {

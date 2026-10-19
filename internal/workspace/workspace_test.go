@@ -121,6 +121,12 @@ func TestPrompts(t *testing.T) {
 	if hp := HerdrStartPrompt("DEMO-1", "Filter accounts"); !strings.HasPrefix(hp, p) || !strings.Contains(hp, "herdr worktree create") || !strings.Contains(hp, "git worktree add") {
 		t.Errorf("herdr start prompt = %q", hp)
 	}
+	bp := HerdrBranchPrompt("DEMO-1", "Filter accounts")
+	for _, want := range []string{"Work on Jira ticket DEMO-1: Filter accounts", "do not create a worktree", "must contain DEMO-1", "tkt context DEMO-1 --images .ticket-assets > .ticket.md", ".git/info/exclude", "tkt link DEMO-1"} {
+		if !strings.Contains(bp, want) {
+			t.Errorf("branch prompt missing %q", want)
+		}
+	}
 	if !strings.Contains(ContinuePrompt("DEMO-1", "Filter"), "Continue work on Jira ticket DEMO-1") {
 		t.Error("continue prompt")
 	}
