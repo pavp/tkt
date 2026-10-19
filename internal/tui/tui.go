@@ -68,6 +68,9 @@ type Model struct {
 	now          func() time.Time
 	compact      bool
 	menu         *menu
+	// inStrip means the keyboard cursor is on the review chips above the columns, at stripSel.
+	inStrip  bool
+	stripSel int
 }
 
 // tickMsg drives the "synced … ago" label and the periodic refresh.
@@ -160,6 +163,13 @@ func (m Model) current() (item, bool) {
 		}
 		return item{}, false
 	}
+	if m.inStrip {
+		if _, spans := m.reviewChips(); m.stripSel < len(spans) {
+			pr := spans[m.stripSel].pr
+			return item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr}, true
+		}
+		return item{}, false
+	}
 	cols := m.columns()
 	if m.col < len(cols) && m.row >= 0 && m.row < len(cols[m.col]) {
 		return cols[m.col][m.row], true
@@ -169,6 +179,12 @@ func (m Model) current() (item, bool) {
 
 // reselect moves the cursor back onto the previously selected item after the data or view changed.
 func (m *Model) reselect() {
+	if m.inStrip && m.effectiveView() == ViewColumns {
+		if _, spans := m.reviewChips(); m.stripSel < len(spans) {
+			return
+		}
+	}
+	m.inStrip = false
 	if m.effectiveView() == ViewList {
 		items := m.listItems()
 		m.row = 0
@@ -441,7 +457,26 @@ func (m *Model) move(dc, dr int) {
 		m.remember()
 		return
 	}
+	if m.inStrip {
+		_, spans := m.reviewChips()
+		switch {
+		case dr > 0:
+			m.inStrip = false
+		case dc != 0:
+			m.stripSel = clamp(m.stripSel+dc, 0, len(spans)-1)
+		}
+		m.remember()
+		return
+	}
 	cols := m.columns()
+	atTop := m.col >= len(cols) || len(cols[m.col]) == 0 || m.row == 0
+	if dr < 0 && atTop {
+		if _, spans := m.reviewChips(); len(spans) > 0 {
+			m.inStrip, m.stripSel = true, 0
+			m.remember()
+			return
+		}
+	}
 	if dc != 0 {
 		c := m.col
 		for {
@@ -638,6 +673,9 @@ func (m Model) reviewChips() (string, []chipSpan) {
 			text += " · " + string(keys[0])
 		}
 		chip := reviewChip.Render(warn.Render("!") + text)
+		if m.inStrip && len(spans) == m.stripSel {
+			chip = reviewChip.BorderForeground(lipgloss.Color("111")).Render(selected.Render("▸" + text))
+		}
 		if used+2+lipgloss.Width(chip) > m.width {
 			more := lipgloss.NewStyle().PaddingTop(1).Render(dim.Render(fmt.Sprintf("+%d more · press 3", len(m.snap.Reviews)-i)))
 			row = append(row, " ", more)
@@ -669,7 +707,7 @@ func (m Model) columnsView(height int) string {
 			parts = append(parts, " "+dim.Render("— nothing here"))
 		}
 		for ri, it := range cols[ci] {
-			parts = append(parts, card(*it.ticket, inner, ci == m.col && ri == m.row, m.compact))
+			parts = append(parts, card(*it.ticket, inner, ci == m.col && ri == m.row && !m.inStrip, m.compact))
 		}
 		// Cards run edge to edge inside their column, with no padding between them and the border.
 		st := box.Padding(0)
@@ -1027,7 +1065,7 @@ func (m Model) footer() string {
 		move = "←↑↓→ wasd"
 	}
 	legend := [][2]string{
-		{move, "move"}, {"click", "select · open review"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
+		{move, "move · ↑ to reviews"}, {"click", "select · open review"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
 		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
 	}
 	items := make([]string, len(legend))

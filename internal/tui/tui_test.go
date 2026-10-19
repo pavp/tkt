@@ -665,3 +665,36 @@ func TestClickOnReviewChipOpensThePR(t *testing.T) {
 		t.Error("click on the strip label should do nothing")
 	}
 }
+
+func TestKeyboardReachesReviewChips(t *testing.T) {
+	r := &recorder{}
+	snap := snapshot()
+	snap.Reviews = append(snap.Reviews, ticket.PullRequest{Repo: "example-org/api", Number: 821, Title: "Second", URL: "https://github.com/example-org/api/pull/821"})
+	m := New(board.Snapshot{}, false, r, ViewColumns)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	next, _ = next.Update(SnapshotMsg{Snap: snap})
+	next = press(next, "w")
+	v := stripANSI(next.View())
+	if !strings.Contains(v, "▸ #820") || !strings.Contains(v, "#820 · Add pagination") {
+		t.Fatalf("up from the top card should select the first review chip:\n%s", v)
+	}
+	if strings.Contains(v, "▸ DEMO-") {
+		t.Errorf("a card stays selected while the cursor is on the reviews:\n%s", v)
+	}
+	next = press(next, "d")
+	if !strings.Contains(stripANSI(next.View()), "▸ #821") {
+		t.Fatalf("right should move to the next chip:\n%s", stripANSI(next.View()))
+	}
+	next = press(next, "enter")
+	if !strings.Contains(stripANSI(next.View()), "Review request #821") {
+		t.Fatalf("enter on a chip should open its menu:\n%s", stripANSI(next.View()))
+	}
+	next, _ = run(next, "enter")
+	if r.last() != "open https://github.com/example-org/api/pull/821" {
+		t.Errorf("menu ran %v", r.calls)
+	}
+	next = press(next, "s")
+	if v := stripANSI(next.View()); strings.Contains(v, "▸ #821") || !strings.Contains(v, "▸ DEMO-") {
+		t.Errorf("down should return to the columns:\n%s", v)
+	}
+}
