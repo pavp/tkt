@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pavp/tkt/internal/config"
+	"github.com/pavp/tkt/internal/github"
 	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/ticket"
 )
@@ -18,6 +19,15 @@ type fakeGitHub struct {
 	prs     []ticket.PullRequest
 	reviews map[string][]ticket.PullRequest
 	err     error
+	failed  map[string][]github.FailedCheck
+	changes map[int][]github.ChangeRequest
+}
+
+func (f *fakeGitHub) FailedChecks(_ context.Context, repo, sha string) ([]github.FailedCheck, error) {
+	return f.failed[repo+"@"+sha], nil
+}
+func (f *fakeGitHub) ChangeRequests(_ context.Context, _ string, n int) ([]github.ChangeRequest, error) {
+	return f.changes[n], nil
 }
 
 func (f *fakeGitHub) PullRequests(context.Context, []string) ([]ticket.PullRequest, error) {

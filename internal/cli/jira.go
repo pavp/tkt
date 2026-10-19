@@ -46,6 +46,8 @@ func (a *App) jiraClient(c *config.Config) (JiraAPI, error) {
 type GitHubAPI interface {
 	PullRequests(ctx context.Context, repos []string) ([]ticket.PullRequest, error)
 	ReviewRequests(ctx context.Context, owner string) ([]ticket.PullRequest, error)
+	FailedChecks(ctx context.Context, repo, sha string) ([]github.FailedCheck, error)
+	ChangeRequests(ctx context.Context, repo string, number int) ([]github.ChangeRequest, error)
 }
 
 func githubFor(c *config.Config, run execx.Runner) GitHubAPI {
