@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -87,6 +88,7 @@ func (a *App) runInit(cmd *cobra.Command) error {
 
 	fmt.Fprintln(a.Stderr, "\n1/4 Jira")
 	var siteURL, email, token string
+	fromClipboard := false
 	if defSite != "" && defEmail != "" {
 		if u, err := config.SiteURL(defSite); err == nil {
 			if t, _, err := credstore.JiraToken(a.Creds, a.Env.Getenv, u, defEmail); err == nil {
@@ -103,7 +105,7 @@ func (a *App) runInit(cmd *cobra.Command) error {
 		if siteURL, err = config.SiteURL(site); err != nil {
 			return err
 		}
-		if email, err = a.ask("Atlassian account email", defEmail); err != nil {
+		if email, err = a.ask("Atlassian account email", cmp.Or(defEmail, a.gitEmail(ctx))); err != nil {
 			return err
 		}
 		if email == "" {
@@ -123,7 +125,7 @@ func (a *App) runInit(cmd *cobra.Command) error {
 			}
 		}
 		if token == "" {
-			if token, err = a.readToken(email); err != nil {
+			if token, fromClipboard, err = a.readToken(ctx, email); err != nil {
 				return err
 			}
 		}
@@ -138,6 +140,9 @@ func (a *App) runInit(cmd *cobra.Command) error {
 	}
 	if err := a.Creds.Set(credstore.JiraKey(siteURL, email), token); err != nil {
 		return err
+	}
+	if fromClipboard {
+		a.clearClipboardIf(ctx, token)
 	}
 	fmt.Fprintf(a.Stderr, "✓ Connected as %s; token saved in %s\n\n", user.DisplayName, a.Creds.Name())
 

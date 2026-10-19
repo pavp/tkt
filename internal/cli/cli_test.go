@@ -7,6 +7,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -33,11 +35,17 @@ type fakeRunner struct {
 	out     map[string]string
 	missing map[string]bool
 	calls   []string
+	// stdin records what each command received, keyed like out.
+	stdin map[string]string
 }
 
-func (f *fakeRunner) Run(_ context.Context, dir, name string, args []string, _ []byte) ([]byte, error) {
+func (f *fakeRunner) Run(_ context.Context, dir, name string, args []string, in []byte) ([]byte, error) {
 	key := strings.TrimSpace(name + " " + strings.Join(args, " "))
 	f.calls = append(f.calls, key)
+	if f.stdin == nil {
+		f.stdin = map[string]string{}
+	}
+	f.stdin[key] = string(in)
 	if v, ok := f.out[key]; ok {
 		return []byte(v), nil
 	}
@@ -322,5 +330,88 @@ func TestVersionFlag(t *testing.T) {
 	h := newHarness(t, "")
 	if code := h.exec("--version"); code != 0 || !strings.Contains(h.out.String(), "tkt version dev") {
 		t.Errorf("exit %d, %q", code, h.out)
+	}
+}
+
+const clipToken = "ATATT3xFfGF0-example-token-0123456789abcdef"
+
+func terminalHarness(t *testing.T, config string, passwords ...string) *harness {
+	h := newHarness(t, config)
+	h.app.IsTerminal = func() bool { return true }
+	h.app.ReadPassword = func() ([]byte, error) {
+		if len(passwords) == 0 {
+			return nil, errors.New("no more input")
+		}
+		p := passwords[0]
+		passwords = passwords[1:]
+		return []byte(p), nil
+	}
+	return h
+}
+
+func TestAuthJiraTakesTheTokenFromTheClipboard(t *testing.T) {
+	h := terminalHarness(t, baseConfig, "")
+	h.run.out["wl-paste -n"] = clipToken + "\n"
+	h.app.Stdin = strings.NewReader("\n")
+	if code := h.exec("auth", "jira"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if got := h.creds["jira:example.atlassian.net:dev@example.com"]; got != clipToken {
+		t.Errorf("stored %q", got)
+	}
+	if !slices.Contains(h.run.calls, "xdg-open "+atlassianTokenURL) {
+		t.Errorf("token page not opened: %v", h.run.calls)
+	}
+	if !strings.Contains(h.errOut.String(), "Use the token on the clipboard ("+strconv.Itoa(len(clipToken))+" characters)? (Y/n)") {
+		t.Errorf("no clipboard confirmation: %q", h.errOut)
+	}
+	if v, ok := h.run.stdin["wl-copy"]; !ok || v != "" {
+		t.Errorf("clipboard not cleared after saving: %v", h.run.calls)
+	}
+	if strings.Contains(h.out.String()+h.errOut.String(), clipToken) {
+		t.Error("token printed")
+	}
+}
+
+func TestAuthJiraClipboardDeclinedFallsBackToTheHiddenPrompt(t *testing.T) {
+	h := terminalHarness(t, baseConfig, "", "typed-token-value")
+	h.run.out["wl-paste -n"] = clipToken
+	h.app.Stdin = strings.NewReader("n\n")
+	if code := h.exec("auth", "jira"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if got := h.creds["jira:example.atlassian.net:dev@example.com"]; got != "typed-token-value" {
+		t.Errorf("stored %q", got)
+	}
+	if _, ok := h.run.stdin["wl-copy"]; ok {
+		t.Error("clipboard cleared although its token was not used")
+	}
+}
+
+func TestAuthJiraLeavesTheClipboardWhenTheTokenIsRejected(t *testing.T) {
+	h := terminalHarness(t, baseConfig, "")
+	h.run.out["wl-paste -n"] = clipToken
+	h.app.Stdin = strings.NewReader("\n")
+	h.jira.myselfErr = jira.ErrUnauthorized
+	if code := h.exec("auth", "jira"); code == 0 {
+		t.Fatal("a rejected token should fail")
+	}
+	if _, ok := h.run.stdin["wl-copy"]; ok {
+		t.Error("clipboard cleared although nothing was saved")
+	}
+}
+
+func TestAuthJiraAsksForTheAccountWithGitEmailAsDefault(t *testing.T) {
+	h := terminalHarness(t, "", "typed-token-value")
+	h.run.out["git config user.email"] = "me@work.example\n"
+	h.app.Stdin = strings.NewReader("example.atlassian.net\n\n")
+	if code := h.exec("auth", "jira"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if !strings.Contains(h.errOut.String(), "Atlassian account email [me@work.example]") {
+		t.Errorf("email prompt = %q", h.errOut)
+	}
+	if h.creds["jira:example.atlassian.net:me@work.example"] != "typed-token-value" {
+		t.Errorf("creds = %v", h.creds)
 	}
 }

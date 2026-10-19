@@ -33,7 +33,7 @@ GOPRIVATE=github.com/pavp/* go install github.com/pavp/tkt/cmd/tkt@latest
 | Command | What it does |
 |---|---|
 | `tkt init` | Interactive setup: Jira account and token, spaces, repositories, GitHub accounts |
-| `tkt auth jira [--site S --email E]` | Store the Jira API token (hidden prompt, or stdin when piped) |
+| `tkt auth jira [--site S --email E]` | Store the Jira API token: opens Atlassian's token page; press Enter once the token is copied (tkt reads it from the clipboard, asks before using it, and clears it once saved) or paste it at the hidden prompt; stdin when piped |
 | `tkt auth status` | Show which credentials tkt can use, without printing them |
 | `tkt doctor` | Check config, credentials, tools (`git`, `gh`, `claude`, `herdr`) and local clones |
 | `tkt list [--space S] [--needs-you] [--cached]` | Your open-sprint tickets with PRs and CI; tickets with failing CI or requested changes first, then review requests. Falls back to the cached board when offline |

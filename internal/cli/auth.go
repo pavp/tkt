@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"cmp"
+	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -31,15 +35,17 @@ func newAuthJiraCmd(a *App) *cobra.Command {
 		Use:   "jira",
 		Short: "Store a Jira API token in the system credential store",
 		Long: "Store a Jira API token in the system credential store (macOS Keychain, Secret Service, or Windows\n" +
-			"Credential Manager under WSL). The token is read from a hidden prompt, or from stdin when piped.\n" +
-			"Create one at " + atlassianTokenURL + ".",
+			"Credential Manager under WSL). In a terminal it opens " + atlassianTokenURL + ";\n" +
+			"press Enter once the new token is copied and tkt reads it from the clipboard (asking first, and clearing\n" +
+			"the clipboard once the token is saved), or paste it at the hidden prompt. When piped, it reads stdin.\n" +
+			"A missing site or email is asked for, suggesting the last login or the git email.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			s, e, err := a.jiraAccount(site, email)
+			s, e, err := a.jiraAccount(cmd.Context(), site, email)
 			if err != nil {
 				return err
 			}
-			token, err := a.readToken(e)
+			token, fromClipboard, err := a.readToken(cmd.Context(), e)
 			if err != nil {
 				return err
 			}
@@ -53,6 +59,9 @@ func newAuthJiraCmd(a *App) *cobra.Command {
 			}
 			if err := a.Creds.Set(credstore.JiraKey(s, e), token); err != nil {
 				return err
+			}
+			if fromClipboard {
+				a.clearClipboardIf(cmd.Context(), token)
 			}
 			st := a.loadState()
 			st.JiraSite, st.JiraEmail = s, e
@@ -72,19 +81,30 @@ func newAuthJiraCmd(a *App) *cobra.Command {
 	return cmd
 }
 
-// jiraAccount resolves the site and email from flags, falling back to the configuration.
-func (a *App) jiraAccount(site, email string) (string, string, error) {
+// jiraAccount resolves the site and email from flags, the configuration and the last login; in a terminal
+// it asks for what is still missing, suggesting the git email.
+func (a *App) jiraAccount(ctx context.Context, site, email string) (string, string, error) {
 	if site == "" || email == "" {
 		c, err := a.LoadConfig()
 		if err != nil && !errors.Is(err, config.ErrNotConfigured) {
 			return "", "", err
 		}
 		if c != nil {
-			if site == "" {
-				site = c.Jira.Site
+			site, email = cmp.Or(site, c.Jira.Site), cmp.Or(email, c.Jira.Email)
+		}
+		st := a.loadState()
+		site, email = cmp.Or(site, st.JiraSite), cmp.Or(email, st.JiraEmail)
+	}
+	if (site == "" || email == "") && a.IsTerminal() {
+		var err error
+		if site == "" {
+			if site, err = a.ask("Jira site (e.g. example.atlassian.net)", ""); err != nil {
+				return "", "", err
 			}
-			if email == "" {
-				email = c.Jira.Email
+		}
+		if email == "" {
+			if email, err = a.ask("Atlassian account email", a.gitEmail(ctx)); err != nil {
+				return "", "", err
 			}
 		}
 	}
@@ -98,28 +118,105 @@ func (a *App) jiraAccount(site, email string) (string, string, error) {
 	return s, email, nil
 }
 
-func (a *App) readToken(email string) (string, error) {
-	var raw string
-	if a.IsTerminal() {
-		fmt.Fprintf(a.Stderr, "Create a token at %s\nJira API token for %s (input hidden): ", atlassianTokenURL, email)
-		b, err := a.ReadPassword()
-		fmt.Fprintln(a.Stderr)
-		if err != nil {
-			return "", fmt.Errorf("read token: %w", err)
-		}
-		raw = string(b)
-	} else {
+// gitEmail is only a suggestion: git may hold a personal address while Jira uses the work one.
+func (a *App) gitEmail(ctx context.Context) string {
+	out, err := a.Run.Run(ctx, "", "git", []string{"config", "user.email"}, nil)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// readToken opens Atlassian's token page and takes the token typed or pasted at a hidden prompt, or, when
+// the user just presses Enter, the one they copied in the browser. fromClipboard tells the caller to clear
+// the clipboard once the token is saved; clearing earlier would lose it, since Atlassian shows it once.
+func (a *App) readToken(ctx context.Context, email string) (token string, fromClipboard bool, err error) {
+	if !a.IsTerminal() {
 		line, err := a.readLine("")
 		if err != nil {
-			return "", errors.New("no token on stdin")
+			return "", false, errors.New("no token on stdin")
 		}
-		raw = line
+		if line == "" {
+			return "", false, errors.New("no token entered")
+		}
+		return line, false, nil
 	}
-	token := strings.TrimSpace(raw)
-	if token == "" {
-		return "", errors.New("no token entered")
+	if a.openURL(ctx, atlassianTokenURL) == nil {
+		fmt.Fprintln(a.Stderr, "Opened the Atlassian token page in your browser: create a token and copy it.")
 	}
-	return token, nil
+	fmt.Fprintf(a.Stderr, "Create a token at %s\nJira API token for %s: press Enter once it is copied, or paste it (input hidden): ", atlassianTokenURL, email)
+	if token, err = a.hiddenLine(); err != nil || token != "" {
+		return token, false, err
+	}
+	if clip := a.readClipboard(ctx); looksLikeToken(clip) {
+		ans, err := a.ask(fmt.Sprintf("Use the token on the clipboard (%d characters)? (Y/n)", len(clip)), "y")
+		if err != nil {
+			return "", false, err
+		}
+		if !strings.HasPrefix(strings.ToLower(ans), "n") {
+			return clip, true, nil
+		}
+	} else {
+		fmt.Fprintln(a.Stderr, "No token on the clipboard.")
+	}
+	fmt.Fprint(a.Stderr, "Jira API token (input hidden): ")
+	if token, err = a.hiddenLine(); err == nil && token == "" {
+		err = errors.New("no token entered")
+	}
+	return token, false, err
+}
+
+func (a *App) hiddenLine() (string, error) {
+	b, err := a.ReadPassword()
+	fmt.Fprintln(a.Stderr)
+	if err != nil {
+		return "", fmt.Errorf("read token: %w", err)
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+func looksLikeToken(s string) bool {
+	return len(s) >= 20 && !strings.ContainsFunc(s, unicode.IsSpace)
+}
+
+func (a *App) readClipboard(ctx context.Context) string {
+	type tool struct {
+		name string
+		args []string
+	}
+	var tools []tool
+	switch {
+	case a.Env.GOOS == "darwin":
+		tools = []tool{{"pbpaste", nil}}
+	case credstore.IsWSL(a.Env.Getenv, os.ReadFile):
+		tools = []tool{{"powershell.exe", []string{"-NoProfile", "-Command", "Get-Clipboard"}}}
+	default:
+		tools = []tool{{"wl-paste", []string{"-n"}}, {"xclip", []string{"-selection", "clipboard", "-o"}}, {"xsel", []string{"--clipboard", "--output"}}}
+	}
+	for _, t := range tools {
+		if _, err := a.Run.LookPath(t.name); err != nil {
+			continue
+		}
+		out, err := a.Run.Run(ctx, "", t.name, t.args, nil)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	return ""
+}
+
+// clearClipboardIf empties the clipboard only while it still holds token, so it never wipes something
+// the user copied afterwards.
+func (a *App) clearClipboardIf(ctx context.Context, token string) {
+	if a.readClipboard(ctx) != token {
+		return
+	}
+	if err := a.copyToClipboard(ctx, ""); err != nil {
+		fmt.Fprintf(a.Stderr, "! could not clear the clipboard (%v); clear it yourself\n", err)
+		return
+	}
+	fmt.Fprintln(a.Stderr, "✓ Cleared the token from the clipboard")
 }
 
 type jiraStatus struct {
