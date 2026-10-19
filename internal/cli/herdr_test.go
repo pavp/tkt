@@ -19,6 +19,7 @@ func herdrHarness(t *testing.T) (*harness, *herdrtest.FakeServer, *[]launchCall)
 	f := herdrtest.Start(t)
 	h.app.NewHerdr = func() HerdrAPI { return herdr.New(f.Path) }
 	h.app.Executable = func() (string, error) { return "/opt/tkt/bin/tkt", nil }
+	h.run.out["herdr --default-config"] = "[keys]\nprefix = \"ctrl+b\"\nnew_tab = \"prefix+c\"\n"
 	return h, f, calls
 }
 
@@ -48,8 +49,75 @@ func TestHerdrInstallWritesManifestAndLinks(t *testing.T) {
 	if got := f.Last("plugin.link"); got["path"] != dir || got["enabled"] != true {
 		t.Errorf("link params = %v", got)
 	}
-	if !strings.Contains(h.out.String(), `command = "tkt.board"`) {
-		t.Errorf("keybinding hint missing:\n%s", h.out)
+	if !strings.Contains(h.out.String(), "Skipped keybindings") {
+		t.Errorf("without answers the keys should be skipped:\n%s", h.out)
+	}
+}
+
+func TestHerdrInstallAddsAndUninstallRemovesKeys(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	cfg := filepath.Join(h.home, ".config", "herdr", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := "[theme]\nname = \"catppuccin\"\n"
+	if err := os.WriteFile(cfg, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.app.Stdin = strings.NewReader("\n")
+	if code := h.exec("herdr", "install"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	b, _ := os.ReadFile(cfg)
+	if !strings.Contains(string(b), `command = "tkt.board"`) || !strings.Contains(string(b), `key = "prefix+i"`) {
+		t.Errorf("config:\n%s", b)
+	}
+	if bak, _ := os.ReadFile(cfg + ".bak-tkt"); string(bak) != original {
+		t.Errorf("backup = %q", bak)
+	}
+	if count(f, "server.reload_config") != 1 {
+		t.Error("config not reloaded")
+	}
+	if !strings.Contains(h.errOut.String(), "Add Herdr keybindings prefix+i (tkt ticket pane), prefix+t (tkt board)?") {
+		t.Errorf("prompt = %q", h.errOut)
+	}
+
+	h.app.in = nil
+	if code := h.exec("herdr", "install", "--keys"); code != 0 {
+		t.Fatalf("reinstall exit %d", code)
+	}
+	if !strings.Contains(h.out.String(), "✓ Already bound:") {
+		t.Errorf("reinstall should not duplicate keys:\n%s", h.out)
+	}
+
+	if code := h.exec("herdr", "uninstall"); code != 0 {
+		t.Fatalf("uninstall exit %d: %s", code, h.errOut)
+	}
+	if b, _ := os.ReadFile(cfg); string(b) != original {
+		t.Errorf("uninstall left:\n%s", b)
+	}
+	if count(f, "plugin.unlink") != 1 {
+		t.Error("plugin not unlinked")
+	}
+}
+
+func TestHerdrInstallNeverTakesUsedKeys(t *testing.T) {
+	h, _, _ := herdrHarness(t)
+	cfg := filepath.Join(h.home, ".config", "herdr", "config.toml")
+	_ = os.MkdirAll(filepath.Dir(cfg), 0o755)
+	_ = os.WriteFile(cfg, []byte("[keys]\nzoom = \"prefix+t\"\n"), 0o644)
+	if code := h.exec("herdr", "install", "--keys"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	b, _ := os.ReadFile(cfg)
+	if strings.Contains(string(b), `key = "prefix+t"`) || !strings.Contains(string(b), `key = "prefix+i"`) {
+		t.Errorf("config:\n%s", b)
+	}
+	if !strings.Contains(h.out.String(), `! prefix+t is taken by "zoom"`) {
+		t.Errorf("output = %q", h.out)
+	}
+	if code := h.exec("herdr", "install", "--no-keys"); code != 0 || strings.Contains(h.out.String(), "keybindings") {
+		t.Errorf("--no-keys: exit %d, %q", code, h.out)
 	}
 }
 

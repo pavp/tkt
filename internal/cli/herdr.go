@@ -36,6 +36,7 @@ type HerdrAPI interface {
 	Notify(ctx context.Context, title, body string) error
 	LinkPlugin(ctx context.Context, path string) error
 	UnlinkPlugin(ctx context.Context, id string) error
+	ReloadConfig(ctx context.Context) error
 }
 
 const (
@@ -72,15 +73,28 @@ func newHerdrCmd(a *App) *cobra.Command {
 	start.Flags().StringArrayVar(&repoFlags, "repo", nil, "repository to start in; repeat for several")
 	start.Flags().BoolVar(&clone, "clone", false, "clone missing repositories without asking")
 
+	var keysFlag, noKeys bool
+	installCmd := &cobra.Command{
+		Use:   "install",
+		Short: "Link the tkt plugin into the running Herdr and offer keybindings",
+		Long: "Link the tkt plugin into the running Herdr. Herdr plugins cannot bring their own keys, so install\n" +
+			"offers to add prefix+t (board) and prefix+i (ticket pane) to your Herdr config when those keys are free,\n" +
+			"backing the config up first. --keys adds them without asking; --no-keys skips them.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrInstall(cmd, keysFlag, noKeys) },
+	}
+	installCmd.Flags().BoolVar(&keysFlag, "keys", false, "add the keybindings without asking")
+	installCmd.Flags().BoolVar(&noKeys, "no-keys", false, "do not add keybindings")
+
 	cmd.AddCommand(
 		start,
-		&cobra.Command{Use: "install", Short: "Link the tkt plugin into the running Herdr", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrInstall(cmd) }},
-		&cobra.Command{Use: "uninstall", Short: "Unlink the tkt plugin from Herdr", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		installCmd,
+		&cobra.Command{Use: "uninstall", Short: "Unlink the tkt plugin from Herdr and remove its keybindings", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := a.NewHerdr().UnlinkPlugin(cmd.Context(), a.pluginID()); err != nil {
 				return err
 			}
 			a.printf("✓ Unlinked the tkt plugin from Herdr\n")
-			return nil
+			return a.removeHerdrKeys(cmd)
 		}},
 		&cobra.Command{Use: "open-board", Short: "Open the board popup (setup when tkt is not configured)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			entry := "board"
@@ -102,7 +116,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 	return cmd
 }
 
-func (a *App) herdrInstall(cmd *cobra.Command) error {
+func (a *App) herdrInstall(cmd *cobra.Command, keys, noKeys bool) error {
 	exe, err := a.Executable()
 	if err != nil {
 		return fmt.Errorf("locate the tkt binary: %w", err)
@@ -115,8 +129,90 @@ func (a *App) herdrInstall(cmd *cobra.Command) error {
 		return err
 	}
 	a.printf("✓ Linked the tkt plugin into Herdr (%s)\n", dir)
-	a.printf("Herdr ships no default keys for plugins; bind the board in your Herdr config, for example:\n\n" +
-		"[[keys.command]]\nkey = \"prefix+t\"\ntype = \"plugin_action\"\ncommand = \"tkt.board\"\ndescription = \"tkt board\"\n")
+	if noKeys {
+		return nil
+	}
+	return a.addHerdrKeys(cmd, keys)
+}
+
+func (a *App) herdrConfigPath() string {
+	if x := a.Env.Getenv("XDG_CONFIG_HOME"); x != "" {
+		return filepath.Join(x, "herdr", "config.toml")
+	}
+	return filepath.Join(a.Env.Home, ".config", "herdr", "config.toml")
+}
+
+func (a *App) herdrBin() string {
+	if p := a.Env.Getenv("HERDR_BIN_PATH"); p != "" {
+		return p
+	}
+	return "herdr"
+}
+
+// addHerdrKeys offers tkt's shortcuts, never taking a key the user or Herdr already binds.
+func (a *App) addHerdrKeys(cmd *cobra.Command, yes bool) error {
+	path := a.herdrConfigPath()
+	current, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	defaults, err := a.Run.Run(cmd.Context(), "", a.herdrBin(), []string{"--default-config"}, nil)
+	if err != nil {
+		return fmt.Errorf("read Herdr's default keys: %w", err)
+	}
+	plan, err := herdrplugin.PlanKeys(string(current), string(defaults))
+	if err != nil {
+		return err
+	}
+	if len(plan.Present) > 0 {
+		a.printf("✓ Already bound: %s\n", herdrplugin.Describe(plan.Present))
+	}
+	for key, what := range plan.Conflict {
+		a.printf("! %s is taken by %q; bind tkt there yourself if you want another key\n", key, what)
+	}
+	if len(plan.Add) == 0 {
+		return nil
+	}
+	if !yes {
+		ans, err := a.readLine(fmt.Sprintf("Add Herdr keybindings %s? [Y/n] ", herdrplugin.Describe(plan.Add)))
+		if err != nil || strings.HasPrefix(strings.ToLower(ans), "n") {
+			a.printf("Skipped keybindings; `tkt herdr install --keys` adds them later\n")
+			return nil
+		}
+	}
+	if len(current) > 0 {
+		if err := os.WriteFile(path+".bak-tkt", current, 0o644); err != nil {
+			return fmt.Errorf("back up %s: %w", path, err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, []byte(herdrplugin.AddBlock(string(current), plan.Add)), 0o644); err != nil {
+		return err
+	}
+	if err := a.NewHerdr().ReloadConfig(cmd.Context()); err != nil {
+		a.printf("! keybindings saved; reload Herdr's config to use them (%v)\n", err)
+	}
+	a.printf("✓ Added %s to %s\n", herdrplugin.Describe(plan.Add), path)
+	return nil
+}
+
+func (a *App) removeHerdrKeys(cmd *cobra.Command) error {
+	path := a.herdrConfigPath()
+	current, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	updated, ok := herdrplugin.RemoveBlock(string(current))
+	if !ok {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		return err
+	}
+	_ = a.NewHerdr().ReloadConfig(cmd.Context())
+	a.printf("✓ Removed tkt's keybindings from %s\n", path)
 	return nil
 }
 

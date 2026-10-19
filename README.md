@@ -52,7 +52,7 @@ Every command accepts `--json` and `--config <path>`.
 tkt herdr install
 ```
 
-links the tkt plugin into the running Herdr (0.9.5 or later) and prints a keybinding to add to your Herdr config. The plugin gives you:
+links the tkt plugin into the running Herdr (0.9.5 or later). Herdr plugins cannot bring their own keys, so install offers to add `prefix+t` (board) and `prefix+i` (ticket pane) to your Herdr config when those keys are free, backing it up first (`--keys` adds them without asking, `--no-keys` skips them). The plugin gives you:
 
 - a board popup (`tkt.board` action; offers setup when tkt is not configured),
 - a live ticket pane for the current workspace (`tkt.ticket`),
@@ -60,7 +60,7 @@ links the tkt plugin into the running Herdr (0.9.5 or later) and prints a keybin
 - sidebar labels such as `DEMO-1 · ✕ CI · #812 · claude working`, refreshed by `tkt list`, the `tkt.refresh` action, and at Herdr startup from the cache,
 - automatic `tkt link` when an agent creates a worktree with `herdr worktree create`.
 
-`tkt herdr start KEY` opens Claude Code in a new Herdr workspace per repository instead of the current terminal. `tkt herdr uninstall` removes the plugin.
+`tkt herdr start KEY` opens Claude Code in a new Herdr workspace per repository instead of the current terminal. `tkt herdr uninstall` removes the plugin and the keybindings it added.
 
 ## Develop
 

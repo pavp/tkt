@@ -193,3 +193,8 @@ func (c *Client) LinkPlugin(ctx context.Context, path string) error {
 func (c *Client) UnlinkPlugin(ctx context.Context, id string) error {
 	return c.Call(ctx, "plugin.unlink", map[string]any{"plugin_id": id}, nil)
 }
+
+// ReloadConfig makes the running server reread config.toml.
+func (c *Client) ReloadConfig(ctx context.Context) error {
+	return c.Call(ctx, "server.reload_config", nil, nil)
+}
