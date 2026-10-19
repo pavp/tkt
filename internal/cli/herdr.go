@@ -407,12 +407,27 @@ func (a *App) promptStarted(ctx context.Context, h HerdrAPI, agent, where, promp
 	} else if startErr != nil {
 		return startErr
 	}
-	if err := h.Prompt(ctx, agent, prompt); err != nil {
+	if err := a.promptWhenNamed(ctx, h, agent, prompt); err != nil {
 		a.printf("! Claude Code started in %s but did not get its first prompt (%v); give it this prompt:\n\n%s\n", where, err, prompt)
 		return nil
 	}
 	a.printf("✓ Claude Code started in %s\n", where)
 	return nil
+}
+
+// promptWhenNamed retries while Herdr has not yet made the started agent's name active, which on WSL lags
+// behind agent.start returning.
+func (a *App) promptWhenNamed(ctx context.Context, h HerdrAPI, agent, prompt string) error {
+	var err error
+	for range 20 {
+		if err = h.Prompt(ctx, agent, prompt); err == nil || !strings.Contains(err.Error(), "not an active named agent") {
+			return err
+		}
+		if serr := a.Sleep(ctx, 500*time.Millisecond); serr != nil {
+			return err
+		}
+	}
+	return err
 }
 
 // idlePaneAt finds a pane at dir in a workspace where no agent runs.
