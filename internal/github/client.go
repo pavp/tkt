@@ -228,24 +228,43 @@ func (c *Client) PullRequests(ctx context.Context, repos []string) ([]ticket.Pul
 	return out, nil
 }
 
-// ReviewRequests returns open PRs in owner's repositories that request the token user's review.
-func (c *Client) ReviewRequests(ctx context.Context, owner string) ([]ticket.PullRequest, error) {
-	q := `query($q: String!) { search(query: $q, type: ISSUE, first: 30) { nodes { ... on PullRequest { ` + prFields + ` } } } }`
-	var data struct {
-		Search struct {
-			Nodes []prNode `json:"nodes"`
-		} `json:"search"`
+// ReviewRequests returns open PRs in repos ("owner/name") that request the token user's review. direct
+// keeps only requests addressed to the user; otherwise requests to the user's teams count too.
+func (c *Client) ReviewRequests(ctx context.Context, repos []string, direct bool) ([]ticket.PullRequest, error) {
+	byOwner := map[string][]string{}
+	for _, r := range repos {
+		owner, _, _ := strings.Cut(r, "/")
+		byOwner[owner] = append(byOwner[owner], r)
 	}
-	vars := map[string]any{"q": "is:pr is:open review-requested:@me archived:false user:" + owner}
-	if err := c.query(ctx, owner, q, vars, &data); err != nil {
-		return nil, fmt.Errorf("review requests in %s: %w", owner, err)
+	owners := make([]string, 0, len(byOwner))
+	for o := range byOwner {
+		owners = append(owners, o)
 	}
-	out := make([]ticket.PullRequest, 0, len(data.Search.Nodes))
-	for _, n := range data.Search.Nodes {
-		if n.Number == 0 {
-			continue
+	sort.Strings(owners)
+	qualifier := "review-requested:@me"
+	if direct {
+		qualifier = "user-review-requested:@me"
+	}
+	q := `query($q: String!) { search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { ` + prFields + ` } } } }`
+	var out []ticket.PullRequest
+	for _, owner := range owners {
+		terms := []string{"is:pr", "is:open", "archived:false", qualifier}
+		for _, r := range byOwner[owner] {
+			terms = append(terms, "repo:"+r)
 		}
-		out = append(out, n.toPR())
+		var data struct {
+			Search struct {
+				Nodes []prNode `json:"nodes"`
+			} `json:"search"`
+		}
+		if err := c.query(ctx, owner, q, map[string]any{"q": strings.Join(terms, " ")}, &data); err != nil {
+			return nil, fmt.Errorf("review requests in %s: %w", owner, err)
+		}
+		for _, n := range data.Search.Nodes {
+			if n.Number != 0 {
+				out = append(out, n.toPR())
+			}
+		}
 	}
 	return out, nil
 }

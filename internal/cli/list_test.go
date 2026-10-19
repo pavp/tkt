@@ -33,8 +33,16 @@ func (f *fakeGitHub) ChangeRequests(_ context.Context, _ string, n int) ([]githu
 func (f *fakeGitHub) PullRequests(context.Context, []string) ([]ticket.PullRequest, error) {
 	return f.prs, f.err
 }
-func (f *fakeGitHub) ReviewRequests(_ context.Context, owner string) ([]ticket.PullRequest, error) {
-	return f.reviews[owner], f.err
+func (f *fakeGitHub) ReviewRequests(_ context.Context, repos []string, _ bool) ([]ticket.PullRequest, error) {
+	var out []ticket.PullRequest
+	for _, r := range repos {
+		owner, _, _ := strings.Cut(r, "/")
+		out = append(out, f.reviews[owner]...)
+		if f.reviews != nil {
+			f.reviews[owner] = nil
+		}
+	}
+	return out, f.err
 }
 
 var fixedNow = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
@@ -51,12 +59,12 @@ func listHarness(t *testing.T) (*harness, *fakeGitHub) {
 	h.creds["jira:example.atlassian.net:dev@example.com"] = "tok"
 	h.app.Now = func() time.Time { return fixedNow }
 	h.jira.issues = []jira.Issue{
-		{Key: "DEMO-1", Type: "Story", Summary: "Filter accounts by date", Status: "In Progress", StatusCategory: "indeterminate"},
+		{Key: "DEMO-1", Type: "Story", Summary: "Filter accounts by date", Status: "In Progress", StatusCategory: "indeterminate",
+			Sprints: []jira.Sprint{{Space: "DEMO", Name: "DEMO S42", State: "active", End: fixedNow.Add(4 * 24 * time.Hour)}}},
 		{Key: "DEMO-2", Type: "Sub-task", Summary: "Picker", Status: "Done", StatusCategory: "done", Parent: "DEMO-1"},
 		{Key: "DEMO-3", Type: "Story", Summary: "Export CSV", Status: "To Do", StatusCategory: "new"},
 		{Key: "OPS-4", Type: "Bug", Summary: "Fix redirect", Status: "In Review", StatusCategory: "indeterminate"},
 	}
-	h.jira.sprints = map[string][]jira.Sprint{"DEMO": {{Space: "DEMO", Name: "DEMO S42", End: fixedNow.Add(4 * 24 * time.Hour)}}}
 	gh := &fakeGitHub{
 		prs: []ticket.PullRequest{
 			{Repo: "example-org/web", Number: 812, Branch: "feature/DEMO-1-filter", State: ticket.PROpen, Checks: ticket.ChecksFail},

@@ -76,7 +76,7 @@ func (a *App) renderList(s board.Snapshot, stale error) {
 	if len(s.Sprints) > 0 {
 		parts := make([]string, len(s.Sprints))
 		for i, sp := range s.Sprints {
-			parts[i] = fmt.Sprintf("%s · %dd left", sp.Name, board.DaysLeft(sp.End, now))
+			parts[i] = board.SprintLabel(sp, now)
 		}
 		a.printf("%s\n\n", strings.Join(parts, "   "))
 	}

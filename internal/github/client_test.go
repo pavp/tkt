@@ -133,15 +133,21 @@ func TestReviewRequests(t *testing.T) {
 		return 200, `{"data":{"search":{"nodes":[` + pr("example-org/web", 820, "feature/DEMO-9", "OPEN", "REVIEW_REQUIRED", "SUCCESS") + `,{}]}}}`
 	})
 	c := New(staticTokens(map[string]string{"example-org": "t"})).WithEndpoints(base, h)
-	got, err := c.ReviewRequests(context.Background(), "example-org")
+	got, err := c.ReviewRequests(context.Background(), []string{"example-org/web", "example-org/api"}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 || got[0].Number != 820 || got[0].Checks != ticket.ChecksPass {
 		t.Errorf("got %+v", got)
 	}
-	if q := (*calls)[0].vars["q"]; q != "is:pr is:open review-requested:@me archived:false user:example-org" {
-		t.Errorf("search = %v", q)
+	if q := (*calls)[0].vars["q"]; q != "is:pr is:open archived:false user-review-requested:@me repo:example-org/web repo:example-org/api" {
+		t.Errorf("direct search = %v", q)
+	}
+	if _, err := c.ReviewRequests(context.Background(), []string{"example-org/web"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if q := (*calls)[1].vars["q"]; q != "is:pr is:open archived:false review-requested:@me repo:example-org/web" {
+		t.Errorf("team search = %v", q)
 	}
 }
 

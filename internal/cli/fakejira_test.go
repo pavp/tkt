@@ -20,7 +20,6 @@ type fakeJira struct {
 	comments  map[string][]jira.Comment
 	statuses  map[string][]jira.Status
 	projects  []jira.Project
-	sprints   map[string][]jira.Sprint
 	files     map[string]string
 }
 
@@ -55,10 +54,7 @@ func (f *fakeJira) Statuses(_ context.Context, p string) ([]jira.Status, error) 
 	return f.statuses[p], nil
 }
 func (f *fakeJira) Projects(context.Context) ([]jira.Project, error) { return f.projects, nil }
-func (f *fakeJira) ActiveSprints(_ context.Context, p string) ([]jira.Sprint, error) {
-	return f.sprints[p], nil
-}
-func (f *fakeJira) BrowseURL(key string) string { return "https://example.atlassian.net/browse/" + key }
+func (f *fakeJira) BrowseURL(key string) string                      { return "https://example.atlassian.net/browse/" + key }
 
 func (f *fakeJira) Download(_ context.Context, url string, w io.Writer, _ int64) error {
 	body, ok := f.files[url]

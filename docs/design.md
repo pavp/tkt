@@ -125,7 +125,8 @@ Events over WebSocket:
 ### Board scope
 
 - Tickets assigned to the user in open sprints across configured projects, plus pull requests where the user's review is requested.
-- Each space has its own sprint; the UI shows one sprint chip per space (for example `DEMO S42 · 4d left`, `OPS S18 · 9d left`), read from the Jira Agile API.
+- Each space has its own sprint; the UI shows the active sprints the user's tickets belong to (for example `DEMO S42 · 4d left`), read from the tickets' own Sprint field. Listing every board of a space shows other teams' sprints and costs one request per board, so it is avoided.
+- `reviews` in the configuration selects review requests: `direct` (default; requests addressed to the user in configured repositories), `team` (also requests to the user's teams, which include CODEOWNERS and dependabot traffic), or `off`.
 - "Needs you" means: one of my tickets has failing CI or requested changes, or my review is requested on a PR.
 - Subtasks are grouped under their parent story.
 - CI status comes from GitHub Actions checks.
@@ -148,7 +149,7 @@ Based on https://herdr.dev/docs/plugins/ and https://herdr.dev/docs/socket-api/.
 - `link_handlers` with regex patterns for Jira issue URLs and GitHub PR URLs.
 - Sidebar status through `workspace.report_metadata` tokens, rendered as `$name`. A report may set at most 16 keys and a workspace keeps at most 32; names are 1–32 ASCII letters, digits, `_`, `-`.
 - CLI support for the plugin: `tkt board` (a TUI board for the popup pane) and `tkt herdr <restore|open-board|open|start|on-worktree|setup|install>` (glue commands the manifest calls).
-- Setup from Herdr: a `setup` action opens a popup running `tkt init`; opening the board without configuration shows "tkt isn't set up · enter to set up" and launches the same popup. The logic stays in the CLI; the agent never sees the token, because the popup has no pane id it could read.
+- Setup from Herdr: a `setup` action opens a tab running `tkt init` (a tab, not a popup, because Herdr popups cannot be moved or closed by hand); `tkt auth jira` remembers the Jira site and email so setup does not ask again; opening the board without configuration shows "tkt isn't set up · enter to set up" and launches the same popup. The logic stays in the CLI; the agent never sees the token, because the popup has no pane id it could read.
 - Link handlers for Jira issue and GitHub PR URLs run an `open` action: it focuses the ticket's workspace when a worktree is linked, otherwise it shows the ticket in a popup with Start. Clicking never starts an agent by itself.
 - An event hook on `worktree.created` runs `tkt herdr on-worktree`, which links the new worktree automatically when its branch carries a ticket key, so linking does not depend on the agent remembering to run `tkt link`.
 - Limitations to design around: tokens do not survive Herdr restarts; values are limited to 80 characters (per the project brief); plugins have no daemons — `[[startup]]` hooks are one-shot and must restore state and exit; plugins ship no default keybindings (users bind actions in their own config).

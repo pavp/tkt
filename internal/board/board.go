@@ -24,17 +24,16 @@ type Snapshot struct {
 
 type JiraSource interface {
 	Search(ctx context.Context, jql string, fields []string) ([]jira.Issue, error)
-	ActiveSprints(ctx context.Context, project string) ([]jira.Sprint, error)
 	BrowseURL(key string) string
 }
 
 type GitHubSource interface {
 	PullRequests(ctx context.Context, repos []string) ([]ticket.PullRequest, error)
-	ReviewRequests(ctx context.Context, owner string) ([]ticket.PullRequest, error)
+	ReviewRequests(ctx context.Context, repos []string, direct bool) ([]ticket.PullRequest, error)
 }
 
-// Fetch builds a snapshot. Jira failures are fatal because there is no board without tickets; GitHub and
-// sprint failures become warnings so the tickets still show.
+// Fetch builds a snapshot. Jira failures are fatal because there is no board without tickets; GitHub
+// failures become warnings so the tickets still show.
 func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource, now time.Time) (Snapshot, error) {
 	snap := Snapshot{FetchedAt: now}
 	if len(c.Spaces) == 0 {
@@ -45,16 +44,21 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 		return snap, err
 	}
 	tickets := make([]ticket.Ticket, 0, len(issues))
+	seenSprint := map[string]bool{}
 	for _, is := range issues {
 		tickets = append(tickets, ToTicket(c, is, js.BrowseURL(is.Key)))
+		for _, sp := range is.Sprints {
+			if sp.State == "active" && !seenSprint[sp.Name] {
+				seenSprint[sp.Name] = true
+				snap.Sprints = append(snap.Sprints, sp)
+			}
+		}
 	}
 
 	repos := c.Repos()
 	names := make([]string, len(repos))
-	owners := map[string]bool{}
 	for i, r := range repos {
 		names[i] = r.Name
-		owners[r.Owner()] = true
 	}
 	if len(names) > 0 {
 		prs, err := gh.PullRequests(ctx, names)
@@ -65,13 +69,12 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 	}
 	snap.Tickets = ticket.GroupSubtasks(tickets)
 
-	seen := map[string]bool{}
-	for _, owner := range sortedKeys(owners) {
-		reviews, err := gh.ReviewRequests(ctx, owner)
+	if mode := c.ReviewMode(); mode != config.ReviewsOff && len(names) > 0 {
+		reviews, err := gh.ReviewRequests(ctx, names, mode == config.ReviewsDirect)
 		if err != nil {
 			snap.Warnings = append(snap.Warnings, "review requests unavailable: "+err.Error())
-			continue
 		}
+		seen := map[string]bool{}
 		for _, pr := range reviews {
 			id := fmt.Sprintf("%s#%d", pr.Repo, pr.Number)
 			if !seen[id] {
@@ -79,15 +82,6 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 				snap.Reviews = append(snap.Reviews, pr)
 			}
 		}
-	}
-
-	for _, s := range c.Spaces {
-		sprints, err := js.ActiveSprints(ctx, s.Key)
-		if err != nil {
-			snap.Warnings = append(snap.Warnings, fmt.Sprintf("sprints of %s unavailable: %v", s.Key, err))
-			continue
-		}
-		snap.Sprints = append(snap.Sprints, sprints...)
 	}
 	return snap, nil
 }
@@ -105,15 +99,6 @@ func ToTicket(c *config.Config, is jira.Issue, url string) ticket.Ticket {
 	space, _ := c.Space(t.Space())
 	t.Category = ticket.CategoryFor(is.Status, is.StatusCategory, space.Categories())
 	return t
-}
-
-func sortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // Attention is one item that needs the user: a ticket with failing CI or requested changes, or a PR
@@ -199,6 +184,17 @@ func (s Snapshot) Filter(space string) Snapshot {
 		}
 	}
 	return out
+}
+
+// SprintLabel names a sprint with its time left: "S42 · 4d left", "S42 · overdue", or just the name.
+func SprintLabel(sp jira.Sprint, now time.Time) string {
+	switch {
+	case sp.End.IsZero():
+		return sp.Name
+	case !sp.End.After(now):
+		return sp.Name + " · overdue"
+	}
+	return fmt.Sprintf("%s · %dd left", sp.Name, DaysLeft(sp.End, now))
 }
 
 // DaysLeft returns whole days until end, rounding up; a past end gives 0.

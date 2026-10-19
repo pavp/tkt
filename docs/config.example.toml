@@ -4,6 +4,10 @@
 # Folders where tkt looks for local clones of the repositories below.
 repo_roots = ["~/dev/work"]
 
+# Review requests on the board: "direct" (asked of you, default), "team" (also your teams, e.g. CODEOWNERS
+# and dependabot), or "off" (only your assigned tickets).
+reviews = "direct"
+
 [jira]
 site = "example.atlassian.net"
 email = "you@example.com"

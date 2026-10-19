@@ -21,7 +21,6 @@ type JiraAPI interface {
 	Comments(ctx context.Context, key string, max int) ([]jira.Comment, error)
 	Statuses(ctx context.Context, project string) ([]jira.Status, error)
 	Projects(ctx context.Context) ([]jira.Project, error)
-	ActiveSprints(ctx context.Context, project string) ([]jira.Sprint, error)
 	BrowseURL(key string) string
 	Download(ctx context.Context, url string, w io.Writer, maxBytes int64) error
 }
@@ -45,7 +44,7 @@ func (a *App) jiraClient(c *config.Config) (JiraAPI, error) {
 // GitHubAPI is the read-only GitHub surface commands use.
 type GitHubAPI interface {
 	PullRequests(ctx context.Context, repos []string) ([]ticket.PullRequest, error)
-	ReviewRequests(ctx context.Context, owner string) ([]ticket.PullRequest, error)
+	ReviewRequests(ctx context.Context, repos []string, direct bool) ([]ticket.PullRequest, error)
 	FailedChecks(ctx context.Context, repo, sha string) ([]github.FailedCheck, error)
 	ChangeRequests(ctx context.Context, repo string, number int) ([]github.ChangeRequest, error)
 }

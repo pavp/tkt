@@ -21,10 +21,12 @@ var ErrNotConfigured = errors.New("tkt is not configured yet: run `tkt init`")
 
 type Config struct {
 	RepoRoots []string `toml:"repo_roots,omitempty"`
-	Jira      Jira     `toml:"jira"`
-	GitHub    GitHub   `toml:"github,omitempty"`
-	Context   Context  `toml:"context,omitempty"`
-	Spaces    []Space  `toml:"spaces"`
+	// Reviews selects which review requests the board shows: direct (default), team, or off.
+	Reviews string  `toml:"reviews,omitempty"`
+	Jira    Jira    `toml:"jira"`
+	GitHub  GitHub  `toml:"github,omitempty"`
+	Context Context `toml:"context,omitempty"`
+	Spaces  []Space `toml:"spaces"`
 }
 
 type Jira struct {
@@ -56,6 +58,20 @@ type Repo struct {
 }
 
 const DefaultComments = 5
+
+const (
+	ReviewsDirect = "direct"
+	ReviewsTeam   = "team"
+	ReviewsOff    = "off"
+)
+
+// ReviewMode returns the configured review mode, defaulting to direct requests only.
+func (c *Config) ReviewMode() string {
+	if c.Reviews == "" {
+		return ReviewsDirect
+	}
+	return c.Reviews
+}
 
 var (
 	spaceKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]+$`)
@@ -125,6 +141,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Jira.Email == "" {
 		errs = append(errs, errors.New("jira.email is required"))
+	}
+	switch c.Reviews {
+	case "", ReviewsDirect, ReviewsTeam, ReviewsOff:
+	default:
+		errs = append(errs, fmt.Errorf("reviews = %q must be direct, team or off", c.Reviews))
 	}
 	if c.Context.Comments < 0 {
 		errs = append(errs, errors.New("context.comments must not be negative"))

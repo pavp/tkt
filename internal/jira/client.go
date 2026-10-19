@@ -21,6 +21,10 @@ type Client struct {
 	email string
 	token string
 	http  *http.Client
+
+	// sprintField is the id of the site's Sprint custom field; it differs between Jira sites.
+	sprintField  string
+	sprintLooked bool
 }
 
 // New builds a read-only client for site (for example "https://example.atlassian.net").
@@ -119,6 +123,7 @@ type Issue struct {
 	Updated        time.Time
 	Description    json.RawMessage
 	Attachments    []Attachment
+	Sprints        []Sprint
 	Fields         map[string]json.RawMessage
 }
 
@@ -154,7 +159,7 @@ type issueFields struct {
 	Attachment  []Attachment    `json:"attachment"`
 }
 
-func (r rawIssue) decode() (Issue, error) {
+func (r rawIssue) decode(sprintField string) (Issue, error) {
 	all, err := json.Marshal(r.Fields)
 	if err != nil {
 		return Issue{}, err
@@ -182,14 +187,71 @@ func (r rawIssue) decode() (Issue, error) {
 			is.Updated = t
 		}
 	}
+	if raw, ok := r.Fields[sprintField]; ok && sprintField != "" {
+		var sprints []struct {
+			Name    string `json:"name"`
+			State   string `json:"state"`
+			EndDate string `json:"endDate"`
+		}
+		if json.Unmarshal(raw, &sprints) == nil {
+			space, _, _ := strings.Cut(r.Key, "-")
+			for _, sp := range sprints {
+				out := Sprint{Space: space, Name: sp.Name, State: sp.State}
+				if t, err := time.Parse(time.RFC3339, sp.EndDate); err == nil {
+					out.End = t
+				}
+				is.Sprints = append(is.Sprints, out)
+			}
+		}
+	}
 	return is, nil
 }
 
+// SprintFieldName stands for the site's Sprint custom field in field lists; Search and Issue resolve it.
+const SprintFieldName = "sprint"
+
+// resolveFields replaces SprintFieldName with the site's Sprint field id, looked up once per client.
+func (c *Client) resolveFields(ctx context.Context, fields []string) ([]string, error) {
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f != SprintFieldName {
+			out = append(out, f)
+			continue
+		}
+		if !c.sprintLooked {
+			var all []struct {
+				ID     string `json:"id"`
+				Schema struct {
+					Custom string `json:"custom"`
+				} `json:"schema"`
+			}
+			if err := c.do(ctx, http.MethodGet, "/rest/api/3/field", nil, &all); err != nil {
+				return nil, err
+			}
+			for _, fd := range all {
+				if fd.Schema.Custom == "com.pyxis.greenhopper.jira:gh-sprint" {
+					c.sprintField = fd.ID
+					break
+				}
+			}
+			c.sprintLooked = true
+		}
+		if c.sprintField != "" {
+			out = append(out, c.sprintField)
+		}
+	}
+	return out, nil
+}
+
 // ListFields are the fields the board needs; Issue() asks for more.
-var ListFields = []string{"summary", "issuetype", "status", "parent", "updated"}
+var ListFields = []string{"summary", "issuetype", "status", "parent", "updated", SprintFieldName}
 
 // Search runs jql over every result page (POST /rest/api/3/search/jql).
 func (c *Client) Search(ctx context.Context, jql string, fields []string) ([]Issue, error) {
+	fields, err := c.resolveFields(ctx, fields)
+	if err != nil {
+		return nil, err
+	}
 	var out []Issue
 	token := ""
 	for page := 0; page < 50; page++ {
@@ -206,7 +268,7 @@ func (c *Client) Search(ctx context.Context, jql string, fields []string) ([]Iss
 			return nil, err
 		}
 		for _, r := range resp.Issues {
-			is, err := r.decode()
+			is, err := r.decode(c.sprintField)
 			if err != nil {
 				return nil, err
 			}
@@ -232,13 +294,16 @@ func MySprintJQL(spaces []string) string {
 // Issue fetches one issue with the board fields, its description, attachments, and any extra fields.
 func (c *Client) Issue(ctx context.Context, key string, extraFields ...string) (Issue, error) {
 	fields := append(append([]string{}, ListFields...), "description", "attachment")
-	fields = append(fields, extraFields...)
+	fields, err := c.resolveFields(ctx, append(fields, extraFields...))
+	if err != nil {
+		return Issue{}, err
+	}
 	q := url.Values{"fields": {strings.Join(fields, ",")}}
 	var r rawIssue
 	if err := c.do(ctx, http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(key)+"?"+q.Encode(), nil, &r); err != nil {
 		return Issue{}, err
 	}
-	return r.decode()
+	return r.decode(c.sprintField)
 }
 
 type Comment struct {
@@ -326,45 +391,8 @@ func (c *Client) Projects(ctx context.Context) ([]Project, error) {
 type Sprint struct {
 	Space string    `json:"space"`
 	Name  string    `json:"name"`
+	State string    `json:"state,omitempty"`
 	End   time.Time `json:"end"`
-}
-
-// ActiveSprints returns the active sprints of a space's scrum boards.
-func (c *Client) ActiveSprints(ctx context.Context, project string) ([]Sprint, error) {
-	var boards struct {
-		Values []struct {
-			ID int `json:"id"`
-		} `json:"values"`
-	}
-	q := url.Values{"projectKeyOrId": {project}, "type": {"scrum"}}
-	if err := c.do(ctx, http.MethodGet, "/rest/agile/1.0/board?"+q.Encode(), nil, &boards); err != nil {
-		return nil, err
-	}
-	seen := map[string]bool{}
-	var out []Sprint
-	for _, b := range boards.Values {
-		var sprints struct {
-			Values []struct {
-				Name    string `json:"name"`
-				EndDate string `json:"endDate"`
-			} `json:"values"`
-		}
-		if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/rest/agile/1.0/board/%d/sprint?state=active", b.ID), nil, &sprints); err != nil {
-			return nil, err
-		}
-		for _, s := range sprints.Values {
-			if seen[s.Name] {
-				continue
-			}
-			seen[s.Name] = true
-			sp := Sprint{Space: project, Name: s.Name}
-			if t, err := time.Parse(time.RFC3339, s.EndDate); err == nil {
-				sp.End = t
-			}
-			out = append(out, sp)
-		}
-	}
-	return out, nil
 }
 
 // Download writes an attachment to w. It refuses URLs outside the Jira site so the credentials are never

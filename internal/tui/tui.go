@@ -338,7 +338,7 @@ func (m Model) View() string {
 func (m Model) header() string {
 	parts := []string{bold.Render("tkt")}
 	for _, sp := range m.snap.Sprints {
-		parts = append(parts, fmt.Sprintf("%s · %dd", sp.Name, board.DaysLeft(sp.End, m.snap.FetchedAt)))
+		parts = append(parts, board.SprintLabel(sp, m.snap.FetchedAt))
 	}
 	filters := []string{}
 	for _, f := range []struct{ id, label string }{{FilterAll, fmt.Sprintf("All %d", len(m.snap.Tickets))}, {FilterNeeds, fmt.Sprintf("Needs you %d", len(m.snap.NeedsYou()))}, {FilterReviews, fmt.Sprintf("Reviews %d", len(m.snap.Reviews))}} {

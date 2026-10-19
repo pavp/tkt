@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type recorded struct {
@@ -20,6 +22,10 @@ func server(t *testing.T, routes map[string]string) (*Client, *[]recorded) {
 	t.Helper()
 	var calls []recorded
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := routes["GET /rest/api/3/field"]; !ok && r.Method == "GET" && r.URL.Path == "/rest/api/3/field" {
+			_, _ = io.WriteString(w, "[]")
+			return
+		}
 		rec := recorded{method: r.Method, path: r.URL.Path, query: r.URL.RawQuery, auth: r.Header.Get("Authorization")}
 		if b, _ := io.ReadAll(r.Body); len(b) > 0 {
 			_ = json.Unmarshal(b, &rec.body)
@@ -163,21 +169,33 @@ func TestStatusesDeduplicates(t *testing.T) {
 	}
 }
 
-func TestActiveSprints(t *testing.T) {
+func TestSprintFieldIsDiscoveredAndParsed(t *testing.T) {
 	c, calls := server(t, map[string]string{
-		"GET /rest/agile/1.0/board":          `{"values":[{"id":7},{"id":8}]}`,
-		"GET /rest/agile/1.0/board/7/sprint": `{"values":[{"name":"DEMO S42","endDate":"2026-10-23T17:00:00.000Z"}]}`,
-		"GET /rest/agile/1.0/board/8/sprint": `{"values":[{"name":"DEMO S42","endDate":"2026-10-23T17:00:00.000Z"}]}`,
+		"GET /rest/api/3/field":       `[{"id":"summary","schema":{}},{"id":"customfield_10020","schema":{"custom":"com.pyxis.greenhopper.jira:gh-sprint"}}]`,
+		"POST /rest/api/3/search/jql": `{"issues":[{"key":"DEMO-1","fields":{"summary":"x","customfield_10020":[{"name":"DEMO S41","state":"closed","endDate":"2026-10-09T17:00:00.000Z"},{"name":"DEMO S42","state":"active","endDate":"2026-10-23T17:00:00.000Z"}]}}],"isLast":true}`,
 	})
-	got, err := c.ActiveSprints(context.Background(), "DEMO")
+	got, err := c.Search(context.Background(), "x", ListFields)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Name != "DEMO S42" || got[0].Space != "DEMO" || got[0].End.IsZero() {
-		t.Errorf("sprints = %+v", got)
+	if len(got[0].Sprints) != 2 || got[0].Sprints[1] != (Sprint{Space: "DEMO", Name: "DEMO S42", State: "active", End: time.Date(2026, 10, 23, 17, 0, 0, 0, time.UTC)}) {
+		t.Errorf("sprints = %+v", got[0].Sprints)
 	}
-	if !strings.Contains((*calls)[0].query, "projectKeyOrId=DEMO") || !strings.Contains((*calls)[1].query, "state=active") {
-		t.Errorf("queries = %s / %s", (*calls)[0].query, (*calls)[1].query)
+	fields := fmt.Sprint((*calls)[1].body["fields"])
+	if !strings.Contains(fields, "customfield_10020") || strings.Contains(fields, " sprint") {
+		t.Errorf("fields sent = %s", fields)
+	}
+	if _, err := c.Search(context.Background(), "x", ListFields); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, call := range *calls {
+		if call.path == "/rest/api/3/field" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("field list fetched %d times, want once per client", n)
 	}
 }
 

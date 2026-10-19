@@ -15,36 +15,36 @@ import (
 )
 
 type stubJira struct {
-	issues    []jira.Issue
-	err       error
-	jql       string
-	sprints   map[string][]jira.Sprint
-	sprintErr error
+	issues []jira.Issue
+	err    error
+	jql    string
 }
 
 func (s *stubJira) Search(_ context.Context, jql string, _ []string) ([]jira.Issue, error) {
 	s.jql = jql
 	return s.issues, s.err
 }
-func (s *stubJira) ActiveSprints(_ context.Context, p string) ([]jira.Sprint, error) {
-	return s.sprints[p], s.sprintErr
-}
 func (s *stubJira) BrowseURL(k string) string { return "https://example.atlassian.net/browse/" + k }
 
 type stubGitHub struct {
-	prs       []ticket.PullRequest
-	prErr     error
-	reviews   map[string][]ticket.PullRequest
-	reviewErr error
-	repos     []string
+	prs         []ticket.PullRequest
+	prErr       error
+	reviews     []ticket.PullRequest
+	reviewErr   error
+	repos       []string
+	reviewRepos []string
+	direct      bool
+	reviewCalls int
 }
 
 func (s *stubGitHub) PullRequests(_ context.Context, repos []string) ([]ticket.PullRequest, error) {
 	s.repos = repos
 	return s.prs, s.prErr
 }
-func (s *stubGitHub) ReviewRequests(_ context.Context, owner string) ([]ticket.PullRequest, error) {
-	return s.reviews[owner], s.reviewErr
+func (s *stubGitHub) ReviewRequests(_ context.Context, repos []string, direct bool) ([]ticket.PullRequest, error) {
+	s.reviewCalls++
+	s.reviewRepos, s.direct = repos, direct
+	return s.reviews, s.reviewErr
 }
 
 func cfg() *config.Config {
@@ -62,18 +62,19 @@ var now = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 func TestFetchAssemblesTickets(t *testing.T) {
 	js := &stubJira{
 		issues: []jira.Issue{
-			{Key: "DEMO-1", Summary: "Filter", Type: "Story", Status: "In Progress", StatusCategory: "indeterminate"},
+			{Key: "DEMO-1", Summary: "Filter", Type: "Story", Status: "In Progress", StatusCategory: "indeterminate",
+				Sprints: []jira.Sprint{{Space: "DEMO", Name: "DEMO S41", State: "closed"}, {Space: "DEMO", Name: "DEMO S42", State: "active"}}},
 			{Key: "DEMO-2", Summary: "Sub", Type: "Sub-task", Status: "Code Review", StatusCategory: "indeterminate", Parent: "DEMO-1"},
-			{Key: "OPS-3", Summary: "Ops", Type: "Task", Status: "To Do", StatusCategory: "new"},
+			{Key: "OPS-3", Summary: "Ops", Type: "Task", Status: "To Do", StatusCategory: "new",
+				Sprints: []jira.Sprint{{Space: "OPS", Name: "DEMO S42", State: "active"}}},
 		},
-		sprints: map[string][]jira.Sprint{"DEMO": {{Space: "DEMO", Name: "DEMO S42"}}},
 	}
 	gh := &stubGitHub{
 		prs: []ticket.PullRequest{{Repo: "example-org/web", Number: 9, Branch: "feature/DEMO-1-filter", State: ticket.PROpen, Checks: ticket.ChecksFail}},
-		reviews: map[string][]ticket.PullRequest{"example-org": {
+		reviews: []ticket.PullRequest{
 			{Repo: "example-org/web", Number: 20, Branch: "feature/DEMO-9", State: ticket.PROpen},
 			{Repo: "example-org/web", Number: 20, Branch: "feature/DEMO-9", State: ticket.PROpen},
-		}},
+		},
 	}
 	snap, err := Fetch(context.Background(), cfg(), js, gh, now)
 	if err != nil {
@@ -98,13 +99,31 @@ func TestFetchAssemblesTickets(t *testing.T) {
 	if len(snap.Reviews) != 1 {
 		t.Errorf("reviews not deduplicated: %+v", snap.Reviews)
 	}
-	if len(snap.Sprints) != 1 || !snap.FetchedAt.Equal(now) || len(snap.Warnings) != 0 {
-		t.Errorf("snapshot = %+v", snap)
+	if len(snap.Sprints) != 1 || snap.Sprints[0].Name != "DEMO S42" || !snap.FetchedAt.Equal(now) || len(snap.Warnings) != 0 {
+		t.Errorf("only the active sprint of my tickets, once: %+v", snap.Sprints)
+	}
+	if !gh.direct || !reflect.DeepEqual(gh.reviewRepos, []string{"example-org/api", "example-org/web"}) {
+		t.Errorf("reviews queried for %v direct=%v", gh.reviewRepos, gh.direct)
+	}
+}
+
+func TestFetchReviewModes(t *testing.T) {
+	js := &stubJira{issues: []jira.Issue{{Key: "DEMO-1", StatusCategory: "new"}}}
+	c := cfg()
+	c.Reviews = config.ReviewsOff
+	gh := &stubGitHub{reviews: []ticket.PullRequest{{Number: 1}}}
+	snap, err := Fetch(context.Background(), c, js, gh, now)
+	if err != nil || gh.reviewCalls != 0 || len(snap.Reviews) != 0 {
+		t.Errorf("off: calls %d, reviews %d, %v", gh.reviewCalls, len(snap.Reviews), err)
+	}
+	c.Reviews = config.ReviewsTeam
+	if _, err := Fetch(context.Background(), c, js, gh, now); err != nil || gh.direct {
+		t.Errorf("team mode asked for direct requests only: %v", err)
 	}
 }
 
 func TestFetchDegradesWithoutGitHub(t *testing.T) {
-	js := &stubJira{issues: []jira.Issue{{Key: "DEMO-1", StatusCategory: "new"}}, sprintErr: errors.New("agile disabled")}
+	js := &stubJira{issues: []jira.Issue{{Key: "DEMO-1", StatusCategory: "new"}}}
 	gh := &stubGitHub{prErr: errors.New("rate limited"), reviewErr: errors.New("rate limited")}
 	snap, err := Fetch(context.Background(), cfg(), js, gh, now)
 	if err != nil {
@@ -114,7 +133,7 @@ func TestFetchDegradesWithoutGitHub(t *testing.T) {
 		t.Errorf("tickets = %+v", snap.Tickets)
 	}
 	joined := strings.Join(snap.Warnings, "\n")
-	for _, want := range []string{"pull requests unavailable: rate limited", "review requests unavailable", "sprints of DEMO unavailable"} {
+	for _, want := range []string{"pull requests unavailable: rate limited", "review requests unavailable"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("warnings missing %q: %v", want, snap.Warnings)
 		}
@@ -241,5 +260,20 @@ func TestFind(t *testing.T) {
 	}
 	if _, ok := s.Find("DEMO-9"); ok {
 		t.Error("found a missing ticket")
+	}
+}
+
+func TestSprintLabel(t *testing.T) {
+	for _, tt := range []struct {
+		sp   jira.Sprint
+		want string
+	}{
+		{jira.Sprint{Name: "S42", End: now.Add(4 * 24 * time.Hour)}, "S42 · 4d left"},
+		{jira.Sprint{Name: "S41", End: now.Add(-time.Hour)}, "S41 · overdue"},
+		{jira.Sprint{Name: "Kanban"}, "Kanban"},
+	} {
+		if got := SprintLabel(tt.sp, now); got != tt.want {
+			t.Errorf("SprintLabel = %q, want %q", got, tt.want)
+		}
 	}
 }
