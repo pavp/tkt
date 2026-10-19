@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -341,5 +342,32 @@ func TestBoardOffersSetupWhenUnconfigured(t *testing.T) {
 	os.Remove(h.app.configPath)
 	if code := h.exec("board"); code != 0 || !strings.Contains(h.errOut.String(), "tkt isn't set up") {
 		t.Errorf("exit %d, %q", code, h.errOut)
+	}
+}
+
+func TestBoardOffersToConnectJiraWithoutAToken(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	if code := h.exec("board"); code != 0 || !strings.Contains(h.errOut.String(), "No Jira token for dev@example.com · press Enter to connect Jira") {
+		t.Errorf("exit %d, %q", code, h.errOut)
+	}
+}
+
+func TestEnsureJiraTokenConnectsBeforeTheBoard(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	h.app.Stdin = strings.NewReader("\ntok-123\n")
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := h.app.ensureJiraToken(context.Background(), c)
+	if err != nil || !ok {
+		t.Fatalf("ensureJiraToken = %v, %v; stderr %q", ok, err, h.errOut)
+	}
+	if h.creds["jira:example.atlassian.net:dev@example.com"] != "tok-123" {
+		t.Errorf("creds = %v", h.creds)
+	}
+	h.creds["jira:example.atlassian.net:dev@example.com"] = "stored"
+	if ok, err := h.app.ensureJiraToken(context.Background(), c); err != nil || !ok || strings.Count(h.errOut.String(), "press Enter to connect Jira") != 1 {
+		t.Errorf("a stored token should open the board without asking: %v, %v", ok, err)
 	}
 }

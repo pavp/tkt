@@ -45,40 +45,45 @@ func newAuthJiraCmd(a *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			token, fromClipboard, err := a.readToken(cmd.Context(), e)
-			if err != nil {
-				return err
-			}
-			user, err := a.NewJira(s, e, token).Myself(cmd.Context())
-			if errors.Is(err, jira.ErrUnauthorized) {
-				return errors.New("jira rejected this token for " + e + "; nothing was saved")
-			}
-			verified := err == nil
-			if !verified {
-				fmt.Fprintf(a.Stderr, "! could not reach Jira to check the token (%v); saving it anyway\n", err)
-			}
-			if err := a.Creds.Set(credstore.JiraKey(s, e), token); err != nil {
-				return err
-			}
-			if fromClipboard {
-				a.clearClipboardIf(cmd.Context(), token)
-			}
-			st := a.loadState()
-			st.JiraSite, st.JiraEmail = s, e
-			a.saveState(st)
-			if a.jsonOut {
-				return a.printJSON(map[string]any{"saved": true, "verified": verified, "user": user.DisplayName, "store": a.Creds.Name(), "site": s, "email": e})
-			}
-			if verified {
-				a.printf("✓ Connected to %s as %s\n", s, user.DisplayName)
-			}
-			a.printf("✓ Jira token saved in %s for %s on %s\n", a.Creds.Name(), e, s)
-			return nil
+			return a.connectJira(cmd.Context(), s, e)
 		},
 	}
 	cmd.Flags().StringVar(&site, "site", "", "Jira site, e.g. example.atlassian.net (default: jira.site from the config)")
 	cmd.Flags().StringVar(&email, "email", "", "Atlassian account email (default: jira.email from the config)")
 	return cmd
+}
+
+// connectJira reads a token for email on site, checks it against Jira and stores it.
+func (a *App) connectJira(ctx context.Context, s, e string) error {
+	token, fromClipboard, err := a.readToken(ctx, e)
+	if err != nil {
+		return err
+	}
+	user, err := a.NewJira(s, e, token).Myself(ctx)
+	if errors.Is(err, jira.ErrUnauthorized) {
+		return errors.New("jira rejected this token for " + e + "; nothing was saved")
+	}
+	verified := err == nil
+	if !verified {
+		fmt.Fprintf(a.Stderr, "! could not reach Jira to check the token (%v); saving it anyway\n", err)
+	}
+	if err := a.Creds.Set(credstore.JiraKey(s, e), token); err != nil {
+		return err
+	}
+	if fromClipboard {
+		a.clearClipboardIf(ctx, token)
+	}
+	st := a.loadState()
+	st.JiraSite, st.JiraEmail = s, e
+	a.saveState(st)
+	if a.jsonOut {
+		return a.printJSON(map[string]any{"saved": true, "verified": verified, "user": user.DisplayName, "store": a.Creds.Name(), "site": s, "email": e})
+	}
+	if verified {
+		a.printf("✓ Connected to %s as %s\n", s, user.DisplayName)
+	}
+	a.printf("✓ Jira token saved in %s for %s on %s\n", a.Creds.Name(), e, s)
+	return nil
 }
 
 // jiraAccount resolves the site and email from flags and the configuration; in a terminal it asks for what

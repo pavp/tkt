@@ -31,7 +31,7 @@ func newBoardCmd(a *App) *cobra.Command {
 		Long: "Interactive board. It opens instantly from the cached board and refreshes in the background.\n" +
 			"Keys: arrows, wasd or hjkl move · enter actions menu · f send CI failures or review comments to the agent ·\n" +
 			"i ticket pane · o Jira · p pull request · n needs you · r reviews · v columns/list · g refresh · q close.\n" +
-			"When tkt is not configured, it offers to run the setup.",
+			"When tkt is not configured, it offers to run the setup; without a Jira token, to connect Jira first.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := a.LoadConfig()
@@ -42,6 +42,9 @@ func newBoardCmd(a *App) *cobra.Command {
 				return a.runInit(cmd)
 			}
 			if err != nil {
+				return err
+			}
+			if ok, err := a.ensureJiraToken(cmd.Context(), c); err != nil || !ok {
 				return err
 			}
 			snap, have, err := a.cache().Load()
@@ -59,6 +62,25 @@ func newBoardCmd(a *App) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&view, "view", "columns", "initial view: columns or list")
 	return cmd
+}
+
+// ensureJiraToken offers to connect Jira before the board opens when no token is stored, so the board
+// never sits on a cache it cannot refresh. ok is false when the user closed the pane instead.
+func (a *App) ensureJiraToken(ctx context.Context, c *config.Config) (bool, error) {
+	site, err := config.SiteURL(c.Jira.Site)
+	if err != nil {
+		return false, err
+	}
+	if _, _, err := credstore.JiraToken(a.Creds, a.Env.Getenv, site, c.Jira.Email); !errors.Is(err, credstore.ErrNotFound) {
+		return true, nil
+	}
+	if _, err := a.readLine("No Jira token for " + c.Jira.Email + " · press Enter to connect Jira (Ctrl-C to close) "); err != nil {
+		return false, nil
+	}
+	if err := a.connectJira(ctx, site, c.Jira.Email); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // boardActions carries out what the board asks for.
