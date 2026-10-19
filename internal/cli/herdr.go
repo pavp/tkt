@@ -122,6 +122,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 		&cobra.Command{Use: "refresh", Short: "Fetch fresh data and update the Herdr sidebar", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrSidebar(cmd, false) }},
 		&cobra.Command{Use: "restore", Short: "Update the Herdr sidebar from the cache (startup hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrSidebar(cmd, true) }},
 		&cobra.Command{Use: "on-worktree", Short: "Link a worktree Herdr just created (event hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOnWorktree(cmd) }},
+		&cobra.Command{Use: "on-agent", Short: "Relabel workspaces when an agent's status changes (event hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOnAgent(cmd) }},
 	)
 	return cmd
 }
@@ -596,6 +597,21 @@ func worktreePath(raw string) string {
 		return ""
 	}
 	return walk(v, false)
+}
+
+// herdrOnAgent relabels workspaces from the cached board: agent statuses change often and need only
+// Herdr's own state, never a Jira or GitHub round trip.
+func (a *App) herdrOnAgent(cmd *cobra.Command) error {
+	c, err := a.LoadConfig()
+	if err != nil {
+		return nil
+	}
+	snap, ok, err := a.cache().Load()
+	if err != nil || !ok {
+		return nil
+	}
+	_, _, _ = a.updateSidebar(cmd.Context(), c, snap)
+	return nil
 }
 
 func (a *App) herdrOnWorktree(cmd *cobra.Command) error {

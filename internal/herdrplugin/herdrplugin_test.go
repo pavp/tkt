@@ -47,7 +47,8 @@ func TestRenderIsValidTOML(t *testing.T) {
 	if panes["board"] != "popup board" || panes["ticket"] != "split show --watch" || panes["setup"] != "tab init" {
 		t.Errorf("panes = %v", panes)
 	}
-	if len(m.Events) != 1 || m.Events[0].On != "worktree.created" || strings.Join(m.Events[0].Command[1:], " ") != "herdr on-worktree" {
+	if len(m.Events) != 2 || m.Events[0].On != "worktree.created" || strings.Join(m.Events[0].Command[1:], " ") != "herdr on-worktree" ||
+		m.Events[1].On != "pane.agent_status_changed" || strings.Join(m.Events[1].Command[1:], " ") != "herdr on-agent" {
 		t.Errorf("events = %+v", m.Events)
 	}
 	if len(m.LinkHandlers) != 2 || m.LinkHandlers[0].Action != "open" {

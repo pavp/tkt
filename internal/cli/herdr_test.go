@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/herdr/herdrtest"
+	"github.com/pavp/tkt/internal/herdrplugin"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
 	"github.com/pavp/tkt/internal/workspace"
@@ -528,5 +530,28 @@ func TestHerdrRefreshLabelsWorkspacesOpenedOnAPlainCheckout(t *testing.T) {
 	}
 	if tok := got["tokens"].(map[string]any)["tkt_agent_idle"]; tok != "no agent" {
 		t.Errorf("tokens = %v", got["tokens"])
+	}
+}
+
+func TestHerdrOnAgentRelabelsFromTheCache(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.exec("herdr", "install", "--no-keys", "--no-sidebar")
+	b, _ := os.ReadFile(filepath.Join(h.app.Env.DataDir(), "herdr-plugin", herdrplugin.FileName))
+	if !strings.Contains(string(b), "on = \"pane.agent_status_changed\"\ncommand = [\"/opt/tkt/bin/tkt\", \"herdr\", \"on-agent\"]") {
+		t.Fatalf("manifest should follow agent status changes:\n%s", b)
+	}
+	if code := h.exec("list"); code != 0 {
+		t.Fatalf("list: %s", h.errOut)
+	}
+	h.jira.searchErr = errors.New("on-agent must not call Jira")
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w1","label":"web-DEMO-1","worktree":{"checkout_path":"/src/web-DEMO-1"}}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p1","workspace_id":"w1","agent":"claude","agent_status":"working"}]}`
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
+	if code := h.exec("herdr", "on-agent"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	got := f.Last("workspace.report_metadata")
+	if got == nil || got["tokens"].(map[string]any)["tkt_agent"] != "● claude working" {
+		t.Errorf("report = %v", got)
 	}
 }
