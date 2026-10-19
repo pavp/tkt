@@ -18,7 +18,17 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test ./...
-      - uses: goreleaser/goreleaser-action@v6
+      - name: Check the tap token
+        id: tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.TKT_HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::warning::TKT_HOMEBREW_TAP_TOKEN is not set; nothing was published. Add the secret, or release locally with goreleaser."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.tap.outputs.skip != 'true'
+        uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
