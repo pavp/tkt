@@ -34,7 +34,8 @@ type Actions interface {
 	Copy(text, what string) tea.Cmd
 	CopyContext(key ticket.Key) tea.Cmd
 	// Detail renders a ticket for reading inside the board; the result arrives as a DetailMsg.
-	Detail(key ticket.Key) tea.Cmd
+	// known, when set, is the board's own copy of the ticket, whose pull requests need no fetching.
+	Detail(key ticket.Key, known *ticket.Ticket) tea.Cmd
 	// Config returns a copy of the configuration in use, for the settings view to edit.
 	Config() config.Config
 	// SaveConfig writes the configuration; the outcome arrives as a SettingsSavedMsg.
@@ -1040,6 +1041,9 @@ func (m Model) headerItems() []string {
 	return append(out, " "+views+dim.Render(" v"))
 }
 
+// syncSlot is the width of the sync state's widest wording, "✓ synced 59 min ago".
+var syncSlot = lipgloss.Width("✓ synced 59 min ago")
+
 // syncLabel says how fresh the board is: refreshing (with a spinner), synced N min ago, or cached when the
 // last refresh failed.
 func (m Model) syncLabel() string {
@@ -1699,11 +1703,13 @@ func (m Model) footer() string {
 	if m.stale != nil {
 		sync = warn.Render(m.syncLabel())
 	}
-	// The sync state sits at the bottom right: on the legend's last line when it fits, else on its own.
+	// The sync state sits at the bottom right: on the legend's last line when its widest wording fits,
+	// else on its own. Deciding by the widest wording keeps it from jumping between lines, and the
+	// board's height with it, as it turns from synced to refreshing.
 	lines := strings.Split(wrapSep(items, m.width, "    "), "\n")
 	last := lines[len(lines)-1]
-	if gap := m.width - lipgloss.Width(last) - lipgloss.Width(sync); gap >= 4 {
-		lines[len(lines)-1] = last + strings.Repeat(" ", gap) + sync
+	if m.width-lipgloss.Width(last)-syncSlot >= 4 {
+		lines[len(lines)-1] = last + strings.Repeat(" ", m.width-lipgloss.Width(last)-lipgloss.Width(sync)) + sync
 	} else {
 		lines = append(lines, strings.Repeat(" ", max(0, m.width-lipgloss.Width(sync)))+sync)
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pavp/tkt/internal/adf"
@@ -54,7 +55,10 @@ func (a *App) resolveKey(ctx context.Context, c *config.Config, args []string) (
 	return k, nil
 }
 
-func (a *App) loadDetail(ctx context.Context, c *config.Config, key ticket.Key) (detail, error) {
+// loadDetail reads a ticket, its comments and its pull requests at once. known, when set, is a board's
+// copy of the ticket, whose pull requests stand in for listing every recent pull request on GitHub, by
+// far the slowest of the three.
+func (a *App) loadDetail(ctx context.Context, c *config.Config, key ticket.Key, known *ticket.Ticket) (detail, error) {
 	js, err := a.jiraClient(c)
 	if err != nil {
 		return detail{}, err
@@ -64,7 +68,33 @@ func (a *App) loadDetail(ctx context.Context, c *config.Config, key ticket.Key) 
 	if space.AcceptanceField != "" {
 		extra = append(extra, space.AcceptanceField)
 	}
+	var (
+		wg          sync.WaitGroup
+		comments    []jira.Comment
+		commentsErr error
+		prs         []ticket.PullRequest
+		prsErr      error
+		listed      bool
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		comments, commentsErr = js.Comments(ctx, string(key), c.Context.Comments)
+	}()
+	if repos := c.Repos(); known == nil && len(repos) > 0 {
+		listed = true
+		names := make([]string, len(repos))
+		for i, r := range repos {
+			names[i] = r.Name
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			prs, prsErr = a.NewGitHub(c).PullRequests(ctx, names)
+		}()
+	}
 	is, err := js.Issue(ctx, string(key), extra...)
+	wg.Wait()
 	if err != nil {
 		return detail{}, err
 	}
@@ -77,9 +107,8 @@ func (a *App) loadDetail(ctx context.Context, c *config.Config, key ticket.Key) 
 			d.Warnings = append(d.Warnings, "acceptance criteria could not be converted: "+err.Error())
 		}
 	}
-	comments, err := js.Comments(ctx, string(key), c.Context.Comments)
-	if err != nil {
-		d.Warnings = append(d.Warnings, "comments unavailable: "+err.Error())
+	if commentsErr != nil {
+		d.Warnings = append(d.Warnings, "comments unavailable: "+commentsErr.Error())
 	}
 	for _, cm := range comments {
 		body, err := adf.ToMarkdown(cm.Body)
@@ -88,14 +117,12 @@ func (a *App) loadDetail(ctx context.Context, c *config.Config, key ticket.Key) 
 		}
 		d.Comments = append(d.Comments, commentView{Author: cm.Author, Created: cm.Created, Body: body})
 	}
-	if repos := c.Repos(); len(repos) > 0 {
-		names := make([]string, len(repos))
-		for i, r := range repos {
-			names[i] = r.Name
-		}
-		prs, err := a.NewGitHub(c).PullRequests(ctx, names)
-		if err != nil {
-			d.Warnings = append(d.Warnings, "pull requests unavailable: "+err.Error())
+	switch {
+	case known != nil:
+		d.Ticket.PRs = known.PRs
+	case listed:
+		if prsErr != nil {
+			d.Warnings = append(d.Warnings, "pull requests unavailable: "+prsErr.Error())
 		}
 		d.Ticket = ticket.AttachPRs([]ticket.Ticket{d.Ticket}, prs)[0]
 	}

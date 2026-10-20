@@ -658,7 +658,7 @@ func (a *App) herdrTicketPopup(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	d, err := a.loadDetail(cmd.Context(), c, ticket.Key(key))
+	d, err := a.loadDetail(cmd.Context(), c, ticket.Key(key), a.daemonTicket(cmd.Context(), ticket.Key(key)))
 	if err != nil {
 		return err
 	}

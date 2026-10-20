@@ -25,6 +25,8 @@ type fakeGitHub struct {
 	keysAsked   []string
 	repos       map[string][]string
 	ownersAsked []string
+	// prCalls counts the full listings PullRequests made.
+	prCalls int
 }
 
 func (f *fakeGitHub) Repos(_ context.Context, owner string) ([]string, error) {
@@ -45,6 +47,7 @@ func (f *fakeGitHub) ChangeRequests(_ context.Context, _ string, n int) ([]githu
 }
 
 func (f *fakeGitHub) PullRequests(context.Context, []string) ([]ticket.PullRequest, error) {
+	f.prCalls++
 	return f.prs, f.err
 }
 func (f *fakeGitHub) ReviewRequests(_ context.Context, repos []string, _ bool) ([]ticket.PullRequest, error) {
