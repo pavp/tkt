@@ -33,6 +33,7 @@ type recorder struct {
 	dirs     map[string][]string
 	listed   []string
 	noNative bool
+	broken   map[string][]string
 }
 
 func (r *recorder) ListDirs(path string) tea.Cmd {
@@ -52,7 +53,7 @@ func (r *recorder) ListDirs(path string) tea.Cmd {
 				return DirsListedMsg{Path: path, Dir: dir, Abs: abs, Err: errors.New("no such folder")}
 			}
 		}
-		return DirsListedMsg{Path: path, Dir: dir, Abs: abs, Names: names}
+		return DirsListedMsg{Path: path, Dir: dir, Abs: abs, Names: names, Broken: r.broken[path]}
 	}
 }
 

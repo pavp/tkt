@@ -139,8 +139,8 @@ func (b *boardActions) PickFolder(start string) tea.Cmd {
 func (b *boardActions) ListDirs(path string) tea.Cmd {
 	return func() tea.Msg {
 		abs := filepath.Clean(b.a.Env.ExpandHome(path))
-		names, err := listDirs(abs)
-		return tui.DirsListedMsg{Path: path, Dir: withSlash(b.a.tildePath(abs)), Abs: withSlash(abs), Names: names, Err: err}
+		names, broken, err := listDirs(abs)
+		return tui.DirsListedMsg{Path: path, Dir: withSlash(b.a.tildePath(abs)), Abs: withSlash(abs), Names: names, Broken: broken, Err: err}
 	}
 }
 
@@ -153,24 +153,30 @@ func withSlash(p string) string {
 
 func (b *boardActions) NativePicker() bool { return b.a.nativePicker() }
 
-// listDirs returns the folders inside dir, symlinks to folders included, sorted ignoring case.
-func listDirs(dir string) ([]string, error) {
+// listDirs returns the folders inside dir, symlinks to folders included, and the symlinks whose target
+// is gone, both sorted ignoring case.
+func listDirs(dir string) (names, broken []string, err error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var names []string
 	for _, e := range entries {
-		if e.IsDir() {
+		switch {
+		case e.IsDir():
 			names = append(names, e.Name())
-		} else if e.Type()&os.ModeSymlink != 0 {
-			if fi, err := os.Stat(filepath.Join(dir, e.Name())); err == nil && fi.IsDir() {
+		case e.Type()&os.ModeSymlink != 0:
+			fi, err := os.Stat(filepath.Join(dir, e.Name()))
+			if errors.Is(err, os.ErrNotExist) {
+				broken = append(broken, e.Name())
+			} else if err == nil && fi.IsDir() {
 				names = append(names, e.Name())
 			}
 		}
 	}
-	slices.SortFunc(names, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
-	return names, nil
+	byName := func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) }
+	slices.SortFunc(names, byName)
+	slices.SortFunc(broken, byName)
+	return names, broken, nil
 }
 
 func (b *boardActions) SaveConfig(c config.Config) tea.Cmd {
