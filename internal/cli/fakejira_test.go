@@ -59,6 +59,7 @@ func (f *fakeJira) Statuses(_ context.Context, p string) ([]jira.Status, error) 
 	return f.statuses[p], nil
 }
 func (f *fakeJira) Projects(context.Context) ([]jira.Project, error) { return f.projects, nil }
+func (f *fakeJira) FieldID(context.Context, string) (string, error)  { return "", jira.ErrFieldNotFound }
 func (f *fakeJira) BrowseURL(key string) string                      { return "https://example.atlassian.net/browse/" + key }
 
 func (f *fakeJira) DevPullRequests(_ context.Context, id string) ([]jira.DevPullRequest, error) {

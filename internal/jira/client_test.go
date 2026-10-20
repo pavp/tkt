@@ -172,6 +172,54 @@ func TestStatusesDeduplicates(t *testing.T) {
 	}
 }
 
+func TestFieldIDFindsAFieldByNameOnce(t *testing.T) {
+	c, calls := server(t, map[string]string{
+		"GET /rest/api/3/field":       `[{"id":"summary","name":"Summary","schema":{}},{"id":"customfield_10020","name":"Sprint","schema":{"custom":"com.pyxis.greenhopper.jira:gh-sprint"}},{"id":"customfield_10136","name":"Product","schema":{}}]`,
+		"POST /rest/api/3/search/jql": `{"issues":[],"isLast":true}`,
+	})
+	ctx := context.Background()
+	for _, name := range []string{"Product", "product"} {
+		if id, err := c.FieldID(ctx, name); err != nil || id != "customfield_10136" {
+			t.Errorf("FieldID(%q) = %q, %v", name, id, err)
+		}
+	}
+	if _, err := c.FieldID(ctx, "Team"); !errors.Is(err, ErrFieldNotFound) {
+		t.Errorf("missing field: %v", err)
+	}
+	if _, err := c.Search(ctx, "x", ListFields); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, call := range *calls {
+		if call.path == "/rest/api/3/field" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("field list read %d times, want once", n)
+	}
+}
+
+func TestFieldText(t *testing.T) {
+	tests := []struct {
+		raw, want string
+	}{
+		{`{"self":"x","value":"User Access Center","id":"10330"}`, "User Access Center"},
+		{`"Payments"`, "Payments"},
+		{`[{"value":"Web"},{"value":"API"}]`, "Web, API"},
+		{`{"name":"Team Orion"}`, "Team Orion"},
+		{`{"displayName":"Alex"}`, "Alex"},
+		{`null`, ""},
+		{``, ""},
+		{`42`, ""},
+	}
+	for _, tt := range tests {
+		if got := FieldText(json.RawMessage(tt.raw)); got != tt.want {
+			t.Errorf("FieldText(%s) = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+}
+
 func TestSprintFieldIsDiscoveredAndParsed(t *testing.T) {
 	c, calls := server(t, map[string]string{
 		"GET /rest/api/3/field":       `[{"id":"summary","schema":{}},{"id":"customfield_10020","schema":{"custom":"com.pyxis.greenhopper.jira:gh-sprint"}}]`,

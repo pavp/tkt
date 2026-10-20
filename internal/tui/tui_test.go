@@ -558,6 +558,16 @@ func TestRefreshingSpinsUntilTheBoardArrives(t *testing.T) {
 	}
 }
 
+func TestPreviewStartsWithTheTicketsLabel(t *testing.T) {
+	snap := snapshot()
+	snap.Tickets[0].Label = "User Access Center"
+	m := tea.Model(New(snap, true, &recorder{}, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(m.View()); !strings.Contains(v, "\n User Access Center · To Do · ") {
+		t.Errorf("preview lacks the label first:\n%s", v)
+	}
+}
+
 func TestTickRefreshesWhenStale(t *testing.T) {
 	r := &recorder{}
 	base := snapshot().FetchedAt

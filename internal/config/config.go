@@ -34,6 +34,8 @@ type Config struct {
 type Jira struct {
 	Site  string `toml:"site"`
 	Email string `toml:"email"`
+	// LabelField names a Jira field, such as "Product", whose value the board shows for each ticket.
+	LabelField string `toml:"label_field,omitempty"`
 }
 
 type GitHub struct {

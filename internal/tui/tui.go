@@ -1602,6 +1602,9 @@ func (m Model) preview() string {
 	t := it.ticket
 	title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s", t.Key, t.Summary), m.width))
 	parts := []string{t.Status}
+	if t.Label != "" {
+		parts = append([]string{t.Label}, parts...)
+	}
 	for _, r := range t.Attention() {
 		parts = append(parts, string(r))
 	}

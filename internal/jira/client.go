@@ -2,6 +2,7 @@ package jira
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,6 +28,9 @@ type Client struct {
 	// sprintField is the id of the site's Sprint custom field; it differs between Jira sites.
 	sprintField  string
 	sprintLooked bool
+	// fields is the site's field list, read once for the Sprint field and FieldID.
+	fields       []fieldDef
+	fieldsLoaded bool
 
 	// devApps are the development-tool integrations that hold this site's pull requests; mu guards it,
 	// since the board asks for several tickets' pull requests at once.
@@ -257,13 +261,8 @@ func (c *Client) resolveFields(ctx context.Context, fields []string) ([]string, 
 			continue
 		}
 		if !c.sprintLooked {
-			var all []struct {
-				ID     string `json:"id"`
-				Schema struct {
-					Custom string `json:"custom"`
-				} `json:"schema"`
-			}
-			if err := c.do(ctx, http.MethodGet, "/rest/api/3/field", nil, &all); err != nil {
+			all, err := c.loadFields(ctx)
+			if err != nil {
 				return nil, err
 			}
 			for _, fd := range all {
@@ -279,6 +278,69 @@ func (c *Client) resolveFields(ctx context.Context, fields []string) ([]string, 
 		}
 	}
 	return out, nil
+}
+
+type fieldDef struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Schema struct {
+		Custom string `json:"custom"`
+	} `json:"schema"`
+}
+
+func (c *Client) loadFields(ctx context.Context) ([]fieldDef, error) {
+	if !c.fieldsLoaded {
+		if err := c.do(ctx, http.MethodGet, "/rest/api/3/field", nil, &c.fields); err != nil {
+			return nil, err
+		}
+		c.fieldsLoaded = true
+	}
+	return c.fields, nil
+}
+
+// ErrFieldNotFound means the site has no field of the name asked for.
+var ErrFieldNotFound = errors.New("jira field not found")
+
+// FieldID returns the id of the field named name, ignoring case, such as a site's own "Product" field.
+func (c *Client) FieldID(ctx context.Context, name string) (string, error) {
+	all, err := c.loadFields(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, fd := range all {
+		if strings.EqualFold(fd.Name, name) {
+			return fd.ID, nil
+		}
+	}
+	return "", fmt.Errorf("%w: %q", ErrFieldNotFound, name)
+}
+
+// FieldText words a field's value for display: text as is, an option, user or component by its value or
+// name, and a list joined by commas; anything else is empty.
+func FieldText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var one struct {
+		Value       string `json:"value"`
+		Name        string `json:"name"`
+		DisplayName string `json:"displayName"`
+	}
+	if json.Unmarshal(raw, &one) == nil {
+		return cmp.Or(one.Value, one.Name, one.DisplayName)
+	}
+	var many []json.RawMessage
+	if json.Unmarshal(raw, &many) != nil {
+		return ""
+	}
+	var parts []string
+	for _, m := range many {
+		if t := FieldText(m); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // ListFields are the fields the board needs; Issue() asks for more.
