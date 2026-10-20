@@ -280,22 +280,50 @@ func (b *boardActions) Refresh() tea.Cmd {
 	}
 }
 
-// Start hands the terminal to `tkt start` (or `tkt herdr start` inside Herdr), which may ask for repositories.
-func (b *boardActions) Start(key ticket.Key) tea.Cmd {
-	exe, err := b.a.Executable()
+// Start hands the terminal to `tkt start` (or `tkt herdr start` inside Herdr) with the answers the board
+// already asked for.
+func (b *boardActions) Start(key ticket.Key, opts tui.StartOptions) tea.Cmd {
+	cmd, err := b.startCommand(key, opts)
 	if err != nil {
 		return status("cannot find the tkt binary: " + err.Error())
 	}
-	args := []string{"start", string(key)}
-	if b.inHerdr() {
-		args = []string{"herdr", "start", string(key)}
-	}
-	return tea.ExecProcess(exec.Command(exe, args...), func(err error) tea.Msg {
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		if err != nil {
 			return tui.StatusMsg("start " + string(key) + ": " + err.Error())
 		}
 		return tui.StatusMsg("✓ started " + string(key))
 	})
+}
+
+// startCommand clears the screen first: what an earlier Start printed would otherwise still show.
+func (b *boardActions) startCommand(key ticket.Key, opts tui.StartOptions) (*exec.Cmd, error) {
+	exe, err := b.a.Executable()
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"start", string(key)}
+	if b.inHerdr() {
+		args = []string{"herdr", "start", string(key)}
+	}
+	if opts.Worktree != "" {
+		args = append(args, "--worktree", opts.Worktree)
+	}
+	for _, r := range opts.Repos {
+		args = append(args, "--repo", r)
+	}
+	return exec.Command("sh", append([]string{"-c", `printf '\033[H\033[2J'; exec "$0" "$@"`, exe}, args...)...), nil
+}
+
+// StartChoices reads what a Start of key would ask, with the agents' states when the board runs in Herdr.
+func (b *boardActions) StartChoices(key ticket.Key) tea.Cmd {
+	return func() tea.Msg {
+		var h HerdrAPI
+		if b.inHerdr() {
+			h = b.a.NewHerdr()
+		}
+		choices, err := b.a.startChoices(b.ctx, b.cfg(), key, h)
+		return tui.StartChoicesMsg{Key: key, Choices: choices, Err: err}
+	}
 }
 
 func (b *boardActions) Detail(key ticket.Key) tea.Cmd {

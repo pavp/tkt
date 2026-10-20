@@ -47,7 +47,7 @@ func (m Model) buildMenu(it item) *menu {
 		start = "Go to the agent in Herdr"
 	}
 	items := []menuItem{
-		{label: start, run: func() tea.Cmd { return a.Start(t.Key) }},
+		{label: start, run: func() tea.Cmd { return a.StartChoices(t.Key) }},
 		{label: "Show details", key: "i", detail: t.Key},
 		{label: "Open the ticket pane next to its agent", run: func() tea.Cmd { return a.TicketPane(t.Key) }},
 	}

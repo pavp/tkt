@@ -1,5 +1,14 @@
 package tui
 
+import (
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/pavp/tkt/internal/ticket"
+)
+
 // StartChoices is what a Start must ask before it runs: several worktrees to choose from, or the
 // repositories to start in. Both empty means Start can run without asking.
 type StartChoices struct {
@@ -22,4 +31,146 @@ type RepoChoice struct {
 type StartOptions struct {
 	Repos    []string
 	Worktree string
+}
+
+// StartChoicesMsg carries what a Start of Key would ask; the board asks it in a modal before Start runs.
+type StartChoicesMsg struct {
+	Key     ticket.Key
+	Choices StartChoices
+	Err     error
+}
+
+// picker is the modal that asks a Start's question: one worktree to open, or (multi) the repositories.
+type picker struct {
+	key             ticket.Key
+	title, question string
+	rows            []pickerRow
+	multi           bool
+	sel             int
+}
+
+type pickerRow struct {
+	label, hint, value string
+	checked            bool
+}
+
+func worktreePicker(key ticket.Key, ws []WorktreeChoice) *picker {
+	p := &picker{key: key, title: "Open " + string(key), question: "Which worktree?"}
+	for _, w := range ws {
+		hint := "no agent"
+		if w.Agent != "" {
+			hint = "● " + w.Agent
+		}
+		p.rows = append(p.rows, pickerRow{label: w.Branch, hint: hint, value: w.Path})
+	}
+	return p
+}
+
+func (p *picker) action() string { return "Open" }
+
+// startChoices runs Start at once when there is nothing to ask, otherwise opens the picker.
+func (m Model) startChoices(msg StartChoicesMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Err != nil:
+		m.status = "start " + string(msg.Key) + ": " + msg.Err.Error()
+	case len(msg.Choices.Worktrees) > 1:
+		m.picker = worktreePicker(msg.Key, msg.Choices.Worktrees)
+	default:
+		return m, m.actions.Start(msg.Key, StartOptions{})
+	}
+	return m, nil
+}
+
+func (m Model) finishPicker() (tea.Model, tea.Cmd) {
+	p := m.picker
+	m.picker = nil
+	return m, m.actions.Start(p.key, StartOptions{Worktree: p.rows[p.sel].value})
+}
+
+func (m Model) pickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	p := m.picker
+	switch k.String() {
+	case "esc", "q", "backspace":
+		m.picker = nil
+	case "up", "w", "k":
+		p.sel = (p.sel + len(p.rows) - 1) % len(p.rows)
+	case "down", "s", "j", "tab":
+		p.sel = (p.sel + 1) % len(p.rows)
+	case "enter":
+		return m.finishPicker()
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// pickerLayout renders the modal within width and says where its rows and buttons sit, relative to the
+// box's top-left corner, for clicks.
+func (m Model) pickerLayout() (box string, firstRow, buttonsRow int, buttons []chipSpan) {
+	p := m.picker
+	inner := 0
+	for _, r := range p.rows {
+		inner = max(inner, 2+lipgloss.Width(r.label)+3+lipgloss.Width(r.hint))
+	}
+	inner = max(inner, lipgloss.Width(p.title), lipgloss.Width(p.question), 24)
+	// Border and padding take 6 cells; a narrow pane (the tray panel) gets a narrower box, cutting labels.
+	inner = min(inner, max(20, m.width-6))
+	lines := []string{bold.Render(truncate(p.title, inner)), "", truncate(p.question, inner), ""}
+	firstRow = 1 + len(lines)
+	for i, r := range p.rows {
+		hint := r.hint
+		label := truncate(r.label, max(4, inner-2-3-lipgloss.Width(hint)))
+		gap := max(3, inner-2-lipgloss.Width(label)-lipgloss.Width(hint))
+		line := "  " + label + strings.Repeat(" ", gap) + dim.Render(hint)
+		if i == p.sel {
+			line = selected.Render("▸ "+label+strings.Repeat(" ", gap)) + hint
+		}
+		lines = append(lines, line)
+	}
+	lines = append(lines, "")
+	buttonsRow = 1 + len(lines)
+	act, cancel := selected.Render(" "+p.action()+" "), dim.Render(" Cancel ")
+	// The box's left border and padding put its content 3 cells in.
+	buttons = []chipSpan{{start: 3, width: lipgloss.Width(act)}, {start: 3 + lipgloss.Width(act) + 2, width: lipgloss.Width(cancel)}}
+	lines = append(lines, act+"  "+cancel, "", dim.Render(truncate("enter "+strings.ToLower(p.action())+" · esc cancel", inner)))
+	return menuBox.Render(strings.Join(lines, "\n")), firstRow, buttonsRow, buttons
+}
+
+func (m Model) pickerView() string {
+	box, _, _, _ := m.pickerLayout()
+	return box
+}
+
+func (m Model) pickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	p := m.picker
+	switch {
+	case msg.Button == tea.MouseButtonWheelUp:
+		p.sel = max(0, p.sel-1)
+	case msg.Button == tea.MouseButtonWheelDown:
+		p.sel = min(len(p.rows)-1, p.sel+1)
+	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
+		box, firstRow, buttonsRow, buttons := m.pickerLayout()
+		top := lineCount(m.header())
+		height := m.height - top - lineCount(m.preview()+"\n"+m.footer())
+		left := (m.width - lipgloss.Width(box)) / 2
+		y := msg.Y - (top + (height-lipgloss.Height(box))/2)
+		x := msg.X - left
+		if x < 0 || x >= lipgloss.Width(box) || y < 0 || y >= lipgloss.Height(box) {
+			m.picker = nil
+			return m, nil
+		}
+		if i := y - firstRow; i >= 0 && i < len(p.rows) {
+			p.sel = i
+			return m.finishPicker()
+		}
+		if y == buttonsRow {
+			switch {
+			case x >= buttons[0].start && x < buttons[0].start+buttons[0].width:
+				return m.finishPicker()
+			case x >= buttons[1].start && x < buttons[1].start+buttons[1].width:
+				m.picker = nil
+			}
+		}
+	}
+	return m, nil
 }
