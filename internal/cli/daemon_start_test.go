@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,6 +25,8 @@ type fakeDaemons struct {
 	started atomic.Int32
 	mu      sync.Mutex
 	stops   []context.CancelFunc
+	// served closes when each fake daemon's Serve returns, so a stop waits for its cleanup.
+	served  []chan struct{}
 	servers []*daemon.Server
 	// board seeds every fake daemon; nil leaves them without a board.
 	board *board.Snapshot
@@ -59,11 +63,13 @@ func (f *fakeDaemons) install(t *testing.T, h *harness) {
 			return 0, err
 		}
 		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
 		f.mu.Lock()
 		f.stops = append(f.stops, cancel)
 		f.servers = append(f.servers, s)
+		f.served = append(f.served, done)
 		f.mu.Unlock()
-		go func() { _ = s.Serve(ctx, ln) }()
+		go func() { _ = s.Serve(ctx, ln); close(done) }()
 		return os.Getpid(), nil
 	}
 	t.Cleanup(func() {
@@ -75,11 +81,17 @@ func (f *fakeDaemons) install(t *testing.T, h *harness) {
 	})
 }
 
+// stopAll stops every fake daemon and waits for each to finish its shutdown: they share this process's
+// pid, so an unfinished one could remove the record of the daemon started after it.
 func (f *fakeDaemons) stopAll() {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, stop := range f.stops {
+	stops, served := slices.Clone(f.stops), slices.Clone(f.served)
+	f.mu.Unlock()
+	for _, stop := range stops {
 		stop()
+	}
+	for _, done := range served {
+		<-done
 	}
 }
 
@@ -145,6 +157,9 @@ func TestEnsureDaemonReplacesAnOlderDaemon(t *testing.T) {
 			}
 			if replaced := len(signalled) == 1 && f.started.Load() == 2 && got.Version == tt.cli; replaced != tt.replaced {
 				t.Errorf("replaced = %v (signalled %v, started %d, now %q)", replaced, signalled, f.started.Load(), got.Version)
+			}
+			if out := h.out.String() + h.errOut.String(); out != "" {
+				t.Errorf("replacing the daemon printed %q into the command's output", out)
 			}
 			if !tt.replaced && (got.Port != old.Port || len(signalled) != 0) {
 				t.Errorf("kept daemon changed: %+v, signalled %v", got, signalled)
@@ -221,6 +236,9 @@ func TestDaemonStatusAndStop(t *testing.T) {
 	}
 	if code := h.exec("daemon", "stop"); code != 0 || len(signalled) != 1 || signalled[0] != info.PID {
 		t.Errorf("stop: exit %d, signalled %v, want [%d]", code, signalled, info.PID)
+	}
+	if want := fmt.Sprintf("✓ stopped the tkt daemon (pid %d)", info.PID); !strings.Contains(h.out.String(), want) {
+		t.Errorf("stop printed %q, want %q", h.out, want)
 	}
 }
 

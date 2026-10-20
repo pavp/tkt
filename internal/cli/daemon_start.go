@@ -50,7 +50,7 @@ func (a *App) ensureDaemon(ctx context.Context) (daemon.Info, error) {
 			return info, nil
 		}
 		// A daemon that will not stop still serves a board, so keep it rather than fail.
-		if err := a.stopDaemon(ctx); err != nil {
+		if _, err := a.stopDaemon(ctx); err != nil {
 			return info, nil
 		}
 	}
@@ -166,21 +166,22 @@ func (a *App) daemonStatus(ctx context.Context) error {
 	return nil
 }
 
-func (a *App) stopDaemon(ctx context.Context) error {
+// stopDaemon stops the running daemon and returns its pid; it prints nothing, since ensureDaemon also
+// calls it in the middle of other commands' output.
+func (a *App) stopDaemon(ctx context.Context) (int, error) {
 	info, ok := a.runningDaemon(ctx)
 	if !ok {
-		return errDaemonNotRunning
+		return 0, errDaemonNotRunning
 	}
 	if err := a.Signal(info.PID, syscall.SIGTERM); err != nil {
-		return fmt.Errorf("stop the tkt daemon (pid %d): %w", info.PID, err)
+		return 0, fmt.Errorf("stop the tkt daemon (pid %d): %w", info.PID, err)
 	}
 	deadline := time.Now().Add(daemonStartWait)
 	for time.Now().Before(deadline) {
 		if _, ok := daemon.Healthy(ctx, info.Port); !ok {
-			a.printf("✓ stopped the tkt daemon (pid %d)\n", info.PID)
-			return nil
+			return info.PID, nil
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return fmt.Errorf("the tkt daemon (pid %d) did not stop", info.PID)
+	return 0, fmt.Errorf("the tkt daemon (pid %d) did not stop", info.PID)
 }
