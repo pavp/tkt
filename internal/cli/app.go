@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/term"
@@ -48,6 +49,11 @@ type App struct {
 	Executable func() (string, error)
 	// OrgMember reports whether a gh token belongs to an active member of a GitHub organization.
 	OrgMember func(ctx context.Context, token, org string) (bool, error)
+
+	// tokens remembers Jira tokens read from the credential store, which under WSL costs a PowerShell
+	// start per read; they stay in memory only.
+	tokenMu sync.Mutex
+	tokens  map[string]string
 
 	in *bufio.Reader
 

@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -276,5 +278,66 @@ func TestDevPullRequestsSkipsDetailWithoutPRs(t *testing.T) {
 	got, err := c.DevPullRequests(context.Background(), "101")
 	if err != nil || got != nil || len(*calls) != 1 {
 		t.Errorf("got %v, %v after %d calls", got, err, len(*calls))
+	}
+}
+
+func TestDevPullRequestsIsSafeToCallConcurrently(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/summary") {
+			_, _ = io.WriteString(w, `{"summary":{"pullrequest":{"overall":{"count":1},"byInstanceType":{"oAuth-example.github":{"count":1}}}}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"detail":[{"pullRequests":[{"id":"#1","url":"https://github.com/example-org/web/pull/1","status":"OPEN","repositoryName":"example-org/web"}]}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "dev@example.com", "t").WithHTTPClient(srv.Client())
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = c.DevPullRequests(context.Background(), fmt.Sprint(100+i))
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRequestsRetryWhenJiraThrottles(t *testing.T) {
+	cases := []struct {
+		name      string
+		throttled int
+		wantErr   bool
+		wantCalls int
+	}{
+		{"once", 1, false, 2},
+		{"until giving up", 10, true, 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if int(calls.Add(1)) <= tc.throttled {
+					w.Header().Set("Retry-After", "0")
+					w.WriteHeader(http.StatusTooManyRequests)
+					return
+				}
+				_, _ = io.WriteString(w, `{"summary":{"pullrequest":{"overall":{"count":0}}}}`)
+			}))
+			t.Cleanup(srv.Close)
+			c := New(srv.URL, "dev@example.com", "t").WithHTTPClient(srv.Client())
+			_, err := c.DevPullRequests(context.Background(), "101")
+			if (err != nil) != tc.wantErr || int(calls.Load()) != tc.wantCalls {
+				t.Errorf("err %v after %d calls", err, calls.Load())
+			}
+			if tc.wantErr && !strings.Contains(err.Error(), "429") {
+				t.Errorf("err = %v", err)
+			}
+		})
 	}
 }

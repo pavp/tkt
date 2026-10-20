@@ -9,7 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -26,7 +28,9 @@ type Client struct {
 	sprintField  string
 	sprintLooked bool
 
-	// devApps are the development-tool integrations that hold this site's pull requests.
+	// devApps are the development-tool integrations that hold this site's pull requests; mu guards it,
+	// since the board asks for several tickets' pull requests at once.
+	mu      sync.Mutex
 	devApps []string
 }
 
@@ -38,6 +42,15 @@ func New(site, email, token string) *Client {
 		token: token,
 		http:  &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// retryAfter reads Jira's Retry-After seconds, waiting a second when it is missing and at most five.
+func retryAfter(v string) time.Duration {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		return time.Second
+	}
+	return min(time.Duration(n)*time.Second, 5*time.Second)
 }
 
 // WithHTTPClient replaces the HTTP client, mainly for tests.
@@ -55,27 +68,46 @@ type apiError struct {
 	Errors        map[string]string `json:"errors"`
 }
 
+// throttleRetries is how many times a request is repeated after Jira answers 429 Too Many Requests.
+const throttleRetries = 2
+
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
-	var rd io.Reader
+	var payload []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
-		rd = bytes.NewReader(b)
+		payload = b
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
-	if err != nil {
-		return err
-	}
-	req.SetBasicAuth(c.email, c.token)
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("jira %s %s: %w", method, path, err)
+	var resp *http.Response
+	for attempt := 0; ; attempt++ {
+		var rd io.Reader
+		if payload != nil {
+			rd = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
+		if err != nil {
+			return err
+		}
+		req.SetBasicAuth(c.email, c.token)
+		req.Header.Set("Accept", "application/json")
+		if payload != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		resp, err = c.http.Do(req)
+		if err != nil {
+			return fmt.Errorf("jira %s %s: %w", method, path, err)
+		}
+		if resp.StatusCode != http.StatusTooManyRequests || attempt == throttleRetries {
+			break
+		}
+		resp.Body.Close()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(retryAfter(resp.Header.Get("Retry-After"))):
+		}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {

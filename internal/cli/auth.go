@@ -67,7 +67,7 @@ func (a *App) connectJira(ctx context.Context, s, e string) error {
 	if !verified {
 		fmt.Fprintf(a.Stderr, "! could not reach Jira to check the token (%v); saving it anyway\n", err)
 	}
-	if err := a.Creds.Set(credstore.JiraKey(s, e), token); err != nil {
+	if err := a.saveJiraToken(s, e, token); err != nil {
 		return err
 	}
 	if fromClipboard {

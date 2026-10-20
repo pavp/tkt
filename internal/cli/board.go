@@ -37,7 +37,8 @@ func newBoardCmd(a *App) *cobra.Command {
 		Long: "Interactive board. It opens instantly from the cached board and refreshes in the background.\n" +
 			"Keys: arrows, wasd or hjkl move · enter actions menu · f send CI failures or review comments to the agent ·\n" +
 			"i ticket pane · o Jira · p pull request · O/P copy their link · n needs you · r reviews · v columns/list · g refresh · q close.\n" +
-			"When tkt is not configured, it offers to run the setup; without a Jira token, to connect Jira first.",
+			"When tkt is not configured, it offers to run the setup; without a Jira token and a cached board, to connect Jira\n" +
+			"first (with a cached board it opens at once and its status line says how to connect).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := a.LoadConfig()
@@ -50,11 +51,8 @@ func newBoardCmd(a *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if ok, err := a.ensureJiraToken(cmd.Context(), c); err != nil || !ok {
-				return err
-			}
-			snap, have, err := a.cache().Load()
-			if err != nil {
+			snap, have, ok, err := a.boardStart(cmd.Context(), c)
+			if err != nil || !ok {
 				return err
 			}
 			forceColor(a.Env.Getenv)
@@ -73,12 +71,27 @@ func newBoardCmd(a *App) *cobra.Command {
 
 // ensureJiraToken offers to connect Jira before the board opens when no token is stored, so the board
 // never sits on a cache it cannot refresh. ok is false when the user closed the pane instead.
+// boardStart loads the cached board; only without one does it first check for a Jira token, since
+// reading the token can take seconds (PowerShell under WSL) and a cached board should show at once.
+func (a *App) boardStart(ctx context.Context, c *config.Config) (board.Snapshot, bool, bool, error) {
+	snap, have, err := a.cache().Load()
+	if err != nil {
+		return board.Snapshot{}, false, false, err
+	}
+	if !have {
+		if ok, err := a.ensureJiraToken(ctx, c); err != nil || !ok {
+			return snap, false, false, err
+		}
+	}
+	return snap, have, true, nil
+}
+
 func (a *App) ensureJiraToken(ctx context.Context, c *config.Config) (bool, error) {
 	site, err := config.SiteURL(c.Jira.Site)
 	if err != nil {
 		return false, err
 	}
-	if _, _, err := credstore.JiraToken(a.Creds, a.Env.Getenv, site, c.Jira.Email); !errors.Is(err, credstore.ErrNotFound) {
+	if _, err := a.jiraToken(site, c.Jira.Email); !errors.Is(err, credstore.ErrNotFound) {
 		return true, nil
 	}
 	if _, err := a.readLine("No Jira token for " + c.Jira.Email + " · press Enter to connect Jira (Ctrl-C to close) "); err != nil {

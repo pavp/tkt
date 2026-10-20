@@ -9,8 +9,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
+	"github.com/pavp/tkt/internal/credstore"
+	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/tui"
 )
 
@@ -264,5 +268,126 @@ func TestListReposAsksGitHubOncePerOwner(t *testing.T) {
 	}
 	if len(gh.ownersAsked) != 1 {
 		t.Errorf("GitHub asked %v, want once", gh.ownersAsked)
+	}
+}
+
+type countingCreds struct {
+	memCreds
+	gets int
+}
+
+func (c *countingCreds) Get(k string) (string, error) {
+	c.gets++
+	return c.memCreds.Get(k)
+}
+
+func TestJiraTokenIsReadOncePerProcess(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	creds := &countingCreds{memCreds: h.creds}
+	h.app.Creds = creds
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	site, err := config.SiteURL(c.Jira.Site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	creds.memCreds[credstore.JiraKey(site, c.Jira.Email)] = "token"
+	for range 3 {
+		if _, err := h.app.jiraClient(c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if creds.gets != 1 {
+		t.Errorf("the credential store was read %d times, want once", creds.gets)
+	}
+}
+
+func TestBoardStartSkipsTheTokenCheckWithACachedBoard(t *testing.T) {
+	cases := []struct {
+		name       string
+		cached     bool
+		wantPrompt bool
+		wantOK     bool
+	}{
+		{"cached board opens at once", true, false, true},
+		{"first run offers to connect Jira", false, true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, baseConfig)
+			creds := &countingCreds{memCreds: memCreds{}}
+			h.app.Creds = creds
+			if c.cached {
+				if err := h.app.cache().Save(board.Snapshot{FetchedAt: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := h.app.LoadConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, have, ok, err := h.app.boardStart(context.Background(), cfg)
+			if err != nil || ok != c.wantOK || have != c.cached {
+				t.Errorf("have %v ok %v err %v", have, ok, err)
+			}
+			if prompted := strings.Contains(h.errOut.String()+h.out.String(), "No Jira token"); prompted != c.wantPrompt {
+				t.Errorf("prompted = %v", prompted)
+			}
+			if c.cached && creds.gets != 0 {
+				t.Errorf("a cached board read the token %d times before opening", creds.gets)
+			}
+		})
+	}
+}
+
+func TestRefreshRereadsTheTokenJiraRejects(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	site, err := config.SiteURL(c.Jira.Site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := credstore.JiraKey(site, c.Jira.Email)
+	h.creds[key] = "old"
+	if _, err := h.app.jiraToken(site, c.Jira.Email); err != nil {
+		t.Fatal(err)
+	}
+	h.creds[key] = "new"
+	h.app.NewGitHub = func(*config.Config) GitHubAPI { return &fakeGitHub{} }
+	h.app.Now = func() time.Time { return time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC) }
+	var used []string
+	h.app.NewJira = func(_, _, token string) JiraAPI {
+		used = append(used, token)
+		if token == "old" {
+			return &fakeJira{searchErr: jira.ErrUnauthorized}
+		}
+		return &fakeJira{issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Status: "To Do", StatusCategory: "new"}}}
+	}
+	snap, stale, err := h.app.loadSnapshot(context.Background(), c, false)
+	if err != nil || stale != nil || len(snap.Tickets) != 1 {
+		t.Fatalf("snapshot %+v stale %v err %v", snap, stale, err)
+	}
+	if strings.Join(used, ",") != "old,new" {
+		t.Errorf("tokens used = %v", used)
+	}
+}
+
+func TestSavingAJiraTokenReplacesTheRememberedOne(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	site, email := "https://example.atlassian.net", "dev@example.com"
+	h.creds[credstore.JiraKey(site, email)] = "old"
+	if _, err := h.app.jiraToken(site, email); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.saveJiraToken(site, email, "new"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := h.app.jiraToken(site, email); got != "new" {
+		t.Errorf("token = %q after saving a new one", got)
 	}
 }
