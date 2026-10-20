@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -580,5 +581,87 @@ func TestFetchAsksForReviewsWhilePullRequestsLoad(t *testing.T) {
 	}
 	if len(snap.Reviews) != 1 {
 		t.Errorf("reviews = %+v", snap.Reviews)
+	}
+}
+
+// countingJira counts development-panel calls per issue id.
+type countingJira struct {
+	stubJira
+	mu    sync.Mutex
+	asked map[string]int
+}
+
+func (c *countingJira) DevPullRequests(ctx context.Context, id string) ([]jira.DevPullRequest, error) {
+	c.mu.Lock()
+	if c.asked == nil {
+		c.asked = map[string]int{}
+	}
+	c.asked[id]++
+	c.mu.Unlock()
+	return c.stubJira.DevPullRequests(ctx, id)
+}
+
+func TestFetchSinceReusesDevPanelsOfUnchangedTickets(t *testing.T) {
+	updated := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	issues := []jira.Issue{
+		{ID: "101", Key: "DEMO-1", Status: "To Do", StatusCategory: "new", Updated: updated},
+		{ID: "102", Key: "DEMO-2", Status: "To Do", StatusCategory: "new", Updated: updated.Add(time.Hour)},
+		{ID: "103", Key: "DEMO-3", Status: "To Do", StatusCategory: "new", Updated: updated},
+	}
+	cached := []jira.DevPullRequest{{Repo: "example-org/web", Number: 9, Status: "OPEN"}}
+	prev := Snapshot{Panels: map[string]DevPanel{
+		"DEMO-1": {Updated: updated, Asked: now.Add(-time.Minute), PRs: cached},
+		"DEMO-2": {Updated: updated, Asked: now.Add(-time.Minute)},
+		"DEMO-3": {Updated: updated, Asked: now.Add(-11 * time.Minute)},
+	}}
+	js := &countingJira{stubJira: stubJira{issues: issues, linked: map[string][]jira.DevPullRequest{
+		"102": {{Repo: "example-org/api", Number: 4, Status: "OPEN"}},
+	}}}
+	snap, err := FetchSince(context.Background(), cfg(), js, &stubGitHub{}, now, prev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"102": 1, "103": 1}
+	if !reflect.DeepEqual(js.asked, want) {
+		t.Errorf("Jira was asked %v, want %v (unchanged and fresh tickets reuse their panel)", js.asked, want)
+	}
+	if prs := snap.Tickets[0].PRs; len(prs) != 1 || prs[0].Number != 9 {
+		t.Errorf("DEMO-1 should keep its cached pull request: %+v", prs)
+	}
+	if p := snap.Panels["DEMO-2"]; !p.Updated.Equal(updated.Add(time.Hour)) || !p.Asked.Equal(now) || len(p.PRs) != 1 {
+		t.Errorf("DEMO-2's fresh panel = %+v", p)
+	}
+	if p := snap.Panels["DEMO-1"]; !p.Asked.Equal(now.Add(-time.Minute)) {
+		t.Errorf("a reused panel keeps when it was asked: %+v", p)
+	}
+}
+
+func TestFetchSinceDoesNotKeepFailedPanels(t *testing.T) {
+	js := &stubJira{issues: []jira.Issue{{ID: "101", Key: "DEMO-1", Status: "To Do", StatusCategory: "new"}}}
+	snap, err := FetchSince(context.Background(), cfg(), js, &stubGitHub{}, now, Snapshot{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := snap.Panels["DEMO-1"]; ok {
+		t.Error("a failed development panel must be asked again next time")
+	}
+}
+
+func TestFetchSinceKeepsIgnoredPullRequestsInTheCachedPanel(t *testing.T) {
+	updated := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	c := cfg()
+	c.Spaces[0].Ignored = []string{"example-org/old"}
+	panel := []jira.DevPullRequest{{Repo: "example-org/old", Number: 4, Status: "OPEN"}, {Repo: "example-org/web", Number: 9, Status: "OPEN"}}
+	prev := Snapshot{Panels: map[string]DevPanel{"DEMO-1": {Updated: updated, Asked: now, PRs: panel}}}
+	js := &stubJira{issues: []jira.Issue{{ID: "101", Key: "DEMO-1", Status: "To Do", StatusCategory: "new", Updated: updated}}}
+	snap, err := FetchSince(context.Background(), c, js, &stubGitHub{}, now, prev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snap.Panels["DEMO-1"].PRs; len(got) != 2 || got[0].Number != 4 || got[1].Number != 9 {
+		t.Errorf("the cached panel was changed by the ignore filter: %+v", got)
+	}
+	if prev.Panels["DEMO-1"].PRs[0].Number != 4 {
+		t.Errorf("the previous snapshot was changed: %+v", prev.Panels["DEMO-1"].PRs)
 	}
 }

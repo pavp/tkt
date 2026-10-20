@@ -93,6 +93,17 @@ Events over WebSocket:
 - `agent.updated` carries the agent state of each linked worktree (working, blocked, idle, none) and since when. The daemon reads it from Herdr's socket API (`pane.agent_status_changed` events); without Herdr the state is `none`.
 - Errors: `{"type":"error","code":"<machine code>","message":"…"}`.
 
+### Phase 3a: the daemon for the Herdr plugin
+
+Phase 3a builds the part of this contract the Herdr plugin, the board and `tkt list` need; the rest follows with the web UI.
+
+- Routes: `GET /health`, `GET /v1/tickets` (the board snapshot), `POST /v1/sync`, and `/v1/ws`. Events: `snapshot`, `ticket.updated`, `ticket.removed`, `agent.updated`, `sync.started`, `sync.finished`, `sync.failed`.
+- Sync: every minute and on `POST /v1/sync`. Jira and GitHub are polled, since their webhooks need a public endpoint a `127.0.0.1` daemon does not have. A ticket's development panel is asked again only when the issue's `updated` changed or the last answer is older than ten minutes.
+- Herdr: the daemon subscribes to `pane.agent_status_changed` (`events.subscribe`), maps each workspace to its ticket, rewrites the sidebar lines at once and sends `agent.updated`. Herdr plugins cannot keep a process alive, so the daemon lives outside the plugin.
+- Start: automatic. The Herdr `[[startup]]` hook, the board and `tkt list` start `tkt daemon run` in the background when `GET /health` does not answer; a lock file in the data directory keeps one daemon per user. `tkt daemon status` and `tkt daemon stop` manage it; a launchd or systemd service can come later.
+- Cache: the JSON snapshot cache the CLI already keeps, written only by the daemon while it runs; SQLite arrives with the web UI.
+- Without the daemon, every client works as before, straight against Jira and GitHub.
+
 ## 4. Configuration and data
 
 - Configuration: `~/.config/tkt/` (`$XDG_CONFIG_HOME/tkt` when set). Nothing about a specific organization is hard-coded; everything comes from configuration or is discovered from Jira. Format and exact fields are decided at the start of phase 1.
@@ -213,6 +224,8 @@ Each phase starts only after explicit approval.
 1. CLI: `tkt init`, `tkt auth`, `tkt list`, `tkt show`, `tkt context`, `tkt start`, `tkt link` (Jira, GitHub, worktree discovery).
 2. Herdr plugin on top of the CLI.
 3. Daemon with cache, sync, and local API; web UI served on localhost. The visual design starts from the UI prototype (section 14); changes to it are agreed with the user, and every screen keeps its full-window and tray-panel versions.
+   - 3a (Herdr first): the daemon without the web UI, serving the Herdr plugin, the board and `tkt list` (see "Phase 3a" in section 3).
+   - 3b: the web UI, SQLite cache, and the remaining routes and events.
 4. Claude Code: skill first, then a read-only MCP server; writes with UI confirmation.
 5. Tray app (status icon, panel, global shortcut, optional floating dot).
 6. Optional AI (summaries, PR descriptions).
