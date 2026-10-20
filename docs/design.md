@@ -97,7 +97,7 @@ Events over WebSocket:
 
 Phase 3a builds the part of this contract the Herdr plugin, the board and `tkt list` need; the rest follows with the web UI.
 
-- Routes: `GET /health`, `GET /v1/tickets` (the board snapshot), `POST /v1/sync`, and `/v1/ws`. Events: `snapshot`, `ticket.updated`, `ticket.removed`, `agent.updated`, `sync.started`, `sync.finished`, `sync.failed`.
+- Routes: `GET /health`, `GET /v1/tickets` (the board snapshot), `POST /v1/sync`, and `/v1/ws`. Events: `snapshot`, `ticket.updated`, `ticket.removed`, `agent.updated`, `sync.started`, `sync.finished`, `sync.failed`. A sync that changes more than tickets (reviews, sprints, repositories, warnings) sends a new `snapshot` instead of deltas. A client that falls 64 events behind is dropped and reconnects. Before the first board exists, `hello` is answered by the first sync's `snapshot`.
 - Sync: every minute and on `POST /v1/sync`. Jira and GitHub are polled, since their webhooks need a public endpoint a `127.0.0.1` daemon does not have. A ticket's development panel is asked again only when the issue's `updated` changed or the last answer is older than ten minutes.
 - Herdr: the daemon subscribes to `pane.agent_status_changed` (`events.subscribe`), maps each workspace to its ticket, rewrites the sidebar lines at once and sends `agent.updated`. Herdr plugins cannot keep a process alive, so the daemon lives outside the plugin.
 - Start: automatic. The Herdr `[[startup]]` hook, the board and `tkt list` start `tkt daemon run` in the background when `GET /health` does not answer; a lock file in the data directory keeps one daemon per user. `tkt daemon status` and `tkt daemon stop` manage it; a launchd or systemd service can come later.
