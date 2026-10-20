@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/tui"
 )
 
@@ -243,5 +244,25 @@ func TestBoardOpensLinksAndCopiesThemToTheUsersClipboard(t *testing.T) {
 				t.Errorf("pbcopy used = %v, calls %v", got, h.run.calls)
 			}
 		})
+	}
+}
+
+func TestListReposAsksGitHubOncePerOwner(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	gh := &fakeGitHub{repos: map[string][]string{"example-org": {"example-org/web", "example-org/api"}}}
+	h.app.NewGitHub = func(*config.Config) GitHubAPI { return gh }
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	for range 2 {
+		msg := b.ListRepos("example-org")().(tui.ReposListedMsg)
+		if msg.Owner != "example-org" || strings.Join(msg.Names, ",") != "example-org/web,example-org/api" || msg.Err != nil {
+			t.Fatalf("ListRepos = %+v", msg)
+		}
+	}
+	if len(gh.ownersAsked) != 1 {
+		t.Errorf("GitHub asked %v, want once", gh.ownersAsked)
 	}
 }

@@ -208,3 +208,33 @@ func TestCachedTokensResolvesEachOwnerOnce(t *testing.T) {
 		t.Errorf("account resolved %d times, want once per owner", lookups)
 	}
 }
+
+func TestReposListsAnOwnersRepositories(t *testing.T) {
+	page := 0
+	base, h, calls := gqlServer(t, func(q string) (int, string) {
+		page++
+		if page == 1 {
+			return 200, `{"data":{"repositoryOwner":{"repositories":{"nodes":[{"nameWithOwner":"example-org/web"}],"pageInfo":{"hasNextPage":true,"endCursor":"c1"}}}}}`
+		}
+		return 200, `{"data":{"repositoryOwner":{"repositories":{"nodes":[{"nameWithOwner":"example-org/api"}],"pageInfo":{"hasNextPage":false,"endCursor":"c2"}}}}}`
+	})
+	c := New(staticTokens(map[string]string{"example-org": "work"})).WithEndpoints(base, h)
+	got, err := c.Repos(context.Background(), "example-org")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "example-org/web,example-org/api" {
+		t.Errorf("repos = %v", got)
+	}
+	if len(*calls) != 2 || (*calls)[0].auth != "Bearer work" || (*calls)[0].vars["owner"] != "example-org" || (*calls)[1].vars["after"] != "c1" {
+		t.Errorf("calls = %+v", *calls)
+	}
+}
+
+func TestReposUnknownOwner(t *testing.T) {
+	base, h, _ := gqlServer(t, func(string) (int, string) { return 200, `{"data":{"repositoryOwner":null}}` })
+	c := New(staticTokens(map[string]string{"nobody": "t"})).WithEndpoints(base, h)
+	if _, err := c.Repos(context.Background(), "nobody"); err == nil || err.Error() != "no GitHub organization or user named nobody" {
+		t.Errorf("err = %v", err)
+	}
+}

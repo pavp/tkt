@@ -278,6 +278,10 @@ func (m Model) settingsLookup(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if f.browser == nil || !f.browser.listed(msg) {
 			f.completeFrom(msg)
 		}
+	case ReposListedMsg:
+		if f.completeRepoFrom(msg) && f.values[fieldPath] == "" {
+			return m, m.lookupClones()
+		}
 	case FolderPickedMsg:
 		if msg.Err != nil {
 			m.settings.err = msg.Err.Error()
@@ -327,6 +331,9 @@ func (m Model) settingsFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyTab, tea.KeyDown, tea.KeyShiftTab, tea.KeyUp:
 		if k.Type == tea.KeyTab && f.focus == f.pathField() {
 			return m.completePath()
+		}
+		if k.Type == tea.KeyTab && f.repo && f.focus == fieldRepo {
+			return m.completeRepo()
 		}
 		left := f.focus
 		if k.Type == tea.KeyTab || k.Type == tea.KeyDown {
@@ -536,14 +543,11 @@ func (m Model) settingsModal() string {
 		} else {
 			lines = append(lines, "  "+dim.Render(l), "   "+v)
 		}
-		if i == f.pathField() && f.hint != "" {
+		if i == f.focus && f.hint != "" {
 			lines = append(lines, "   "+keyDim.Render(f.hint))
 		}
 	}
-	keys := "enter save · tab next field · ctrl+o browse folders · esc cancel"
-	if f.focus == f.pathField() {
-		keys = "enter save · tab complete · ↑↓ fields · ctrl+o browse folders · esc cancel"
-	}
+	keys := "enter save · tab complete · ↑↓ fields · ctrl+o browse folders · esc cancel"
 	lines = append(lines, "", dim.Render(keys))
 	return menuBox.Render(strings.Join(lines, "\n"))
 }

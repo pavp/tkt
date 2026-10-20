@@ -97,6 +97,8 @@ type boardActions struct {
 	c   *config.Config
 	ctx context.Context
 	mu  sync.Mutex
+	// repos caches each owner's GitHub repositories for the life of the board.
+	repos map[string][]string
 }
 
 func (b *boardActions) cfg() *config.Config {
@@ -151,6 +153,29 @@ func withSlash(p string) string {
 		return p
 	}
 	return p + "/"
+}
+
+func (b *boardActions) ListRepos(owner string) tea.Cmd {
+	return func() tea.Msg {
+		b.mu.Lock()
+		names, ok := b.repos[owner]
+		b.mu.Unlock()
+		if !ok {
+			ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+			defer cancel()
+			var err error
+			if names, err = b.a.NewGitHub(b.cfg()).Repos(ctx, owner); err != nil {
+				return tui.ReposListedMsg{Owner: owner, Err: err}
+			}
+			b.mu.Lock()
+			if b.repos == nil {
+				b.repos = map[string][]string{}
+			}
+			b.repos[owner] = names
+			b.mu.Unlock()
+		}
+		return tui.ReposListedMsg{Owner: owner, Names: names}
+	}
 }
 
 func (b *boardActions) NativePicker() bool { return b.a.nativePicker() }
