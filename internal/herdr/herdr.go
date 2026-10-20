@@ -141,6 +141,11 @@ func (c *Client) FocusWorkspace(ctx context.Context, id string) error {
 	return c.Call(ctx, "workspace.focus", map[string]any{"workspace_id": id}, nil)
 }
 
+// FocusPane focuses one pane, switching to its tab.
+func (c *Client) FocusPane(ctx context.Context, paneID string) error {
+	return c.Call(ctx, "pane.focus", map[string]any{"pane_id": paneID}, nil)
+}
+
 // ReportWorkspaceTokens patches sidebar tokens; a nil value clears that token.
 func (c *Client) ReportWorkspaceTokens(ctx context.Context, workspaceID, source string, tokens map[string]*string, ttl time.Duration) error {
 	params := map[string]any{"workspace_id": workspaceID, "source": source, "tokens": tokens}

@@ -29,6 +29,7 @@ type HerdrAPI interface {
 	Workspaces(ctx context.Context) ([]herdr.Workspace, error)
 	CreateWorkspace(ctx context.Context, cwd, label string, focus bool) (herdr.Workspace, herdr.Pane, error)
 	FocusWorkspace(ctx context.Context, id string) error
+	FocusPane(ctx context.Context, paneID string) error
 	ReportWorkspaceTokens(ctx context.Context, workspaceID, source string, tokens map[string]*string, ttl time.Duration) error
 	Agents(ctx context.Context) ([]herdr.Agent, error)
 	Panes(ctx context.Context) ([]herdr.Pane, error)
@@ -340,13 +341,23 @@ func (a *App) herdrStart(cmd *cobra.Command, args, repoFlags []string, clone boo
 	h := a.NewHerdr()
 	ctx := cmd.Context()
 	if plan.Existing != nil {
-		if ws, ok := workspaceAt(ctx, h, plan.Existing.Path); ok {
-			a.printf("Focusing %s\n", ws.Label)
-			return h.FocusWorkspace(ctx, ws.ID)
-		}
-		if id, ok := agentWorkspaceAt(ctx, h, plan.Existing.Path); ok {
-			a.printf("Focusing the agent of %s\n", plan.Key)
-			return h.FocusWorkspace(ctx, id)
+		ws, wsOK := workspaceAt(ctx, h, plan.Existing.Path)
+		ag, agOK := agentAt(ctx, h, plan.Existing.Path)
+		if wsOK || agOK {
+			if wsOK {
+				a.printf("Focusing %s\n", ws.Label)
+			} else {
+				ws.ID = ag.WorkspaceID
+				a.printf("Focusing the agent of %s\n", plan.Key)
+			}
+			if err := h.FocusWorkspace(ctx, ws.ID); err != nil {
+				return err
+			}
+			// The workspace alone may show another tab; the agent's pane brings its own tab forward.
+			if agOK && ag.WorkspaceID == ws.ID {
+				_ = h.FocusPane(ctx, ag.PaneID)
+			}
+			return nil
 		}
 		return a.startInWorkspace(ctx, h, plan.Existing.Path, string(plan.Key), plan.Prompt, "", true)
 	}
@@ -494,12 +505,12 @@ func workspaceAt(ctx context.Context, h HerdrAPI, path string) (herdr.Workspace,
 	return herdr.Workspace{}, false
 }
 
-// agentWorkspaceAt finds the workspace of an agent working inside path, which Herdr reports as a worktree
-// only when it created that worktree itself; an agent without a folder is placed by its pane's.
-func agentWorkspaceAt(ctx context.Context, h HerdrAPI, path string) (string, bool) {
+// agentAt finds an agent working inside path, which Herdr reports as a worktree only when it created that
+// worktree itself; an agent without a folder is placed by its pane's.
+func agentAt(ctx context.Context, h HerdrAPI, path string) (herdr.Agent, bool) {
 	agents, err := h.Agents(ctx)
 	if err != nil {
-		return "", false
+		return herdr.Agent{}, false
 	}
 	var cwd map[string]string
 	for _, ag := range agents {
@@ -516,10 +527,10 @@ func agentWorkspaceAt(ctx context.Context, h HerdrAPI, path string) (string, boo
 			dir = cwd[ag.PaneID]
 		}
 		if dir != "" && within(dir, path) {
-			return ag.WorkspaceID, true
+			return ag, true
 		}
 	}
-	return "", false
+	return herdr.Agent{}, false
 }
 
 func within(dir, root string) bool {
