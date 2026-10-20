@@ -683,6 +683,36 @@ func TestReviewChipShowsTicketKey(t *testing.T) {
 	}
 }
 
+func TestActionsMenuGoesToARunningAgent(t *testing.T) {
+	tests := []struct {
+		agent, want, dontWant string
+	}{
+		{"working", "Go to the agent in Herdr", "Start · open the agent"},
+		{"idle", "Go to the agent in Herdr", "Start · open the agent"},
+		{"", "Start · open the agent", "Go to the agent"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			snap := snapshot()
+			if tt.agent != "" {
+				snap.Agents = map[string]string{"DEMO-1": tt.agent}
+			}
+			r := &recorder{}
+			m := tea.Model(New(snap, true, r, ViewColumns))
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+			m = press(m, "l", "enter")
+			v := stripANSI(m.View())
+			if !strings.Contains(v, tt.want) || strings.Contains(v, tt.dontWant) {
+				t.Fatalf("menu:\n%s", v)
+			}
+			press(m, "enter")
+			if !slices.Contains(r.calls, "start DEMO-1") {
+				t.Errorf("calls = %v", r.calls)
+			}
+		})
+	}
+}
+
 func TestActionsMenu(t *testing.T) {
 	r := &recorder{}
 	m := press(loaded(r), "l", "enter")

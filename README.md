@@ -75,7 +75,7 @@ links the tkt plugin into the running Herdr (0.9.5 or later). Herdr plugins cann
 - sidebar labels such as `DEMO-1 · ✕ CI · #812 · claude working`, refreshed by `tkt list`, the `tkt.refresh` action, and at Herdr startup from the cache,
 - automatic `tkt link` when an agent creates a worktree with `herdr worktree create`.
 
-`tkt herdr start KEY` opens Claude Code in a new Herdr workspace per repository instead of the current terminal. `tkt herdr uninstall` removes the plugin and the keybindings it added.
+`tkt herdr start KEY` opens Claude Code in a new Herdr workspace per repository instead of the current terminal; when the ticket already has a worktree with an agent working in it, it focuses that agent's workspace instead (the board's menu then reads "Go to the agent in Herdr"). `tkt herdr uninstall` removes the plugin and the keybindings it added.
 
 ## Develop
 
