@@ -146,8 +146,9 @@ type Model struct {
 	inStrip  bool
 	stripSel int
 	// spin is the refreshing spinner's frame; spinning says its tick is already running.
-	spin     int
-	spinning bool
+	spin         int
+	spinning     bool
+	loadingSince time.Time
 	// showBots also lists review requests on pull requests opened by bots.
 	showBots bool
 }
@@ -157,6 +158,20 @@ type tickMsg time.Time
 
 // spinMsg advances the refreshing spinner; it stops ticking once the board arrives.
 type spinMsg struct{}
+
+// SyncingMsg says the daemon started a sync; SyncFailedMsg that one failed. A finished sync arrives as
+// a SnapshotMsg.
+type SyncingMsg struct{}
+
+type SyncFailedMsg struct{ Message string }
+
+// loadingLimit bounds how long the board waits for a refresh before it stops saying it is refreshing.
+const loadingLimit = 90 * time.Second
+
+func (m *Model) beginLoading() tea.Cmd {
+	m.loading, m.loadingSince = true, m.now()
+	return m.startSpin()
+}
 
 var spinFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
@@ -185,7 +200,7 @@ func New(snap board.Snapshot, haveSnap bool, actions Actions, view string) Model
 	if view != ViewList {
 		view = ViewColumns
 	}
-	m := Model{snap: snap, loading: true, spinning: true, actions: actions, view: view, filter: FilterAll, width: 160, height: 40, now: time.Now}
+	m := Model{snap: snap, loading: true, spinning: true, loadingSince: time.Now(), actions: actions, view: view, filter: FilterAll, width: 160, height: 40, now: time.Now}
 	if !haveSnap {
 		m.status = "loading…"
 	}
@@ -435,11 +450,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detail.loading = false
 		m.detail.lines = strings.Split(strings.TrimRight(msg.Text, "\n"), "\n")
 	case tickMsg:
+		if m.loading && m.now().Sub(m.loadingSince) > loadingLimit {
+			m.loading = false
+		}
 		if !m.loading && m.now().Sub(m.snap.FetchedAt) >= refreshEvery {
-			m.loading = true
-			return m, tea.Batch(m.actions.Refresh(), tick(), m.startSpin())
+			return m, tea.Batch(m.actions.Refresh(), tick(), m.beginLoading())
 		}
 		return m, tick()
+	case SyncingMsg:
+		return m, m.beginLoading()
+	case SyncFailedMsg:
+		m.loading = false
+		m.status = "could not refresh: " + msg.Message
 	case spinMsg:
 		if !m.loading {
 			m.spinning = false
@@ -702,9 +724,8 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "left", "a", "h":
 		m.move(-1, 0)
 	case "g":
-		m.loading = true
 		m.status = "refreshing…"
-		return m, tea.Batch(m.actions.Refresh(), m.startSpin())
+		return m, tea.Batch(m.actions.Refresh(), m.beginLoading())
 	case "enter", " ":
 		m.openMenu()
 	case ",":

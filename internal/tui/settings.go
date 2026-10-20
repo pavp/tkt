@@ -450,8 +450,7 @@ func (m Model) settingsSaved(msg SettingsSavedMsg) (tea.Model, tea.Cmd) {
 		s.row = s.firstSelectable()
 	}
 	s.msg = "✓ saved to your config.toml · the board refreshes with it"
-	m.loading = true
-	return m, tea.Batch(m.actions.Refresh(), m.startSpin())
+	return m, tea.Batch(m.actions.Refresh(), m.beginLoading())
 }
 
 // settingsLines renders the view and maps each line to its row index (-1 for others), for clicks.

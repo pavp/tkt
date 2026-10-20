@@ -576,6 +576,36 @@ func TestPreviewStartsWithTheTicketsLabel(t *testing.T) {
 	}
 }
 
+func TestDaemonSyncsDriveTheSpinner(t *testing.T) {
+	m := loaded(&recorder{})
+	if v := stripANSI(m.View()); strings.Contains(v, "refreshing…") {
+		t.Fatalf("spinning before any sync:\n%s", v)
+	}
+	m, _ = m.Update(SyncingMsg{})
+	if !strings.Contains(stripANSI(m.View()), "refreshing…") {
+		t.Fatalf("a daemon sync does not show:\n%s", stripANSI(m.View()))
+	}
+	m, _ = m.Update(SyncFailedMsg{Message: "rate limited"})
+	if v := stripANSI(m.View()); strings.Contains(v, "refreshing…") || !strings.Contains(v, "could not refresh: rate limited") {
+		t.Errorf("a failed sync does not show:\n%s", v)
+	}
+}
+
+func TestAStuckRefreshGivesUp(t *testing.T) {
+	base := snapshot().FetchedAt
+	clock := base.Add(time.Minute)
+	m := tea.Model(New(board.Snapshot{}, false, &recorder{}, ViewColumns).WithClock(func() time.Time { return clock }))
+	fresh := snapshot()
+	fresh.FetchedAt = clock.Add(90 * time.Second)
+	m, _ = m.Update(SnapshotMsg{Snap: fresh})
+	m, _ = m.Update(SyncingMsg{})
+	clock = clock.Add(2 * time.Minute)
+	m, _ = m.Update(tickMsg(clock))
+	if v := stripANSI(m.View()); strings.Contains(v, "refreshing…") {
+		t.Errorf("still refreshing after two minutes:\n%s", v)
+	}
+}
+
 func TestTickRefreshesWhenStale(t *testing.T) {
 	r := &recorder{}
 	base := snapshot().FetchedAt

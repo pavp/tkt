@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -110,15 +111,29 @@ func TestBoardFollowsTheDaemon(t *testing.T) {
 	f.server().SetAgents(map[string]string{"DEMO-9": "working"})
 	eventually(t, "the board after agent.updated", func() bool { return received() >= 2 })
 	mu.Lock()
-	last := got[len(got)-1].(tui.SnapshotMsg)
+	var last tui.SnapshotMsg
+	for _, m := range got {
+		if snap, ok := m.(tui.SnapshotMsg); ok {
+			last = snap
+		}
+	}
 	mu.Unlock()
 	if !last.Quiet || last.Snap.Agents["DEMO-9"] != "working" || last.Snap.Tickets[0].Key != "DEMO-9" {
 		t.Errorf("last message = %+v", last)
 	}
-	msg := b.Refresh()().(tui.SnapshotMsg)
-	if msg.Err != nil || len(msg.Snap.Tickets) != 1 || msg.Snap.Tickets[0].Key != "DEMO-9" || h.jira.jql != "" {
-		t.Errorf("refresh should read the daemon: %+v (jql %q)", msg, h.jira.jql)
+	if msg := b.Refresh()(); msg != nil || h.jira.jql != "" {
+		t.Errorf("refresh should leave the outcome to the daemon's events: %+v (jql %q)", msg, h.jira.jql)
 	}
+	eventually(t, "the daemon's sync events", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		started := slices.ContainsFunc(got, func(m tea.Msg) bool { _, ok := m.(tui.SyncingMsg); return ok })
+		failed := slices.ContainsFunc(got, func(m tea.Msg) bool {
+			f, ok := m.(tui.SyncFailedMsg)
+			return ok && f.Message == "fake daemons do not sync"
+		})
+		return started && failed
+	})
 	cancel()
 	select {
 	case <-done:

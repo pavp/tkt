@@ -46,7 +46,13 @@ func newDaemonCmd(a *App) *cobra.Command {
 		Use:   "stop",
 		Short: "Stop the running daemon",
 		Args:  cobra.NoArgs,
-		RunE:  func(cmd *cobra.Command, _ []string) error { return a.stopDaemon(cmd.Context()) },
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			pid, err := a.stopDaemon(cmd.Context())
+			if err == nil {
+				a.printf("✓ stopped the tkt daemon (pid %d)\n", pid)
+			}
+			return err
+		},
 	}, &cobra.Command{
 		Use:   "run",
 		Short: "Run the daemon in the foreground until interrupted",
