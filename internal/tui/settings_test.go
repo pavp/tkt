@@ -281,3 +281,59 @@ func TestSettingsKeepsAnInferredRepositoryWhenNotConfirmed(t *testing.T) {
 		t.Errorf("saved %v without confirmation", r.saved)
 	}
 }
+
+func TestSettingsSetsTheTicketLabelFromJiraFields(t *testing.T) {
+	m, r := settingsBoard(t)
+	r.jiraFields = []string{"Priority", "Product", "Product(s)", "Summary"}
+	m = send(send(m, keyTab), keyTab)
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "▸ Ticket label") || !strings.Contains(v, "—") || !strings.Contains(v, "shown first on the selected ticket's detail line") {
+		t.Fatalf("board section:\n%s", v)
+	}
+	m = press(m, "enter")
+	m = typeText(m, "pro")
+	m = send(m, keyTab)
+	v = stripANSI(m.View())
+	if !strings.Contains(v, "Product(s)") || strings.Contains(v, "Priority") || !strings.Contains(strings.Join(r.listed, ","), "jira fields") {
+		t.Fatalf("dropdown of Jira fields:\n%s\nlisted %v", v, r.listed)
+	}
+	m = send(m, keyEnter)
+	m = send(m, keyEnter)
+	if len(r.saved) != 1 || r.saved[0].Jira.LabelField != "Product" {
+		t.Fatalf("saved = %+v", r.saved)
+	}
+	if v := stripANSI(m.View()); !strings.Contains(v, "Ticket label") || !strings.Contains(v, "Product") {
+		t.Errorf("the row does not show the saved field:\n%s", v)
+	}
+	m = press(m, "d")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Stop showing a ticket label? (y/n)") {
+		t.Fatalf("no confirmation:\n%s", v)
+	}
+	send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if len(r.saved) != 2 || r.saved[1].Jira.LabelField != "" {
+		t.Errorf("clear = %+v", r.saved)
+	}
+}
+
+func TestSettingsTicketLabelHintsAnUnknownField(t *testing.T) {
+	m, r := settingsBoard(t)
+	r.jiraFields = []string{"Product"}
+	m = press(send(send(m, keyTab), keyTab), "enter")
+	m = send(typeText(m, "Team"), keyTab)
+	if v := stripANSI(m.View()); !strings.Contains(v, "no Jira field starts with Team") {
+		t.Errorf("hint:\n%s", v)
+	}
+	if v := stripANSI(send(send(m, keyTab), keyTab).View()); strings.Contains(v, "Board") && !strings.Contains(v, "Ticket label") {
+		t.Errorf("tab inside the form should not leave it:\n%s", v)
+	}
+}
+
+func TestSettingsSectionsCycle(t *testing.T) {
+	m, _ := settingsBoard(t)
+	for i, want := range []string{"Folders where tkt looks", "Ticket label", "example-org/web"} {
+		m = send(m, keyTab)
+		if v := stripANSI(m.View()); !strings.Contains(v, want) {
+			t.Errorf("tab %d: missing %q:\n%s", i+1, want, v)
+		}
+	}
+}

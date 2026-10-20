@@ -14,9 +14,10 @@ import (
 const (
 	sectionRepos = iota
 	sectionRoots
+	sectionBoard
 )
 
-var sectionNames = []string{"Spaces & repositories", "Local clones"}
+var sectionNames = []string{"Spaces & repositories", "Local clones", "Board"}
 
 type rowKind int
 
@@ -27,6 +28,7 @@ const (
 	rowAddRepo
 	rowRoot
 	rowAddRoot
+	rowLabel
 )
 
 type settingsRow struct {
@@ -58,10 +60,12 @@ type settingsForm struct {
 	values []string
 	focus  int
 	apply  func(c *config.Config, values []string)
-	// repo forms hold repository, base branch and path; folder forms only the folder.
-	repo  bool
-	found []string
-	hint  string
+	// repo forms hold repository, base branch and path; folder forms only the folder; a jiraField form
+	// holds a Jira field name, completed from the site's fields, and may be left empty.
+	repo      bool
+	jiraField bool
+	found     []string
+	hint      string
 	// cands are the matches the dropdown shows, picked from source as the user types; dropBase is the
 	// prefix the rows leave out; pending is the value whose listing is on its way.
 	cands    []string
@@ -101,6 +105,9 @@ func (m Model) openSettings() (tea.Model, tea.Cmd) {
 
 func (s *settingsView) rows() []settingsRow {
 	var out []settingsRow
+	if s.section == sectionBoard {
+		return []settingsRow{{kind: rowLabel, name: s.cfg.Jira.LabelField}}
+	}
 	if s.section == sectionRoots {
 		for i, r := range s.cfg.RepoRoots {
 			out = append(out, settingsRow{kind: rowRoot, idx: i, name: r})
@@ -173,8 +180,11 @@ func (m Model) settingsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		s.move(-1)
 	case "down", "s", "j":
 		s.move(1)
-	case "tab", "left", "right", "h", "l":
-		s.section = 1 - s.section
+	case "tab", "right", "l":
+		s.section = (s.section + 1) % len(sectionNames)
+		s.row = s.firstSelectable()
+	case "shift+tab", "left", "h":
+		s.section = (s.section + len(sectionNames) - 1) % len(sectionNames)
 		s.row = s.firstSelectable()
 	case "enter", " ", "e":
 		return m.settingsAction("enter")
@@ -207,6 +217,18 @@ func (m Model) settingsAction(action string) (tea.Model, tea.Cmd) {
 			question: fmt.Sprintf("Remove the folder %s? (y/n)", r.name),
 			apply:    func(c *config.Config) { c.RepoRoots = slices.Delete(c.RepoRoots, r.idx, r.idx+1) },
 		}
+	case action == "d" && r.kind == rowLabel:
+		if r.name == "" {
+			return m, nil
+		}
+		s.confirm = &settingsConfirm{
+			question: "Stop showing a ticket label? (y/n)",
+			verb:     "stop",
+			apply:    func(c *config.Config) { c.Jira.LabelField = "" },
+		}
+	case r.kind == rowLabel:
+		s.form = &settingsForm{title: "Ticket label", labels: []string{"Jira field (for example Product)"}, values: []string{r.name}, jiraField: true,
+			apply: func(c *config.Config, v []string) { c.Jira.LabelField = v[0] }}
 	case action == "d" && r.kind == rowInferred:
 		s.confirm = &settingsConfirm{
 			question: fmt.Sprintf("Ignore %s in %s? tkt stops using it for CI and reviews (y/n)", r.name, s.cfg.Spaces[r.space].Key),
@@ -281,6 +303,8 @@ func (m Model) settingsLookup(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if f.browser == nil || !f.browser.listed(msg) {
 			f.completeFrom(msg)
 		}
+	case JiraFieldsListedMsg:
+		f.completeJiraFieldFrom(msg)
 	case ReposListedMsg:
 		if f.completeRepoFrom(msg) && f.values[fieldPath] == "" {
 			return m, m.lookupClones()
@@ -340,13 +364,16 @@ func (m Model) settingsFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		for i := range f.values {
 			f.values[i] = strings.TrimSpace(f.values[i])
 		}
-		if f.values[0] == "" {
+		if f.values[0] == "" && !f.jiraField {
 			m.settings.err = f.labels[0] + " is required"
 			return m, nil
 		}
 		m.settings.form = nil
 		return m.saveSettings(func(c *config.Config) { f.apply(c, f.values) })
 	case tea.KeyTab, tea.KeyDown, tea.KeyShiftTab, tea.KeyUp:
+		if k.Type == tea.KeyTab && f.jiraField {
+			return m.completeJiraField()
+		}
 		if k.Type == tea.KeyTab && f.focus == f.pathField() {
 			return m.completePath()
 		}
@@ -472,9 +499,14 @@ func (m Model) settingsLines() ([]string, []int) {
 			line = mark + pad(truncate(r.name, rootW), rootW) + " " + removeMark
 		case rowAddRoot:
 			line = mark + keyDim.Render("+ Add folder")
+		case rowLabel:
+			line = mark + pad("Ticket label", 14) + " " + orDash(r.name)
 		}
 		if s.section == sectionRoots && i == 0 {
 			lines, at = append(lines, dim.Render("Folders where tkt looks for your local clones")), append(at, -1)
+		}
+		if s.section == sectionBoard && i == 0 {
+			lines, at = append(lines, dim.Render("A Jira field whose value is shown first on the selected ticket's detail line")), append(at, -1)
 		}
 		lines, at = append(lines, truncate(line, m.width)), append(at, i)
 	}
@@ -579,6 +611,9 @@ func (f *settingsForm) lines() ([]string, int) {
 		}
 	}
 	keys := "enter save · tab complete · ↑↓ fields · ctrl+o browse folders · esc cancel"
+	if f.jiraField {
+		keys = "enter save · tab complete from your Jira fields · empty shows none · esc cancel"
+	}
 	return append(lines, "", dim.Render(keys)), drop
 }
 

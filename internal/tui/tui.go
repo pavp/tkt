@@ -49,6 +49,8 @@ type Actions interface {
 	ListDirs(path string) tea.Cmd
 	// ListRepos lists owner's GitHub repositories as "owner/name"; they arrive as a ReposListedMsg.
 	ListRepos(owner string) tea.Cmd
+	// JiraFields lists the names of the Jira site's fields; they arrive as a JiraFieldsListedMsg.
+	JiraFields() tea.Cmd
 	// NativePicker reports whether PickFolder can show a folder chooser the user will see; without one,
 	// ctrl+o browses folders inside the terminal.
 	NativePicker() bool
@@ -397,7 +399,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reselect()
 	case SettingsSavedMsg:
 		return m.settingsSaved(msg)
-	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg, ReposListedMsg:
+	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg, ReposListedMsg, JiraFieldsListedMsg:
 		return m.settingsLookup(msg)
 	case SnapshotMsg:
 		m.loading = false

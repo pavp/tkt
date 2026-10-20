@@ -42,6 +42,14 @@ type recorder struct {
 	broken   map[string][]string
 	// repos answers ListRepos with the repositories of each owner.
 	repos map[string][]string
+	// jiraFields answers JiraFields.
+	jiraFields []string
+}
+
+func (r *recorder) JiraFields() tea.Cmd {
+	r.listed = append(r.listed, "jira fields")
+	names := r.jiraFields
+	return func() tea.Msg { return JiraFieldsListedMsg{Names: names} }
 }
 
 func (r *recorder) ListDirs(path string) tea.Cmd {

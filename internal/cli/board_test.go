@@ -58,6 +58,19 @@ func TestBoardActionsRefreshAndFix(t *testing.T) {
 	}
 }
 
+func TestBoardListsJiraFields(t *testing.T) {
+	h, _, _ := fixHarness(t)
+	h.jira.fieldNames = []string{"Product", "Summary"}
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	if got := b.JiraFields()(); !reflect.DeepEqual(got, tui.JiraFieldsListedMsg{Names: []string{"Product", "Summary"}}) {
+		t.Errorf("JiraFields = %+v", got)
+	}
+}
+
 func TestBoardStartClearsTheScreenAndPassesTheChoices(t *testing.T) {
 	tests := []struct {
 		name   string

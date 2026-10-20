@@ -18,6 +18,7 @@ type JiraAPI interface {
 	Myself(ctx context.Context) (jira.User, error)
 	Search(ctx context.Context, jql string, fields []string) ([]jira.Issue, error)
 	FieldID(ctx context.Context, name string) (string, error)
+	FieldNames(ctx context.Context) ([]string, error)
 	Issue(ctx context.Context, key string, extraFields ...string) (jira.Issue, error)
 	Comments(ctx context.Context, key string, max int) ([]jira.Comment, error)
 	Statuses(ctx context.Context, project string) ([]jira.Status, error)
