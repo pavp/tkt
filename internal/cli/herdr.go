@@ -614,6 +614,10 @@ func (a *App) herdrSidebar(cmd *cobra.Command, cachedOnly bool) error {
 	if err != nil {
 		return err
 	}
+	// Herdr's startup hook runs once and exits, so it starts the daemon that keeps the sidebar fresh.
+	if cachedOnly && a.StartDetached != nil && a.Executable != nil {
+		_, _ = a.ensureDaemon(cmd.Context())
+	}
 	snap, _, err := a.loadSnapshot(cmd.Context(), c, cachedOnly)
 	if err != nil {
 		if cachedOnly {

@@ -23,6 +23,7 @@ import (
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
+	"github.com/pavp/tkt/internal/daemon"
 	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
@@ -57,8 +58,12 @@ func newBoardCmd(a *App) *cobra.Command {
 			}
 			forceColor(a.Env.Getenv)
 			defer a.claimBoardPane()()
-			model := tui.New(snap, have, &boardActions{a: a, c: c, ctx: cmd.Context()}, view)
-			_, err = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context())).Run()
+			actions := &boardActions{a: a, c: c, ctx: cmd.Context()}
+			prog := tea.NewProgram(tui.New(snap, have, actions, view), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
+			follow, stop := context.WithCancel(cmd.Context())
+			defer stop()
+			go a.followDaemon(follow, actions, prog.Send)
+			_, err = prog.Run()
 			if errors.Is(err, tea.ErrProgramKilled) {
 				return nil
 			}
@@ -112,6 +117,20 @@ type boardActions struct {
 	mu  sync.Mutex
 	// repos caches each owner's GitHub repositories for the life of the board.
 	repos map[string][]string
+	// live is the daemon the board reads from while connected; nil means asking Jira and GitHub itself.
+	live *daemon.Client
+}
+
+func (b *boardActions) setLive(c *daemon.Client) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.live = c
+}
+
+func (b *boardActions) liveClient() *daemon.Client {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.live
 }
 
 func (b *boardActions) cfg() *config.Config {
@@ -246,6 +265,13 @@ func (b *boardActions) Refresh() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(b.ctx, time.Minute)
 		defer cancel()
+		// With the daemon, a refresh asks it to sync; the fresh board arrives with its events.
+		if c := b.liveClient(); c != nil {
+			_ = c.Sync(ctx)
+			if snap, err := c.Tickets(ctx); err == nil {
+				return tui.SnapshotMsg{Snap: snap}
+			}
+		}
 		snap, stale, err := b.a.loadSnapshot(ctx, b.cfg(), false)
 		if err == nil && stale == nil {
 			snap.Agents = b.a.refreshSidebarQuietly(ctx, b.cfg(), snap)

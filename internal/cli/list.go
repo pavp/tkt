@@ -32,12 +32,20 @@ func newListCmd(a *App) *cobra.Command {
 					return fmt.Errorf("space %s is not configured (configured: %s)", space, strings.Join(c.SpaceKeys(), ", "))
 				}
 			}
-			snap, stale, err := a.loadSnapshot(cmd.Context(), c, cached)
-			if err != nil {
-				return err
+			// The daemon's board is current and its sync already wrote the Herdr sidebar.
+			snap, fromDaemon := board.Snapshot{}, false
+			if !cached {
+				snap, fromDaemon = a.daemonSnapshot(cmd.Context())
 			}
-			if stale == nil && !cached {
-				a.refreshSidebarQuietly(cmd.Context(), c, snap)
+			var stale error
+			if !fromDaemon {
+				snap, stale, err = a.loadSnapshot(cmd.Context(), c, cached)
+				if err != nil {
+					return err
+				}
+				if stale == nil && !cached {
+					a.refreshSidebarQuietly(cmd.Context(), c, snap)
+				}
 			}
 			snap = snap.Filter(space)
 			if needsYou {
