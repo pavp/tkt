@@ -110,6 +110,20 @@ func (a *App) pickerEnv() pickerEnv {
 	return env
 }
 
+// nativePicker reports whether a folder chooser can open where the user sees it: never over SSH, where it
+// would open on the remote desktop, nor under WSL, whose Windows dialog can hang without showing.
+func (a *App) nativePicker() bool {
+	if a.Env.Getenv("SSH_CONNECTION") != "" || a.Env.Getenv("SSH_TTY") != "" {
+		return false
+	}
+	env := a.pickerEnv()
+	if env.wsl {
+		return false
+	}
+	_, _, ok := folderPicker(env, "/")
+	return ok
+}
+
 var errNoPicker = errors.New("no folder picker on this system (install zenity or kdialog); type the path instead")
 
 // pickFolder shows the system's folder chooser and returns the chosen folder, or "" when cancelled.

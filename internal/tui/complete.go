@@ -8,9 +8,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// DirsListedMsg carries the folders inside Path, as listed by ListDirs.
+// DirsListedMsg carries the folders inside Path, as listed by ListDirs. Dir is that folder as tkt writes
+// it ("~/src/"), Abs its absolute form, both ending in "/"; Abs is set even when the listing failed.
 type DirsListedMsg struct {
 	Path  string
+	Dir   string
+	Abs   string
 	Names []string
 	Err   error
 }
