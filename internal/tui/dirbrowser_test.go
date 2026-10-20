@@ -14,6 +14,7 @@ var (
 	keyRight = tea.KeyMsg{Type: tea.KeyRight}
 	keyDown  = tea.KeyMsg{Type: tea.KeyDown}
 	keyEsc   = tea.KeyMsg{Type: tea.KeyEsc}
+	keySpace = tea.KeyMsg{Type: tea.KeySpace, Runes: []rune(" ")}
 )
 
 var browserDirs = map[string][]string{
@@ -43,14 +44,14 @@ func TestCtrlOBrowsesFoldersInTheTerminalWithoutANativePicker(t *testing.T) {
 		t.Fatalf("no native picker should open, got %v", r.starts)
 	}
 	v := stripANSI(m.View())
-	for _, want := range []string{"Choose a folder", "~/src/", "▸ api", "web", "→ open · ← up · enter choose this folder · / filter · . show hidden · esc cancel"} {
+	for _, want := range []string{"Choose a folder", "~/src/", "▸ api", "web", "→ open · ← up · enter choose ▸ · space choose this folder · / filter · . show hidden · esc cancel"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("browser missing %q:\n%s", want, v)
 		}
 	}
 }
 
-func TestBrowserNavigatesAndChoosesTheCurrentFolder(t *testing.T) {
+func TestBrowserSpaceChoosesTheCurrentFolder(t *testing.T) {
 	cases := []struct {
 		name string
 		keys []tea.KeyMsg
@@ -73,9 +74,9 @@ func TestBrowserNavigatesAndChoosesTheCurrentFolder(t *testing.T) {
 			for _, k := range c.keys {
 				m = send(m, k)
 			}
-			m = send(m, keyEnter)
+			m = send(m, keySpace)
 			if browser(m) != nil {
-				t.Fatal("enter should close the browser")
+				t.Fatal("space should close the browser")
 			}
 			if got := pathValue(m); got != c.want {
 				t.Errorf("path = %q, want %q", got, c.want)
@@ -118,7 +119,7 @@ func TestBrowserShowsUnreadableFoldersAndLetsYouGoUp(t *testing.T) {
 		t.Errorf("listing error missing:\n%s", stripANSI(m.View()))
 	}
 	m = send(m, keyLeft)
-	m = send(m, keyEnter)
+	m = send(m, keySpace)
 	if got := pathValue(m); got != "~/src" {
 		t.Errorf("path = %q", got)
 	}
@@ -142,7 +143,6 @@ func TestBrowserChoiceNamesTheRepository(t *testing.T) {
 	m = send(m, keyTab)
 	m = send(m, keyCtrlO)
 	m = send(m, keyDown)
-	m = send(m, keyRight)
 	m = send(m, keyEnter)
 	f := m.(Model).settings.form
 	if f.values[fieldPath] != "~/src/web" || f.values[fieldRepo] != "example-org/web" {
@@ -177,9 +177,37 @@ func TestBrowserScrollsLongFolders(t *testing.T) {
 	if !strings.Contains(v, "▸ repo15/") || !strings.Contains(v, "↑ more") || strings.Contains(v, "repo03") {
 		t.Errorf("the selected folder should stay visible after scrolling:\n%s", v)
 	}
-	m = send(m, keyRight)
 	m = send(m, keyEnter)
 	if got := pathValue(m); got != "~/src/repo15" {
 		t.Errorf("path = %q", got)
+	}
+}
+
+func TestBrowserEnterChoosesTheHighlightedFolder(t *testing.T) {
+	cases := []struct {
+		name string
+		keys []tea.KeyMsg
+		want string
+	}{
+		{"the first folder", nil, "~/src/api"},
+		{"after moving", []tea.KeyMsg{keyDown}, "~/src/web"},
+		{"inside a folder", []tea.KeyMsg{keyDown, keyRight}, "~/src/web/docs"},
+		{"an empty folder chooses itself", []tea.KeyMsg{keyRight}, "~/src/api"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m, _ := browsing(t)
+			m = send(m, keyCtrlO)
+			for _, k := range c.keys {
+				m = send(m, k)
+			}
+			m = send(m, keyEnter)
+			if browser(m) != nil {
+				t.Fatal("enter should close the browser")
+			}
+			if got := pathValue(m); got != c.want {
+				t.Errorf("path = %q, want %q", got, c.want)
+			}
+		})
 	}
 }

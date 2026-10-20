@@ -10,7 +10,8 @@ import (
 const browserRows = 12
 
 // dirBrowser lets the user walk folders inside the form when no native folder picker can open, as over
-// SSH or under WSL. Enter chooses the folder being shown, so an empty folder can be chosen too.
+// SSH or under WSL. Enter chooses the highlighted folder and space the folder shown, so an empty folder
+// can be chosen too.
 type dirBrowser struct {
 	// req is the folder whose listing the browser waits for; dir and abs are the one shown.
 	req    string
@@ -102,8 +103,10 @@ func (m Model) browserKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				b.refresh()
 			}
 			return m, nil
-		case tea.KeyEnter, tea.KeyRight:
+		case tea.KeyRight:
 			return m, b.open(m.actions)
+		case tea.KeyEnter:
+			return m.chooseHighlighted()
 		case tea.KeyRunes, tea.KeySpace:
 			b.filter += string(k.Runes)
 			b.refresh()
@@ -114,18 +117,10 @@ func (m Model) browserKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		f.browser = nil
 	case "enter":
-		if b.req != "" {
-			return m, nil
-		}
-		f.browser = nil
-		chosen := b.dir
-		if chosen != "/" {
-			chosen = strings.TrimSuffix(chosen, "/")
-		}
-		f.values[f.pathField()] = chosen
-		f.resetCompletion()
-		if f.repo && strings.TrimSpace(f.values[fieldRepo]) == "" {
-			return m, m.actions.RepoAt(chosen)
+		return m.chooseHighlighted()
+	case " ":
+		if b.req == "" {
+			return m.choose(b.dir)
 		}
 	case "up", "k":
 		b.move(-1)
@@ -142,6 +137,35 @@ func (m Model) browserKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ".":
 		b.hidden = !b.hidden
 		b.refresh()
+	}
+	return m, nil
+}
+
+// chooseHighlighted takes the folder under the cursor, or the folder shown when it has none.
+func (m Model) chooseHighlighted() (tea.Model, tea.Cmd) {
+	b := m.settings.form.browser
+	switch {
+	case b.req != "":
+		return m, nil
+	case len(b.rows) == 0:
+		return m.choose(b.dir)
+	case b.rows[b.cursor].broken:
+		return m, nil
+	}
+	return m.choose(b.dir + b.rows[b.cursor].name)
+}
+
+// choose closes the browser with dir in the path field, naming the repository when the form needs one.
+func (m Model) choose(dir string) (tea.Model, tea.Cmd) {
+	f := m.settings.form
+	f.browser = nil
+	if dir != "/" {
+		dir = strings.TrimSuffix(dir, "/")
+	}
+	f.values[f.pathField()] = dir
+	f.resetCompletion()
+	if f.repo && strings.TrimSpace(f.values[fieldRepo]) == "" {
+		return m, m.actions.RepoAt(dir)
 	}
 	return m, nil
 }
@@ -202,12 +226,12 @@ func (b *dirBrowser) view() string {
 	if end < len(b.rows) {
 		lines = append(lines, dim.Render("  ↓ more"))
 	}
-	keys := "→ open · ← up · enter choose this folder · / filter · . show hidden · esc cancel"
+	keys := "→ open · ← up · enter choose ▸ · space choose this folder · / filter · . show hidden · esc cancel"
 	if b.hidden {
 		keys = strings.Replace(keys, ". show hidden", ". hide hidden", 1)
 	}
 	if b.filtering {
-		keys = "type to filter · enter open match · esc clear filter"
+		keys = "type to filter · enter choose ▸ · → open · esc clear filter"
 	}
 	lines = append(lines, "", dim.Render(keys))
 	return menuBox.Render(strings.Join(lines, "\n"))
