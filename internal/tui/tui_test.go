@@ -672,7 +672,7 @@ func TestActionsMenu(t *testing.T) {
 	r := &recorder{}
 	m := press(loaded(r), "l", "enter")
 	v := stripANSI(m.View())
-	for _, want := range []string{"Actions for DEMO-1", "Start · open the agent", "Show details", "Open the ticket pane next to its agent", "Open in Jira ↗", "Copy the Jira link", "Open #812 ✕ in GitHub ↗", "Copy the #812 ✕ link", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
+	for _, want := range []string{"Actions for DEMO-1", "Start · open the agent", "Show details", "Open the ticket pane next to its agent", "Open in Jira ↗", "Open #812 ✕ in GitHub ↗", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("menu missing %q:\n%s", want, v)
 		}
@@ -680,10 +680,13 @@ func TestActionsMenu(t *testing.T) {
 	if strings.Contains(v, "Send the review comments") {
 		t.Error("offered review comments for a ticket without requested changes")
 	}
-	m = press(m, "s", "s", "s", "s", "s", "s", "s")
+	if strings.Contains(v, "Copy the Jira link") || strings.Contains(v, "link") && strings.Contains(v, "Copy the #812") {
+		t.Errorf("links are copied with c from their own row, not from extra rows:\n%s", v)
+	}
+	m = press(m, "s", "s", "s", "s", "s")
 	_, msg := run(m, "enter")
 	if r.last() != "fix DEMO-1" || msg != StatusMsg("fix DEMO-1") {
-		t.Errorf("eighth item ran %v", r.calls)
+		t.Errorf("sixth item ran %v", r.calls)
 	}
 	m = press(loaded(r), "enter", "w")
 	run(m, "enter")
@@ -1221,5 +1224,42 @@ func TestStatusKeepsAHyperlinkWholeWhenCut(t *testing.T) {
 	}
 	if !strings.Contains(p, "\x1b]8;;"+url+"\x1b\\") || !strings.Contains(p, "\x1b]8;;\x1b\\") {
 		t.Errorf("hyperlink broken by the cut: %q", p)
+	}
+}
+
+func TestMenuCopiesTheHighlightedLinkWithC(t *testing.T) {
+	cases := []struct {
+		name   string
+		keys   []string
+		copied string
+		footer string
+	}{
+		{"Jira row", []string{"s", "s", "s"}, "copy link https://example.atlassian.net/browse/DEMO-1", "enter run · c copy link · esc close"},
+		{"pull request row", []string{"s", "s", "s", "s"}, "copy link https://github.com/example-org/web/pull/812", "enter run · c copy link · esc close"},
+		{"row without a link", nil, "", "enter run · esc close"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := &recorder{}
+			m := press(loaded(r), "l", "enter")
+			m = press(m, c.keys...)
+			if v := stripANSI(m.View()); !strings.Contains(v, c.footer) || (c.copied == "" && strings.Contains(v, "c copy link")) {
+				t.Errorf("footer should read %q:\n%s", c.footer, v)
+			}
+			before := len(r.calls)
+			m, _ = run(m, "c")
+			if c.copied == "" {
+				if len(r.calls) != before {
+					t.Errorf("c on a row without a link ran %v", r.calls[before:])
+				}
+				return
+			}
+			if r.last() != c.copied {
+				t.Errorf("c ran %q, want %q", r.last(), c.copied)
+			}
+			if strings.Contains(stripANSI(m.View()), "Actions for") {
+				t.Error("copying should close the menu")
+			}
+		})
 	}
 }

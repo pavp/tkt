@@ -16,6 +16,8 @@ type menuItem struct {
 	run   func() tea.Cmd
 	// detail, when set, opens that ticket's detail view instead of running an action.
 	detail ticket.Key
+	// link is the URL c copies while the item is highlighted.
+	link string
 }
 
 // menu lists what can be done with the selected ticket or review request.
@@ -34,8 +36,7 @@ func (m Model) buildMenu(it item) *menu {
 	if it.pr != nil {
 		pr := *it.pr
 		return &menu{title: fmt.Sprintf("Review request #%d", pr.Number), items: []menuItem{
-			{label: "Open the pull request in GitHub ↗", key: "p", run: func() tea.Cmd { return a.Open(pr.URL) }},
-			{label: "Copy the pull request link", key: "P", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }},
+			{label: "Open the pull request in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }},
 		}}
 	}
 	t := *it.ticket
@@ -45,8 +46,7 @@ func (m Model) buildMenu(it item) *menu {
 		{label: "Open the ticket pane next to its agent", run: func() tea.Cmd { return a.TicketPane(t.Key) }},
 	}
 	if t.URL != "" {
-		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", run: func() tea.Cmd { return a.Open(t.URL) }})
-		items = append(items, menuItem{label: "Copy the Jira link", key: "O", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
+		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
 	}
 	for i, pr := range t.PRs {
 		pr := pr
@@ -54,14 +54,7 @@ func (m Model) buildMenu(it item) *menu {
 		if i == 0 {
 			key = "p"
 		}
-		copyKey := ""
-		if key != "" {
-			copyKey = "P"
-		}
-		items = append(items,
-			menuItem{label: "Open " + prRef(pr) + " in GitHub ↗", key: key, run: func() tea.Cmd { return a.Open(pr.URL) }},
-			menuItem{label: "Copy the " + prRef(pr) + " link", key: copyKey, run: func() tea.Cmd { return a.Copy(pr.URL, "link") }},
-		)
+		items = append(items, menuItem{label: "Open " + prRef(pr) + " in GitHub ↗", key: key, link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }})
 	}
 	for _, r := range t.Attention() {
 		label := "Send the CI failure to the agent"
@@ -88,6 +81,11 @@ func (m Model) menuKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		mn.sel = (mn.sel + 1) % len(mn.items)
 	case "enter", " ":
 		return m.runMenuItem(mn.sel)
+	case "c":
+		if link := mn.items[mn.sel].link; link != "" {
+			m.menu = nil
+			return m, m.actions.Copy(link, "link")
+		}
 	case "ctrl+c":
 		return m, tea.Quit
 	}
@@ -126,7 +124,11 @@ func (m Model) menuView() string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "", dim.Render("enter run · esc close"))
+	keys := "enter run · esc close"
+	if mn.items[mn.sel].link != "" {
+		keys = "enter run · c copy link · esc close"
+	}
+	lines = append(lines, "", dim.Render(keys))
 	return menuBox.Render(strings.Join(lines, "\n"))
 }
 
