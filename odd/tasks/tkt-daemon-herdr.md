@@ -20,8 +20,8 @@ Forecast: 2010–3090 authored changed lines, budget 1000 per slice (user: "sube
 | ID | Specs | Slice / branch | Route | Status | Commit |
 |---|---|---|---|---|---|
 | T1 | S1, S2 | 1 `feat/daemon-herdr-1-design-devstatus` | inline, no Writer reason | done (RED→GREEN) | c390490 (222 lines) |
-| T2 | S3, S4 | 2 `feat/daemon-herdr-2-server-sync` | inline, no Writer reason | done (RED→GREEN, live smoke test) | see branch |
-| T3 | S5, S6 | 3 `feat/daemon-herdr-3-ws-events` | inline, no Writer reason | todo | |
+| T2 | S3, S4 | 2 `feat/daemon-herdr-2-server-sync` | inline, no Writer reason | done (RED→GREEN, live smoke test) | dbc6bb5 (552 lines) |
+| T3 | S5, S6 | 3 `feat/daemon-herdr-3-ws-events` | inline, no Writer reason | done (RED→GREEN, independent verifier: items 4, 5) | see branch |
 | T4 | S7, S8 | 4 `feat/daemon-herdr-4-agents-autostart` | inline, no Writer reason | todo | |
 | T5 | S9 | 5 `feat/daemon-herdr-5-clients-board` | inline, no Writer reason | todo | |
 
@@ -36,3 +36,4 @@ Forecast: 2010–3090 authored changed lines, budget 1000 per slice (user: "sube
 - L4 Herdr 0.9.5 API checked: `events.subscribe` with `{"subscriptions":[{"type":"pane.agent_status_changed"}]}`; events carry `workspace_id` and `agent_status`.
 - L5 T1: design.md gains "Phase 3a" (section 3) and 3a/3b (section 11). `board.FetchSince` reuses a ticket's development panel while its `updated` is unchanged and the answer is under 10 minutes old (`Snapshot.Panels`, saved in the JSON cache; failed panels are not kept; panels are cloned before the ignore filter). Measured `tkt list` on macOS: 4.5 s filling the cache, then 2.7–3.0 s. "jira o github no tienen ningun servicio de websocket o algo parecido?" → no public streaming API; webhooks need a public URL and admin rights (gh webhook forward is a dev tool), so polling stays.
 - L6 T2: `internal/daemon` (token 0600, daemon.json 0600 with port/pid/version, loopback listener, /health, Bearer-protected /v1/tickets and POST /v1/sync, seed from the cache, a failed sync keeps the last board) and `tkt daemon run` (config reread per sync). Live on macOS: /health ok, /v1/tickets served 4 tickets, 401 without token, bound to 127.0.0.1, daemon.json removed on SIGINT.
+- L7 T3: `/v1/ws` with coder/websocket v1.8.15 (risk items 4 concurrency, 5 dependency). Independent verifier: S5/S6 pass; blocker fixed — a silent client is now closed with 4401 (timer, since an expired Read deadline closes without a code); advisories fixed — clients closed with "going away" when the daemon stops, 10 s write timeout, slow-client drop tested, Panels left out of events and /v1/tickets, design notes the no-board case. Not changed: ticket reorder sends no event (clients sort), JSON marshalled per client under the lock (fine at this scale).

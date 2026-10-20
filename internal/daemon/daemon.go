@@ -34,7 +34,8 @@ type Options struct {
 	// Interval is the time between syncs; POST /v1/sync asks for one at once.
 	Interval time.Duration
 	// Seed, when set, is served until the first sync finishes, so clients see the cached board at once.
-	Seed *board.Snapshot
+	Seed         *board.Snapshot // HelloTimeout bounds the wait for a WebSocket client's hello; zero means ten seconds.
+	HelloTimeout time.Duration
 }
 
 // Info is what daemon.json records for clients: where the daemon listens and which process it is.
@@ -48,11 +49,17 @@ type Server struct {
 	opts  Options
 	token string
 
-	mu   sync.Mutex
-	snap board.Snapshot
-	have bool
+	// mu guards the board and the clients, so a client joining between two events sees each once.
+	mu      sync.Mutex
+	snap    board.Snapshot
+	have    bool
+	clients map[*client]struct{}
 
 	syncNow chan struct{}
+	// quit closes when Serve stops, so WebSocket handlers, which outlive the HTTP server's shutdown,
+	// close their clients too.
+	quit     chan struct{}
+	quitOnce sync.Once
 }
 
 func New(o Options) (*Server, error) {
@@ -60,7 +67,10 @@ func New(o Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{opts: o, token: tok, syncNow: make(chan struct{}, 1)}
+	if o.HelloTimeout == 0 {
+		o.HelloTimeout = 10 * time.Second
+	}
+	s := &Server{opts: o, token: tok, syncNow: make(chan struct{}, 1), clients: map[*client]struct{}{}, quit: make(chan struct{})}
 	if o.Seed != nil {
 		s.snap, s.have = *o.Seed, true
 	}
@@ -124,7 +134,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		s.syncLoop(ctx)
 	}()
 
+	defer s.quitOnce.Do(func() { close(s.quit) })
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	srv.RegisterOnShutdown(func() { s.quitOnce.Do(func() { close(s.quit) }) })
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	select {
@@ -155,15 +167,22 @@ func (s *Server) syncLoop(ctx context.Context) {
 	}
 }
 
-// syncOnce fetches a board; a failed sync keeps serving the last good one.
+// syncOnce fetches a board and tells clients what changed; a failed sync keeps serving the last good one.
 func (s *Server) syncOnce(ctx context.Context) {
+	s.mu.Lock()
+	s.publish("sync.started", struct{}{})
+	s.mu.Unlock()
 	snap, err := s.opts.Sync(ctx)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err != nil {
+		s.publish("sync.failed", map[string]string{"message": err.Error()})
 		return
 	}
-	s.mu.Lock()
+	old, had := s.snap, s.have
 	s.snap, s.have = snap, true
-	s.mu.Unlock()
+	s.publishChanges(old, had, snap)
+	s.publish("sync.finished", map[string]any{"fetched_at": snap.FetchedAt})
 }
 
 func (s *Server) Handler() http.Handler {
@@ -173,13 +192,18 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /v1/tickets", s.authed(s.tickets))
 	mux.HandleFunc("POST /v1/sync", s.authed(s.requestSync))
+	mux.HandleFunc("GET /v1/ws", s.ws)
 	return mux
+}
+
+func (s *Server) validToken(got string) bool {
+	return subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) == 1
 }
 
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || subtle.ConstantTimeCompare([]byte(got), []byte(s.token)) != 1 {
+		if !ok || !s.validToken(got) {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "missing or wrong token")
 			return
 		}
@@ -195,7 +219,13 @@ func (s *Server) tickets(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "not_synced", "the first sync has not finished")
 		return
 	}
-	writeJSON(w, http.StatusOK, snap)
+	writeJSON(w, http.StatusOK, public(snap))
+}
+
+// public leaves out the development-panel cache, which only the sync needs.
+func public(snap board.Snapshot) board.Snapshot {
+	snap.Panels = nil
+	return snap
 }
 
 func (s *Server) requestSync(w http.ResponseWriter, _ *http.Request) {
