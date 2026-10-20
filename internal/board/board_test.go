@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -443,6 +444,54 @@ func TestFetchWarnsAboutSpacesWithoutRepositories(t *testing.T) {
 	}
 	want := "DEMO has no repositories yet: none of your tickets has a pull request, so CI and reviews are off; add one in the config"
 	if !reflect.DeepEqual(snap.Warnings, []string{want}) {
+		t.Errorf("warnings = %q", snap.Warnings)
+	}
+}
+
+func TestFetchSkipsIgnoredRepositories(t *testing.T) {
+	c := &config.Config{
+		Jira: config.Jira{Site: "example.atlassian.net", Email: "dev@example.com"},
+		Spaces: []config.Space{
+			{Key: "DEMO", Ignored: []string{"Example-Org/API", "example-org/ops"}, Repos: []config.Repo{{Name: "example-org/ops"}}},
+		},
+	}
+	js := &stubJira{
+		issues: []jira.Issue{{ID: "101", Key: "DEMO-1", Status: "In Progress", StatusCategory: "indeterminate"}},
+		linked: map[string][]jira.DevPullRequest{
+			"101": {{Repo: "example-org/web", Number: 9, Status: "OPEN"}, {Repo: "example-org/api", Number: 4, Status: "MERGED"}},
+		},
+	}
+	gh := &stubGitHub{}
+	snap, err := Fetch(context.Background(), c, js, gh, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"example-org/ops", "example-org/web"}
+	if !reflect.DeepEqual(gh.repos, want) || !reflect.DeepEqual(snap.Repos["DEMO"], want) {
+		t.Errorf("GitHub queried %v, snapshot repos %v, want %v (configured repos stay even when ignored)", gh.repos, snap.Repos, want)
+	}
+	for _, pr := range snap.Tickets[0].PRs {
+		if strings.EqualFold(pr.Repo, "example-org/api") {
+			t.Errorf("a pull request from an ignored repository is still shown: %+v", pr)
+		}
+	}
+}
+
+func TestFetchExplainsASpaceWhoseRepositoriesAreAllIgnored(t *testing.T) {
+	c := &config.Config{
+		Jira:   config.Jira{Site: "example.atlassian.net", Email: "dev@example.com"},
+		Spaces: []config.Space{{Key: "DEMO", Ignored: []string{"example-org/api"}}},
+	}
+	js := &stubJira{
+		issues: []jira.Issue{{ID: "101", Key: "DEMO-1", Status: "In Progress", StatusCategory: "indeterminate"}},
+		linked: map[string][]jira.DevPullRequest{"101": {{Repo: "example-org/api", Number: 4, Status: "OPEN"}}},
+	}
+	snap, err := Fetch(context.Background(), c, js, &stubGitHub{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "DEMO has no repositories yet: you ignore every repository of its pull requests, so CI and reviews are off; add one in the config"
+	if !slices.Contains(snap.Warnings, want) {
 		t.Errorf("warnings = %q", snap.Warnings)
 	}
 }

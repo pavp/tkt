@@ -66,13 +66,17 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 
 	linked := map[ticket.Key][]jira.DevPullRequest{}
 	devFailed := map[ticket.Key]bool{}
+	ignoredAny := map[string]bool{}
 	for _, t := range tickets {
 		l, err := js.DevPullRequests(ctx, ids[t.Key])
 		if err != nil {
 			devFailed[t.Key] = true
 			continue
 		}
-		linked[t.Key] = l
+		linked[t.Key] = slices.DeleteFunc(l, func(p jira.DevPullRequest) bool { return ignored(c, t.Space(), p.Repo) })
+		if len(l) > len(linked[t.Key]) {
+			ignoredAny[t.Space()] = true
+		}
 	}
 	snap.Repos = spaceRepos(c, linked)
 	names := allRepos(snap.Repos)
@@ -104,7 +108,7 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 	tickets = attached
 	for _, t := range tickets {
 		for _, p := range t.PRs {
-			addRepo(snap.Repos, t.Space(), strings.ToLower(p.Repo))
+			addInferred(c, snap.Repos, t.Space(), strings.ToLower(p.Repo))
 		}
 	}
 	for _, s := range c.Spaces {
@@ -112,7 +116,10 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 			continue
 		}
 		why := "none of your tickets has a pull request"
-		if len(tickets) > 0 && len(devFailed) == len(tickets) {
+		switch {
+		case ignoredAny[s.Key]:
+			why = "you ignore every repository of its pull requests"
+		case len(tickets) > 0 && len(devFailed) == len(tickets):
 			why = "Jira does not show your tickets' pull requests"
 		}
 		snap.Warnings = append(snap.Warnings, s.Key+" has no repositories yet: "+why+", so CI and reviews are off; add one in the config")
@@ -147,10 +154,59 @@ func spaceRepos(c *config.Config, linked map[ticket.Key][]jira.DevPullRequest) m
 	}
 	for key, prs := range linked {
 		for _, p := range prs {
-			addRepo(out, key.Space(), strings.ToLower(p.Repo))
+			addInferred(c, out, key.Space(), strings.ToLower(p.Repo))
 		}
 	}
 	return out
+}
+
+// addInferred adds a repository found through pull requests unless the space ignores it.
+func addInferred(c *config.Config, bySpace map[string][]string, space, repo string) {
+	if !ignored(c, space, repo) {
+		addRepo(bySpace, space, repo)
+	}
+}
+
+// ignored reports whether space ignores repo; a repository the space configures is never ignored.
+func ignored(c *config.Config, space, repo string) bool {
+	s, ok := c.Space(space)
+	return ok && s.Ignores(repo) && !slices.ContainsFunc(s.Repos, func(r config.Repo) bool { return strings.EqualFold(r.Name, repo) })
+}
+
+// DropIgnored removes what a snapshot holds from repositories the config now ignores, so a board read
+// from the cache honors an ignore made after it was fetched.
+func DropIgnored(c *config.Config, snap Snapshot) Snapshot {
+	drop := func(space string, prs []ticket.PullRequest) []ticket.PullRequest {
+		return slices.DeleteFunc(slices.Clone(prs), func(p ticket.PullRequest) bool { return ignored(c, space, p.Repo) })
+	}
+	repos := map[string][]string{}
+	for space, rs := range snap.Repos {
+		for _, r := range rs {
+			if !ignored(c, space, r) {
+				repos[space] = append(repos[space], r)
+			}
+		}
+	}
+	snap.Repos = repos
+	tickets := slices.Clone(snap.Tickets)
+	for i := range tickets {
+		tickets[i].PRs = drop(tickets[i].Space(), tickets[i].PRs)
+		subs := slices.Clone(tickets[i].Subtasks)
+		for j := range subs {
+			subs[j].PRs = drop(subs[j].Space(), subs[j].PRs)
+		}
+		tickets[i].Subtasks = subs
+	}
+	snap.Tickets = tickets
+	snap.Reviews = slices.DeleteFunc(slices.Clone(snap.Reviews), func(p ticket.PullRequest) bool {
+		for _, s := range c.Spaces {
+			if ignored(c, s.Key, p.Repo) {
+				return true
+			}
+		}
+		return false
+	})
+	return snap
 }
 
 // addRepo adds repo to space once, ignoring case, keeping the list sorted.

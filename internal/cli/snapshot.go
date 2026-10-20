@@ -25,7 +25,7 @@ func (a *App) loadSnapshot(ctx context.Context, c *config.Config, cachedOnly boo
 		if !ok {
 			return board.Snapshot{}, nil, errors.New("no cached board yet: run `tkt list` once while online")
 		}
-		return snap, nil, nil
+		return board.DropIgnored(c, snap), nil, nil
 	}
 	snap, fetchErr := a.fetchSnapshot(ctx, c)
 	if fetchErr == nil {
@@ -38,7 +38,7 @@ func (a *App) loadSnapshot(ctx context.Context, c *config.Config, cachedOnly boo
 	if err != nil || !ok {
 		return board.Snapshot{}, nil, fetchErr
 	}
-	return cached, fetchErr, nil
+	return board.DropIgnored(c, cached), fetchErr, nil
 }
 
 func (a *App) fetchSnapshot(ctx context.Context, c *config.Config) (board.Snapshot, error) {

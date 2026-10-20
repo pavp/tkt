@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/jira"
+	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/workspace"
 )
 
@@ -311,5 +315,69 @@ func TestStartFindsTheRepositoryFromOtherSprintTickets(t *testing.T) {
 	}
 	if len(*calls) != 1 || (*calls)[0].dir != web {
 		t.Errorf("launches = %+v", *calls)
+	}
+}
+
+func TestStartSkipsIgnoredRepositories(t *testing.T) {
+	cases := []struct {
+		name   string
+		devPRs map[string][]jira.DevPullRequest
+		issues []jira.Issue
+	}{
+		{"the ticket's pull requests", map[string][]jira.DevPullRequest{"107": {{Repo: "example-org/api", Number: 4}, {Repo: "example-org/web", Number: 5}}}, nil},
+		{"other sprint tickets", map[string][]jira.DevPullRequest{"101": {{Repo: "example-org/api", Number: 4}, {Repo: "example-org/web", Number: 9}}}, []jira.Issue{{ID: "101", Key: "DEMO-1"}, {ID: "107", Key: "DEMO-7"}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, calls := workHarness(t)
+			cfg := noRepoConfig + "ignored = [\"Example-Org/API\"]\n"
+			if err := os.WriteFile(h.app.configPath, []byte(cfg), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			web := h.clone(t, "web")
+			h.clone(t, "api")
+			h.jira.details["DEMO-7"] = jira.Issue{ID: "107", Key: "DEMO-7", Summary: "Export users", Status: "To Do", StatusCategory: "new"}
+			h.jira.issues = c.issues
+			h.jira.devPRs = c.devPRs
+			if code := h.exec("start", "DEMO-7"); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.errOut)
+			}
+			if len(*calls) != 1 || (*calls)[0].dir != web {
+				t.Errorf("an ignored repository was used: launches %+v", *calls)
+			}
+		})
+	}
+}
+
+func TestCachedBoardDropsIgnoredRepositories(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Spaces[0].Ignored = []string{"example-org/api"}
+	snap := board.Snapshot{
+		FetchedAt: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC),
+		Repos:     map[string][]string{c.Spaces[0].Key: {"example-org/api", "example-org/web"}},
+		Tickets: []ticket.Ticket{{Key: ticket.Key(c.Spaces[0].Key + "-1"),
+			PRs:      []ticket.PullRequest{{Repo: "example-org/api", Number: 4}, {Repo: "example-org/web", Number: 5}},
+			Subtasks: []ticket.Ticket{{Key: ticket.Key(c.Spaces[0].Key + "-2"), PRs: []ticket.PullRequest{{Repo: "Example-Org/API", Number: 6}}}}}},
+		Reviews: []ticket.PullRequest{{Repo: "example-org/api", Number: 7}, {Repo: "example-org/web", Number: 8}},
+	}
+	if err := h.app.cache().Save(snap); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := h.app.loadSnapshot(context.Background(), c, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := got.Repos[c.Spaces[0].Key]; len(r) != 1 || r[0] != "example-org/web" {
+		t.Errorf("repos = %v", got.Repos)
+	}
+	if prs := got.Tickets[0].PRs; len(prs) != 1 || prs[0].Number != 5 || len(got.Tickets[0].Subtasks[0].PRs) != 0 {
+		t.Errorf("ticket pull requests = %+v / %+v", prs, got.Tickets[0].Subtasks[0].PRs)
+	}
+	if len(got.Reviews) != 1 || got.Reviews[0].Number != 8 {
+		t.Errorf("reviews = %+v", got.Reviews)
 	}
 }
