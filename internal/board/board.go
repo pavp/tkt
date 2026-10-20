@@ -44,6 +44,7 @@ const panelTTL = 10 * time.Minute
 
 type JiraSource interface {
 	Search(ctx context.Context, jql string, fields []string) ([]jira.Issue, error)
+	FieldID(ctx context.Context, name string) (string, error)
 	BrowseURL(key string) string
 	DevPullRequests(ctx context.Context, issueID string) ([]jira.DevPullRequest, error)
 }
@@ -67,7 +68,19 @@ func FetchSince(ctx context.Context, c *config.Config, js JiraSource, gh GitHubS
 	if len(c.Spaces) == 0 {
 		return snap, errors.New("no Jira spaces configured: add [[spaces]] to the config or run `tkt init`")
 	}
-	issues, err := js.Search(ctx, jira.MySprintJQL(c.SpaceKeys()), jira.ListFields)
+	fields, labelID := jira.ListFields, ""
+	if name := c.Jira.LabelField; name != "" {
+		id, err := js.FieldID(ctx, name)
+		switch {
+		case err == nil:
+			labelID, fields = id, append(slices.Clone(fields), id)
+		case errors.Is(err, jira.ErrFieldNotFound):
+			snap.Warnings = append(snap.Warnings, fmt.Sprintf("Jira has no field %q: check label_field in the config", name))
+		default:
+			snap.Warnings = append(snap.Warnings, "ticket labels unavailable: "+err.Error())
+		}
+	}
+	issues, err := js.Search(ctx, jira.MySprintJQL(c.SpaceKeys()), fields)
 	if err != nil {
 		return snap, err
 	}
@@ -76,7 +89,11 @@ func FetchSince(ctx context.Context, c *config.Config, js JiraSource, gh GitHubS
 	updated := make(map[ticket.Key]time.Time, len(issues))
 	seenSprint := map[string]bool{}
 	for _, is := range issues {
-		tickets = append(tickets, ToTicket(c, is, js.BrowseURL(is.Key)))
+		t := ToTicket(c, is, js.BrowseURL(is.Key))
+		if labelID != "" {
+			t.Label = jira.FieldText(is.Fields[labelID])
+		}
+		tickets = append(tickets, t)
 		ids[ticket.Key(is.Key)] = is.ID
 		updated[ticket.Key(is.Key)] = is.Updated
 		for _, sp := range is.Sprints {

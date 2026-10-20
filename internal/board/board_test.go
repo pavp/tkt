@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -24,11 +25,23 @@ type stubJira struct {
 	jql    string
 	// linked maps issue ids to their development-panel PRs; nil means the panel is unavailable.
 	linked map[string][]jira.DevPullRequest
+	// fieldIDs answers FieldID; fields records what Search asked for.
+	fieldIDs   map[string]string
+	fields     []string
+	fieldCalls int
 }
 
-func (s *stubJira) Search(_ context.Context, jql string, _ []string) ([]jira.Issue, error) {
-	s.jql = jql
+func (s *stubJira) Search(_ context.Context, jql string, fields []string) ([]jira.Issue, error) {
+	s.jql, s.fields = jql, fields
 	return s.issues, s.err
+}
+
+func (s *stubJira) FieldID(_ context.Context, name string) (string, error) {
+	s.fieldCalls++
+	if id, ok := s.fieldIDs[name]; ok {
+		return id, nil
+	}
+	return "", jira.ErrFieldNotFound
 }
 func (s *stubJira) BrowseURL(k string) string { return "https://example.atlassian.net/browse/" + k }
 func (s *stubJira) DevPullRequests(_ context.Context, id string) ([]jira.DevPullRequest, error) {
@@ -186,6 +199,46 @@ func TestToTicketPutsBlockedTicketsInToDo(t *testing.T) {
 		if got.Category != tt.want {
 			t.Errorf("%s %q in %q, want %q", tt.key, tt.status, got.Category, tt.want)
 		}
+	}
+}
+
+func TestFetchLabelsTicketsWithTheConfiguredField(t *testing.T) {
+	issues := []jira.Issue{
+		{Key: "DEMO-1", StatusCategory: "new", Fields: map[string]json.RawMessage{"customfield_10136": json.RawMessage(`{"value":"User Access Center"}`)}},
+		{Key: "DEMO-2", StatusCategory: "new", Fields: map[string]json.RawMessage{"customfield_10136": json.RawMessage(`null`)}},
+	}
+	tests := []struct {
+		name, field string
+		wantLabel   string
+		wantWarning string
+		wantField   bool
+	}{
+		{"configured", "Product", "User Access Center", "", true},
+		{"missing in Jira", "Team", "", `Jira has no field "Team": check label_field in the config`, false},
+		{"not configured", "", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			js := &stubJira{issues: issues, fieldIDs: map[string]string{"Product": "customfield_10136"}}
+			c := cfg()
+			c.Jira.LabelField = tt.field
+			snap, err := Fetch(context.Background(), c, js, &stubGitHub{}, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snap.Tickets[0].Label != tt.wantLabel || snap.Tickets[1].Label != "" {
+				t.Errorf("labels = %q, %q", snap.Tickets[0].Label, snap.Tickets[1].Label)
+			}
+			if got := slices.Contains(js.fields, "customfield_10136"); got != tt.wantField {
+				t.Errorf("fields asked = %v", js.fields)
+			}
+			if tt.wantWarning != "" && !slices.Contains(snap.Warnings, tt.wantWarning) {
+				t.Errorf("warnings = %v", snap.Warnings)
+			}
+			if tt.field == "" && js.fieldCalls != 0 {
+				t.Errorf("looked up a field nobody configured")
+			}
+		})
 	}
 }
 

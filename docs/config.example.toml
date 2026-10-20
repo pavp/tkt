@@ -11,6 +11,8 @@ reviews = "direct"
 [jira]
 site = "example.atlassian.net"
 email = "you@example.com"
+# Optional: a Jira field whose value the board shows for the selected ticket, such as its product.
+# label_field = "Product"
 
 # Optional: the gh account that reads each GitHub organization (`gh auth status` lists them).
 # Without it, tkt detects the logged-in account that belongs to the organization.
