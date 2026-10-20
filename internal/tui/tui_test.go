@@ -857,6 +857,69 @@ func TestRepositoryModalWorksWithTheMouse(t *testing.T) {
 	}
 }
 
+func TestStartFromTheDetailViewShowsTheModal(t *testing.T) {
+	r := &recorder{choices: twoWorktrees()}
+	m := press(loaded(r), "l", "i")
+	m, _ = m.Update(DetailMsg{Key: "DEMO-1", Text: "DEMO-1 details"})
+	m = startFromMenu(press(m, "enter"))
+	if v := stripANSI(m.View()); !strings.Contains(v, "Which worktree?") {
+		t.Fatalf("modal hidden behind the detail view:\n%s", v)
+	}
+	v := m.View()
+	y := lineIndex(v, "feature/DEMO-1-b")
+	click(m, strings.Index(strings.Split(stripANSI(v), "\n")[y], "feature/DEMO-1-b")+2, y)
+	if r.last() != "start DEMO-1 worktree=/src/web-DEMO-1-b" {
+		t.Errorf("click on the modal over the detail view: calls = %v", r.calls)
+	}
+}
+
+func TestModalButtonsWorkWithTheMouse(t *testing.T) {
+	button := func(m tea.Model, label string) (int, int) {
+		v := stripANSI(m.View())
+		y := lineIndex(v, "Cancel")
+		return strings.Index(strings.Split(v, "\n")[y], label) + 1, y
+	}
+	r := &recorder{choices: twoWorktrees()}
+	m := startFromMenu(press(loaded(r), "l", "enter"))
+	x, y := button(m, "Open")
+	if click(m, x, y); r.last() != "start DEMO-1 worktree=/src/web-DEMO-1-a" {
+		t.Errorf("Open button: calls = %v", r.calls)
+	}
+	r = &recorder{choices: twoRepos()}
+	m = startFromMenu(press(loaded(r), "l", "enter"))
+	x, y = button(m, "Cancel")
+	if v := stripANSI(click(m, x, y).View()); strings.Contains(v, "Which repositories?") || strings.HasPrefix(r.last(), "start") {
+		t.Errorf("Cancel button: calls %v\n%s", r.calls, v)
+	}
+}
+
+func TestWorktreeRowsNameTheirRepositoryWhenTheyDiffer(t *testing.T) {
+	r := &recorder{choices: StartChoices{Worktrees: []WorktreeChoice{
+		{Repo: "example-org/web", Branch: "feature/DEMO-1", Path: "/src/web-DEMO-1"},
+		{Repo: "example-org/api", Branch: "feature/DEMO-1", Path: "/src/api-DEMO-1"},
+	}}}
+	v := stripANSI(startFromMenu(press(loaded(r), "l", "enter")).View())
+	if !strings.Contains(v, "web · feature/DEMO-1") || !strings.Contains(v, "api · feature/DEMO-1") {
+		t.Errorf("rows do not tell the repositories apart:\n%s", v)
+	}
+}
+
+func TestModalClicksInAShortPane(t *testing.T) {
+	r := &recorder{choices: twoWorktrees()}
+	m := tea.Model(New(snapshot(), true, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 14})
+	m = startFromMenu(press(m, "enter"))
+	v := m.View()
+	y := lineIndex(v, "feature/DEMO-1-b")
+	if y < 0 {
+		t.Skip("row not visible in so short a pane")
+	}
+	click(m, strings.Index(strings.Split(stripANSI(v), "\n")[y], "feature/DEMO-1-b")+2, y)
+	if r.last() != "start DEMO-1 worktree=/src/web-DEMO-1-b" {
+		t.Errorf("click in a short pane: calls = %v", r.calls)
+	}
+}
+
 func TestStartWithNothingToAskRunsAtOnce(t *testing.T) {
 	r := &recorder{}
 	startFromMenu(press(loaded(r), "l", "enter"))

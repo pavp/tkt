@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,7 +19,7 @@ type StartChoices struct {
 
 // WorktreeChoice is one worktree of the ticket; Agent is the status of the agent working in it, if any.
 type WorktreeChoice struct {
-	Branch, Path, Agent string
+	Repo, Branch, Path, Agent string
 }
 
 // RepoChoice is one repository of the ticket's space; Checked ones are offered preselected.
@@ -56,12 +57,21 @@ type pickerRow struct {
 
 func worktreePicker(key ticket.Key, ws []WorktreeChoice) *picker {
 	p := &picker{key: key, title: "Open " + string(key), question: "Which worktree?"}
+	repos := map[string]bool{}
 	for _, w := range ws {
+		repos[w.Repo] = true
+	}
+	for _, w := range ws {
+		label := w.Branch
+		if len(repos) > 1 {
+			_, name, _ := strings.Cut(w.Repo, "/")
+			label = cmp.Or(name, w.Repo) + " · " + w.Branch
+		}
 		hint := "no agent"
 		if w.Agent != "" {
 			hint = "● " + w.Agent
 		}
-		p.rows = append(p.rows, pickerRow{label: w.Branch, hint: hint, value: w.Path})
+		p.rows = append(p.rows, pickerRow{label: label, hint: hint, value: w.Path})
 	}
 	return p
 }
@@ -204,7 +214,13 @@ func (m Model) pickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		top := lineCount(m.header())
 		height := m.height - top - lineCount(m.preview()+"\n"+m.footer())
 		left := (m.width - lipgloss.Width(box)) / 2
-		y := msg.Y - (top + (height-lipgloss.Height(box))/2)
+		// View centers the box in at least its own height and, in a short pane, shows only the window of
+		// lines around the selected row, so clicks map through the same window.
+		bodyTop := (max(height, lipgloss.Height(box)) - lipgloss.Height(box)) / 2
+		if body := strings.Split(lipgloss.Place(m.width, max(height, lipgloss.Height(box)), lipgloss.Center, lipgloss.Center, box), "\n"); height > 0 && len(body) > height {
+			bodyTop -= windowStart(body, height)
+		}
+		y := msg.Y - (top + bodyTop)
 		x := msg.X - left
 		if x < 0 || x >= lipgloss.Width(box) || y < 0 || y >= lipgloss.Height(box) {
 			m.picker = nil

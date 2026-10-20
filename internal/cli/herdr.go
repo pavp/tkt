@@ -81,6 +81,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 	start.Flags().StringArrayVar(&repoFlags, "repo", nil, "repository to start in; repeat for several")
 	start.Flags().BoolVar(&clone, "clone", false, "clone missing repositories without asking")
 	start.Flags().StringVar(&worktree, "worktree", "", "open the ticket's worktree at this path instead of asking which one")
+	start.MarkFlagsMutuallyExclusive("worktree", "repo")
 
 	var keysFlag, noKeys, sidebarFlag, noSidebar bool
 	installCmd := &cobra.Command{

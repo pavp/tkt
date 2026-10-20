@@ -435,7 +435,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.settings != nil {
 		return m.settingsMouse(msg)
 	}
-	if m.detail != nil && m.menu == nil {
+	if m.detail != nil && m.menu == nil && m.picker == nil {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
 			m.detail.offset = max(0, m.detail.offset-3)
@@ -810,7 +810,7 @@ func (m Model) board() string {
 	if m.settings != nil {
 		return top + "\n" + m.detailBack() + "\n\n" + m.settingsBody() + "\n\n" + m.settingsFooter()
 	}
-	if m.detail != nil && m.menu == nil {
+	if m.detail != nil && m.menu == nil && m.picker == nil {
 		body := m.detailBody()
 		bottom := m.detailFooter()
 		lines := strings.Split(body, "\n")

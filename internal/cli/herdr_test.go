@@ -289,6 +289,12 @@ func TestStartOpensTheWorktreeAsked(t *testing.T) {
 	if code := h.exec("herdr", "start", "DEMO-1", "--worktree", "/nope"); code == 0 || !strings.Contains(h.errOut.String(), "DEMO-1 has no worktree at /nope") {
 		t.Errorf("unknown worktree: exit %d, %s", code, h.errOut)
 	}
+	for _, args := range [][]string{{"start"}, {"herdr", "start"}} {
+		args = append(args, "DEMO-1", "--worktree", "/src/web-DEMO-1-a", "--repo", "web")
+		if code := h.exec(args...); code == 0 || !strings.Contains(h.errOut.String(), "worktree") || !strings.Contains(h.errOut.String(), "repo") {
+			t.Errorf("%v: exit %d, %s", args, code, h.errOut)
+		}
+	}
 }
 
 func TestStartChoices(t *testing.T) {
@@ -303,9 +309,9 @@ func TestStartChoices(t *testing.T) {
 		{"one worktree", "worktree /src/web-DEMO-1-a\nHEAD a\nbranch refs/heads/feature/DEMO-1-a\n", `[]`, nil, tui.StartChoices{}},
 		{"the agent tells", twoWorktrees, `[` + agent("w6", "/src/web-DEMO-1-b") + `]`, nil, tui.StartChoices{}},
 		{"no agent tells", twoWorktrees, `[]`, nil, tui.StartChoices{Worktrees: []tui.WorktreeChoice{
-			{Branch: "feature/DEMO-1-a", Path: "/src/web-DEMO-1-a"}, {Branch: "feature/DEMO-1-b", Path: "/src/web-DEMO-1-b"}}}},
+			{Repo: "example-org/web", Branch: "feature/DEMO-1-a", Path: "/src/web-DEMO-1-a"}, {Repo: "example-org/web", Branch: "feature/DEMO-1-b", Path: "/src/web-DEMO-1-b"}}}},
 		{"both have agents", twoWorktrees, `[` + agent("w5", "/src/web-DEMO-1-a") + `,` + agent("w6", "/src/web-DEMO-1-b") + `]`, nil, tui.StartChoices{Worktrees: []tui.WorktreeChoice{
-			{Branch: "feature/DEMO-1-a", Path: "/src/web-DEMO-1-a", Agent: "working"}, {Branch: "feature/DEMO-1-b", Path: "/src/web-DEMO-1-b", Agent: "working"}}}},
+			{Repo: "example-org/web", Branch: "feature/DEMO-1-a", Path: "/src/web-DEMO-1-a", Agent: "working"}, {Repo: "example-org/web", Branch: "feature/DEMO-1-b", Path: "/src/web-DEMO-1-b", Agent: "working"}}}},
 		{"repositories, last used checked", "", `[]`, []string{"example-org/api"}, tui.StartChoices{Repos: []tui.RepoChoice{
 			{Name: "example-org/web"}, {Name: "example-org/api", LastUsed: true, Checked: true}}}},
 		{"repositories, first checked when none was used", "", `[]`, nil, tui.StartChoices{Repos: []tui.RepoChoice{

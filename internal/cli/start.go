@@ -56,6 +56,7 @@ func newStartCmd(a *App) *cobra.Command {
 	cmd.Flags().StringArrayVar(&repoFlags, "repo", nil, "repository to start in (owner/name or name); repeat for several")
 	cmd.Flags().BoolVar(&clone, "clone", false, "clone missing repositories without asking")
 	cmd.Flags().StringVar(&worktree, "worktree", "", "open the ticket's worktree at this path instead of asking which one")
+	cmd.MarkFlagsMutuallyExclusive("worktree", "repo")
 	return cmd
 }
 
@@ -230,7 +231,7 @@ func (a *App) startChoices(ctx context.Context, c *config.Config, key ticket.Key
 		if w.Path == "" {
 			continue
 		}
-		choice := tui.WorktreeChoice{Branch: w.Branch, Path: w.Path}
+		choice := tui.WorktreeChoice{Repo: w.Repo, Branch: w.Branch, Path: w.Path}
 		if h != nil {
 			if ag, ok := agentAt(ctx, h, w.Path); ok {
 				choice.Agent = cmp.Or(ag.Status, "unknown")
