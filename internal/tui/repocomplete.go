@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 
@@ -44,7 +43,8 @@ func (m Model) completeRepo() (tea.Model, tea.Cmd) {
 	case 1:
 		f.values[fieldRepo], f.hint = owners[0], ""
 	default:
-		f.cands, f.cand = owners, 0
+		f.open(owners, owners, "")
+		f.cand = 0
 		f.values[fieldRepo] = owners[0]
 	}
 	return m, nil
@@ -102,15 +102,6 @@ func (f *settingsForm) completeRepoFrom(msg ReposListedMsg) bool {
 	if p := commonPrefixFold(matches); len([]rune(p)) > len([]rune(v)) {
 		f.values[fieldRepo] = p
 	}
-	f.cands, f.cand = matches, -1
-	short := make([]string, 0, maxShownMatches)
-	for _, n := range matches[:min(len(matches), maxShownMatches)] {
-		short = append(short, n[strings.Index(n, "/")+1:])
-	}
-	f.hint = strings.Join(short, " · ")
-	if more := len(matches) - len(short); more > 0 {
-		f.hint += fmt.Sprintf(" · +%d more", more)
-	}
-	f.hint += " · tab cycles"
+	f.open(msg.Names, matches, owner+"/")
 	return false
 }

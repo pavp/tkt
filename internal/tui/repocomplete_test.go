@@ -33,7 +33,7 @@ func TestTabCompletesRepositoriesFromGitHub(t *testing.T) {
 		{"an owner prefix", "exa", 1, "example-org/", ""},
 		{"a single repository", "example-org/a", 1, "example-org/api", ""},
 		{"ignoring case, with the repository's spelling", "example-org/do", 1, "example-org/Docs", ""},
-		{"common prefix of several", "example-org/w", 1, "example-org/web", "web · web-admin · tab cycles"},
+		{"common prefix of several", "example-org/w", 1, "example-org/web", "web-admin"},
 		{"next tab cycles", "example-org/w", 2, "example-org/web", ""},
 		{"and on", "example-org/w", 3, "example-org/web-admin", ""},
 		{"no match says so", "example-org/zz", 1, "example-org/zz", "no repository of example-org starts with zz"},
