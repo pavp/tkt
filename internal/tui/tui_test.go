@@ -1052,6 +1052,58 @@ func TestListMarksBlockedTicketsThatNeedYou(t *testing.T) {
 	}
 }
 
+func TestNeedsYouIsAListThatSaysWhy(t *testing.T) {
+	snap := snapshot()
+	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-4", Summary: "Fix login redirect", Status: "In Review", Category: ticket.InReview,
+		PRs: []ticket.PullRequest{
+			{Number: 815, State: ticket.PROpen, Checks: ticket.ChecksPass, Review: ticket.ReviewChangesRequested},
+			{Number: 816, State: ticket.PROpen, Checks: ticket.ChecksPass},
+		}})
+	for _, view := range []string{ViewColumns, ViewList} {
+		m := tea.Model(New(snap, false, &recorder{}, view))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+		m = press(m, "2")
+		v := stripANSI(m.View())
+		if !strings.Contains(v, "KEY") || !strings.Contains(v, "Needs you  2") || strings.Contains(v, "In Progress  ") {
+			t.Fatalf("%s: needs you is not a list:\n%s", view, v)
+		}
+		lines := strings.Split(v, "\n")
+		ci, changes := lines[lineIndex(v, "DEMO-1")], lines[lineIndex(v, "DEMO-4")]
+		if !strings.Contains(ci, "CI failing") || !strings.Contains(ci, "#812 ✕") || strings.Contains(ci, "In Progress") {
+			t.Errorf("%s: CI row = %q", view, ci)
+		}
+		if !strings.Contains(changes, "Changes requested") || !strings.Contains(changes, "#815") || strings.Contains(changes, "✓") || strings.Contains(changes, "#816") {
+			t.Errorf("%s: changes row = %q", view, changes)
+		}
+		if strings.Contains(v, "to reviews") || strings.Contains(v, "open review") {
+			t.Errorf("%s: footer offers reviews in needs you:\n%s", view, v)
+		}
+	}
+}
+
+func TestReasonsText(t *testing.T) {
+	tests := []struct {
+		rs   []ticket.Reason
+		want string
+	}{
+		{[]ticket.Reason{ticket.ReasonCIFailing}, "CI failing"},
+		{[]ticket.Reason{ticket.ReasonChangesRequested}, "Changes requested"},
+		{[]ticket.Reason{ticket.ReasonCIFailing, ticket.ReasonChangesRequested}, "CI + changes"},
+	}
+	for _, tt := range tests {
+		if got := reasonsText(tt.rs); got != tt.want || len(got) > statusWidth {
+			t.Errorf("reasonsText(%v) = %q, want %q within %d cells", tt.rs, got, tt.want, statusWidth)
+		}
+	}
+}
+
+func TestNeedsYouInColumnsExplainsTheList(t *testing.T) {
+	m := press(loaded(&recorder{}), "2", "v", "v")
+	if v := stripANSI(m.View()); !strings.Contains(v, "the needs-you filter always shows a list") {
+		t.Errorf("no explanation:\n%s", v)
+	}
+}
+
 func TestEveryRowSharesOneLeftMargin(t *testing.T) {
 	for _, view := range []string{ViewColumns, ViewList} {
 		m := tea.Model(New(snapshot(), true, &recorder{}, view))

@@ -177,9 +177,10 @@ func (m Model) WithClock(now func() time.Time) Model {
 	return m
 }
 
-// effectiveView falls back to the list when columns would not fit or when showing reviews.
+// effectiveView falls back to the list when columns would not fit or when showing reviews or what needs
+// the user, short lists that columns would mostly leave empty.
 func (m Model) effectiveView() string {
-	if m.filter == FilterReviews || m.width < narrowWidth {
+	if m.filter == FilterReviews || m.filter == FilterNeeds || m.width < narrowWidth {
 		return ViewList
 	}
 	return m.view
@@ -191,6 +192,8 @@ func (m *Model) explainList() {
 	case m.view != ViewColumns || m.effectiveView() == ViewColumns:
 	case m.filter == FilterReviews:
 		m.status = "the reviews filter always shows a list · press 1 for all tickets"
+	case m.filter == FilterNeeds:
+		m.status = "the needs-you filter always shows a list · press 1 for all tickets"
 	default:
 		m.status = fmt.Sprintf("columns need a pane at least %d columns wide (this one has %d) · showing the list", narrowWidth, m.width)
 	}
@@ -1276,6 +1279,32 @@ func prRef(pr ticket.PullRequest) string {
 	return fmt.Sprintf("#%d %s", pr.Number, checkMark(pr.Checks))
 }
 
+// reasonsText words why a ticket needs the user within the list's STATUS column.
+func reasonsText(rs []ticket.Reason) string {
+	if len(rs) > 1 {
+		return "CI + changes"
+	}
+	if len(rs) == 1 {
+		return string(rs[0])
+	}
+	return ""
+}
+
+// attentionRefs lists the open PRs that need the user, with the CI mark only when CI is what fails.
+func attentionRefs(prs []ticket.PullRequest) string {
+	var parts []string
+	for _, pr := range prs {
+		switch {
+		case pr.State != ticket.PROpen:
+		case pr.Checks == ticket.ChecksFail:
+			parts = append(parts, prRef(pr))
+		case pr.Review == ticket.ReviewChangesRequested:
+			parts = append(parts, fmt.Sprintf("#%d", pr.Number))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
 // prRefs lists open PRs; finished ones show by number when there is one, as a count when there are several.
 func prRefs(prs []ticket.PullRequest) string {
 	if len(prs) == 0 {
@@ -1352,8 +1381,11 @@ func (m Model) listView() string {
 		return dim.Render("  nothing matches this filter")
 	}
 	prText := func(it item) string {
-		if it.pr != nil {
+		switch {
+		case it.pr != nil:
 			return checkMark(it.pr.Checks)
+		case m.filter == FilterNeeds:
+			return attentionRefs(it.ticket.PRs)
 		}
 		return prRefs(it.ticket.PRs)
 	}
@@ -1450,7 +1482,11 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 	}
 	for i, it := range items {
 		if i == 0 && it.ticket != nil {
-			section("My tickets", nTickets)
+			title := "My tickets"
+			if m.filter == FilterNeeds {
+				title = "Needs you"
+			}
+			section(title, nTickets)
 		}
 		if it.pr != nil && (i == 0 || items[i-1].pr == nil || items[i-1].pr.Repo != it.pr.Repo) {
 			n := 0
@@ -1464,6 +1500,12 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		var line string
 		if it.pr != nil {
 			line = row(string(it.key), "Review requested", pad("", agentW), prText(it), it.pr.Title)
+		} else if m.filter == FilterNeeds {
+			status := reasonsText(it.ticket.Attention())
+			if i != m.row {
+				status = warn.Render(status)
+			}
+			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), it.ticket.Summary)
 		} else {
 			line = row(string(it.key), it.ticket.Status, agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), it.ticket.Summary)
 		}
@@ -1555,8 +1597,12 @@ func (m Model) footer() string {
 	if m.effectiveView() == ViewColumns {
 		move = "←↑↓→ wasd"
 	}
+	moveHint, clickHint := "move · ↑ to reviews", "select · open review"
+	if m.filter == FilterNeeds {
+		moveHint, clickHint = "move", "select"
+	}
 	legend := [][2]string{
-		{move, "move · ↑ to reviews"}, {"click", "select · open review"}, {"double-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
+		{move, moveHint}, {"click", clickHint}, {"double-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
 		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-3", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
 	}
 	if m.filter == FilterReviews && m.hiddenBots() > 0 {
