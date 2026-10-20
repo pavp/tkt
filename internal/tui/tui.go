@@ -41,6 +41,9 @@ type Actions interface {
 	PickFolder(start string) tea.Cmd
 	// ListDirs lists the folders inside path ("~/dev/"); they arrive as a DirsListedMsg.
 	ListDirs(path string) tea.Cmd
+	// NativePicker reports whether PickFolder can show a folder chooser the user will see; without one,
+	// ctrl+o browses folders inside the terminal.
+	NativePicker() bool
 }
 
 type ClonesFoundMsg struct {

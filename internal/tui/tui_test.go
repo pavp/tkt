@@ -28,15 +28,35 @@ type recorder struct {
 	origins map[string]string
 	picked  string
 	starts  []string
-	// dirs answers ListDirs: the folders inside each listed path.
-	dirs   map[string][]string
-	listed []string
+	// dirs answers ListDirs: the folders inside each listed path, keyed by the path as written ("~/src/"
+	// or "/home/"); a missing key fails the listing. Home is /home/dev.
+	dirs     map[string][]string
+	listed   []string
+	noNative bool
 }
 
 func (r *recorder) ListDirs(path string) tea.Cmd {
 	r.listed = append(r.listed, path)
-	return func() tea.Msg { return DirsListedMsg{Path: path, Names: r.dirs[path]} }
+	return func() tea.Msg {
+		abs := path
+		if strings.HasPrefix(path, "~") {
+			abs = "/home/dev" + strings.TrimPrefix(path, "~")
+		}
+		dir := abs
+		if strings.HasPrefix(abs, "/home/dev/") {
+			dir = "~" + strings.TrimPrefix(abs, "/home/dev")
+		}
+		names, ok := r.dirs[path]
+		if !ok && r.dirs != nil {
+			if names, ok = r.dirs[dir]; !ok {
+				return DirsListedMsg{Path: path, Dir: dir, Abs: abs, Err: errors.New("no such folder")}
+			}
+		}
+		return DirsListedMsg{Path: path, Dir: dir, Abs: abs, Names: names}
+	}
 }
+
+func (r *recorder) NativePicker() bool { return !r.noNative }
 
 func (r *recorder) FindClones(repo string) tea.Cmd {
 	return func() tea.Msg { return ClonesFoundMsg{Repo: repo, Paths: r.clones[repo]} }

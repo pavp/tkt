@@ -138,10 +138,20 @@ func (b *boardActions) PickFolder(start string) tea.Cmd {
 
 func (b *boardActions) ListDirs(path string) tea.Cmd {
 	return func() tea.Msg {
-		names, err := listDirs(b.a.Env.ExpandHome(path))
-		return tui.DirsListedMsg{Path: path, Names: names, Err: err}
+		abs := filepath.Clean(b.a.Env.ExpandHome(path))
+		names, err := listDirs(abs)
+		return tui.DirsListedMsg{Path: path, Dir: withSlash(b.a.tildePath(abs)), Abs: withSlash(abs), Names: names, Err: err}
 	}
 }
+
+func withSlash(p string) string {
+	if strings.HasSuffix(p, "/") {
+		return p
+	}
+	return p + "/"
+}
+
+func (b *boardActions) NativePicker() bool { return b.a.nativePicker() }
 
 // listDirs returns the folders inside dir, symlinks to folders included, sorted ignoring case.
 func listDirs(dir string) ([]string, error) {

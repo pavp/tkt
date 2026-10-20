@@ -66,6 +66,7 @@ type settingsForm struct {
 	cands   []string
 	cand    int
 	pending string
+	browser *dirBrowser
 }
 
 const (
@@ -266,7 +267,9 @@ func (m Model) settingsLookup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			f.hint = "repository read from the folder's origin"
 		}
 	case DirsListedMsg:
-		f.completeFrom(msg)
+		if f.browser == nil || !f.browser.listed(msg) {
+			f.completeFrom(msg)
+		}
 	case FolderPickedMsg:
 		if msg.Err != nil {
 			m.settings.err = msg.Err.Error()
@@ -297,6 +300,9 @@ func repoForm(title string, r config.Repo, set func(c *config.Config, r config.R
 
 func (m Model) settingsFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	f := m.settings.form
+	if f.browser != nil {
+		return m.browserKey(k)
+	}
 	switch k.Type {
 	case tea.KeyEsc:
 		m.settings.form = nil
@@ -327,6 +333,9 @@ func (m Model) settingsFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.actions.RepoAt(strings.TrimSpace(f.values[fieldPath]))
 		}
 	case tea.KeyCtrlO:
+		if !m.actions.NativePicker() {
+			return m.openBrowser()
+		}
 		start := f.values[f.pathField()]
 		if start == "" && len(m.settings.cfg.RepoRoots) > 0 {
 			start = m.settings.cfg.RepoRoots[0]
@@ -504,6 +513,9 @@ func (m Model) settingsModal() string {
 		return menuBox.Render(s.confirm.question + "\n\n" + dim.Render("y remove · any other key keeps it"))
 	}
 	f := s.form
+	if f.browser != nil {
+		return f.browser.view()
+	}
 	lines := []string{bold.Render(f.title), ""}
 	for i, l := range f.labels {
 		v := f.values[i]
