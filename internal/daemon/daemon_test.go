@@ -60,7 +60,7 @@ func get(t *testing.T, h http.Handler, method, path, token string) (int, map[str
 func TestHealthNeedsNoTokenAndSaysLittle(t *testing.T) {
 	s := newServer(t, &fakeSync{}, nil)
 	code, body := get(t, s.Handler(), http.MethodGet, "/health", "")
-	if code != http.StatusOK || body["ok"] != true || body["version"] != "1.2.3" || body["protocol"] != float64(Protocol) || len(body) != 3 {
+	if code != http.StatusOK || body["ok"] != true || body["version"] != "1.2.3" || body["protocol"] != float64(Protocol) || body["pid"] != float64(os.Getpid()) || len(body) != 4 {
 		t.Errorf("health = %d %v", code, body)
 	}
 }
@@ -195,5 +195,47 @@ func waitFor(t *testing.T, ok func() bool) {
 			t.Fatal("timed out")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestHealthNamesTheProcess(t *testing.T) {
+	s := newServer(t, &fakeSync{}, nil)
+	ln, err := Listen(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = s.Serve(ctx, ln) }()
+	port := ln.Addr().(*net.TCPAddr).Port
+	waitFor(t, func() bool { _, ok := Healthy(context.Background(), port); return ok })
+	if pid, _ := Healthy(context.Background(), port); pid != os.Getpid() {
+		t.Errorf("health pid = %d, want %d", pid, os.Getpid())
+	}
+}
+
+func TestStoppingKeepsAnotherDaemonsRecord(t *testing.T) {
+	f := &fakeSync{}
+	dir := t.TempDir()
+	s, err := New(Options{Dir: dir, Version: "1.2.3", Sync: f.sync, Interval: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := Listen(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(ctx, ln) }()
+	waitFor(t, func() bool { _, err := ReadInfo(dir); return err == nil })
+	newer := []byte(`{"port":1,"pid":424242,"version":"newer"}`)
+	if err := os.WriteFile(filepath.Join(dir, "daemon.json"), newer, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	<-done
+	if b, err := os.ReadFile(filepath.Join(dir, "daemon.json")); err != nil || string(b) != string(newer) {
+		t.Errorf("a stopping daemon removed another daemon's record: %q %v", b, err)
 	}
 }

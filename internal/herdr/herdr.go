@@ -250,3 +250,67 @@ func (c *Client) ReloadConfig(ctx context.Context) error {
 	}
 	return nil
 }
+
+// Subscription names a Herdr event to follow; agent status changes are followed per pane.
+type Subscription struct {
+	Type   string `json:"type"`
+	PaneID string `json:"pane_id,omitempty"`
+}
+
+// Event is one event Herdr streams after events.subscribe.
+type Event struct {
+	Kind string          `json:"event"`
+	Data json.RawMessage `json:"data"`
+}
+
+// Watch subscribes to subs and calls on for each event until ctx ends, returning ctx's error, or Herdr
+// closes the connection.
+func (c *Client) Watch(ctx context.Context, subs []Subscription, on func(Event)) error {
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "unix", c.socket)
+	if err != nil {
+		return ErrNotRunning
+	}
+	defer conn.Close()
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	defer stop()
+	req, err := json.Marshal(map[string]any{"id": "tkt-watch", "method": "events.subscribe", "params": map[string]any{"subscriptions": subs}})
+	if err != nil {
+		return err
+	}
+	if _, err := conn.Write(append(req, '\n')); err != nil {
+		return fmt.Errorf("herdr events.subscribe: %w", err)
+	}
+	r := bufio.NewReader(conn)
+	line, err := r.ReadBytes('\n')
+	if err != nil {
+		return orCtx(ctx, fmt.Errorf("herdr events.subscribe: %w", err))
+	}
+	var ack struct {
+		Error *RPCError `json:"error"`
+	}
+	if err := json.Unmarshal(line, &ack); err != nil {
+		return fmt.Errorf("herdr events.subscribe: %w", err)
+	}
+	if ack.Error != nil {
+		return ack.Error
+	}
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			return orCtx(ctx, fmt.Errorf("herdr events: %w", err))
+		}
+		var e Event
+		if json.Unmarshal(line, &e) == nil && e.Kind != "" {
+			on(e)
+		}
+	}
+}
+
+// orCtx prefers ctx's error, since closing the connection on cancel surfaces as a read error.
+func orCtx(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}

@@ -37,6 +37,7 @@ type HerdrAPI interface {
 	SplitPane(ctx context.Context, paneID, cwd string) (herdr.Pane, error)
 	Prompt(ctx context.Context, target, text string) error
 	OpenPluginPane(ctx context.Context, p herdr.PaneOpen) error
+	Watch(ctx context.Context, subs []herdr.Subscription, on func(herdr.Event)) error
 	FocusPluginPane(ctx context.Context, paneID string) error
 	ClosePluginPane(ctx context.Context, paneID string) error
 	Notify(ctx context.Context, title, body string) error

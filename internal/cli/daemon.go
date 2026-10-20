@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -21,9 +22,32 @@ func newDaemonCmd(a *App) *cobra.Command {
 		Use:   "daemon",
 		Short: "Background sync that keeps the board and the Herdr sidebar fresh",
 		Long: "The daemon syncs Jira and GitHub once a minute in one place and serves the board on 127.0.0.1,\n" +
-			"so the board, tkt list and the Herdr plugin read fresh data without each asking Jira and GitHub.",
+			"so the board, tkt list and the Herdr plugin read fresh data without each asking Jira and GitHub.\n" +
+			"They start it in the background when it is not running; start, status and stop manage it by hand.",
 	}
 	cmd.AddCommand(&cobra.Command{
+		Use:   "start",
+		Short: "Start the daemon in the background unless one runs",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			info, err := a.ensureDaemon(cmd.Context())
+			if err != nil {
+				return err
+			}
+			a.printf("running · pid %d · 127.0.0.1:%d\n", info.PID, info.Port)
+			return nil
+		},
+	}, &cobra.Command{
+		Use:   "status",
+		Short: "Say whether the daemon runs, and where",
+		Args:  cobra.NoArgs,
+		RunE:  func(cmd *cobra.Command, _ []string) error { return a.daemonStatus(cmd.Context()) },
+	}, &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the running daemon",
+		Args:  cobra.NoArgs,
+		RunE:  func(cmd *cobra.Command, _ []string) error { return a.stopDaemon(cmd.Context()) },
+	}, &cobra.Command{
 		Use:   "run",
 		Short: "Run the daemon in the foreground until interrupted",
 		Args:  cobra.NoArgs,
@@ -37,6 +61,9 @@ func newDaemonCmd(a *App) *cobra.Command {
 }
 
 func (a *App) runDaemon(ctx context.Context) error {
+	if info, ok := a.runningDaemon(ctx); ok {
+		return fmt.Errorf("a tkt daemon is already running (pid %d)", info.PID)
+	}
 	var seed *board.Snapshot
 	if snap, ok, err := a.cache().Load(); err == nil && ok {
 		seed = &snap
@@ -50,11 +77,13 @@ func (a *App) runDaemon(ctx context.Context) error {
 		return err
 	}
 	a.printf("tkt daemon listening on %s\n", ln.Addr())
+	go a.watchAgents(ctx, s)
 	return s.Serve(ctx, ln)
 }
 
 // daemonSync reads the configuration afresh, so changes made in the board's settings apply without a
-// restart, and fails when the fetch does, so the daemon keeps its last good board.
+// restart, fails when the fetch does, so the daemon keeps its last good board, and rewrites the Herdr
+// sidebar with the new board when Herdr runs.
 func (a *App) daemonSync(ctx context.Context) (board.Snapshot, error) {
 	c, err := a.LoadConfig()
 	if err != nil {
@@ -66,6 +95,13 @@ func (a *App) daemonSync(ctx context.Context) (board.Snapshot, error) {
 	}
 	if stale != nil {
 		return board.Snapshot{}, stale
+	}
+	if a.NewHerdr != nil {
+		hctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if _, agents, err := a.updateSidebar(hctx, c, snap, true); err == nil {
+			snap.Agents = agents
+		}
 	}
 	return snap, nil
 }
