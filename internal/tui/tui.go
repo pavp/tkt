@@ -72,10 +72,12 @@ type SettingsSavedMsg struct {
 }
 
 // SnapshotMsg delivers a fetched board; Stale explains why it came from the cache, Err why nothing came.
+// Quiet marks a board the daemon pushed on its own, which leaves the status line alone.
 type SnapshotMsg struct {
 	Snap  board.Snapshot
 	Stale error
 	Err   error
+	Quiet bool
 }
 
 // AgentsMsg delivers the agent states read for the board fetched at FetchedAt.
@@ -321,7 +323,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.Snap.Agents = m.snap.Agents
 		}
 		m.snap, m.stale = msg.Snap, msg.Stale
-		m.status = ""
+		if !msg.Quiet {
+			m.status = ""
+		}
 		m.reselect()
 	case AgentsMsg:
 		if msg.FetchedAt.Equal(m.snap.FetchedAt) {

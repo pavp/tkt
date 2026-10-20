@@ -30,6 +30,9 @@ func (s *scriptedSync) sync(context.Context) (board.Snapshot, error) {
 	if s.err != nil {
 		return board.Snapshot{}, s.err
 	}
+	if len(s.boards) == 0 {
+		return board.Snapshot{}, errors.New("no board scripted")
+	}
 	b := s.boards[0]
 	if len(s.boards) > 1 {
 		s.boards = s.boards[1:]

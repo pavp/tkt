@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,15 @@ type fakeDaemons struct {
 	started atomic.Int32
 	mu      sync.Mutex
 	stops   []context.CancelFunc
+	servers []*daemon.Server
+	// board seeds every fake daemon; nil leaves them without a board.
+	board *board.Snapshot
+}
+
+func (f *fakeDaemons) server() *daemon.Server {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.servers[len(f.servers)-1]
 }
 
 func (f *fakeDaemons) install(t *testing.T, h *harness) {
@@ -30,7 +40,13 @@ func (f *fakeDaemons) install(t *testing.T, h *harness) {
 			t.Errorf("started %s %v (log %s)", name, args, logPath)
 		}
 		f.started.Add(1)
-		s, err := daemon.New(daemon.Options{Dir: h.app.Env.DataDir(), Version: Version, Sync: func(context.Context) (board.Snapshot, error) { return board.Snapshot{}, nil }, Interval: time.Hour})
+		f.mu.Lock()
+		seed := f.board
+		f.mu.Unlock()
+		sync := func(context.Context) (board.Snapshot, error) {
+			return board.Snapshot{}, errors.New("fake daemons do not sync")
+		}
+		s, err := daemon.New(daemon.Options{Dir: h.app.Env.DataDir(), Version: Version, Sync: sync, Interval: time.Hour, Seed: seed})
 		if err != nil {
 			return 0, err
 		}
@@ -41,6 +57,7 @@ func (f *fakeDaemons) install(t *testing.T, h *harness) {
 		ctx, cancel := context.WithCancel(context.Background())
 		f.mu.Lock()
 		f.stops = append(f.stops, cancel)
+		f.servers = append(f.servers, s)
 		f.mu.Unlock()
 		go func() { _ = s.Serve(ctx, ln) }()
 		return os.Getpid(), nil
@@ -66,6 +83,7 @@ func startHarness(t *testing.T) (*harness, *fakeDaemons) {
 	t.Helper()
 	h := newHarness(t, baseConfig)
 	h.app.Executable = func() (string, error) { return "/opt/tkt/bin/tkt", nil }
+	h.app.Now = func() time.Time { return time.Date(2026, 10, 20, 12, 5, 0, 0, time.UTC) }
 	f := &fakeDaemons{}
 	f.install(t, h)
 	return h, f
