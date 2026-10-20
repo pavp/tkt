@@ -122,10 +122,6 @@ func (w *WSL) powershell(body string, stdin []byte) ([]byte, error) {
 	return out, err
 }
 
-// EncodedCommand produces the UTF-16LE base64 form that powershell's -EncodedCommand expects, so scripts
-// pass without shell quoting.
-func EncodedCommand(script string) string { return encode(script) }
-
 func encode(script string) string {
 	u := utf16.Encode([]rune(script))
 	b := make([]byte, len(u)*2)
