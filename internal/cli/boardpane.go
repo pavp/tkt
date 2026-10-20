@@ -31,7 +31,8 @@ func (a *App) claimBoardPane() func() {
 }
 
 // herdrOpenBoard keeps one board: it focuses the board already open in this workspace, moves one open
-// elsewhere here (Herdr would otherwise keep showing it there), or opens a new one.
+// elsewhere here (Herdr would otherwise keep showing it there), or opens a new one. Herdr opens popups on
+// the active pane and rejects a workspace_id for them.
 func (a *App) herdrOpenBoard(ctx context.Context) error {
 	h := a.NewHerdr()
 	current := a.Env.Getenv("HERDR_WORKSPACE_ID")
@@ -43,5 +44,5 @@ func (a *App) herdrOpenBoard(ctx context.Context) error {
 			_ = h.ClosePluginPane(ctx, pane)
 		}
 	}
-	return h.OpenPluginPane(ctx, herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "board", WorkspaceID: current})
+	return h.OpenPluginPane(ctx, herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "board"})
 }

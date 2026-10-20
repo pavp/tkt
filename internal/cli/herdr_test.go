@@ -244,8 +244,8 @@ func TestHerdrOpenBoardBringsTheOpenBoardToTheCurrentWorkspace(t *testing.T) {
 				t.Fatalf("opened %d boards, want %d", n, c.opens)
 			}
 			if c.opens > 0 {
-				if got := f.Last("plugin.pane.open"); got["workspace_id"] != "w2" || got["entrypoint"] != "board" {
-					t.Errorf("pane = %v", got)
+				if got := f.Last("plugin.pane.open"); got["entrypoint"] != "board" || got["workspace_id"] != nil {
+					t.Errorf("a popup opens on the active pane, Herdr rejects a workspace_id: %v", got)
 				}
 			}
 		})
