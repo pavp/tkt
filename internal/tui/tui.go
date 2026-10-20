@@ -1109,16 +1109,7 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 		lines = append(lines, titleStyle.Render(l))
 	}
 	if !compact {
-		prs := coloredPRs(t.PRs, inner)
-		if line, kind := board.AgentLine(agent); kind != board.AgentNone {
-			styled := map[board.AgentKind]lipgloss.Style{board.AgentWorking: keyStyle, board.AgentNeedsYou: warn, board.AgentIdle: dim}[kind].Render(line)
-			if lipgloss.Width(prs)+3+lipgloss.Width(line) <= inner {
-				prs += dim.Render(" · ") + styled
-			} else {
-				prs = coloredPRs(t.PRs, max(1, inner-lipgloss.Width(line)-3)) + dim.Render(" · ") + styled
-			}
-		}
-		lines = append(lines, prs)
+		lines = append(lines, coloredPRs(t.PRs, inner))
 		info := t.Type
 		if len(t.Subtasks) > 0 {
 			info = strings.TrimSpace(fmt.Sprintf("%s · %d subtasks", info, len(t.Subtasks)))
@@ -1126,7 +1117,14 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 		if info == "" {
 			info = t.Status
 		}
-		lines = append(lines, dim.Render(truncate(info, inner)))
+		// The agent shares the type's line, which has room to spare, so the pull requests keep theirs;
+		// when both do not fit, the type gives way.
+		if text, kind := agentShort(agent); kind != board.AgentNone {
+			room := max(1, inner-lipgloss.Width(text)-3)
+			lines = append(lines, dim.Render(truncate(info, room)+" · ")+agentStyle(kind).Render(text))
+		} else {
+			lines = append(lines, dim.Render(truncate(info, inner)))
+		}
 	}
 	for i, l := range lines {
 		lines[i] = " " + l
@@ -1356,16 +1354,26 @@ func agentCell(status string, agentW int, plain bool) string {
 	if agentW == 0 {
 		return ""
 	}
-	line, kind := board.AgentLine(status)
-	text := ""
-	if kind != board.AgentNone {
-		text = strings.Replace(line, "claude ", "", 1)
-	}
+	text, kind := agentShort(status)
 	cell := pad(text, agentW)
 	if plain || kind == board.AgentNone {
 		return cell
 	}
-	return map[board.AgentKind]lipgloss.Style{board.AgentWorking: keyStyle, board.AgentNeedsYou: warn, board.AgentIdle: dim}[kind].Render(cell)
+	return agentStyle(kind).Render(cell)
+}
+
+// agentShort words an agent status without the agent's name, as the list and cards have little room;
+// it is empty when no agent runs.
+func agentShort(status string) (string, board.AgentKind) {
+	line, kind := board.AgentLine(status)
+	if kind == board.AgentNone {
+		return "", kind
+	}
+	return strings.Replace(line, "claude ", "", 1), kind
+}
+
+func agentStyle(kind board.AgentKind) lipgloss.Style {
+	return map[board.AgentKind]lipgloss.Style{board.AgentWorking: keyStyle, board.AgentNeedsYou: warn, board.AgentIdle: dim}[kind]
 }
 
 // listLines lays the list out in two sections, the user's tickets and review requests, and returns for

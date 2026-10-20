@@ -1219,8 +1219,8 @@ func TestCardsShowTheAgentState(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	v := stripANSI(next.View())
-	if !strings.Contains(v, "● claude working") || !strings.Contains(v, "! claude needs you") {
-		t.Errorf("cards should show their agent:\n%s", v)
+	if !strings.Contains(v, "● working") || !strings.Contains(v, "! needs you") || strings.Contains(v, "claude") {
+		t.Errorf("cards should show their agent in short form:\n%s", v)
 	}
 	if strings.Contains(v, "no agent") {
 		t.Errorf("cards without an agent say nothing about it:\n%s", v)
@@ -1352,8 +1352,19 @@ func TestCardFitsPullRequestsBesideTheAgentWithoutBreakingColors(t *testing.T) {
 		if brokenEscape.MatchString(out) || strings.ContainsRune(plain, utf8.RuneError) || !utf8.ValidString(out) {
 			t.Errorf("%s: a cut escape code leaks into the card: %q", status, out)
 		}
-		if !strings.Contains(plain, "#731") || !strings.Contains(plain, "claude") {
-			t.Errorf("%s: card lost its pull request or agent:\n%s", status, plain)
+		short, _ := board.AgentLine(status)
+		short = strings.Replace(short, "claude ", "", 1)
+		if !strings.Contains(plain, "#731 ✓ #732 ✓ #733 ✓") || !strings.Contains(plain, short) {
+			t.Errorf("%s: the card should keep its pull requests and show %q:\n%s", status, short, plain)
+		}
+		var last string
+		for _, l := range strings.Split(plain, "\n") {
+			if strings.Contains(l, short) {
+				last = l
+			}
+		}
+		if !strings.Contains(last, "In Progress") && !strings.Contains(last, "In Pr") {
+			t.Errorf("%s: the agent belongs on the type line: %q", status, last)
 		}
 		for _, l := range strings.Split(out, "\n") {
 			if lipgloss.Width(l) > 30 {
@@ -1382,5 +1393,13 @@ func TestTruncateKeepsColorCodesWhole(t *testing.T) {
 		if brokenEscape.MatchString(got) || ansi.Strip(got) != c.want || lipgloss.Width(got) > c.n {
 			t.Errorf("truncate(%q, %d) = %q", c.in, c.n, got)
 		}
+	}
+}
+
+func TestCardCutsTheTypeBeforeTheAgent(t *testing.T) {
+	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Type: "A very long issue type name", Status: "In Progress"}
+	plain := ansi.Strip(card(tk, 30, false, false, "blocked"))
+	if !strings.Contains(plain, "! needs you") || !strings.Contains(plain, "A very long") {
+		t.Errorf("the type should shrink, never the agent:\n%s", plain)
 	}
 }
