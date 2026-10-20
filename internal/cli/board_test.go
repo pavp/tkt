@@ -125,16 +125,58 @@ func TestListDirsListsFoldersOnly(t *testing.T) {
 	cases := []struct {
 		path    string
 		want    string
+		dir     string
+		abs     string
 		wantErr bool
 	}{
-		{"~/", ".cache,dev,Docs,link", false},
-		{h.home + "/", ".cache,dev,Docs,link", false},
-		{"~/missing/", "", true},
+		{"~/", ".cache,dev,Docs,link", "~/", h.home + "/", false},
+		{h.home + "/", ".cache,dev,Docs,link", "~/", h.home + "/", false},
+		{h.home + "/dev/../", ".cache,dev,Docs,link", "~/", h.home + "/", false},
+		{"~/missing/", "", "~/missing/", h.home + "/missing/", true},
+		{"/", "", "/", "/", false},
 	}
 	for _, c := range cases {
 		msg := b.ListDirs(c.path)().(tui.DirsListedMsg)
-		if msg.Path != c.path || strings.Join(msg.Names, ",") != c.want || (msg.Err != nil) != c.wantErr {
+		if c.path == "/" {
+			if msg.Err != nil || msg.Dir != "/" || msg.Abs != "/" || len(msg.Names) == 0 {
+				t.Errorf("ListDirs(/) = %+v", msg)
+			}
+			continue
+		}
+		if msg.Path != c.path || strings.Join(msg.Names, ",") != c.want || msg.Dir != c.dir || msg.Abs != c.abs || (msg.Err != nil) != c.wantErr {
 			t.Errorf("ListDirs(%q) = %+v", c.path, msg)
 		}
+	}
+}
+
+func TestNativePickerOnlyWhereTheUserSeesIt(t *testing.T) {
+	cases := []struct {
+		name   string
+		goos   string
+		env    map[string]string
+		zenity bool
+		want   bool
+	}{
+		{"macOS", "darwin", nil, false, true},
+		{"macOS over SSH", "darwin", map[string]string{"SSH_CONNECTION": "10.0.0.2 5000 10.0.0.1 22"}, false, false},
+		{"Linux with zenity", "linux", nil, true, true},
+		{"Linux with zenity over SSH", "linux", map[string]string{"SSH_TTY": "/dev/pts/4"}, true, false},
+		{"Linux without a chooser", "linux", nil, false, false},
+		{"WSL", "linux", map[string]string{"WSL_DISTRO_NAME": "Ubuntu"}, true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, "")
+			h.app.Env.GOOS = c.goos
+			for k, v := range c.env {
+				h.env[k] = v
+			}
+			h.run.missing["zenity"] = !c.zenity
+			h.run.missing["kdialog"] = true
+			b := &boardActions{a: h.app, ctx: context.Background()}
+			if got := b.NativePicker(); got != c.want {
+				t.Errorf("NativePicker() = %v, want %v", got, c.want)
+			}
+		})
 	}
 }
