@@ -34,7 +34,7 @@ var menuBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForegro
 // or changes were requested.
 func (m Model) buildMenu(it item) *menu {
 	a := m.actions
-	if it.pr != nil {
+	if it.review() {
 		pr := *it.pr
 		return &menu{title: fmt.Sprintf("Review request #%d", pr.Number), items: []menuItem{
 			{label: "Open the pull request in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }},

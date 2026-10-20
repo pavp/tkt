@@ -2,7 +2,9 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -93,19 +95,23 @@ const (
 	ViewColumns = "columns"
 	ViewList    = "list"
 
-	FilterAll     = "all"
-	FilterNeeds   = "needs"
-	FilterReviews = "reviews"
+	FilterAll = "all"
+	// FilterPRs lists the user's own open pull requests, then the review requests.
+	FilterPRs = "prs"
 
 	// narrowWidth is the terminal width below which four columns no longer fit.
 	narrowWidth = 100
 )
 
+// item is a ticket, a review request (pr alone), or one of the user's pull requests (pr with its ticket).
 type item struct {
 	key    ticket.Key
 	ticket *ticket.Ticket
 	pr     *ticket.PullRequest
 }
+
+func (it item) review() bool { return it.pr != nil && it.ticket == nil }
+func (it item) mine() bool   { return it.pr != nil && it.ticket != nil }
 
 type Model struct {
 	// lastClick and lastClickAt detect a double click, which the terminal does not report.
@@ -145,7 +151,7 @@ const (
 	refreshEvery = 2 * time.Minute
 )
 
-var filterOrder = []string{FilterAll, FilterNeeds, FilterReviews}
+var filterOrder = []string{FilterAll, FilterPRs}
 
 func tick() tea.Cmd {
 	return tea.Tick(tickEvery, func(t time.Time) tea.Msg { return tickMsg(t) })
@@ -177,10 +183,10 @@ func (m Model) WithClock(now func() time.Time) Model {
 	return m
 }
 
-// effectiveView falls back to the list when columns would not fit or when showing reviews or what needs
-// the user, short lists that columns would mostly leave empty.
+// effectiveView falls back to the list when columns would not fit or when showing pull requests, which
+// have no column of their own.
 func (m Model) effectiveView() string {
-	if m.filter == FilterReviews || m.filter == FilterNeeds || m.width < narrowWidth {
+	if m.filter == FilterPRs || m.width < narrowWidth {
 		return ViewList
 	}
 	return m.view
@@ -190,10 +196,8 @@ func (m Model) effectiveView() string {
 func (m *Model) explainList() {
 	switch {
 	case m.view != ViewColumns || m.effectiveView() == ViewColumns:
-	case m.filter == FilterReviews:
-		m.status = "the reviews filter always shows a list · press 1 for all tickets"
-	case m.filter == FilterNeeds:
-		m.status = "the needs-you filter always shows a list · press 1 for all tickets"
+	case m.filter == FilterPRs:
+		m.status = "the PRs filter always shows a list · press 1 for all tickets"
 	default:
 		m.status = fmt.Sprintf("columns need a pane at least %d columns wide (this one has %d) · showing the list", narrowWidth, m.width)
 	}
@@ -217,17 +221,56 @@ func (m *Model) toggleBots() {
 }
 
 func (m Model) tickets() []ticket.Ticket {
-	if m.filter == FilterReviews {
+	if m.filter == FilterPRs {
 		return nil
 	}
-	var out []ticket.Ticket
-	for _, t := range m.snap.Tickets {
-		if m.filter == FilterNeeds && len(t.Attention()) == 0 {
-			continue
+	return m.snap.Tickets
+}
+
+// myPRs lists the open pull requests of the user's tickets, those that need the user first.
+func (m Model) myPRs() []item {
+	var out []item
+	for _, t := range board.Sorted(m.snap.Tickets) {
+		for _, pr := range t.PRs {
+			if pr.State == ticket.PROpen {
+				t, pr := t, pr
+				out = append(out, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), ticket: &t, pr: &pr})
+			}
 		}
-		out = append(out, t)
 	}
+	slices.SortStableFunc(out, func(a, b item) int {
+		return boolRank(needsYou(*b.pr)) - boolRank(needsYou(*a.pr))
+	})
 	return out
+}
+
+func needsYou(pr ticket.PullRequest) bool {
+	return pr.Checks == ticket.ChecksFail || pr.Review == ticket.ReviewChangesRequested
+}
+
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// prStatus words where one of the user's pull requests stands: what needs the user first, then the review,
+// as the CI mark beside it already shows a running check.
+func prStatus(pr ticket.PullRequest) string {
+	switch {
+	case pr.Checks == ticket.ChecksFail:
+		return string(ticket.ReasonCIFailing)
+	case pr.Review == ticket.ReviewChangesRequested:
+		return string(ticket.ReasonChangesRequested)
+	case pr.Review == ticket.ReviewApproved:
+		return "Approved"
+	case pr.Review == ticket.ReviewRequired:
+		return "Waiting review"
+	case pr.Checks == ticket.ChecksPending:
+		return "CI running"
+	}
+	return "Open"
 }
 
 func (m Model) columns() [][]item {
@@ -246,12 +289,12 @@ func (m Model) columns() [][]item {
 
 func (m Model) listItems() []item {
 	var out []item
+	if m.filter == FilterPRs {
+		out = m.myPRs()
+	}
 	for _, t := range board.Sorted(m.tickets()) {
 		t := t
 		out = append(out, item{key: t.Key, ticket: &t})
-	}
-	if m.filter == FilterNeeds {
-		return out
 	}
 	for _, pr := range m.reviews() {
 		out = append(out, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr})
@@ -586,15 +629,14 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.reselect()
 		m.explainList()
 	case "b":
-		if m.filter == FilterReviews {
+		if m.filter == FilterPRs {
 			m.toggleBots()
 		}
 	case "n", "r":
-		want := map[string]string{"n": FilterNeeds, "r": FilterReviews}[k.String()]
-		if m.filter == want {
+		if m.filter == FilterPRs {
 			m.filter = FilterAll
 		} else {
-			m.filter = want
+			m.filter = FilterPRs
 		}
 		m.reselect()
 	case "tab", "shift+tab":
@@ -609,7 +651,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.reselect()
-	case "1", "2", "3":
+	case "1", "2":
 		m.filter = filterOrder[k.String()[0]-'1']
 		m.reselect()
 	case "down", "s", "j":
@@ -630,7 +672,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openSettings()
 	case "i":
 		if it, ok := m.current(); ok && it.ticket != nil {
-			return m.openDetail(it.key)
+			return m.openDetail(it.ticket.Key)
 		}
 	case "o":
 		if it, ok := m.current(); ok && it.ticket != nil && it.ticket.URL != "" {
@@ -659,8 +701,8 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "f":
 		if it, ok := m.current(); ok && it.ticket != nil {
-			m.status = "sending feedback for " + string(it.key) + "…"
-			return m, m.actions.Fix(it.key)
+			m.status = "sending feedback for " + string(it.ticket.Key) + "…"
+			return m, m.actions.Fix(it.ticket.Key)
 		}
 	}
 	return m, nil
@@ -863,7 +905,7 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 	pos := 0
 	for i, it := range m.headerSpec() {
 		gap := map[bool]int{true: 1, false: 0}[i > 0]
-		if i == 3 {
+		if i == len(filterOrder) {
 			gap = 2
 		}
 		row = append(row, strings.Repeat(" ", gap))
@@ -891,7 +933,7 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 	pos = 0
 	for i, it := range m.headerSpec() {
 		w := lipgloss.Width(it.label)
-		if i < 3 {
+		if i < len(filterOrder) {
 			w = lipgloss.Width(items[i])
 		}
 		if pos+w > m.width {
@@ -899,9 +941,9 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 		}
 		spans = append(spans, headerSpan{start: pos, width: w, filter: it.filter, view: it.view})
 		pos += w
-		if i < 2 {
+		if i < len(filterOrder)-1 {
 			pos += 2
-		} else if i == 2 {
+		} else if i == len(filterOrder)-1 {
 			pos += 3
 		}
 	}
@@ -916,8 +958,7 @@ type headerItem struct {
 func (m Model) headerSpec() []headerItem {
 	return []headerItem{
 		{filter: FilterAll, label: fmt.Sprintf(" 1 All %d ", len(m.snap.Tickets)+len(m.reviews()))},
-		{filter: FilterNeeds, label: fmt.Sprintf(" 2 Needs you %d ", len(m.snap.NeedsYou()))},
-		{filter: FilterReviews, label: fmt.Sprintf(" 3 Reviews %d ", len(m.reviews()))},
+		{filter: FilterPRs, label: fmt.Sprintf(" 2 PRs %d ", len(m.myPRs())+len(m.reviews()))},
 		{view: ViewColumns, label: " Columns "},
 		{view: ViewList, label: " List "},
 	}
@@ -979,7 +1020,7 @@ type chipSpan struct {
 // reviewChips renders the strip and returns each visible chip's horizontal span.
 func (m Model) reviewChips() (string, []chipSpan) {
 	reviews := m.reviews()
-	if len(reviews) == 0 || m.filter == FilterNeeds {
+	if len(reviews) == 0 || m.filter == FilterPRs {
 		return "", nil
 	}
 	label := dim.Render("Review requested")
@@ -1011,7 +1052,7 @@ func (m Model) reviewChips() (string, []chipSpan) {
 	return lipgloss.JoinHorizontal(lipgloss.Top, row...), spans
 }
 
-func moreReviews(n int) string { return fmt.Sprintf("+%d more · press 3", n) }
+func moreReviews(n int) string { return fmt.Sprintf("+%d more · press 2", n) }
 
 // cardLines is how many lines one bordered card takes: two border lines plus its content lines.
 func (m Model) cardLines() int {
@@ -1279,32 +1320,6 @@ func prRef(pr ticket.PullRequest) string {
 	return fmt.Sprintf("#%d %s", pr.Number, checkMark(pr.Checks))
 }
 
-// reasonsText words why a ticket needs the user within the list's STATUS column.
-func reasonsText(rs []ticket.Reason) string {
-	if len(rs) > 1 {
-		return "CI + changes"
-	}
-	if len(rs) == 1 {
-		return string(rs[0])
-	}
-	return ""
-}
-
-// attentionRefs lists the open PRs that need the user, with the CI mark only when CI is what fails.
-func attentionRefs(prs []ticket.PullRequest) string {
-	var parts []string
-	for _, pr := range prs {
-		switch {
-		case pr.State != ticket.PROpen:
-		case pr.Checks == ticket.ChecksFail:
-			parts = append(parts, prRef(pr))
-		case pr.Review == ticket.ReviewChangesRequested:
-			parts = append(parts, fmt.Sprintf("#%d", pr.Number))
-		}
-	}
-	return strings.Join(parts, " ")
-}
-
 // prRefs lists open PRs; finished ones show by number when there is one, as a count when there are several.
 func prRefs(prs []ticket.PullRequest) string {
 	if len(prs) == 0 {
@@ -1381,11 +1396,8 @@ func (m Model) listView() string {
 		return dim.Render("  nothing matches this filter")
 	}
 	prText := func(it item) string {
-		switch {
-		case it.pr != nil:
+		if it.pr != nil {
 			return checkMark(it.pr.Checks)
-		case m.filter == FilterNeeds:
-			return attentionRefs(it.ticket.PRs)
 		}
 		return prRefs(it.ticket.PRs)
 	}
@@ -1460,16 +1472,19 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 	}
 	lines := []string{"  " + dim.Render(row("KEY", "STATUS", header, "PR / CI", "TITLE")), dim.Render(strings.Repeat("─", m.width))}
 	at := []int{-1, -1}
-	if m.filter == FilterReviews && m.hiddenBots() > 0 {
+	if m.filter == FilterPRs && m.hiddenBots() > 0 {
 		toggle := keyStyle.Render("b") + " " + dim.Render(fmt.Sprintf("show bots · %d hidden", m.hiddenBots()))
 		if m.showBots {
 			toggle = keyStyle.Render("b") + " " + dim.Render("hide bots")
 		}
 		lines, at = append(lines, "  "+toggle), append(at, botToggleLine)
 	}
-	nTickets := 0
+	nTickets, nMine := 0, 0
 	for _, it := range items {
-		if it.ticket != nil {
+		switch {
+		case it.mine():
+			nMine++
+		case it.ticket != nil:
 			nTickets++
 		}
 	}
@@ -1481,39 +1496,42 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		at = append(at, -1)
 	}
 	for i, it := range items {
-		if i == 0 && it.ticket != nil {
-			title := "My tickets"
-			if m.filter == FilterNeeds {
-				title = "Needs you"
-			}
-			section(title, nTickets)
+		switch {
+		case i == 0 && it.mine():
+			section("Mine", nMine)
+		case i == 0 && it.ticket != nil:
+			section("My tickets", nTickets)
 		}
-		if it.pr != nil && (i == 0 || items[i-1].pr == nil || items[i-1].pr.Repo != it.pr.Repo) {
+		if it.review() && (i == 0 || !items[i-1].review() || items[i-1].pr.Repo != it.pr.Repo) {
 			n := 0
 			for _, o := range items[i:] {
-				if o.pr != nil && o.pr.Repo == it.pr.Repo {
+				if o.review() && o.pr.Repo == it.pr.Repo {
 					n++
 				}
 			}
 			section("Review requested · "+it.pr.Repo, n)
 		}
 		var line string
-		if it.pr != nil {
+		switch {
+		case it.review():
 			line = row(string(it.key), "Review requested", pad("", agentW), prText(it), it.pr.Title)
-		} else if m.filter == FilterNeeds {
-			status := reasonsText(it.ticket.Attention())
-			if i != m.row {
+		case it.mine():
+			status := prStatus(*it.pr)
+			if i != m.row && needsYou(*it.pr) {
 				status = warn.Render(status)
 			}
-			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), it.ticket.Summary)
-		} else {
+			title := cmp.Or(it.pr.Title, it.ticket.Summary)
+			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), prText(it), string(it.ticket.Key)+" · "+title)
+		default:
 			line = row(string(it.key), it.ticket.Status, agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), it.ticket.Summary)
 		}
 		switch {
 		case i == m.row:
 			line = "▸ " + selected.Render(line)
-		case it.pr != nil:
+		case it.review(), it.mine() && needsYou(*it.pr):
 			line = warn.Render("!") + " " + line
+		case it.mine():
+			line = "  " + line
 		case len(it.ticket.Attention()) > 0 && it.ticket.Blocked():
 			// The wider mark takes one cell of the key's padding, so the columns stay aligned.
 			line = warn.Render("!") + blocked.Render("⊘") + " " + strings.Replace(line, string(it.key)+" ", string(it.key), 1)
@@ -1536,6 +1554,10 @@ func (m Model) preview() string {
 	it, okSel := m.current()
 	if !okSel {
 		return dim.Render("nothing selected")
+	}
+	if it.mine() {
+		title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s · %s", it.key, it.ticket.Key, cmp.Or(it.pr.Title, it.ticket.Summary)), m.width))
+		return title + "\n" + dim.Render(truncate(fmt.Sprintf("%s in %s · CI %s · enter for actions", prStatus(*it.pr), it.pr.Repo, ciWord(it.pr.Checks)), m.width))
 	}
 	if it.pr != nil {
 		title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s", it.key, it.pr.Title), m.width))
@@ -1598,14 +1620,14 @@ func (m Model) footer() string {
 		move = "←↑↓→ wasd"
 	}
 	moveHint, clickHint := "move · ↑ to reviews", "select · open review"
-	if m.filter == FilterNeeds {
-		moveHint, clickHint = "move", "select"
+	if m.filter == FilterPRs {
+		moveHint, clickHint = "move", "select · open review"
 	}
 	legend := [][2]string{
 		{move, moveHint}, {"click", clickHint}, {"double-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
-		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-3", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
+		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-2", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
 	}
-	if m.filter == FilterReviews && m.hiddenBots() > 0 {
+	if m.filter == FilterPRs && m.hiddenBots() > 0 {
 		legend = append(legend[:1], append([][2]string{{"b", "bots"}}, legend[1:]...)...)
 	}
 	items := make([]string, len(legend))
