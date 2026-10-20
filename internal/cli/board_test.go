@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -100,5 +102,39 @@ func TestBoardDetailRendersTheTicket(t *testing.T) {
 	msg := b.Detail("DEMO-7")().(tui.DetailMsg)
 	if msg.Err != nil || !strings.Contains(msg.Text, "DEMO-7") || !strings.Contains(msg.Text, "Export users") {
 		t.Errorf("detail = %+v", msg)
+	}
+}
+
+func TestListDirsListsFoldersOnly(t *testing.T) {
+	h := newHarness(t, "")
+	for _, d := range []string{"dev", "Docs", ".cache"} {
+		if err := os.Mkdir(filepath.Join(h.home, d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(h.home, "notes.txt"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(h.home, "dev"), filepath.Join(h.home, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(h.home, "gone"), filepath.Join(h.home, "broken")); err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, ctx: context.Background()}
+	cases := []struct {
+		path    string
+		want    string
+		wantErr bool
+	}{
+		{"~/", ".cache,dev,Docs,link", false},
+		{h.home + "/", ".cache,dev,Docs,link", false},
+		{"~/missing/", "", true},
+	}
+	for _, c := range cases {
+		msg := b.ListDirs(c.path)().(tui.DirsListedMsg)
+		if msg.Path != c.path || strings.Join(msg.Names, ",") != c.want || (msg.Err != nil) != c.wantErr {
+			t.Errorf("ListDirs(%q) = %+v", c.path, msg)
+		}
 	}
 }

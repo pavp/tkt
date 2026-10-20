@@ -28,6 +28,14 @@ type recorder struct {
 	origins map[string]string
 	picked  string
 	starts  []string
+	// dirs answers ListDirs: the folders inside each listed path.
+	dirs   map[string][]string
+	listed []string
+}
+
+func (r *recorder) ListDirs(path string) tea.Cmd {
+	r.listed = append(r.listed, path)
+	return func() tea.Msg { return DirsListedMsg{Path: path, Names: r.dirs[path]} }
 }
 
 func (r *recorder) FindClones(repo string) tea.Cmd {

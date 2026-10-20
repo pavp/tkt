@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -132,6 +134,33 @@ func (b *boardActions) PickFolder(start string) tea.Cmd {
 		p, err := b.a.pickFolder(b.ctx, start)
 		return tui.FolderPickedMsg{Path: p, Err: err}
 	}
+}
+
+func (b *boardActions) ListDirs(path string) tea.Cmd {
+	return func() tea.Msg {
+		names, err := listDirs(b.a.Env.ExpandHome(path))
+		return tui.DirsListedMsg{Path: path, Names: names, Err: err}
+	}
+}
+
+// listDirs returns the folders inside dir, symlinks to folders included, sorted ignoring case.
+func listDirs(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		} else if e.Type()&os.ModeSymlink != 0 {
+			if fi, err := os.Stat(filepath.Join(dir, e.Name())); err == nil && fi.IsDir() {
+				names = append(names, e.Name())
+			}
+		}
+	}
+	slices.SortFunc(names, func(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) })
+	return names, nil
 }
 
 func (b *boardActions) SaveConfig(c config.Config) tea.Cmd {

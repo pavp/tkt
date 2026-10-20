@@ -62,6 +62,10 @@ type settingsForm struct {
 	repo  bool
 	found []string
 	hint  string
+	// cands are the paths a repeated Tab cycles through; pending is the path whose folders are being listed.
+	cands   []string
+	cand    int
+	pending string
 }
 
 const (
@@ -261,6 +265,8 @@ func (m Model) settingsLookup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			f.values[fieldRepo] = msg.Repo
 			f.hint = "repository read from the folder's origin"
 		}
+	case DirsListedMsg:
+		f.completeFrom(msg)
 	case FolderPickedMsg:
 		if msg.Err != nil {
 			m.settings.err = msg.Err.Error()
@@ -305,6 +311,9 @@ func (m Model) settingsFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.settings.form = nil
 		return m.saveSettings(func(c *config.Config) { f.apply(c, f.values) })
 	case tea.KeyTab, tea.KeyDown, tea.KeyShiftTab, tea.KeyUp:
+		if k.Type == tea.KeyTab && f.focus == f.pathField() {
+			return m.completePath()
+		}
 		left := f.focus
 		if k.Type == tea.KeyTab || k.Type == tea.KeyDown {
 			f.focus = (f.focus + 1) % len(f.values)
@@ -327,17 +336,21 @@ func (m Model) settingsFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.actions.PickFolder(start)
 	case tea.KeyCtrlN:
+		f.resetCompletion()
 		if f.repo && len(f.found) > 1 {
 			i := (slices.Index(f.found, f.values[fieldPath]) + 1) % len(f.found)
 			f.values[fieldPath] = f.found[i]
 		}
 	case tea.KeyBackspace:
+		f.resetCompletion()
 		if v := []rune(f.values[f.focus]); len(v) > 0 {
 			f.values[f.focus] = string(v[:len(v)-1])
 		}
 	case tea.KeyCtrlU:
+		f.resetCompletion()
 		f.values[f.focus] = ""
 	case tea.KeyRunes, tea.KeySpace:
+		f.resetCompletion()
 		f.values[f.focus] += string(k.Runes)
 	}
 	return m, nil
@@ -503,7 +516,11 @@ func (m Model) settingsModal() string {
 			lines = append(lines, "   "+keyDim.Render(f.hint))
 		}
 	}
-	lines = append(lines, "", dim.Render("enter save · tab next field · ctrl+o browse folders · esc cancel"))
+	keys := "enter save · tab next field · ctrl+o browse folders · esc cancel"
+	if f.focus == f.pathField() {
+		keys = "enter save · tab complete · ↑↓ fields · ctrl+o browse folders · esc cancel"
+	}
+	lines = append(lines, "", dim.Render(keys))
 	return menuBox.Render(strings.Join(lines, "\n"))
 }
 
