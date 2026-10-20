@@ -138,6 +138,57 @@ func TestFetchReviewModes(t *testing.T) {
 	}
 }
 
+func TestFetchKeepsBotReviewsMarkedAndGroupsThemByRepo(t *testing.T) {
+	js := &stubJira{issues: []jira.Issue{{Key: "DEMO-1", StatusCategory: "new"}}}
+	reviews := []ticket.PullRequest{
+		{Repo: "example-org/web", Number: 9},
+		{Repo: "example-org/api", Number: 4, Author: "dependabot", AuthorBot: true},
+		{Repo: "example-org/api", Number: 7},
+		{Repo: "example-org/web", Number: 2},
+	}
+	snap, err := Fetch(context.Background(), cfg(), js, &stubGitHub{reviews: reviews}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := reviewIDs(snap.Reviews), []string{"example-org/api#4", "example-org/api#7", "example-org/web#2", "example-org/web#9"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("reviews = %v, want %v", got, want)
+	}
+	if got, want := reviewIDs(snap.WithoutBots().Reviews), []string{"example-org/api#7", "example-org/web#2", "example-org/web#9"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("without bots = %v, want %v", got, want)
+	}
+	if len(snap.Reviews) != 4 {
+		t.Error("WithoutBots changed the snapshot it was called on")
+	}
+}
+
+func reviewIDs(prs []ticket.PullRequest) []string {
+	var out []string
+	for _, p := range prs {
+		out = append(out, fmt.Sprintf("%s#%d", p.Repo, p.Number))
+	}
+	return out
+}
+
+func TestToTicketPutsBlockedTicketsInToDo(t *testing.T) {
+	c := cfg()
+	c.Spaces[1].StatusOverrides = map[string]string{"Blocked": "in_progress"}
+	tests := []struct {
+		key, status string
+		want        ticket.Category
+	}{
+		{"DEMO-1", "Blocked", ticket.ToDo},
+		{"DEMO-2", "Bloqueado", ticket.ToDo},
+		{"DEMO-3", "In Progress", ticket.InProgress},
+		{"OPS-1", "Blocked", ticket.InProgress},
+	}
+	for _, tt := range tests {
+		got := ToTicket(c, jira.Issue{Key: tt.key, Status: tt.status, StatusCategory: "indeterminate"}, "")
+		if got.Category != tt.want {
+			t.Errorf("%s %q in %q, want %q", tt.key, tt.status, got.Category, tt.want)
+		}
+	}
+}
+
 func TestFetchDegradesWithoutGitHub(t *testing.T) {
 	js := &stubJira{issues: []jira.Issue{{Key: "DEMO-1", StatusCategory: "new"}}}
 	gh := &stubGitHub{prErr: errors.New("rate limited"), reviewErr: errors.New("rate limited")}
