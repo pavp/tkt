@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync/atomic"
 
 	"github.com/pavp/tkt/internal/jira"
 )
@@ -23,6 +24,8 @@ type fakeJira struct {
 	files     map[string]string
 	// devPRs maps issue ids to development-panel PRs; nil means the panel is unavailable.
 	devPRs map[string][]jira.DevPullRequest
+	// devAsked counts development-panel calls; the board makes them concurrently.
+	devAsked atomic.Int32
 }
 
 func (f *fakeJira) Myself(context.Context) (jira.User, error) {
@@ -59,6 +62,7 @@ func (f *fakeJira) Projects(context.Context) ([]jira.Project, error) { return f.
 func (f *fakeJira) BrowseURL(key string) string                      { return "https://example.atlassian.net/browse/" + key }
 
 func (f *fakeJira) DevPullRequests(_ context.Context, id string) ([]jira.DevPullRequest, error) {
+	f.devAsked.Add(1)
 	if f.devPRs == nil {
 		return nil, errors.New("no development panel")
 	}

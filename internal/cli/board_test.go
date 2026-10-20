@@ -391,3 +391,27 @@ func TestSavingAJiraTokenReplacesTheRememberedOne(t *testing.T) {
 		t.Errorf("token = %q after saving a new one", got)
 	}
 }
+
+func TestSyncAsksJiraOnlyForChangedTickets(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	site, _ := config.SiteURL(c.Jira.Site)
+	h.creds[credstore.JiraKey(site, c.Jira.Email)] = "token"
+	h.app.NewGitHub = func(*config.Config) GitHubAPI { return &fakeGitHub{} }
+	h.app.Now = func() time.Time { return time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC) }
+	updated := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	key := c.Spaces[0].Key
+	h.jira.issues = []jira.Issue{{ID: "1", Key: key + "-1", Status: "To Do", StatusCategory: "new", Updated: updated}}
+	h.jira.devPRs = map[string][]jira.DevPullRequest{"1": {{Repo: "example-org/web", Number: 9, Status: "OPEN"}}}
+	for i := range 2 {
+		if _, _, err := h.app.loadSnapshot(context.Background(), c, false); err != nil {
+			t.Fatal(err)
+		}
+		if got := h.jira.devAsked.Load(); got != 1 {
+			t.Fatalf("after sync %d Jira's panel was asked %d times, want once", i+1, got)
+		}
+	}
+}

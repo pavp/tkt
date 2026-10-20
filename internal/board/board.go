@@ -26,7 +26,21 @@ type Snapshot struct {
 	// Repos lists each space's repositories, configured or inferred from Jira-linked pull requests.
 	Repos    map[string][]string `json:"repos,omitempty"`
 	Warnings []string            `json:"warnings,omitempty"`
+	// Panels keeps each ticket's development panel, so the next sync asks Jira only for changed tickets.
+	Panels map[string]DevPanel `json:"panels,omitempty"`
 }
+
+// DevPanel is a ticket's development panel as last asked: the issue's updated time it belongs to and
+// when it was asked.
+type DevPanel struct {
+	Updated time.Time             `json:"updated"`
+	Asked   time.Time             `json:"asked"`
+	PRs     []jira.DevPullRequest `json:"prs,omitempty"`
+}
+
+// panelTTL bounds how long an unchanged ticket's panel is trusted, since a new pull request may not
+// change the issue's updated time.
+const panelTTL = 10 * time.Minute
 
 type JiraSource interface {
 	Search(ctx context.Context, jql string, fields []string) ([]jira.Issue, error)
@@ -43,7 +57,13 @@ type GitHubSource interface {
 // Fetch builds a snapshot. Jira failures are fatal because there is no board without tickets; GitHub
 // failures become warnings so the tickets still show.
 func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource, now time.Time) (Snapshot, error) {
-	snap := Snapshot{FetchedAt: now}
+	return FetchSince(ctx, c, js, gh, now, Snapshot{})
+}
+
+// FetchSince builds a snapshot like Fetch, reusing prev's development panels for tickets that did not
+// change.
+func FetchSince(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource, now time.Time, prev Snapshot) (Snapshot, error) {
+	snap := Snapshot{FetchedAt: now, Panels: map[string]DevPanel{}}
 	if len(c.Spaces) == 0 {
 		return snap, errors.New("no Jira spaces configured: add [[spaces]] to the config or run `tkt init`")
 	}
@@ -53,10 +73,12 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 	}
 	tickets := make([]ticket.Ticket, 0, len(issues))
 	ids := make(map[ticket.Key]string, len(issues))
+	updated := make(map[ticket.Key]time.Time, len(issues))
 	seenSprint := map[string]bool{}
 	for _, is := range issues {
 		tickets = append(tickets, ToTicket(c, is, js.BrowseURL(is.Key)))
 		ids[ticket.Key(is.Key)] = is.ID
+		updated[ticket.Key(is.Key)] = is.Updated
 		for _, sp := range is.Sprints {
 			if sp.State == "active" && !seenSprint[sp.Name] {
 				seenSprint[sp.Name] = true
@@ -68,14 +90,24 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 	linked := map[ticket.Key][]jira.DevPullRequest{}
 	devFailed := map[ticket.Key]bool{}
 	ignoredAny := map[string]bool{}
-	panels := devPanels(ctx, js, tickets, ids)
+	panels := devPanels(ctx, js, tickets, ids, func(t ticket.Ticket) (DevPanel, bool) {
+		p, ok := prev.Panels[string(t.Key)]
+		return p, ok && p.Updated.Equal(updated[t.Key]) && now.Sub(p.Asked) < panelTTL
+	})
 	for i, t := range tickets {
 		l, err := panels[i].prs, panels[i].err
+		if err == nil {
+			asked := now
+			if panels[i].reused {
+				asked = prev.Panels[string(t.Key)].Asked
+			}
+			snap.Panels[string(t.Key)] = DevPanel{Updated: updated[t.Key], Asked: asked, PRs: slices.Clone(l)}
+		}
 		if err != nil {
 			devFailed[t.Key] = true
 			continue
 		}
-		linked[t.Key] = slices.DeleteFunc(l, func(p jira.DevPullRequest) bool { return ignored(c, t.Space(), p.Repo) })
+		linked[t.Key] = slices.DeleteFunc(slices.Clone(l), func(p jira.DevPullRequest) bool { return ignored(c, t.Space(), p.Repo) })
 		if len(l) > len(linked[t.Key]) {
 			ignoredAny[t.Space()] = true
 		}
@@ -180,24 +212,29 @@ func spaceRepos(c *config.Config, linked map[ticket.Key][]jira.DevPullRequest) m
 const devPanelCalls = 8
 
 type devPanel struct {
-	prs []jira.DevPullRequest
-	err error
+	prs    []jira.DevPullRequest
+	err    error
+	reused bool
 }
 
 // devPanels asks Jira for each ticket's linked pull requests, several at a time, since one request per
-// ticket in turn made loading slow; results keep the tickets' order.
-func devPanels(ctx context.Context, js JiraSource, tickets []ticket.Ticket, ids map[ticket.Key]string) []devPanel {
+// ticket in turn made loading slow; a ticket cached reports holds is not asked. Results keep the tickets' order.
+func devPanels(ctx context.Context, js JiraSource, tickets []ticket.Ticket, ids map[ticket.Key]string, cached func(ticket.Ticket) (DevPanel, bool)) []devPanel {
 	out := make([]devPanel, len(tickets))
 	sem := make(chan struct{}, devPanelCalls)
 	var wg sync.WaitGroup
 	for i, t := range tickets {
+		if p, ok := cached(t); ok {
+			out[i] = devPanel{prs: p.PRs, reused: true}
+			continue
+		}
 		wg.Add(1)
 		go func(i int, id string) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			prs, err := js.DevPullRequests(ctx, id)
-			out[i] = devPanel{prs, err}
+			out[i] = devPanel{prs: prs, err: err}
 		}(i, ids[t.Key])
 	}
 	wg.Wait()
