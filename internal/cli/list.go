@@ -47,7 +47,7 @@ func newListCmd(a *App) *cobra.Command {
 					a.refreshSidebarQuietly(cmd.Context(), c, snap)
 				}
 			}
-			snap = snap.Filter(space)
+			snap = snap.Filter(space).WithoutBots()
 			if needsYou {
 				snap = onlyNeedsYou(snap)
 			}

@@ -121,6 +121,19 @@ func TestListShowsNeedsYouFirst(t *testing.T) {
 	}
 }
 
+func TestListHidesBotReviews(t *testing.T) {
+	for _, args := range [][]string{{"list"}, {"--json", "list"}} {
+		h, gh := listHarness(t)
+		gh.reviews["example-org"] = append(gh.reviews["example-org"], ticket.PullRequest{Repo: "example-org/web", Number: 830, Title: "Bump vite", Author: "dependabot", AuthorBot: true, State: ticket.PROpen})
+		if code := h.exec(args...); code != 0 {
+			t.Fatalf("%v: exit %d: %s", args, code, h.errOut)
+		}
+		if out := h.out.String(); strings.Contains(out, "830") || !strings.Contains(out, "820") {
+			t.Errorf("%v: bot review listed or person's review missing:\n%s", args, out)
+		}
+	}
+}
+
 func TestListFilters(t *testing.T) {
 	h, _ := listHarness(t)
 	h.exec("list", "--space", "OPS")

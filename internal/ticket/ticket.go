@@ -162,16 +162,18 @@ const (
 )
 
 type PullRequest struct {
-	Repo    string         `json:"repo"`
-	Number  int            `json:"number"`
-	Title   string         `json:"title"`
-	URL     string         `json:"url"`
-	Branch  string         `json:"branch"`
-	State   PRState        `json:"state"`
-	Checks  CheckState     `json:"checks"`
-	Review  ReviewDecision `json:"review"`
-	Author  string         `json:"author,omitempty"`
-	HeadSHA string         `json:"head_sha,omitempty"`
+	Repo   string         `json:"repo"`
+	Number int            `json:"number"`
+	Title  string         `json:"title"`
+	URL    string         `json:"url"`
+	Branch string         `json:"branch"`
+	State  PRState        `json:"state"`
+	Checks CheckState     `json:"checks"`
+	Review ReviewDecision `json:"review"`
+	Author string         `json:"author,omitempty"`
+	// AuthorBot marks pull requests opened by a bot account, such as dependabot.
+	AuthorBot bool   `json:"author_bot,omitempty"`
+	HeadSHA   string `json:"head_sha,omitempty"`
 }
 
 type Ticket struct {
@@ -196,6 +198,12 @@ const (
 )
 
 // Attention lists why an open ticket needs the user: failing CI or requested changes on any open PR.
+// Blocked reports whether the ticket's status says it is blocked, as "Blocked" or "Bloqueado" do.
+func (t Ticket) Blocked() bool {
+	s := strings.ToLower(t.Status)
+	return strings.Contains(s, "block") || strings.Contains(s, "bloque")
+}
+
 func (t Ticket) Attention() []Reason {
 	if t.Category == Done {
 		return nil

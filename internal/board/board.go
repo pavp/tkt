@@ -187,6 +187,7 @@ func FetchSince(ctx context.Context, c *config.Config, js JiraSource, gh GitHubS
 				snap.Reviews = append(snap.Reviews, pr)
 			}
 		}
+		slices.SortStableFunc(snap.Reviews, byRepoNumber)
 	}
 	return snap, nil
 }
@@ -337,16 +338,19 @@ func mergeLinked(attached []ticket.PullRequest, linked []jira.DevPullRequest, fr
 		}
 		out = append(out, ticket.PullRequest{Repo: l.Repo, Number: l.Number, Title: l.Title, URL: l.URL, Branch: l.Branch, State: state})
 	}
-	slices.SortStableFunc(out, func(a, b ticket.PullRequest) int {
-		if c := strings.Compare(a.Repo, b.Repo); c != 0 {
-			return c
-		}
-		return a.Number - b.Number
-	})
+	slices.SortStableFunc(out, byRepoNumber)
 	return out
 }
 
-// ToTicket converts a Jira issue into a board ticket using its space's status overrides.
+func byRepoNumber(a, b ticket.PullRequest) int {
+	if c := strings.Compare(a.Repo, b.Repo); c != 0 {
+		return c
+	}
+	return a.Number - b.Number
+}
+
+// ToTicket converts a Jira issue into a board ticket using its space's status overrides; a blocked ticket
+// waits in To Do unless its status is overridden.
 func ToTicket(c *config.Config, is jira.Issue, url string) ticket.Ticket {
 	t := ticket.Ticket{
 		Key:     ticket.Key(is.Key),
@@ -357,7 +361,11 @@ func ToTicket(c *config.Config, is jira.Issue, url string) ticket.Ticket {
 		URL:     url,
 	}
 	space, _ := c.Space(t.Space())
-	t.Category = ticket.CategoryFor(is.Status, is.StatusCategory, space.Categories())
+	overrides := space.Categories()
+	t.Category = ticket.CategoryFor(is.Status, is.StatusCategory, overrides)
+	if _, ok := overrides[is.Status]; !ok && t.Blocked() {
+		t.Category = ticket.ToDo
+	}
 	return t
 }
 
@@ -409,6 +417,12 @@ func (s Snapshot) Column(c ticket.Category) []ticket.Ticket {
 		}
 	}
 	return out
+}
+
+// WithoutBots drops review requests on pull requests opened by bots, such as dependabot.
+func (s Snapshot) WithoutBots() Snapshot {
+	s.Reviews = slices.DeleteFunc(slices.Clone(s.Reviews), func(p ticket.PullRequest) bool { return p.AuthorBot })
+	return s
 }
 
 // Filter keeps the tickets and reviews of one space; an empty space keeps everything.

@@ -69,6 +69,24 @@ func TestCategoryFor(t *testing.T) {
 	}
 }
 
+func TestBlocked(t *testing.T) {
+	tests := []struct {
+		status string
+		want   bool
+	}{
+		{"Blocked", true},
+		{"BLOCKED BY CLIENT", true},
+		{"Bloqueado", true},
+		{"In Progress", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := (Ticket{Status: tt.status}).Blocked(); got != tt.want {
+			t.Errorf("Blocked() for %q = %v, want %v", tt.status, got, tt.want)
+		}
+	}
+}
+
 func TestWorstChecks(t *testing.T) {
 	if got := WorstChecks(ChecksPass, ChecksFail, ChecksPending); got != ChecksFail {
 		t.Errorf("got %q, want fail", got)

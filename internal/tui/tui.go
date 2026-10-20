@@ -133,6 +133,8 @@ type Model struct {
 	// inStrip means the keyboard cursor is on the review chips above the columns, at stripSel.
 	inStrip  bool
 	stripSel int
+	// showBots also lists review requests on pull requests opened by bots.
+	showBots bool
 }
 
 // tickMsg drives the "synced … ago" label and the periodic refresh.
@@ -194,6 +196,23 @@ func (m *Model) explainList() {
 	}
 }
 
+func (m Model) reviews() []ticket.PullRequest {
+	if m.showBots {
+		return m.snap.Reviews
+	}
+	return m.snap.WithoutBots().Reviews
+}
+
+func (m Model) hiddenBots() int { return len(m.snap.Reviews) - len(m.snap.WithoutBots().Reviews) }
+
+// botToggleLine is listLines' marker for the reviews filter's "show bots" line, which a click toggles.
+const botToggleLine = -2
+
+func (m *Model) toggleBots() {
+	m.showBots = !m.showBots
+	m.reselect()
+}
+
 func (m Model) tickets() []ticket.Ticket {
 	if m.filter == FilterReviews {
 		return nil
@@ -231,8 +250,7 @@ func (m Model) listItems() []item {
 	if m.filter == FilterNeeds {
 		return out
 	}
-	for i := range m.snap.Reviews {
-		pr := m.snap.Reviews[i]
+	for _, pr := range m.reviews() {
 		out = append(out, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr})
 	}
 	return out
@@ -434,7 +452,9 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if avail > 0 && len(lines) > avail {
 			start = windowStart(lines, avail)
 		}
-		if i := start + body; i >= 0 && i < len(at) && at[i] >= 0 {
+		if i := start + body; i >= 0 && i < len(at) && at[i] == botToggleLine {
+			m.toggleBots()
+		} else if i >= 0 && i < len(at) && at[i] >= 0 {
 			m.row = at[i]
 			m.remember()
 			m.selectedByClick()
@@ -562,6 +582,10 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.reselect()
 		m.explainList()
+	case "b":
+		if m.filter == FilterReviews {
+			m.toggleBots()
+		}
 	case "n", "r":
 		want := map[string]string{"n": FilterNeeds, "r": FilterReviews}[k.String()]
 		if m.filter == want {
@@ -888,9 +912,9 @@ type headerItem struct {
 
 func (m Model) headerSpec() []headerItem {
 	return []headerItem{
-		{filter: FilterAll, label: fmt.Sprintf(" 1 All %d ", len(m.snap.Tickets)+len(m.snap.Reviews))},
+		{filter: FilterAll, label: fmt.Sprintf(" 1 All %d ", len(m.snap.Tickets)+len(m.reviews()))},
 		{filter: FilterNeeds, label: fmt.Sprintf(" 2 Needs you %d ", len(m.snap.NeedsYou()))},
-		{filter: FilterReviews, label: fmt.Sprintf(" 3 Reviews %d ", len(m.snap.Reviews))},
+		{filter: FilterReviews, label: fmt.Sprintf(" 3 Reviews %d ", len(m.reviews()))},
 		{view: ViewColumns, label: " Columns "},
 		{view: ViewList, label: " List "},
 	}
@@ -951,14 +975,15 @@ type chipSpan struct {
 
 // reviewChips renders the strip and returns each visible chip's horizontal span.
 func (m Model) reviewChips() (string, []chipSpan) {
-	if len(m.snap.Reviews) == 0 || m.filter == FilterNeeds {
+	reviews := m.reviews()
+	if len(reviews) == 0 || m.filter == FilterNeeds {
 		return "", nil
 	}
 	label := dim.Render("Review requested")
 	row := []string{lipgloss.NewStyle().PaddingTop(1).Render(label)}
 	used := lipgloss.Width(label)
 	var spans []chipSpan
-	for i, pr := range m.snap.Reviews {
+	for i, pr := range reviews {
 		text := fmt.Sprintf(" #%d", pr.Number)
 		if keys := ticket.BranchKeys(pr.Branch); len(keys) > 0 {
 			text += " · " + string(keys[0])
@@ -969,11 +994,11 @@ func (m Model) reviewChips() (string, []chipSpan) {
 		}
 		// A chip only fits if the "+N more" label for the chips after it still fits beside it.
 		need := used + 2 + lipgloss.Width(chip)
-		if rest := len(m.snap.Reviews) - i - 1; rest > 0 {
+		if rest := len(reviews) - i - 1; rest > 0 {
 			need += 1 + lipgloss.Width(moreReviews(rest))
 		}
 		if need > m.width {
-			row = append(row, " ", lipgloss.NewStyle().PaddingTop(1).Render(dim.Render(moreReviews(len(m.snap.Reviews)-i))))
+			row = append(row, " ", lipgloss.NewStyle().PaddingTop(1).Render(dim.Render(moreReviews(len(reviews)-i))))
 			break
 		}
 		row = append(row, "  ", chip)
@@ -1086,6 +1111,7 @@ var (
 // card renders one ticket in its own bordered box of the given outer width.
 var (
 	cardBoxWarn = cardBox.BorderForeground(lipgloss.Color("130"))
+	blocked     = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255"))
 	keyDim      = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 )
@@ -1095,13 +1121,24 @@ var (
 func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 	width := outer - 2
 	inner := width - 2
+	head := keyDim.Render(string(t.Key))
+	if sel {
+		head = selected.Render("▸ " + string(t.Key))
+	}
 	flag := ""
 	if r := t.Attention(); len(r) > 0 {
 		flag = warn.Render("! " + string(r[0]))
 	}
-	head := keyDim.Render(string(t.Key))
-	if sel {
-		head = selected.Render("▸ " + string(t.Key))
+	if t.Blocked() {
+		// The word gives way to the icon alone when another flag is there or the card is too narrow for it.
+		switch word := blocked.Render("⊘ blocked"); {
+		case flag != "":
+			flag += " " + blocked.Render("⊘")
+		case lipgloss.Width(head)+1+lipgloss.Width(word) <= inner:
+			flag = word
+		default:
+			flag = blocked.Render("⊘")
+		}
 	}
 	gap := max(1, inner-lipgloss.Width(head)-lipgloss.Width(flag))
 	lines := []string{head + strings.Repeat(" ", gap) + flag}
@@ -1380,8 +1417,9 @@ func agentStyle(kind board.AgentKind) lipgloss.Style {
 	return map[board.AgentKind]lipgloss.Style{board.AgentWorking: keyStyle, board.AgentNeedsYou: warn, board.AgentIdle: dim}[kind]
 }
 
-// listLines lays the list out in two sections, the user's tickets and review requests, and returns for
-// every line the index of the item on it (-1 for titles and spacing), so clicks map back to items.
+// listLines lays the list out in sections, the user's tickets and review requests per repo, and returns for
+// every line the index of the item on it (-1 for titles and spacing, botToggleLine for the bots toggle), so
+// clicks map back to items.
 func (m Model) listLines(row func(key, status, agent, pr, title string) string, prText func(item) string, agentW int) ([]string, []int) {
 	items := m.listItems()
 	header := pad("", agentW)
@@ -1390,6 +1428,13 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 	}
 	lines := []string{"  " + dim.Render(row("KEY", "STATUS", header, "PR / CI", "TITLE")), dim.Render(strings.Repeat("─", m.width))}
 	at := []int{-1, -1}
+	if m.filter == FilterReviews && m.hiddenBots() > 0 {
+		toggle := keyStyle.Render("b") + " " + dim.Render(fmt.Sprintf("show bots · %d hidden", m.hiddenBots()))
+		if m.showBots {
+			toggle = keyStyle.Render("b") + " " + dim.Render("hide bots")
+		}
+		lines, at = append(lines, "  "+toggle), append(at, botToggleLine)
+	}
 	nTickets := 0
 	for _, it := range items {
 		if it.ticket != nil {
@@ -1407,8 +1452,14 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		if i == 0 && it.ticket != nil {
 			section("My tickets", nTickets)
 		}
-		if it.pr != nil && (i == 0 || items[i-1].pr == nil) {
-			section("Review requested", len(items)-nTickets)
+		if it.pr != nil && (i == 0 || items[i-1].pr == nil || items[i-1].pr.Repo != it.pr.Repo) {
+			n := 0
+			for _, o := range items[i:] {
+				if o.pr != nil && o.pr.Repo == it.pr.Repo {
+					n++
+				}
+			}
+			section("Review requested · "+it.pr.Repo, n)
 		}
 		var line string
 		if it.pr != nil {
@@ -1419,8 +1470,15 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		switch {
 		case i == m.row:
 			line = "▸ " + selected.Render(line)
-		case it.pr != nil || len(it.ticket.Attention()) > 0:
+		case it.pr != nil:
 			line = warn.Render("!") + " " + line
+		case len(it.ticket.Attention()) > 0 && it.ticket.Blocked():
+			// The wider mark takes one cell of the key's padding, so the columns stay aligned.
+			line = warn.Render("!") + blocked.Render("⊘") + " " + strings.Replace(line, string(it.key)+" ", string(it.key), 1)
+		case len(it.ticket.Attention()) > 0:
+			line = warn.Render("!") + " " + line
+		case it.ticket.Blocked():
+			line = blocked.Render("⊘") + " " + line
 		default:
 			line = "  " + line
 		}
@@ -1500,6 +1558,9 @@ func (m Model) footer() string {
 	legend := [][2]string{
 		{move, "move · ↑ to reviews"}, {"click", "select · open review"}, {"double-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
 		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-3", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
+	}
+	if m.filter == FilterReviews && m.hiddenBots() > 0 {
+		legend = append(legend[:1], append([][2]string{{"b", "bots"}}, legend[1:]...)...)
 	}
 	items := make([]string, len(legend))
 	for i, k := range legend {

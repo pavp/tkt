@@ -118,7 +118,7 @@ func (c *Client) query(ctx context.Context, owner, q string, vars map[string]any
 }
 
 const prFields = `number title url state isDraft headRefName headRefOid reviewDecision
-  author { login }
+  author { login __typename }
   repository { nameWithOwner }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
 
@@ -131,7 +131,8 @@ type prNode struct {
 	HeadRefOid     string `json:"headRefOid"`
 	ReviewDecision string `json:"reviewDecision"`
 	Author         *struct {
-		Login string `json:"login"`
+		Login    string `json:"login"`
+		Typename string `json:"__typename"`
 	} `json:"author"`
 	Repository struct {
 		NameWithOwner string `json:"nameWithOwner"`
@@ -174,6 +175,7 @@ func (n prNode) toPR() ticket.PullRequest {
 	}
 	if n.Author != nil {
 		pr.Author = n.Author.Login
+		pr.AuthorBot = n.Author.Typename == "Bot"
 	}
 	if len(n.Commits.Nodes) > 0 && n.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
 		switch n.Commits.Nodes[0].Commit.StatusCheckRollup.State {

@@ -896,7 +896,7 @@ func TestMenuShowDetailsOpensTheDetail(t *testing.T) {
 func TestListSeparatesMyTicketsFromReviews(t *testing.T) {
 	m := press(loaded(&recorder{}), "v")
 	v := stripANSI(m.View())
-	mine, reviews := strings.Index(v, "My tickets  3"), strings.Index(v, "Review requested  1")
+	mine, reviews := strings.Index(v, "My tickets  3"), strings.Index(v, "Review requested · example-org/web  1")
 	if mine < 0 || reviews < 0 || mine > reviews {
 		t.Fatalf("sections missing or out of order:\n%s", v)
 	}
@@ -911,6 +911,144 @@ func TestListSeparatesMyTicketsFromReviews(t *testing.T) {
 	m = press(m, "1")
 	if !strings.Contains(stripANSI(m.View()), "▸ ") {
 		t.Error("lost the selection")
+	}
+}
+
+func TestListGroupsReviewsByRepo(t *testing.T) {
+	snap := snapshot()
+	snap.Reviews = []ticket.PullRequest{
+		{Repo: "example-org/api", Number: 4, Title: "Rate limit"},
+		{Repo: "example-org/web", Number: 2, Title: "Fix header"},
+		{Repo: "example-org/web", Number: 9, Title: "Add pagination"},
+	}
+	m := tea.Model(New(snap, false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	v := stripANSI(m.View())
+	api, web := strings.Index(v, "Review requested · example-org/api  1"), strings.Index(v, "Review requested · example-org/web  2")
+	if api < 0 || web < 0 || api > web {
+		t.Fatalf("repo sections missing or out of order:\n%s", v)
+	}
+	if i := strings.Index(v, "#4 "); i < api || i > web {
+		t.Errorf("#4 not under its repo:\n%s", v)
+	}
+	if i, j := strings.Index(v, "#2 "), strings.Index(v, "#9 "); i < web || j < web {
+		t.Errorf("web reviews not under their repo:\n%s", v)
+	}
+}
+
+func TestReviewsFilterTogglesBots(t *testing.T) {
+	snap := snapshot()
+	snap.Reviews = append(snap.Reviews, ticket.PullRequest{Repo: "example-org/web", Number: 830, Title: "Bump vite", Author: "dependabot", AuthorBot: true})
+	m := tea.Model(New(snap, false, &recorder{}, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(m.View()); strings.Contains(v, "#830") || !strings.Contains(v, "3 Reviews 1") || !strings.Contains(v, "1 All 4") {
+		t.Fatalf("bot review shown by default:\n%s", v)
+	}
+	if v := stripANSI(press(m, "b").View()); strings.Contains(v, "#830") {
+		t.Errorf("b outside the reviews filter showed bots:\n%s", v)
+	}
+	m = press(m, "3")
+	v := stripANSI(m.View())
+	if strings.Contains(v, "#830") || !strings.Contains(v, "b show bots · 1 hidden") || !strings.Contains(v, "b bots") {
+		t.Fatalf("reviews filter before b:\n%s", v)
+	}
+	shown := press(m, "b")
+	if v := stripANSI(shown.View()); !strings.Contains(v, "#830") || !strings.Contains(v, "b hide bots") || !strings.Contains(v, "3 Reviews 2") {
+		t.Errorf("b did not show bots:\n%s", v)
+	}
+	if v := stripANSI(press(shown, "b").View()); strings.Contains(v, "#830") {
+		t.Errorf("second b did not hide bots:\n%s", v)
+	}
+	clicked := click(m, 6, lineIndex(m.View(), "b show bots"))
+	if v := stripANSI(clicked.View()); !strings.Contains(v, "#830") {
+		t.Errorf("click on the toggle did not show bots:\n%s", v)
+	}
+	if v := stripANSI(click(clicked, 6, lineIndex(clicked.View(), "b hide bots")).View()); strings.Contains(v, "#830") {
+		t.Errorf("second click did not hide bots:\n%s", v)
+	}
+}
+
+func TestBotToggleHidesWithoutBotReviews(t *testing.T) {
+	m := press(loaded(&recorder{}), "3")
+	if v := stripANSI(m.View()); strings.Contains(v, "show bots") {
+		t.Errorf("toggle shown with no bot reviews:\n%s", v)
+	}
+}
+
+func TestBlockedTicketsAreMarked(t *testing.T) {
+	snap := snapshot()
+	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-7", Summary: "Wait for client", Status: "Blocked", Category: ticket.ToDo})
+	for _, view := range []string{ViewColumns, ViewList} {
+		m := tea.Model(New(snap, false, &recorder{}, view))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+		var line string
+		for _, l := range strings.Split(stripANSI(m.View()), "\n") {
+			if strings.Contains(l, "DEMO-7") {
+				line = l
+			}
+		}
+		if !strings.Contains(line, "⊘") {
+			t.Errorf("%s: blocked ticket not marked: %q", view, line)
+		}
+		for _, l := range strings.Split(stripANSI(m.View()), "\n") {
+			if strings.Contains(l, "DEMO-3") && strings.Contains(l, "⊘") {
+				t.Errorf("%s: unblocked ticket marked: %q", view, l)
+			}
+		}
+	}
+}
+
+func TestBlockedMarkShrinksToItsIcon(t *testing.T) {
+	failing := []ticket.PullRequest{{State: ticket.PROpen, Checks: ticket.ChecksFail}}
+	tests := []struct {
+		name     string
+		tk       ticket.Ticket
+		outer    int
+		want     []string
+		dontWant string
+	}{
+		{"room for the word", ticket.Ticket{Key: "DEMO-7", Status: "Blocked"}, 40, []string{"⊘ blocked"}, ""},
+		{"too narrow", ticket.Ticket{Key: "DEMO-7", Status: "Blocked"}, 18, []string{"DEMO-7", "⊘"}, "blocked"},
+		{"another flag", ticket.Ticket{Key: "DEMO-7", Status: "Blocked", PRs: failing}, 40, []string{"! CI failing", "⊘"}, "⊘ blocked"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := strings.Split(stripANSI(card(tt.tk, tt.outer, false, true, "")), "\n")
+			plain := tt.tk
+			plain.Status, plain.PRs = "To Do", nil
+			if n := strings.Count(card(plain, tt.outer, false, true, ""), "\n") + 1; len(lines) != n {
+				t.Errorf("card is %d lines, want %d:\n%s", len(lines), n, strings.Join(lines, "\n"))
+			}
+			first := lines[1]
+			for _, w := range tt.want {
+				if !strings.Contains(first, w) {
+					t.Errorf("first line %q lacks %q", first, w)
+				}
+			}
+			if tt.dontWant != "" && strings.Contains(first, tt.dontWant) {
+				t.Errorf("first line %q has %q", first, tt.dontWant)
+			}
+			if w := lipgloss.Width(first); w > tt.outer {
+				t.Errorf("first line is %d wide, card is %d: %q", w, tt.outer, first)
+			}
+		})
+	}
+}
+
+func TestListMarksBlockedTicketsThatNeedYou(t *testing.T) {
+	snap := snapshot()
+	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-7", Summary: "Wait for client", Status: "Blocked", Category: ticket.ToDo,
+		PRs: []ticket.PullRequest{{State: ticket.PROpen, Checks: ticket.ChecksFail}}})
+	m := tea.Model(New(snap, false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	lines := strings.Split(stripANSI(m.View()), "\n")
+	line, other := lines[lineIndex(m.View(), "DEMO-7")], lines[lineIndex(m.View(), "DEMO-1 ")]
+	if !strings.Contains(line, "!⊘ DEMO-7") {
+		t.Errorf("row = %q", line)
+	}
+	col := func(l, s string) int { return lipgloss.Width(l[:strings.Index(l, s)]) }
+	if a, b := col(line, "Blocked"), col(other, "In Progress"); a != b {
+		t.Errorf("STATUS at %d, other rows at %d:\n%q\n%q", a, b, line, other)
 	}
 }
 
@@ -1016,7 +1154,7 @@ func TestListHeaderHasARuleAndNeutralSections(t *testing.T) {
 	if lipgloss.Width(lines[y+1]) > 120 {
 		t.Errorf("rule wider than the pane: %d", lipgloss.Width(lines[y+1]))
 	}
-	for _, want := range []string{" My tickets  ", " Review requested  1"} {
+	for _, want := range []string{" My tickets  ", " Review requested · example-org/web  1"} {
 		if !strings.Contains(strings.Join(lines, "\n"), want) {
 			t.Errorf("missing section title %q:\n%s", want, strings.Join(lines, "\n"))
 		}

@@ -129,16 +129,20 @@ func TestPullRequestsErrors(t *testing.T) {
 }
 
 func TestReviewRequests(t *testing.T) {
+	bot := strings.Replace(pr("example-org/web", 821, "dependabot/npm/x", "OPEN", "", ""), `{"login":"alex"}`, `{"login":"dependabot","__typename":"Bot"}`, 1)
 	base, h, calls := gqlServer(t, func(string) (int, string) {
-		return 200, `{"data":{"search":{"nodes":[` + pr("example-org/web", 820, "feature/DEMO-9", "OPEN", "REVIEW_REQUIRED", "SUCCESS") + `,{}]}}}`
+		return 200, `{"data":{"search":{"nodes":[` + pr("example-org/web", 820, "feature/DEMO-9", "OPEN", "REVIEW_REQUIRED", "SUCCESS") + `,` + bot + `,{}]}}}`
 	})
 	c := New(staticTokens(map[string]string{"example-org": "t"})).WithEndpoints(base, h)
 	got, err := c.ReviewRequests(context.Background(), []string{"example-org/web", "example-org/api"}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Number != 820 || got[0].Checks != ticket.ChecksPass {
-		t.Errorf("got %+v", got)
+	if len(got) != 2 || got[0].Number != 820 || got[0].Checks != ticket.ChecksPass || got[0].AuthorBot {
+		t.Fatalf("got %+v", got)
+	}
+	if !got[1].AuthorBot || got[1].Author != "dependabot" {
+		t.Errorf("bot author not marked: %+v", got[1])
 	}
 	if q := (*calls)[0].vars["q"]; q != "is:pr is:open archived:false user-review-requested:@me repo:example-org/web repo:example-org/api" {
 		t.Errorf("direct search = %v", q)
