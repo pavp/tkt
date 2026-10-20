@@ -619,7 +619,7 @@ func (a *App) herdrSidebar(cmd *cobra.Command, cachedOnly bool) error {
 		}
 		return err
 	}
-	n, _, err := a.updateSidebar(cmd.Context(), c, snap)
+	n, _, err := a.updateSidebar(cmd.Context(), c, snap, true)
 	if err != nil {
 		return err
 	}
@@ -627,8 +627,9 @@ func (a *App) herdrSidebar(cmd *cobra.Command, cachedOnly bool) error {
 	return nil
 }
 
-// updateSidebar labels every workspace that holds a ticket and returns the agent status shown for each.
-func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Snapshot) (int, map[string]string, error) {
+// updateSidebar returns the agent status shown for every workspace that holds a ticket and, when report
+// is set, labels that workspace in the sidebar.
+func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Snapshot, report bool) (int, map[string]string, error) {
 	h := a.NewHerdr()
 	all, err := h.Workspaces(ctx)
 	if err != nil {
@@ -676,6 +677,9 @@ func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Sn
 		agent := board.MostUrgentAgent(statuses[ws.ID])
 		if agent != "" {
 			agents[string(key)] = board.MostUrgentAgent([]string{agents[string(key)], agent})
+		}
+		if !report {
+			continue
 		}
 		if err := h.ReportWorkspaceTokens(ctx, ws.ID, sidebarSource, sidebarTokens(t), sidebarTTL); err != nil {
 			return n, agents, err
@@ -740,7 +744,7 @@ func (a *App) herdrOnWorktree(cmd *cobra.Command) error {
 	}
 	a.printf("✓ %s ← %s (%s)\n", key, co.branch, co.repo)
 	if snap, ok, _ := a.cache().Load(); ok {
-		_, _, _ = a.updateSidebar(cmd.Context(), c, snap)
+		_, _, _ = a.updateSidebar(cmd.Context(), c, snap, true)
 	}
 	return nil
 }
@@ -748,12 +752,22 @@ func (a *App) herdrOnWorktree(cmd *cobra.Command) error {
 // refreshSidebarQuietly updates Herdr labels after a fresh fetch when tkt runs inside Herdr; any failure
 // is ignored because the sidebar is a convenience, never a reason for a command to fail.
 func (a *App) refreshSidebarQuietly(ctx context.Context, c *config.Config, snap board.Snapshot) map[string]string {
+	return a.readSidebarQuietly(ctx, c, snap, true)
+}
+
+// agentStatesQuietly reads the agent states without touching the sidebar, so a cached board never
+// overwrites lines a fresh fetch may already have written.
+func (a *App) agentStatesQuietly(ctx context.Context, c *config.Config, snap board.Snapshot) map[string]string {
+	return a.readSidebarQuietly(ctx, c, snap, false)
+}
+
+func (a *App) readSidebarQuietly(ctx context.Context, c *config.Config, snap board.Snapshot, report bool) map[string]string {
 	if a.Env.Getenv("HERDR_ENV") != "1" || a.NewHerdr == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	_, agents, _ := a.updateSidebar(ctx, c, snap)
+	_, agents, _ := a.updateSidebar(ctx, c, snap, report)
 	return agents
 }
 
