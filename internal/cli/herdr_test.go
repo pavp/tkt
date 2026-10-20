@@ -207,10 +207,30 @@ func TestHerdrStartFocusesTheAgentOfAWorktreeHerdrDidNotCreate(t *testing.T) {
 			if got := f.Last("workspace.focus"); got["workspace_id"] != "w5" {
 				t.Errorf("focus = %v", got)
 			}
+			if got := f.Last("pane.focus"); got["pane_id"] != "w5:p2" {
+				t.Errorf("agent's pane not focused, so its tab may stay hidden: %v", got)
+			}
 			if count(f, "agent.start") != 0 || count(f, "workspace.create") != 0 {
 				t.Errorf("started a second agent: agent.start %d, workspace.create %d", count(f, "agent.start"), count(f, "workspace.create"))
 			}
 		})
+	}
+}
+
+func TestHerdrStartFocusesTheAgentsPaneInAHerdrWorktree(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.clone(t, "web")
+	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1\nHEAD a\nbranch refs/heads/feature/DEMO-1-filter\n"
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w3","label":"web-DEMO-1","worktree":{"checkout_path":"/src/web-DEMO-1/"}}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w3:p4","workspace_id":"w3","agent":"claude","cwd":"/src/web-DEMO-1"}]}`
+	if code := h.exec("herdr", "start", "DEMO-1"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if got := f.Last("workspace.focus"); got["workspace_id"] != "w3" {
+		t.Errorf("focus = %v", got)
+	}
+	if got := f.Last("pane.focus"); got["pane_id"] != "w3:p4" {
+		t.Errorf("pane.focus = %v", got)
 	}
 }
 
