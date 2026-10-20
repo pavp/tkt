@@ -51,7 +51,9 @@ type devDetail struct {
 // such as GitHub for Jira. It relies on Jira's undocumented dev-status API, so callers treat errors as
 // "unknown" and fall back to their own search.
 func (c *Client) DevPullRequests(ctx context.Context, issueID string) ([]DevPullRequest, error) {
+	c.mu.Lock()
 	apps := c.devApps
+	c.mu.Unlock()
 	if apps == nil {
 		var s devSummary
 		if err := c.do(ctx, http.MethodGet, "/rest/dev-status/latest/issue/summary?issueId="+url.QueryEscape(issueID), nil, &s); err != nil {
@@ -64,7 +66,9 @@ func (c *Client) DevPullRequests(ctx context.Context, issueID string) ([]DevPull
 			apps = append(apps, app)
 		}
 		sort.Strings(apps)
+		c.mu.Lock()
 		c.devApps = apps
+		c.mu.Unlock()
 	}
 	var out []DevPullRequest
 	for _, app := range apps {

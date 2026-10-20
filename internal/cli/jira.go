@@ -32,7 +32,7 @@ func (a *App) jiraClient(c *config.Config) (JiraAPI, error) {
 	if err != nil {
 		return nil, err
 	}
-	token, _, err := credstore.JiraToken(a.Creds, a.Env.Getenv, site, c.Jira.Email)
+	token, err := a.jiraToken(site, c.Jira.Email)
 	if errors.Is(err, credstore.ErrNotFound) {
 		return nil, errors.New("no Jira token: run `tkt auth jira`")
 	}
@@ -40,6 +40,47 @@ func (a *App) jiraClient(c *config.Config) (JiraAPI, error) {
 		return nil, err
 	}
 	return a.NewJira(site, c.Jira.Email, token), nil
+}
+
+// saveJiraToken stores a Jira token and makes it the one this process uses.
+func (a *App) saveJiraToken(site, email, token string) error {
+	if err := a.Creds.Set(credstore.JiraKey(site, email), token); err != nil {
+		return err
+	}
+	a.tokenMu.Lock()
+	defer a.tokenMu.Unlock()
+	if a.tokens == nil {
+		a.tokens = map[string]string{}
+	}
+	a.tokens[credstore.JiraKey(site, email)] = token
+	return nil
+}
+
+// forgetJiraToken drops the remembered token, so the next read sees one saved by another command.
+func (a *App) forgetJiraToken(site, email string) {
+	a.tokenMu.Lock()
+	defer a.tokenMu.Unlock()
+	delete(a.tokens, credstore.JiraKey(site, email))
+}
+
+// jiraToken reads the Jira token once per process; a missing token is not remembered, so connecting
+// Jira later in the same run is seen.
+func (a *App) jiraToken(site, email string) (string, error) {
+	a.tokenMu.Lock()
+	defer a.tokenMu.Unlock()
+	key := credstore.JiraKey(site, email)
+	if t, ok := a.tokens[key]; ok {
+		return t, nil
+	}
+	t, _, err := credstore.JiraToken(a.Creds, a.Env.Getenv, site, email)
+	if err != nil {
+		return "", err
+	}
+	if a.tokens == nil {
+		a.tokens = map[string]string{}
+	}
+	a.tokens[key] = t
+	return t, nil
 }
 
 // GitHubAPI is the read-only GitHub surface commands use.

@@ -142,7 +142,7 @@ func (a *App) runInit(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("could not reach Jira: %w", err)
 	}
-	if err := a.Creds.Set(credstore.JiraKey(siteURL, email), token); err != nil {
+	if err := a.saveJiraToken(siteURL, email, token); err != nil {
 		return err
 	}
 	if fromClipboard {

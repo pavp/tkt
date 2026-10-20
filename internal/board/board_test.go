@@ -3,10 +3,12 @@ package board
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -493,5 +495,90 @@ func TestFetchExplainsASpaceWhoseRepositoriesAreAllIgnored(t *testing.T) {
 	want := "DEMO has no repositories yet: you ignore every repository of its pull requests, so CI and reviews are off; add one in the config"
 	if !slices.Contains(snap.Warnings, want) {
 		t.Errorf("warnings = %q", snap.Warnings)
+	}
+}
+
+// parallelJira answers DevPullRequests only once enough calls overlap, recording how many ran at once.
+type parallelJira struct {
+	stubJira
+	want     int32
+	inFlight atomic.Int32
+	most     atomic.Int32
+}
+
+func (p *parallelJira) DevPullRequests(ctx context.Context, id string) ([]jira.DevPullRequest, error) {
+	n := p.inFlight.Add(1)
+	defer p.inFlight.Add(-1)
+	for {
+		if m := p.most.Load(); n <= m || p.most.CompareAndSwap(m, n) {
+			break
+		}
+	}
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for p.inFlight.Load() < p.want && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	return p.stubJira.DevPullRequests(ctx, id)
+}
+
+func TestFetchAsksJiraForPullRequestsInParallel(t *testing.T) {
+	js := &parallelJira{want: 8}
+	js.linked = map[string][]jira.DevPullRequest{}
+	for i := range 12 {
+		id := fmt.Sprint(100 + i)
+		js.issues = append(js.issues, jira.Issue{ID: id, Key: fmt.Sprintf("DEMO-%d", i+1), Status: "To Do", StatusCategory: "new"})
+		js.linked[id] = []jira.DevPullRequest{{Repo: fmt.Sprintf("example-org/repo%02d", i), Number: i + 1, Status: "OPEN"}}
+	}
+	c := &config.Config{Jira: config.Jira{Site: "example.atlassian.net", Email: "dev@example.com"}, Spaces: []config.Space{{Key: "DEMO"}}}
+	snap, err := Fetch(context.Background(), c, js, &stubGitHub{}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := js.most.Load(); got != 8 {
+		t.Errorf("%d development-panel calls ran at once, want 8", got)
+	}
+	if len(snap.Repos["DEMO"]) != 12 {
+		t.Errorf("repos = %v", snap.Repos["DEMO"])
+	}
+	for _, tk := range snap.Tickets {
+		if len(tk.PRs) != 1 {
+			t.Errorf("%s pull requests = %+v", tk.Key, tk.PRs)
+		}
+	}
+}
+
+// overlappingGitHub reports whether review requests were asked while pull requests were still loading.
+type overlappingGitHub struct {
+	stubGitHub
+	reviewsAsked chan struct{}
+	overlapped   bool
+}
+
+func (o *overlappingGitHub) PullRequests(ctx context.Context, repos []string) ([]ticket.PullRequest, error) {
+	select {
+	case <-o.reviewsAsked:
+		o.overlapped = true
+	case <-time.After(time.Second):
+	}
+	return o.stubGitHub.PullRequests(ctx, repos)
+}
+
+func (o *overlappingGitHub) ReviewRequests(ctx context.Context, repos []string, direct bool) ([]ticket.PullRequest, error) {
+	close(o.reviewsAsked)
+	return o.stubGitHub.ReviewRequests(ctx, repos, direct)
+}
+
+func TestFetchAsksForReviewsWhilePullRequestsLoad(t *testing.T) {
+	gh := &overlappingGitHub{reviewsAsked: make(chan struct{})}
+	gh.reviews = []ticket.PullRequest{{Repo: "example-org/web", Number: 820}}
+	snap, err := Fetch(context.Background(), cfg(), &stubJira{issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Status: "To Do", StatusCategory: "new"}}}, gh, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gh.overlapped {
+		t.Error("review requests waited for the pull requests")
+	}
+	if len(snap.Reviews) != 1 {
+		t.Errorf("reviews = %+v", snap.Reviews)
 	}
 }

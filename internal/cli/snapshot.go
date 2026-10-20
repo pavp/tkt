@@ -6,6 +6,7 @@ import (
 
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
+	"github.com/pavp/tkt/internal/jira"
 )
 
 func (a *App) cache() board.Cache {
@@ -41,10 +42,20 @@ func (a *App) loadSnapshot(ctx context.Context, c *config.Config, cachedOnly boo
 	return board.DropIgnored(c, cached), fetchErr, nil
 }
 
+// fetchSnapshot reads the token again once when Jira rejects the remembered one, since another command
+// may have saved a new token while this one ran.
 func (a *App) fetchSnapshot(ctx context.Context, c *config.Config) (board.Snapshot, error) {
-	js, err := a.jiraClient(c)
-	if err != nil {
-		return board.Snapshot{}, err
+	for retried := false; ; retried = true {
+		js, err := a.jiraClient(c)
+		if err != nil {
+			return board.Snapshot{}, err
+		}
+		snap, err := board.Fetch(ctx, c, js, a.NewGitHub(c), a.Now())
+		if !errors.Is(err, jira.ErrUnauthorized) || retried {
+			return snap, err
+		}
+		if site, serr := config.SiteURL(c.Jira.Site); serr == nil {
+			a.forgetJiraToken(site, c.Jira.Email)
+		}
 	}
-	return board.Fetch(ctx, c, js, a.NewGitHub(c), a.Now())
 }

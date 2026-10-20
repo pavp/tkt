@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pavp/tkt/internal/config"
@@ -67,8 +68,9 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 	linked := map[ticket.Key][]jira.DevPullRequest{}
 	devFailed := map[ticket.Key]bool{}
 	ignoredAny := map[string]bool{}
-	for _, t := range tickets {
-		l, err := js.DevPullRequests(ctx, ids[t.Key])
+	panels := devPanels(ctx, js, tickets, ids)
+	for i, t := range tickets {
+		l, err := panels[i].prs, panels[i].err
 		if err != nil {
 			devFailed[t.Key] = true
 			continue
@@ -80,6 +82,19 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 	}
 	snap.Repos = spaceRepos(c, linked)
 	names := allRepos(snap.Repos)
+	// Review requests need only the repositories, so they load while the pull requests do.
+	type reviewResult struct {
+		prs []ticket.PullRequest
+		err error
+	}
+	var reviewsDone chan reviewResult
+	if mode := c.ReviewMode(); mode != config.ReviewsOff && len(names) > 0 {
+		reviewsDone = make(chan reviewResult, 1)
+		go func() {
+			r, err := gh.ReviewRequests(ctx, names, mode == config.ReviewsDirect)
+			reviewsDone <- reviewResult{r, err}
+		}()
+	}
 	var prs []ticket.PullRequest
 	var prErr error
 	if len(names) > 0 {
@@ -126,8 +141,9 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 	}
 	snap.Tickets = ticket.GroupSubtasks(tickets)
 
-	if mode := c.ReviewMode(); mode != config.ReviewsOff && len(names) > 0 {
-		reviews, err := gh.ReviewRequests(ctx, names, mode == config.ReviewsDirect)
+	if reviewsDone != nil {
+		r := <-reviewsDone
+		reviews, err := r.prs, r.err
 		if err != nil {
 			snap.Warnings = append(snap.Warnings, "review requests unavailable: "+err.Error())
 		}
@@ -157,6 +173,34 @@ func spaceRepos(c *config.Config, linked map[ticket.Key][]jira.DevPullRequest) m
 			addInferred(c, out, key.Space(), strings.ToLower(p.Repo))
 		}
 	}
+	return out
+}
+
+// devPanelCalls bounds the development-panel requests sent to Jira at once.
+const devPanelCalls = 8
+
+type devPanel struct {
+	prs []jira.DevPullRequest
+	err error
+}
+
+// devPanels asks Jira for each ticket's linked pull requests, several at a time, since one request per
+// ticket in turn made loading slow; results keep the tickets' order.
+func devPanels(ctx context.Context, js JiraSource, tickets []ticket.Ticket, ids map[ticket.Key]string) []devPanel {
+	out := make([]devPanel, len(tickets))
+	sem := make(chan struct{}, devPanelCalls)
+	var wg sync.WaitGroup
+	for i, t := range tickets {
+		wg.Add(1)
+		go func(i int, id string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			prs, err := js.DevPullRequests(ctx, id)
+			out[i] = devPanel{prs, err}
+		}(i, ids[t.Key])
+	}
+	wg.Wait()
 	return out
 }
 
