@@ -140,7 +140,7 @@ func TestBrowserChoiceNamesTheRepository(t *testing.T) {
 	r.dirs = browserDirs
 	r.origins = map[string]string{"~/src/web": "example-org/web"}
 	m = press(m, "a")
-	m = send(m, keyTab)
+	m = send(m, keyDown)
 	m = send(m, keyCtrlO)
 	m = send(m, keyDown)
 	m = send(m, keyEnter)

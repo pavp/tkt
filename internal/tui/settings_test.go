@@ -70,7 +70,7 @@ func TestSettingsAddsARepositoryWithItsPath(t *testing.T) {
 		t.Fatalf("no form:\n%s", stripANSI(m.View()))
 	}
 	m = typeText(m, "example-org/docs")
-	m = send(m, keyTab)
+	m = send(m, keyDown)
 	m = typeText(m, "~/code/docs")
 	m = send(m, keyEnter)
 	if len(r.saved) != 1 {
@@ -221,7 +221,7 @@ func TestSettingsFillsTheRepositoryFromThePickedFolder(t *testing.T) {
 	r.picked = "~/code/docs"
 	r.origins = map[string]string{"~/code/docs": "example-org/docs"}
 	m = press(m, "a")
-	m = send(m, keyTab)
+	m = send(m, keyDown)
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlO})
 	v := stripANSI(m.View())
 	if !strings.Contains(v, "~/code/docs") || !strings.Contains(v, "example-org/docs") {

@@ -16,13 +16,20 @@ import (
 )
 
 type fakeGitHub struct {
-	prs       []ticket.PullRequest
-	reviews   map[string][]ticket.PullRequest
-	err       error
-	failed    map[string][]github.FailedCheck
-	changes   map[int][]github.ChangeRequest
-	older     []ticket.PullRequest
-	keysAsked []string
+	prs         []ticket.PullRequest
+	reviews     map[string][]ticket.PullRequest
+	err         error
+	failed      map[string][]github.FailedCheck
+	changes     map[int][]github.ChangeRequest
+	older       []ticket.PullRequest
+	keysAsked   []string
+	repos       map[string][]string
+	ownersAsked []string
+}
+
+func (f *fakeGitHub) Repos(_ context.Context, owner string) ([]string, error) {
+	f.ownersAsked = append(f.ownersAsked, owner)
+	return f.repos[owner], nil
 }
 
 func (f *fakeGitHub) PullRequestsForKeys(_ context.Context, _, keys []string) ([]ticket.PullRequest, error) {

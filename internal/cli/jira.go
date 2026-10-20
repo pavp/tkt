@@ -49,6 +49,7 @@ type GitHubAPI interface {
 	ReviewRequests(ctx context.Context, repos []string, direct bool) ([]ticket.PullRequest, error)
 	FailedChecks(ctx context.Context, repo, sha string) ([]github.FailedCheck, error)
 	ChangeRequests(ctx context.Context, repo string, number int) ([]github.ChangeRequest, error)
+	Repos(ctx context.Context, owner string) ([]string, error)
 }
 
 func (a *App) githubFor(c *config.Config) GitHubAPI {

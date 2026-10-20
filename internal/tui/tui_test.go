@@ -35,6 +35,8 @@ type recorder struct {
 	listed   []string
 	noNative bool
 	broken   map[string][]string
+	// repos answers ListRepos with the repositories of each owner.
+	repos map[string][]string
 }
 
 func (r *recorder) ListDirs(path string) tea.Cmd {
@@ -59,6 +61,16 @@ func (r *recorder) ListDirs(path string) tea.Cmd {
 }
 
 func (r *recorder) NativePicker() bool { return !r.noNative }
+
+func (r *recorder) ListRepos(owner string) tea.Cmd {
+	r.listed = append(r.listed, "repos "+owner)
+	return func() tea.Msg {
+		if names, ok := r.repos[owner]; ok {
+			return ReposListedMsg{Owner: owner, Names: names}
+		}
+		return ReposListedMsg{Owner: owner, Err: errors.New("no GitHub organization or user named " + owner)}
+	}
+}
 
 func (r *recorder) FindClones(repo string) tea.Cmd {
 	return func() tea.Msg { return ClonesFoundMsg{Repo: repo, Paths: r.clones[repo]} }

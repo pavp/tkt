@@ -317,3 +317,47 @@ func (c *Client) PullRequestsForKeys(ctx context.Context, repos, keys []string) 
 	}
 	return out, nil
 }
+
+const maxRepoPages = 5
+
+// Repos lists the repositories owner (an organization or a user) has that the token can see, most
+// recently pushed first, up to maxRepoPages pages of 100.
+func (c *Client) Repos(ctx context.Context, owner string) ([]string, error) {
+	const q = `query($owner: String!, $after: String) {
+  repositoryOwner(login: $owner) {
+    repositories(first: 100, after: $after, orderBy: {field: PUSHED_AT, direction: DESC}) {
+      nodes { nameWithOwner }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`
+	var names []string
+	vars := map[string]any{"owner": owner}
+	for range maxRepoPages {
+		var out struct {
+			RepositoryOwner *struct {
+				Repositories struct {
+					Nodes    []struct{ NameWithOwner string }
+					PageInfo struct {
+						HasNextPage bool
+						EndCursor   string
+					}
+				}
+			}
+		}
+		if err := c.query(ctx, owner, q, vars, &out); err != nil {
+			return nil, err
+		}
+		if out.RepositoryOwner == nil {
+			return nil, fmt.Errorf("no GitHub organization or user named %s", owner)
+		}
+		for _, n := range out.RepositoryOwner.Repositories.Nodes {
+			names = append(names, n.NameWithOwner)
+		}
+		if !out.RepositoryOwner.Repositories.PageInfo.HasNextPage {
+			break
+		}
+		vars["after"] = out.RepositoryOwner.Repositories.PageInfo.EndCursor
+	}
+	return names, nil
+}

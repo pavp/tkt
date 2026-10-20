@@ -42,6 +42,8 @@ type Actions interface {
 	PickFolder(start string) tea.Cmd
 	// ListDirs lists the folders inside path ("~/dev/"); they arrive as a DirsListedMsg.
 	ListDirs(path string) tea.Cmd
+	// ListRepos lists owner's GitHub repositories as "owner/name"; they arrive as a ReposListedMsg.
+	ListRepos(owner string) tea.Cmd
 	// NativePicker reports whether PickFolder can show a folder chooser the user will see; without one,
 	// ctrl+o browses folders inside the terminal.
 	NativePicker() bool
@@ -307,7 +309,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reselect()
 	case SettingsSavedMsg:
 		return m.settingsSaved(msg)
-	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg:
+	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg, ReposListedMsg:
 		return m.settingsLookup(msg)
 	case SnapshotMsg:
 		m.loading = false

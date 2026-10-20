@@ -89,7 +89,7 @@ func TestEmptyRepoPathTabCyclesFoundClonesThenFolders(t *testing.T) {
 	r.clones = map[string][]string{"example-org/docs": {"~/src/docs", "~/work/docs"}}
 	m = press(m, "a")
 	m = typeText(m, "example-org/docs")
-	m = send(m, keyTab)
+	m = send(m, keyDown)
 	f := m.(Model).settings.form
 	f.values[fieldPath] = ""
 	var got []string
@@ -127,7 +127,7 @@ func TestTypingAfterCyclingStartsAFreshCompletion(t *testing.T) {
 func TestArrowsStillMoveBetweenFieldsInARepoForm(t *testing.T) {
 	m, _ := settingsBoard(t)
 	m = press(m, "a")
-	m = send(m, keyTab)
+	m = send(m, keyDown)
 	if !strings.Contains(stripANSI(m.View()), "tab complete") {
 		t.Errorf("footer should explain tab completion in the path field:\n%s", stripANSI(m.View()))
 	}
@@ -135,7 +135,7 @@ func TestArrowsStillMoveBetweenFieldsInARepoForm(t *testing.T) {
 	if f := m.(Model).settings.form; f.focus != fieldRepo {
 		t.Errorf("down from the path field should go back to the repository, focus = %d", f.focus)
 	}
-	if !strings.Contains(stripANSI(m.View()), "tab next field") {
-		t.Errorf("footer in the repository field keeps tab for the next field:\n%s", stripANSI(m.View()))
+	if !strings.Contains(stripANSI(m.View()), "tab complete") {
+		t.Errorf("tab completes the repository field too:\n%s", stripANSI(m.View()))
 	}
 }
