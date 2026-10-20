@@ -724,7 +724,6 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "left", "a", "h":
 		m.move(-1, 0)
 	case "g":
-		m.status = "refreshing…"
 		return m, tea.Batch(m.actions.Refresh(), m.beginLoading())
 	case "enter", " ":
 		m.openMenu()

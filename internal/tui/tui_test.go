@@ -591,6 +591,17 @@ func TestDaemonSyncsDriveTheSpinner(t *testing.T) {
 	}
 }
 
+func TestRefreshKeepsTheSelectedTicketsPreview(t *testing.T) {
+	m := press(loaded(&recorder{}), "g")
+	lines := strings.Split(strings.TrimRight(stripANSI(m.View()), "\n"), "\n")
+	if lineIndex(m.View(), "DEMO-3 · Export CSV") < 0 {
+		t.Errorf("g replaced the selected ticket's preview:\n%s", strings.Join(lines, "\n"))
+	}
+	if n := strings.Count(stripANSI(m.View()), "refreshing…"); n != 1 || !strings.HasSuffix(strings.TrimRight(lines[len(lines)-1], " "), "refreshing…") {
+		t.Errorf("refreshing… should show once, at the bottom right (%d times):\n%s", n, strings.Join(lines, "\n"))
+	}
+}
+
 func TestAStuckRefreshGivesUp(t *testing.T) {
 	base := snapshot().FetchedAt
 	clock := base.Add(time.Minute)
