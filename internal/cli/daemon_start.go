@@ -7,6 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,10 +33,11 @@ func (a *App) runningDaemon(ctx context.Context) (daemon.Info, bool) {
 	return info, ok && pid == info.PID
 }
 
-// ensureDaemon returns the running daemon, starting one in the background when none answers. A lock
-// file keeps concurrent starters, such as the Herdr hook and a board opening together, to one daemon.
+// ensureDaemon returns the running daemon, starting one in the background when none answers, and
+// replacing one older than this tkt, which an upgrade leaves serving the old code. A lock file keeps
+// concurrent starters, such as the Herdr hook and a board opening together, to one daemon.
 func (a *App) ensureDaemon(ctx context.Context) (daemon.Info, error) {
-	if info, ok := a.runningDaemon(ctx); ok {
+	if info, ok := a.runningDaemon(ctx); ok && !olderThanUs(info.Version) {
 		return info, nil
 	}
 	release, err := a.lockDaemonStart(ctx)
@@ -42,7 +46,13 @@ func (a *App) ensureDaemon(ctx context.Context) (daemon.Info, error) {
 	}
 	defer release()
 	if info, ok := a.runningDaemon(ctx); ok {
-		return info, nil
+		if !olderThanUs(info.Version) {
+			return info, nil
+		}
+		// A daemon that will not stop still serves a board, so keep it rather than fail.
+		if err := a.stopDaemon(ctx); err != nil {
+			return info, nil
+		}
 	}
 	exe, err := a.Executable()
 	if err != nil {
@@ -64,6 +74,32 @@ func (a *App) ensureDaemon(ctx context.Context) (daemon.Info, error) {
 		}
 	}
 	return daemon.Info{}, fmt.Errorf("the tkt daemon did not start; see %s", logPath)
+}
+
+// olderThanUs reports whether a daemon of version should give way to this tkt: a release older than
+// ours, or a development build. Only a release replaces, and never a newer daemon, so a board still
+// running an older tkt cannot fight a newer one over the daemon.
+func olderThanUs(version string) bool {
+	ours, ok := parseVersion(Version)
+	if !ok {
+		return false
+	}
+	theirs, ok := parseVersion(version)
+	return !ok || slices.Compare(theirs, ours) < 0
+}
+
+// parseVersion reads a release version such as 0.1.23 (an optional leading v); a dev build is not one.
+func parseVersion(v string) ([]int, bool) {
+	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")
+	out := make([]int, len(parts))
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return nil, false
+		}
+		out[i] = n
+	}
+	return out, len(out) > 0
 }
 
 // lockDaemonStart takes the start lock, waiting while another starter holds it. It is an OS lock on

@@ -278,12 +278,10 @@ func (b *boardActions) Refresh() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(b.ctx, time.Minute)
 		defer cancel()
-		// With the daemon, a refresh asks it to sync; the fresh board arrives with its events.
-		if c := b.liveClient(); c != nil {
-			_ = c.Sync(ctx)
-			if snap, err := c.Tickets(ctx); err == nil {
-				return tui.SnapshotMsg{Snap: snap}
-			}
+		// With the daemon, a refresh asks it to sync; the outcome arrives with its events, so the board
+		// keeps showing the refresh until the sync ends.
+		if c := b.liveClient(); c != nil && c.Sync(ctx) == nil {
+			return nil
 		}
 		snap, stale, err := b.a.loadSnapshot(ctx, b.cfg(), false)
 		if err == nil && stale == nil {

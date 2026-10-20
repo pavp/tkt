@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -50,6 +51,14 @@ func (a *App) followDaemon(ctx context.Context, b *boardActions, send func(tea.M
 					if snap, err := c.Tickets(ctx); err == nil {
 						send(tui.SnapshotMsg{Snap: snap, Quiet: true})
 					}
+				case "sync.started":
+					send(tui.SyncingMsg{})
+				case "sync.failed":
+					var failed struct {
+						Message string `json:"message"`
+					}
+					_ = json.Unmarshal(e.Data, &failed)
+					send(tui.SyncFailedMsg{Message: failed.Message})
 				}
 			})
 			b.setLive(nil)

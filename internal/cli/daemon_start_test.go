@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,8 @@ type fakeDaemons struct {
 	servers []*daemon.Server
 	// board seeds every fake daemon; nil leaves them without a board.
 	board *board.Snapshot
+	// version is what the next fake daemon reports; empty means this CLI's Version.
+	version string
 }
 
 func (f *fakeDaemons) server() *daemon.Server {
@@ -42,11 +45,12 @@ func (f *fakeDaemons) install(t *testing.T, h *harness) {
 		f.started.Add(1)
 		f.mu.Lock()
 		seed := f.board
+		version := cmp.Or(f.version, Version)
 		f.mu.Unlock()
 		sync := func(context.Context) (board.Snapshot, error) {
 			return board.Snapshot{}, errors.New("fake daemons do not sync")
 		}
-		s, err := daemon.New(daemon.Options{Dir: h.app.Env.DataDir(), Version: Version, Sync: sync, Interval: time.Hour, Seed: seed})
+		s, err := daemon.New(daemon.Options{Dir: h.app.Env.DataDir(), Version: version, Sync: sync, Interval: time.Hour, Seed: seed})
 		if err != nil {
 			return 0, err
 		}
@@ -101,6 +105,51 @@ func TestEnsureDaemonStartsOneWhenNoneAnswers(t *testing.T) {
 	}
 	if n := f.started.Load(); n != 1 {
 		t.Errorf("started %d daemons, want 1", n)
+	}
+}
+
+func TestEnsureDaemonReplacesAnOlderDaemon(t *testing.T) {
+	tests := []struct {
+		name, cli, running string
+		replaced           bool
+	}{
+		{"older release", "0.1.23", "0.1.16", true},
+		{"older patch with more digits", "0.1.10", "0.1.9", true},
+		{"a dev daemon", "0.1.23", "dev", true},
+		{"same version", "0.1.23", "0.1.23", false},
+		{"newer daemon", "0.1.23", "0.1.24", false},
+		{"a dev CLI", "dev", "0.1.16", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, f := startHarness(t)
+			was := Version
+			t.Cleanup(func() { Version = was })
+			f.version = tt.running
+			old, err := h.app.ensureDaemon(context.Background())
+			if err != nil || old.Version != tt.running {
+				t.Fatalf("first daemon = %+v, %v", old, err)
+			}
+			Version, f.version = tt.cli, ""
+			var signalled []int
+			h.app.Signal = func(pid int, sig syscall.Signal) error {
+				if sig == syscall.SIGTERM {
+					signalled = append(signalled, pid)
+					f.stopAll()
+				}
+				return nil
+			}
+			got, err := h.app.ensureDaemon(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if replaced := len(signalled) == 1 && f.started.Load() == 2 && got.Version == tt.cli; replaced != tt.replaced {
+				t.Errorf("replaced = %v (signalled %v, started %d, now %q)", replaced, signalled, f.started.Load(), got.Version)
+			}
+			if !tt.replaced && (got.Port != old.Port || len(signalled) != 0) {
+				t.Errorf("kept daemon changed: %+v, signalled %v", got, signalled)
+			}
+		})
 	}
 }
 
