@@ -202,6 +202,91 @@ func TestHerdrOpenBoardOrSetup(t *testing.T) {
 	}
 }
 
+func TestHerdrOpenBoardBringsTheOpenBoardToTheCurrentWorkspace(t *testing.T) {
+	cases := []struct {
+		name     string
+		recorded string
+		closeErr string
+		focus    string
+		close    string
+		opens    int
+	}{
+		{name: "no board open", opens: 1},
+		{name: "board open in this workspace", recorded: "w2:p9 w2", focus: "w2:p9"},
+		{name: "board open in another workspace", recorded: "w1:p9 w1", close: "w1:p9", opens: 1},
+		{name: "recorded board already gone", recorded: "w1:p9 w1", closeErr: "pane not found", close: "w1:p9", opens: 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, f, _ := herdrHarness(t)
+			h.env["HERDR_WORKSPACE_ID"] = "w2"
+			if c.recorded != "" {
+				if err := os.MkdirAll(h.app.Env.DataDir(), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(h.app.Env.DataDir(), "board-pane"), []byte(c.recorded), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.closeErr != "" {
+				f.Errors["plugin.pane.close"] = c.closeErr
+			}
+			if code := h.exec("herdr", "open-board"); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.errOut)
+			}
+			if got, _ := f.Last("plugin.pane.focus")["pane_id"].(string); got != c.focus {
+				t.Errorf("focused %q, want %q", got, c.focus)
+			}
+			if got, _ := f.Last("plugin.pane.close")["pane_id"].(string); got != c.close {
+				t.Errorf("closed %q, want %q", got, c.close)
+			}
+			if n := count(f, "plugin.pane.open"); n != c.opens {
+				t.Fatalf("opened %d boards, want %d", n, c.opens)
+			}
+			if c.opens > 0 {
+				if got := f.Last("plugin.pane.open"); got["entrypoint"] != "board" || got["workspace_id"] != nil {
+					t.Errorf("a popup opens on the active pane, Herdr rejects a workspace_id: %v", got)
+				}
+			}
+		})
+	}
+}
+
+func TestBoardPaneRecordLastsWhileTheBoardRuns(t *testing.T) {
+	h, _, _ := herdrHarness(t)
+	h.env["HERDR_ENV"] = "1"
+	h.env["HERDR_PANE_ID"] = "w3:p2"
+	h.env["HERDR_WORKSPACE_ID"] = "w3"
+	file := filepath.Join(h.app.Env.DataDir(), "board-pane")
+	release := h.app.claimBoardPane()
+	if b, err := os.ReadFile(file); err != nil || string(b) != "w3:p2 w3" {
+		t.Fatalf("record = %q, %v", b, err)
+	}
+	if fi, err := os.Stat(file); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("record mode = %v, %v", fi.Mode().Perm(), err)
+	}
+	release()
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Errorf("record should be gone after the board closes: %v", err)
+	}
+}
+
+func TestBoardPaneReleaseKeepsANewerBoardsRecord(t *testing.T) {
+	h, _, _ := herdrHarness(t)
+	h.env["HERDR_ENV"] = "1"
+	h.env["HERDR_PANE_ID"] = "w3:p2"
+	h.env["HERDR_WORKSPACE_ID"] = "w3"
+	release := h.app.claimBoardPane()
+	file := filepath.Join(h.app.Env.DataDir(), "board-pane")
+	if err := os.WriteFile(file, []byte("w4:p1 w4"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if b, _ := os.ReadFile(file); string(b) != "w4:p1 w4" {
+		t.Errorf("record = %q, the newer board's record must stay", b)
+	}
+}
+
 func TestHerdrRefreshLabelsTicketWorkspaces(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[

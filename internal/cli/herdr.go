@@ -37,6 +37,8 @@ type HerdrAPI interface {
 	SplitPane(ctx context.Context, paneID, cwd string) (herdr.Pane, error)
 	Prompt(ctx context.Context, target, text string) error
 	OpenPluginPane(ctx context.Context, p herdr.PaneOpen) error
+	FocusPluginPane(ctx context.Context, paneID string) error
+	ClosePluginPane(ctx context.Context, paneID string) error
 	Notify(ctx context.Context, title, body string) error
 	LinkPlugin(ctx context.Context, path string) error
 	UnlinkPlugin(ctx context.Context, id string) error
@@ -109,11 +111,10 @@ func newHerdrCmd(a *App) *cobra.Command {
 			return a.removeHerdrSidebar(cmd)
 		}},
 		&cobra.Command{Use: "open-board", Short: "Open the board popup (setup when tkt is not configured)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-			entry := "board"
 			if _, err := os.Stat(a.ConfigPath()); err != nil {
-				entry = "setup"
+				return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "setup"})
 			}
-			return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: entry})
+			return a.herdrOpenBoard(cmd.Context())
 		}},
 		&cobra.Command{Use: "setup", Short: "Open `tkt init` in a Herdr tab", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "setup"})

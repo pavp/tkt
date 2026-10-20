@@ -68,7 +68,7 @@ tkt herdr install
 
 links the tkt plugin into the running Herdr (0.9.5 or later). Herdr plugins cannot bring their own keys, so install offers to add `prefix+t` (board) and `prefix+i` (ticket pane) to your Herdr config when those keys are free, backing it up first (`--keys` adds them without asking, `--no-keys` skips them). The plugin gives you:
 
-- a board popup (`tkt.board` action; offers setup when tkt is not configured),
+- a board popup (`tkt.board` action; offers setup when tkt is not configured); there is one board, so opening it from another workspace moves it there,
 - a live ticket pane for the current workspace (`tkt.ticket`),
 - Ctrl-click on Jira and pull request links to open their ticket,
 - sidebar labels such as `DEMO-1 · ✕ CI · #812 · claude working`, refreshed by `tkt list`, the `tkt.refresh` action, and at Herdr startup from the cache,
