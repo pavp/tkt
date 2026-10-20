@@ -156,7 +156,8 @@ func parseWorktrees(porcelain string) []worktreeEntry {
 }
 
 // Merge combines registered links with discovered work. A link wins for its repository and branch, but
-// a discovered worktree path fills in a link that has none.
+// a discovered worktree path fills in a link that has none, and a link to a worktree now on another branch
+// is dropped.
 func Merge(links, discovered []Work) []Work {
 	type id struct{ repo, branch string }
 	byID := map[id]Work{}
@@ -168,10 +169,18 @@ func Merge(links, discovered []Work) []Work {
 		}
 		byID[k] = w
 	}
+	checkedOut := map[string]string{}
 	for _, w := range discovered {
 		add(w)
+		if w.Path != "" {
+			checkedOut[filepath.Clean(w.Path)] = w.Branch
+		}
 	}
 	for _, w := range links {
+		// A link to a worktree that git now shows on another branch is stale: the agent switched branches there.
+		if b, ok := checkedOut[filepath.Clean(w.Path)]; ok && w.Path != "" && b != w.Branch {
+			continue
+		}
 		if d, ok := byID[id{w.Repo, w.Branch}]; ok && w.Path == "" {
 			w.Path = d.Path
 		}

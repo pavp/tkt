@@ -24,8 +24,10 @@ import (
 
 type recorder struct {
 	calls []string
-	cfg   config.Config
-	saved []config.Config
+	// choices is what StartChoices reports.
+	choices StartChoices
+	cfg     config.Config
+	saved   []config.Config
 	// saveErr makes SaveConfig fail.
 	saveErr error
 	clones  map[string][]string
@@ -105,7 +107,21 @@ func (r *recorder) cmd(s string) tea.Cmd {
 }
 func (r *recorder) Refresh() tea.Cmd              { return r.cmd("refresh") }
 func (r *recorder) Agents(board.Snapshot) tea.Cmd { return r.cmd("agents") }
-func (r *recorder) Start(k ticket.Key) tea.Cmd    { return r.cmd("start " + string(k)) }
+func (r *recorder) Start(k ticket.Key, o StartOptions) tea.Cmd {
+	call := "start " + string(k)
+	if len(o.Repos) > 0 {
+		call += " repos=" + strings.Join(o.Repos, ",")
+	}
+	if o.Worktree != "" {
+		call += " worktree=" + o.Worktree
+	}
+	return r.cmd(call)
+}
+func (r *recorder) StartChoices(k ticket.Key) tea.Cmd {
+	r.calls = append(r.calls, "choices "+string(k))
+	choices := r.choices
+	return func() tea.Msg { return StartChoicesMsg{Key: k, Choices: choices} }
+}
 func (r *recorder) TicketPane(k ticket.Key) tea.Cmd {
 	return r.cmd("pane " + string(k))
 }
@@ -257,9 +273,12 @@ func TestColumnsViewAndNavigation(t *testing.T) {
 	if !strings.Contains(stripANSI(m.View()), "Actions for DEMO-2") {
 		t.Fatalf("enter did not open the actions menu:\n%s", stripANSI(m.View()))
 	}
-	_, msg := run(m, "enter")
-	if r.last() != "start DEMO-2" || msg != StatusMsg("start DEMO-2") {
-		t.Errorf("first menu item = %v / %v", r.calls, msg)
+	m, msg := run(m, "enter")
+	if r.last() != "choices DEMO-2" {
+		t.Fatalf("first menu item = %v", r.calls)
+	}
+	if _, cmd := m.Update(msg); cmd == nil || cmd() != StatusMsg("start DEMO-2") || r.last() != "start DEMO-2" {
+		t.Errorf("nothing to ask, Start did not run: %v", r.calls)
 	}
 }
 
@@ -703,11 +722,209 @@ func TestActionsMenuGoesToARunningAgent(t *testing.T) {
 			if !strings.Contains(v, tt.want) || strings.Contains(v, tt.dontWant) {
 				t.Fatalf("menu:\n%s", v)
 			}
-			press(m, "enter")
+			startFromMenu(m)
 			if !slices.Contains(r.calls, "start DEMO-1") {
 				t.Errorf("calls = %v", r.calls)
 			}
 		})
+	}
+}
+
+// startFromMenu runs the menu's highlighted Start and feeds back what StartChoices reports.
+func startFromMenu(m tea.Model) tea.Model {
+	m, msg := run(m, "enter")
+	if msg != nil {
+		m, _ = m.Update(msg)
+	}
+	return m
+}
+
+func twoWorktrees() StartChoices {
+	return StartChoices{Worktrees: []WorktreeChoice{
+		{Branch: "feature/DEMO-1-a", Path: "/src/web-DEMO-1-a"},
+		{Branch: "feature/DEMO-1-b", Path: "/src/web-DEMO-1-b", Agent: "working"},
+	}}
+}
+
+func TestStartAsksWhichWorktreeInAModal(t *testing.T) {
+	for _, width := range []int{160, 60} {
+		r := &recorder{choices: twoWorktrees()}
+		m := tea.Model(New(snapshot(), true, r, ViewList))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+		m = startFromMenu(press(m, "enter"))
+		v := stripANSI(m.View())
+		for _, want := range []string{"Open DEMO-1", "Which worktree?", "feature/DEMO-1-a", "no agent", "feature/DEMO-1-b", "● working", "Open", "Cancel"} {
+			if !strings.Contains(v, want) {
+				t.Fatalf("width %d: modal lacks %q:\n%s", width, want, v)
+			}
+		}
+		for i, l := range strings.Split(v, "\n") {
+			if w := lipgloss.Width(l); w > width {
+				t.Errorf("width %d: line %d is %d wide: %q", width, i, w, l)
+			}
+		}
+		if slices.ContainsFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, "start") }) {
+			t.Fatalf("started before choosing: %v", r.calls)
+		}
+		press(m, "s", "enter")
+		if r.last() != "start DEMO-1 worktree=/src/web-DEMO-1-b" {
+			t.Errorf("width %d: calls = %v", width, r.calls)
+		}
+	}
+}
+
+func TestWorktreeModalCancels(t *testing.T) {
+	r := &recorder{choices: twoWorktrees()}
+	m := startFromMenu(press(loaded(r), "l", "enter"))
+	if v := stripANSI(press(m, "esc").View()); strings.Contains(v, "Which worktree?") || r.last() != "choices DEMO-1" {
+		t.Errorf("esc: calls %v\n%s", r.calls, v)
+	}
+}
+
+func TestWorktreeModalWorksWithTheMouse(t *testing.T) {
+	r := &recorder{choices: twoWorktrees()}
+	m := startFromMenu(press(loaded(r), "l", "enter"))
+	v := m.View()
+	y := lineIndex(v, "feature/DEMO-1-b")
+	x := strings.Index(strings.Split(stripANSI(v), "\n")[y], "feature/DEMO-1-b")
+	click(m, x+2, y)
+	if r.last() != "start DEMO-1 worktree=/src/web-DEMO-1-b" {
+		t.Errorf("click on a worktree: calls = %v", r.calls)
+	}
+	m = startFromMenu(press(loaded(r), "l", "enter"))
+	v = m.View()
+	y = lineIndex(v, "Cancel")
+	x = strings.Index(strings.Split(stripANSI(v), "\n")[y], "Cancel")
+	if v := stripANSI(click(m, x+1, y).View()); strings.Contains(v, "Which worktree?") || strings.HasPrefix(r.last(), "start") {
+		t.Errorf("click on Cancel: calls %v\n%s", r.calls, v)
+	}
+}
+
+func twoRepos() StartChoices {
+	return StartChoices{Repos: []RepoChoice{{Name: "example-org/web"}, {Name: "example-org/api", LastUsed: true, Checked: true}}}
+}
+
+func TestStartAsksWhichRepositoriesInAModal(t *testing.T) {
+	for _, width := range []int{160, 56} {
+		r := &recorder{choices: twoRepos()}
+		m := tea.Model(New(snapshot(), true, r, ViewList))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+		m = startFromMenu(press(m, "enter"))
+		v := stripANSI(m.View())
+		for _, want := range []string{"Start DEMO-1", "Which repositories?", "[ ] example-org/web", "[x] example-org/api", "last used", "Start", "Cancel", "space toggle"} {
+			if !strings.Contains(v, want) {
+				t.Fatalf("width %d: modal lacks %q:\n%s", width, want, v)
+			}
+		}
+		for i, l := range strings.Split(v, "\n") {
+			if w := lipgloss.Width(l); w > width {
+				t.Errorf("width %d: line %d is %d wide: %q", width, i, w, l)
+			}
+		}
+		if press(m, "enter"); r.last() != "start DEMO-1 repos=example-org/api" {
+			t.Errorf("width %d: default = %v", width, r.calls)
+		}
+	}
+	r := &recorder{choices: twoRepos()}
+	m := startFromMenu(press(loaded(r), "l", "enter"))
+	if press(m, " ", "enter"); r.last() != "start DEMO-1 repos=example-org/web,example-org/api" {
+		t.Errorf("space on web, then enter: %v", r.calls)
+	}
+	m = startFromMenu(press(loaded(r), "l", "enter"))
+	m = press(m, "s", " ", "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "pick at least one repository") || !strings.Contains(v, "Which repositories?") || strings.HasPrefix(r.last(), "start") {
+		t.Errorf("nothing checked: calls %v\n%s", r.calls, v)
+	}
+}
+
+func TestRepositoryModalWorksWithTheMouse(t *testing.T) {
+	r := &recorder{choices: twoRepos()}
+	m := startFromMenu(press(loaded(r), "l", "enter"))
+	at := func(m tea.Model, s string) (int, int) {
+		v := m.View()
+		y := lineIndex(v, s)
+		return strings.Index(strings.Split(stripANSI(v), "\n")[y], s) + 1, y
+	}
+	x, y := at(m, "example-org/web")
+	m = click(m, x, y)
+	if v := stripANSI(m.View()); !strings.Contains(v, "[x] example-org/web") || strings.HasPrefix(r.last(), "start") {
+		t.Fatalf("click on a repository should toggle it, not start:\n%s", v)
+	}
+	_, y = at(m, "Cancel")
+	click(m, strings.Index(strings.Split(stripANSI(m.View()), "\n")[y], "Start")+1, y)
+	if r.last() != "start DEMO-1 repos=example-org/web,example-org/api" {
+		t.Errorf("click on Start: calls = %v", r.calls)
+	}
+}
+
+func TestStartFromTheDetailViewShowsTheModal(t *testing.T) {
+	r := &recorder{choices: twoWorktrees()}
+	m := press(loaded(r), "l", "i")
+	m, _ = m.Update(DetailMsg{Key: "DEMO-1", Text: "DEMO-1 details"})
+	m = startFromMenu(press(m, "enter"))
+	if v := stripANSI(m.View()); !strings.Contains(v, "Which worktree?") {
+		t.Fatalf("modal hidden behind the detail view:\n%s", v)
+	}
+	v := m.View()
+	y := lineIndex(v, "feature/DEMO-1-b")
+	click(m, strings.Index(strings.Split(stripANSI(v), "\n")[y], "feature/DEMO-1-b")+2, y)
+	if r.last() != "start DEMO-1 worktree=/src/web-DEMO-1-b" {
+		t.Errorf("click on the modal over the detail view: calls = %v", r.calls)
+	}
+}
+
+func TestModalButtonsWorkWithTheMouse(t *testing.T) {
+	button := func(m tea.Model, label string) (int, int) {
+		v := stripANSI(m.View())
+		y := lineIndex(v, "Cancel")
+		return strings.Index(strings.Split(v, "\n")[y], label) + 1, y
+	}
+	r := &recorder{choices: twoWorktrees()}
+	m := startFromMenu(press(loaded(r), "l", "enter"))
+	x, y := button(m, "Open")
+	if click(m, x, y); r.last() != "start DEMO-1 worktree=/src/web-DEMO-1-a" {
+		t.Errorf("Open button: calls = %v", r.calls)
+	}
+	r = &recorder{choices: twoRepos()}
+	m = startFromMenu(press(loaded(r), "l", "enter"))
+	x, y = button(m, "Cancel")
+	if v := stripANSI(click(m, x, y).View()); strings.Contains(v, "Which repositories?") || strings.HasPrefix(r.last(), "start") {
+		t.Errorf("Cancel button: calls %v\n%s", r.calls, v)
+	}
+}
+
+func TestWorktreeRowsNameTheirRepositoryWhenTheyDiffer(t *testing.T) {
+	r := &recorder{choices: StartChoices{Worktrees: []WorktreeChoice{
+		{Repo: "example-org/web", Branch: "feature/DEMO-1", Path: "/src/web-DEMO-1"},
+		{Repo: "example-org/api", Branch: "feature/DEMO-1", Path: "/src/api-DEMO-1"},
+	}}}
+	v := stripANSI(startFromMenu(press(loaded(r), "l", "enter")).View())
+	if !strings.Contains(v, "web · feature/DEMO-1") || !strings.Contains(v, "api · feature/DEMO-1") {
+		t.Errorf("rows do not tell the repositories apart:\n%s", v)
+	}
+}
+
+func TestModalClicksInAShortPane(t *testing.T) {
+	r := &recorder{choices: twoWorktrees()}
+	m := tea.Model(New(snapshot(), true, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 14})
+	m = startFromMenu(press(m, "enter"))
+	v := m.View()
+	y := lineIndex(v, "feature/DEMO-1-b")
+	if y < 0 {
+		t.Skip("row not visible in so short a pane")
+	}
+	click(m, strings.Index(strings.Split(stripANSI(v), "\n")[y], "feature/DEMO-1-b")+2, y)
+	if r.last() != "start DEMO-1 worktree=/src/web-DEMO-1-b" {
+		t.Errorf("click in a short pane: calls = %v", r.calls)
+	}
+}
+
+func TestStartWithNothingToAskRunsAtOnce(t *testing.T) {
+	r := &recorder{}
+	startFromMenu(press(loaded(r), "l", "enter"))
+	if r.last() != "start DEMO-1" {
+		t.Errorf("calls = %v", r.calls)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -54,6 +55,37 @@ func TestBoardActionsRefreshAndFix(t *testing.T) {
 	}
 	if got := b.Fix("DEMO-1")(); got != tui.StatusMsg("outside Herdr: run `tkt fix DEMO-1` to print the prompt") {
 		t.Errorf("fix outside Herdr = %v", got)
+	}
+}
+
+func TestBoardStartClearsTheScreenAndPassesTheChoices(t *testing.T) {
+	tests := []struct {
+		name   string
+		herdr  bool
+		opts   tui.StartOptions
+		suffix []string
+	}{
+		{"plain", false, tui.StartOptions{}, []string{"start", "DEMO-1"}},
+		{"worktree in Herdr", true, tui.StartOptions{Worktree: "/src/web-DEMO-1-b"}, []string{"herdr", "start", "DEMO-1", "--worktree", "/src/web-DEMO-1-b"}},
+		{"repositories", true, tui.StartOptions{Repos: []string{"example-org/web", "example-org/api"}}, []string{"herdr", "start", "DEMO-1", "--repo", "example-org/web", "--repo", "example-org/api"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _ := workHarness(t)
+			h.app.Executable = func() (string, error) { return "/opt/tkt/bin/tkt", nil }
+			if tt.herdr {
+				h.env["HERDR_ENV"] = "1"
+			}
+			b := &boardActions{a: h.app, ctx: context.Background()}
+			cmd, err := b.startCommand("DEMO-1", tt.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := append([]string{"sh", "-c", `printf '\033[H\033[2J'; exec "$0" "$@"`, "/opt/tkt/bin/tkt"}, tt.suffix...)
+			if !reflect.DeepEqual(cmd.Args, want) {
+				t.Errorf("args = %q\nwant %q", cmd.Args, want)
+			}
+		})
 	}
 }
 

@@ -23,7 +23,10 @@ type Actions interface {
 	Refresh() tea.Cmd
 	// Agents reads the Herdr agent states of snap's tickets; they arrive as an AgentsMsg.
 	Agents(snap board.Snapshot) tea.Cmd
-	Start(key ticket.Key) tea.Cmd
+	// Start runs Start for key with the answers to its choices; StartChoices first reports, as a
+	// StartChoicesMsg, what Start would ask.
+	Start(key ticket.Key, opts StartOptions) tea.Cmd
+	StartChoices(key ticket.Key) tea.Cmd
 	TicketPane(key ticket.Key) tea.Cmd
 	Open(url string) tea.Cmd
 	Fix(key ticket.Key) tea.Cmd
@@ -134,6 +137,7 @@ type Model struct {
 	menu         *menu
 	detail       *detailView
 	settings     *settingsView
+	picker       *picker
 	// colOffset is how far each column is scrolled; an array so copies of the model never share it.
 	colOffset [8]int
 	// inStrip means the keyboard cursor is on the review chips above the columns, at stripSel.
@@ -397,6 +401,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case StatusMsg:
 		m.status = string(msg)
+	case StartChoicesMsg:
+		return m.startChoices(msg)
 	case DetailMsg:
 		if m.detail == nil || m.detail.key != msg.Key {
 			return m, nil
@@ -429,7 +435,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.settings != nil {
 		return m.settingsMouse(msg)
 	}
-	if m.detail != nil && m.menu == nil {
+	if m.detail != nil && m.menu == nil && m.picker == nil {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
 			m.detail.offset = max(0, m.detail.offset-3)
@@ -441,6 +447,9 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	}
+	if m.picker != nil {
+		return m.pickerMouse(msg)
 	}
 	if m.menu != nil {
 		switch {
@@ -600,6 +609,9 @@ func (m Model) columnWidth() int {
 func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.settings != nil {
 		return m.settingsKey(k)
+	}
+	if m.picker != nil {
+		return m.pickerKey(k)
 	}
 	if m.menu != nil {
 		return m.menuKey(k)
@@ -798,7 +810,7 @@ func (m Model) board() string {
 	if m.settings != nil {
 		return top + "\n" + m.detailBack() + "\n\n" + m.settingsBody() + "\n\n" + m.settingsFooter()
 	}
-	if m.detail != nil && m.menu == nil {
+	if m.detail != nil && m.menu == nil && m.picker == nil {
 		body := m.detailBody()
 		bottom := m.detailFooter()
 		lines := strings.Split(body, "\n")
@@ -809,7 +821,10 @@ func (m Model) board() string {
 	}
 	var body string
 	bottom0 := m.preview() + "\n" + m.footer()
-	if m.menu != nil {
+	if m.picker != nil {
+		height := m.height - lineCount(top) - lineCount(bottom0)
+		body = lipgloss.Place(m.width, max(height, lipgloss.Height(m.pickerView())), lipgloss.Center, lipgloss.Center, m.pickerView())
+	} else if m.menu != nil {
 		height := m.height - lineCount(top) - lineCount(bottom0)
 		body = lipgloss.Place(m.width, max(height, lipgloss.Height(m.menuView())), lipgloss.Center, lipgloss.Center, m.menuView())
 	} else if m.effectiveView() == ViewColumns {

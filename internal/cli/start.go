@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,12 +17,14 @@ import (
 	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/repos"
 	"github.com/pavp/tkt/internal/ticket"
+	"github.com/pavp/tkt/internal/tui"
 	"github.com/pavp/tkt/internal/workspace"
 )
 
 func newStartCmd(a *App) *cobra.Command {
 	var repoFlags []string
 	var clone bool
+	var worktree string
 	cmd := &cobra.Command{
 		Use:   "start KEY",
 		Short: "Open Claude Code to work on a ticket",
@@ -34,7 +38,7 @@ func newStartCmd(a *App) *cobra.Command {
 			if a.jsonOut {
 				return errInteractive("start")
 			}
-			plan, err := a.planStart(cmd, args, repoFlags, clone)
+			plan, err := a.planStart(cmd, args, startOpts{repos: repoFlags, clone: clone, worktree: worktree})
 			if err != nil {
 				return err
 			}
@@ -51,6 +55,8 @@ func newStartCmd(a *App) *cobra.Command {
 	}
 	cmd.Flags().StringArrayVar(&repoFlags, "repo", nil, "repository to start in (owner/name or name); repeat for several")
 	cmd.Flags().BoolVar(&clone, "clone", false, "clone missing repositories without asking")
+	cmd.Flags().StringVar(&worktree, "worktree", "", "open the ticket's worktree at this path instead of asking which one")
+	cmd.MarkFlagsMutuallyExclusive("worktree", "repo")
 	return cmd
 }
 
@@ -64,7 +70,17 @@ type startPlan struct {
 	Prompt   string
 }
 
-func (a *App) planStart(cmd *cobra.Command, args, repoFlags []string, clone bool) (startPlan, error) {
+// startOpts are the choices a Start may arrive with; prefer, when set, picks among several worktrees
+// without asking, and reports false when it cannot tell.
+type startOpts struct {
+	repos    []string
+	clone    bool
+	worktree string
+	prefer   func([]workspace.Work) (workspace.Work, bool)
+}
+
+func (a *App) planStart(cmd *cobra.Command, args []string, opts startOpts) (startPlan, error) {
+	repoFlags, clone := opts.repos, opts.clone
 	c, err := a.LoadConfig()
 	if err != nil {
 		return startPlan{}, err
@@ -108,10 +124,24 @@ func (a *App) planStart(cmd *cobra.Command, args, repoFlags []string, clone bool
 				existing = append(existing, w)
 			}
 		}
+		if opts.worktree != "" {
+			existing = slices.DeleteFunc(existing, func(w workspace.Work) bool {
+				return filepath.Clean(w.Path) != filepath.Clean(opts.worktree)
+			})
+			if len(existing) == 0 {
+				return startPlan{}, fmt.Errorf("%s has no worktree at %s", key, opts.worktree)
+			}
+		}
 		if len(existing) > 0 {
-			w, err := a.pickWork(existing)
-			if err != nil {
-				return startPlan{}, err
+			w, ok := workspace.Work{}, false
+			if len(existing) > 1 && opts.prefer != nil {
+				w, ok = opts.prefer(existing)
+			}
+			if !ok {
+				var err error
+				if w, err = a.pickWork(existing); err != nil {
+					return startPlan{}, err
+				}
 			}
 			plan.Existing = &w
 			plan.Prompt = workspace.ContinuePrompt(key, is.Summary)
@@ -181,6 +211,57 @@ func (a *App) pickWork(ws []workspace.Work) (workspace.Work, error) {
 		return workspace.Work{}, fmt.Errorf("%q is not one of 1-%d", ans, len(ws))
 	}
 	return ws[n-1], nil
+}
+
+// startChoices says what a Start of key would ask, so the board can ask it first: the worktrees when
+// several remain and no single agent tells which, otherwise the space's repositories when there are
+// several. h is nil outside Herdr, where agents are unknown.
+func (a *App) startChoices(ctx context.Context, c *config.Config, key ticket.Key, h HerdrAPI) (tui.StartChoices, error) {
+	space, ok := c.Space(key.Space())
+	if !ok {
+		return tui.StartChoices{}, fmt.Errorf("space %s is not configured", key.Space())
+	}
+	all, err := a.allWork(ctx, c)
+	if err != nil {
+		return tui.StartChoices{}, err
+	}
+	var worktrees []tui.WorktreeChoice
+	withAgent := 0
+	for _, w := range workspace.For(all, key) {
+		if w.Path == "" {
+			continue
+		}
+		choice := tui.WorktreeChoice{Repo: w.Repo, Branch: w.Branch, Path: w.Path}
+		if h != nil {
+			if ag, ok := agentAt(ctx, h, w.Path); ok {
+				choice.Agent = cmp.Or(ag.Status, "unknown")
+				withAgent++
+			}
+		}
+		worktrees = append(worktrees, choice)
+	}
+	switch {
+	case len(worktrees) == 1, len(worktrees) > 1 && withAgent == 1:
+		return tui.StartChoices{}, nil
+	case len(worktrees) > 1:
+		return tui.StartChoices{Worktrees: worktrees}, nil
+	case len(space.Repos) <= 1:
+		return tui.StartChoices{}, nil
+	}
+	last := map[string]bool{}
+	for _, n := range a.loadState().LastRepos[space.Key] {
+		last[n] = true
+	}
+	repos := make([]tui.RepoChoice, len(space.Repos))
+	anyLast := false
+	for i, r := range space.Repos {
+		repos[i] = tui.RepoChoice{Name: r.Name, LastUsed: last[r.Name], Checked: last[r.Name]}
+		anyLast = anyLast || last[r.Name]
+	}
+	if !anyLast {
+		repos[0].Checked = true
+	}
+	return tui.StartChoices{Repos: repos}, nil
 }
 
 // pickRepos resolves --repo flags, or asks which of the space's repositories to use.
