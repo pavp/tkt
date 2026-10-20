@@ -315,6 +315,8 @@ func TestActionKeys(t *testing.T) {
 		{"f", "fix DEMO-1"},
 		{"o", "open https://example.atlassian.net/browse/DEMO-1"},
 		{"p", "open https://github.com/example-org/web/pull/812"},
+		{"O", "copy link https://example.atlassian.net/browse/DEMO-1"},
+		{"P", "copy link https://github.com/example-org/web/pull/812"},
 		{"g", "refresh"},
 	}
 	for _, tt := range tests {
@@ -328,6 +330,10 @@ func TestActionKeys(t *testing.T) {
 	next, _ := run(m, "p")
 	if len(r.calls) != before || !strings.Contains(next.View(), "DEMO-3 has no pull request yet") {
 		t.Errorf("p without PR: calls %v\n%s", r.calls[before:], next.View())
+	}
+	next, _ = run(m, "P")
+	if len(r.calls) != before || !strings.Contains(next.View(), "DEMO-3 has no pull request yet") {
+		t.Errorf("P without PR: calls %v\n%s", r.calls[before:], next.View())
 	}
 }
 
@@ -666,7 +672,7 @@ func TestActionsMenu(t *testing.T) {
 	r := &recorder{}
 	m := press(loaded(r), "l", "enter")
 	v := stripANSI(m.View())
-	for _, want := range []string{"Actions for DEMO-1", "Start · open the agent", "Show details", "Open the ticket pane next to its agent", "Open in Jira ↗", "Open #812 ✕ in GitHub ↗", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
+	for _, want := range []string{"Actions for DEMO-1", "Start · open the agent", "Show details", "Open the ticket pane next to its agent", "Open in Jira ↗", "Copy the Jira link", "Open #812 ✕ in GitHub ↗", "Copy the #812 ✕ link", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("menu missing %q:\n%s", want, v)
 		}
@@ -674,10 +680,10 @@ func TestActionsMenu(t *testing.T) {
 	if strings.Contains(v, "Send the review comments") {
 		t.Error("offered review comments for a ticket without requested changes")
 	}
-	m = press(m, "s", "s", "s", "s", "s")
+	m = press(m, "s", "s", "s", "s", "s", "s", "s")
 	_, msg := run(m, "enter")
 	if r.last() != "fix DEMO-1" || msg != StatusMsg("fix DEMO-1") {
-		t.Errorf("fifth item ran %v", r.calls)
+		t.Errorf("eighth item ran %v", r.calls)
 	}
 	m = press(loaded(r), "enter", "w")
 	run(m, "enter")

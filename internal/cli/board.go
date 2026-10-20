@@ -36,7 +36,7 @@ func newBoardCmd(a *App) *cobra.Command {
 		Short: "Interactive board: columns or list, filters, start, fix CI (the Herdr popup)",
 		Long: "Interactive board. It opens instantly from the cached board and refreshes in the background.\n" +
 			"Keys: arrows, wasd or hjkl move · enter actions menu · f send CI failures or review comments to the agent ·\n" +
-			"i ticket pane · o Jira · p pull request · n needs you · r reviews · v columns/list · g refresh · q close.\n" +
+			"i ticket pane · o Jira · p pull request · O/P copy their link · n needs you · r reviews · v columns/list · g refresh · q close.\n" +
 			"When tkt is not configured, it offers to run the setup; without a Jira token, to connect Jira first.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -289,10 +289,6 @@ func (b *boardActions) ticketPaneOpen(key ticket.Key) tea.Cmd {
 
 func (b *boardActions) Open(url string) tea.Cmd {
 	return func() tea.Msg {
-		if b.a.overSSH() {
-			b.a.copyOverTerminal(url)
-			return tui.StatusMsg("✓ link copied · " + hyperlink(url))
-		}
 		if err := b.a.openURL(b.ctx, url); err != nil {
 			return tui.StatusMsg("could not open " + url + ": " + err.Error())
 		}
@@ -313,9 +309,19 @@ func (b *boardActions) Fix(key ticket.Key) tea.Cmd {
 	}
 }
 
+// copy puts text on the user's clipboard: over SSH through their own terminal, since the remote
+// machine's clipboard is not theirs.
+func (b *boardActions) copy(text string) error {
+	if b.a.overSSH() {
+		b.a.copyOverTerminal(text)
+		return nil
+	}
+	return b.a.copyToClipboard(b.ctx, text)
+}
+
 func (b *boardActions) Copy(text, what string) tea.Cmd {
 	return func() tea.Msg {
-		if err := b.a.copyToClipboard(b.ctx, text); err != nil {
+		if err := b.copy(text); err != nil {
 			return tui.StatusMsg("could not copy: " + err.Error())
 		}
 		return tui.StatusMsg("✓ copied the " + what)
@@ -328,7 +334,7 @@ func (b *boardActions) CopyContext(key ticket.Key) tea.Cmd {
 		if err != nil {
 			return tui.StatusMsg(err.Error())
 		}
-		if err := b.a.copyToClipboard(b.ctx, renderContext(d, nil)); err != nil {
+		if err := b.copy(renderContext(d, nil)); err != nil {
 			return tui.StatusMsg("could not copy: " + err.Error())
 		}
 		return tui.StatusMsg("✓ copied " + string(key) + "'s context as Markdown")
@@ -397,13 +403,11 @@ func (a *App) openURL(ctx context.Context, url string) error {
 	return last
 }
 
-// overSSH reports a session reached over SSH, where a browser or dialog would open on the remote desktop.
+// overSSH reports a session reached over SSH, where a dialog or clipboard tool would act on the remote
+// desktop.
 func (a *App) overSSH() bool {
 	return a.Env.Getenv("SSH_CONNECTION") != "" || a.Env.Getenv("SSH_TTY") != ""
 }
-
-// hyperlink makes url clickable with OSC 8, so the user's own terminal opens it in the local browser.
-func hyperlink(url string) string { return "\x1b]8;;" + url + "\x1b\\" + url + "\x1b]8;;\x1b\\" }
 
 // copyOverTerminal asks the user's own terminal to copy text with OSC 52, which travels back through SSH.
 func (a *App) copyOverTerminal(text string) {

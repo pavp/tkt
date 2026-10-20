@@ -35,7 +35,7 @@ func (m Model) buildMenu(it item) *menu {
 		pr := *it.pr
 		return &menu{title: fmt.Sprintf("Review request #%d", pr.Number), items: []menuItem{
 			{label: "Open the pull request in GitHub ↗", key: "p", run: func() tea.Cmd { return a.Open(pr.URL) }},
-			{label: "Copy the pull request link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }},
+			{label: "Copy the pull request link", key: "P", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }},
 		}}
 	}
 	t := *it.ticket
@@ -46,6 +46,7 @@ func (m Model) buildMenu(it item) *menu {
 	}
 	if t.URL != "" {
 		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", run: func() tea.Cmd { return a.Open(t.URL) }})
+		items = append(items, menuItem{label: "Copy the Jira link", key: "O", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
 	}
 	for i, pr := range t.PRs {
 		pr := pr
@@ -53,7 +54,14 @@ func (m Model) buildMenu(it item) *menu {
 		if i == 0 {
 			key = "p"
 		}
-		items = append(items, menuItem{label: "Open " + prRef(pr) + " in GitHub ↗", key: key, run: func() tea.Cmd { return a.Open(pr.URL) }})
+		copyKey := ""
+		if key != "" {
+			copyKey = "P"
+		}
+		items = append(items,
+			menuItem{label: "Open " + prRef(pr) + " in GitHub ↗", key: key, run: func() tea.Cmd { return a.Open(pr.URL) }},
+			menuItem{label: "Copy the " + prRef(pr) + " link", key: copyKey, run: func() tea.Cmd { return a.Copy(pr.URL, "link") }},
+		)
 	}
 	for _, r := range t.Attention() {
 		label := "Send the CI failure to the agent"

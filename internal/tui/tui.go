@@ -603,15 +603,26 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if it, ok := m.current(); ok && it.ticket != nil && it.ticket.URL != "" {
 			return m, m.actions.Open(it.ticket.URL)
 		}
-	case "p":
+	case "O":
+		if it, ok := m.current(); ok && it.ticket != nil && it.ticket.URL != "" {
+			return m, m.actions.Copy(it.ticket.URL, "link")
+		}
+	case "p", "P":
 		if it, ok := m.current(); ok {
+			url := ""
 			if it.pr != nil {
-				return m, m.actions.Open(it.pr.URL)
+				url = it.pr.URL
+			} else if it.ticket != nil && len(it.ticket.PRs) > 0 {
+				url = it.ticket.PRs[0].URL
 			}
-			if it.ticket != nil && len(it.ticket.PRs) > 0 {
-				return m, m.actions.Open(it.ticket.PRs[0].URL)
+			switch {
+			case url == "":
+				m.status = string(it.key) + " has no pull request yet"
+			case k.String() == "P":
+				return m, m.actions.Copy(url, "link")
+			default:
+				return m, m.actions.Open(url)
 			}
-			m.status = string(it.key) + " has no pull request yet"
 		}
 	case "f":
 		if it, ok := m.current(); ok && it.ticket != nil {
@@ -1441,7 +1452,7 @@ func (m Model) footer() string {
 	}
 	legend := [][2]string{
 		{move, "move · ↑ to reviews"}, {"click", "select · open review"}, {"double-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
-		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"tab 1-3", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
+		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-3", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
 	}
 	items := make([]string, len(legend))
 	for i, k := range legend {
