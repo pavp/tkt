@@ -344,6 +344,10 @@ func (a *App) herdrStart(cmd *cobra.Command, args, repoFlags []string, clone boo
 			a.printf("Focusing %s\n", ws.Label)
 			return h.FocusWorkspace(ctx, ws.ID)
 		}
+		if id, ok := agentWorkspaceAt(ctx, h, plan.Existing.Path); ok {
+			a.printf("Focusing the agent of %s\n", plan.Key)
+			return h.FocusWorkspace(ctx, id)
+		}
 		return a.startInWorkspace(ctx, h, plan.Existing.Path, string(plan.Key), plan.Prompt, "", true)
 	}
 	plan.Prompt = workspace.HerdrStartPrompt(plan.Key, plan.Summary)
@@ -488,6 +492,39 @@ func workspaceAt(ctx context.Context, h HerdrAPI, path string) (herdr.Workspace,
 		}
 	}
 	return herdr.Workspace{}, false
+}
+
+// agentWorkspaceAt finds the workspace of an agent working inside path, which Herdr reports as a worktree
+// only when it created that worktree itself; an agent without a folder is placed by its pane's.
+func agentWorkspaceAt(ctx context.Context, h HerdrAPI, path string) (string, bool) {
+	agents, err := h.Agents(ctx)
+	if err != nil {
+		return "", false
+	}
+	var cwd map[string]string
+	for _, ag := range agents {
+		dir := ag.Cwd
+		if dir == "" {
+			if cwd == nil {
+				cwd = map[string]string{}
+				if panes, err := h.Panes(ctx); err == nil {
+					for _, p := range panes {
+						cwd[p.ID] = p.Cwd
+					}
+				}
+			}
+			dir = cwd[ag.PaneID]
+		}
+		if dir != "" && within(dir, path) {
+			return ag.WorkspaceID, true
+		}
+	}
+	return "", false
+}
+
+func within(dir, root string) bool {
+	dir, root = filepath.Clean(dir), filepath.Clean(root)
+	return dir == root || strings.HasPrefix(dir, root+string(filepath.Separator))
 }
 
 // keyAt returns the ticket key of the branch checked out in dir.

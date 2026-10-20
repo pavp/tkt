@@ -186,6 +186,51 @@ func TestHerdrStartFocusesExistingWorktree(t *testing.T) {
 	}
 }
 
+func TestHerdrStartFocusesTheAgentOfAWorktreeHerdrDidNotCreate(t *testing.T) {
+	tests := []struct {
+		name, agents string
+	}{
+		{"agent reports its folder", `[{"pane_id":"w5:p2","workspace_id":"w5","agent":"claude","cwd":"/src/web-DEMO-1/app"}]`},
+		{"folder from its pane", `[{"pane_id":"w5:p2","workspace_id":"w5","agent":"claude"}]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, f, _ := herdrHarness(t)
+			h.clone(t, "web")
+			h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1\nHEAD a\nbranch refs/heads/feature/DEMO-1-filter\n"
+			f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w5","label":"web"}]}`
+			f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w5:p2","workspace_id":"w5","cwd":"/src/web-DEMO-1/"}]}`
+			f.Results["agent.list"] = `{"type":"agent_list","agents":` + tt.agents + `}`
+			if code := h.exec("herdr", "start", "DEMO-1"); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.errOut)
+			}
+			if got := f.Last("workspace.focus"); got["workspace_id"] != "w5" {
+				t.Errorf("focus = %v", got)
+			}
+			if count(f, "agent.start") != 0 || count(f, "workspace.create") != 0 {
+				t.Errorf("started a second agent: agent.start %d, workspace.create %d", count(f, "agent.start"), count(f, "workspace.create"))
+			}
+		})
+	}
+}
+
+func TestHerdrStartIgnoresAgentsOutsideTheWorktree(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.clone(t, "web")
+	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1\nHEAD a\nbranch refs/heads/feature/DEMO-1-filter\n"
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w5:p2","workspace_id":"w5","agent":"claude","cwd":"/src/web-DEMO-10"}]}`
+	if code := h.exec("herdr", "start", "DEMO-1"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if got := f.Last("workspace.focus"); got["workspace_id"] == "w5" {
+		t.Error("focused an agent of another folder")
+	}
+	if count(f, "agent.start") != 1 {
+		t.Errorf("agent.start = %d, want the ticket's own agent", count(f, "agent.start"))
+	}
+}
+
 func TestHerdrOpenBoardOrSetup(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	if code := h.exec("herdr", "open-board"); code != 0 {

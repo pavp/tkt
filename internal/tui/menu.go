@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/ticket"
 )
 
@@ -40,8 +41,13 @@ func (m Model) buildMenu(it item) *menu {
 		}}
 	}
 	t := *it.ticket
+	// Start focuses the ticket's agent when one already runs, so the label says where it leads.
+	start := "Start · open the agent"
+	if _, kind := board.AgentLine(m.snap.Agents[string(t.Key)]); kind != board.AgentNone {
+		start = "Go to the agent in Herdr"
+	}
 	items := []menuItem{
-		{label: "Start · open the agent", run: func() tea.Cmd { return a.Start(t.Key) }},
+		{label: start, run: func() tea.Cmd { return a.Start(t.Key) }},
 		{label: "Show details", key: "i", detail: t.Key},
 		{label: "Open the ticket pane next to its agent", run: func() tea.Cmd { return a.TicketPane(t.Key) }},
 	}
