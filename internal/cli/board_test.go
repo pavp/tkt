@@ -2,9 +2,11 @@ package cli
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -197,6 +199,43 @@ func TestNativePickerOnlyWhereTheUserSeesIt(t *testing.T) {
 			b := &boardActions{a: h.app, ctx: context.Background()}
 			if got := b.NativePicker(); got != c.want {
 				t.Errorf("NativePicker() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestBoardOpenOverSSHCopiesTheLinkToTheLocalClipboard(t *testing.T) {
+	const url = "https://example.atlassian.net/browse/DEMO-1"
+	cases := []struct {
+		name   string
+		env    map[string]string
+		osc52  bool
+		opened bool
+		status string
+	}{
+		{"local", nil, false, true, "opened " + url},
+		{"over SSH", map[string]string{"SSH_CONNECTION": "10.0.0.2 5000 10.0.0.1 22"}, true, false, "over SSH: link copied to your clipboard · " + url},
+		{"over SSH with only a tty", map[string]string{"SSH_TTY": "/dev/pts/4"}, true, false, "over SSH: link copied to your clipboard · " + url},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, "")
+			h.app.Env.GOOS = "darwin"
+			h.run.out["open "+url] = ""
+			for k, v := range c.env {
+				h.env[k] = v
+			}
+			b := &boardActions{a: h.app, ctx: context.Background()}
+			msg := b.Open(url)()
+			if got := string(msg.(tui.StatusMsg)); got != c.status {
+				t.Errorf("status = %q, want %q", got, c.status)
+			}
+			seq := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(url)) + "\a"
+			if got := strings.Contains(h.out.String(), seq); got != c.osc52 {
+				t.Errorf("OSC 52 written = %v, output %q", got, h.out.String())
+			}
+			if got := slices.Contains(h.run.calls, "open "+url); got != c.opened {
+				t.Errorf("browser opened = %v, calls %v", got, h.run.calls)
 			}
 		})
 	}

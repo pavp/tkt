@@ -3,7 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -287,6 +289,10 @@ func (b *boardActions) ticketPaneOpen(key ticket.Key) tea.Cmd {
 
 func (b *boardActions) Open(url string) tea.Cmd {
 	return func() tea.Msg {
+		if b.a.overSSH() {
+			b.a.copyOverTerminal(url)
+			return tui.StatusMsg("over SSH: link copied to your clipboard · " + url)
+		}
 		if err := b.a.openURL(b.ctx, url); err != nil {
 			return tui.StatusMsg("could not open " + url + ": " + err.Error())
 		}
@@ -389,6 +395,16 @@ func (a *App) openURL(ctx context.Context, url string) error {
 		return err
 	}
 	return last
+}
+
+// overSSH reports a session reached over SSH, where a browser or dialog would open on the remote desktop.
+func (a *App) overSSH() bool {
+	return a.Env.Getenv("SSH_CONNECTION") != "" || a.Env.Getenv("SSH_TTY") != ""
+}
+
+// copyOverTerminal asks the user's own terminal to copy text with OSC 52, which travels back through SSH.
+func (a *App) copyOverTerminal(text string) {
+	_, _ = io.WriteString(a.Stdout, "\x1b]52;c;"+base64.StdEncoding.EncodeToString([]byte(text))+"\a")
 }
 
 // forceColor turns colors on for the board when stdout is a terminal: inside Herdr panes the color
