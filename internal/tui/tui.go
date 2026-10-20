@@ -39,6 +39,8 @@ type Actions interface {
 	RepoAt(path string) tea.Cmd
 	// PickFolder shows the system's folder chooser; the choice arrives as a FolderPickedMsg.
 	PickFolder(start string) tea.Cmd
+	// ListDirs lists the folders inside path ("~/dev/"); they arrive as a DirsListedMsg.
+	ListDirs(path string) tea.Cmd
 }
 
 type ClonesFoundMsg struct {
@@ -301,7 +303,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reselect()
 	case SettingsSavedMsg:
 		return m.settingsSaved(msg)
-	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg:
+	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg:
 		return m.settingsLookup(msg)
 	case SnapshotMsg:
 		m.loading = false
