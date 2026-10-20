@@ -51,6 +51,13 @@ type Space struct {
 	AcceptanceField string            `toml:"acceptance_field,omitempty"`
 	StatusOverrides map[string]string `toml:"status_overrides,omitempty"`
 	Repos           []Repo            `toml:"repos,omitempty"`
+	// Ignored lists repositories inferred from Jira that tkt must not use; a configured one still counts.
+	Ignored []string `toml:"ignored,omitempty"`
+}
+
+// Ignores reports whether repo ("owner/name", any case) is on the space's ignored list.
+func (s Space) Ignores(repo string) bool {
+	return slices.ContainsFunc(s.Ignored, func(r string) bool { return strings.EqualFold(r, repo) })
 }
 
 type Repo struct {
@@ -240,6 +247,7 @@ func (c Config) Clone() Config {
 	for i, s := range c.Spaces {
 		s.StatusOverrides = maps.Clone(s.StatusOverrides)
 		s.Repos = slices.Clone(s.Repos)
+		s.Ignored = slices.Clone(s.Ignored)
 		out.Spaces[i] = s
 	}
 	return out

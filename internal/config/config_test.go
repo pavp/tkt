@@ -178,3 +178,27 @@ func TestCloneIsIndependent(t *testing.T) {
 		t.Errorf("clone shares state with the original: %+v", c)
 	}
 }
+
+func TestIgnoredRepositoriesRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tkt", "config.toml")
+	c := &Config{
+		Jira:   Jira{Site: "example.atlassian.net", Email: "dev@example.com"},
+		Spaces: []Space{{Key: "DEMO", Ignored: []string{"example-org/api"}}},
+	}
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := got.Spaces[0]
+	if !s.Ignores("Example-Org/API") || s.Ignores("example-org/web") {
+		t.Errorf("ignored = %v", s.Ignored)
+	}
+	clone := got.Clone()
+	clone.Spaces[0].Ignored[0] = "changed"
+	if got.Spaces[0].Ignored[0] != "example-org/api" {
+		t.Error("Clone shares the ignored list")
+	}
+}

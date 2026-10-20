@@ -180,8 +180,12 @@ func TestSettingsShowsARemoveButtonOnConfiguredRows(t *testing.T) {
 	if x := lipgloss.Width(lines[y][:strings.LastIndex(lines[y], "✕")]); x > 100 {
 		t.Errorf("the ✕ should sit next to the row's columns, not at the pane's edge (column %d of 140)", x)
 	}
-	if inf := lineIndex(m.View(), "inferred from your tickets"); strings.HasSuffix(strings.TrimRight(lines[inf], " "), "✕") {
-		t.Error("inferred repositories have nothing to remove")
+	inf := lineIndex(m.View(), "inferred from your tickets")
+	if inf < 0 || !strings.Contains(lines[inf], "✕") {
+		t.Fatalf("inferred repositories need a ✕ to ignore them:\n%s", strings.Join(lines, "\n"))
+	}
+	if xi, xc := lipgloss.Width(lines[inf][:strings.Index(lines[inf], "✕")]), lipgloss.Width(lines[y][:strings.LastIndex(lines[y], "✕")]); xi != xc {
+		t.Errorf("the inferred ✕ sits at column %d, the configured one at %d", xi, xc)
 	}
 	x := lipgloss.Width(lines[y][:strings.LastIndex(lines[y], "✕")])
 	m = click(m, x, y)
@@ -241,5 +245,39 @@ func TestSettingsPicksACloneFolder(t *testing.T) {
 	send(m, keyEnter)
 	if len(r.saved) != 1 || strings.Join(r.saved[0].RepoRoots, ",") != "~/src,~/projects" {
 		t.Errorf("saved = %+v", r.saved)
+	}
+}
+
+func TestSettingsIgnoresAnInferredRepository(t *testing.T) {
+	for _, how := range []string{"key", "mouse"} {
+		t.Run(how, func(t *testing.T) {
+			m, r := settingsBoard(t)
+			if how == "key" {
+				m = press(m, "s", "d")
+			} else {
+				lines := strings.Split(stripANSI(m.View()), "\n")
+				y := lineIndex(m.View(), "inferred from your tickets")
+				m = click(m, lipgloss.Width(lines[y][:strings.Index(lines[y], "✕")]), y)
+			}
+			want := "Ignore example-org/api in DEMO? tkt stops using it for CI and reviews (y/n)"
+			if v := stripANSI(m.View()); !strings.Contains(v, want) || !strings.Contains(v, "y ignore · any other key keeps it") {
+				t.Fatalf("no confirmation %q:\n%s", want, v)
+			}
+			m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+			if len(r.saved) != 1 || !r.saved[0].Spaces[0].Ignores("example-org/api") || len(r.saved[0].Spaces[0].Repos) != 1 {
+				t.Fatalf("saved = %+v", r.saved)
+			}
+			if strings.Contains(stripANSI(m.View()), "example-org/api") {
+				t.Errorf("an ignored repository should leave Settings at once:\n%s", stripANSI(m.View()))
+			}
+		})
+	}
+}
+
+func TestSettingsKeepsAnInferredRepositoryWhenNotConfirmed(t *testing.T) {
+	m, r := settingsBoard(t)
+	m = press(m, "s", "d", "n")
+	if len(r.saved) != 0 || !strings.Contains(stripANSI(m.View()), "example-org/api") {
+		t.Errorf("saved %v without confirmation", r.saved)
 	}
 }

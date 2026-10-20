@@ -84,7 +84,9 @@ func (f *settingsForm) pathField() int {
 
 type settingsConfirm struct {
 	question string
-	apply    func(c *config.Config)
+	// verb names what y does in the prompt's footer; empty means "remove".
+	verb  string
+	apply func(c *config.Config)
 }
 
 func (m Model) openSettings() (tea.Model, tea.Cmd) {
@@ -108,7 +110,7 @@ func (s *settingsView) rows() []settingsRow {
 			out = append(out, settingsRow{kind: rowRepo, space: si, idx: ri, name: r.Name})
 		}
 		for _, name := range s.inferred[sp.Key] {
-			if !slices.ContainsFunc(sp.Repos, func(r config.Repo) bool { return strings.EqualFold(r.Name, name) }) {
+			if !sp.Ignores(name) && !slices.ContainsFunc(sp.Repos, func(r config.Repo) bool { return strings.EqualFold(r.Name, name) }) {
 				out = append(out, settingsRow{kind: rowInferred, space: si, name: name})
 			}
 		}
@@ -203,7 +205,13 @@ func (m Model) settingsAction(action string) (tea.Model, tea.Cmd) {
 			apply:    func(c *config.Config) { c.RepoRoots = slices.Delete(c.RepoRoots, r.idx, r.idx+1) },
 		}
 	case action == "d" && r.kind == rowInferred:
-		s.msg = r.name + " comes from your tickets' pull requests in Jira; there is nothing to remove"
+		s.confirm = &settingsConfirm{
+			question: fmt.Sprintf("Ignore %s in %s? tkt stops using it for CI and reviews (y/n)", r.name, s.cfg.Spaces[r.space].Key),
+			verb:     "ignore",
+			apply: func(c *config.Config) {
+				c.Spaces[r.space].Ignored = append(c.Spaces[r.space].Ignored, r.name)
+			},
+		}
 	case action == "d":
 	case r.kind == rowRepo && action == "enter":
 		repo := s.cfg.Spaces[r.space].Repos[r.idx]
@@ -432,7 +440,7 @@ func (m Model) settingsLines() ([]string, []int) {
 			repo := s.cfg.Spaces[r.space].Repos[r.idx]
 			line = mark + pad(truncate(repo.Name, repoW), repoW) + " " + pad(truncate(orDash(repo.Path), pathW), pathW) + " " + removeMark
 		case rowInferred:
-			line = mark + dim.Render(pad(r.name, repoW)+" inferred from your tickets' pull requests · enter to pin")
+			line = mark + dim.Render(pad(truncate(r.name, repoW), repoW)+" "+pad("—", pathW)) + " " + removeMark + dim.Render(" inferred from your tickets' pull requests · enter to pin")
 		case rowAddRepo:
 			line = mark + keyDim.Render("+ Add repository")
 		case rowRoot:
@@ -510,7 +518,11 @@ func (m Model) settingsBody() string {
 func (m Model) settingsModal() string {
 	s := m.settings
 	if s.confirm != nil {
-		return menuBox.Render(s.confirm.question + "\n\n" + dim.Render("y remove · any other key keeps it"))
+		verb := s.confirm.verb
+		if verb == "" {
+			verb = "remove"
+		}
+		return menuBox.Render(s.confirm.question + "\n\n" + dim.Render("y "+verb+" · any other key keeps it"))
 	}
 	f := s.form
 	if f.browser != nil {
@@ -585,7 +597,7 @@ func (m Model) settingsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	i := start + msg.Y - lineCount(m.header()) - 2
 	if i >= 0 && i < len(at) && at[i] >= 0 {
 		s.row = at[i]
-		if r, ok := s.current(); ok && (r.kind == rowRepo || r.kind == rowRoot) && msg.X >= m.removeX() && msg.X < m.removeX()+2 {
+		if r, ok := s.current(); ok && (r.kind == rowRepo || r.kind == rowInferred || r.kind == rowRoot) && msg.X >= m.removeX() && msg.X < m.removeX()+2 {
 			return m.settingsAction("d")
 		}
 	}

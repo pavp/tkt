@@ -87,7 +87,7 @@ func (a *App) planStart(cmd *cobra.Command, args, repoFlags []string, clone bool
 	}
 	plan := startPlan{Key: key, Summary: is.Summary}
 	if len(space.Repos) == 0 {
-		if space.Repos, err = a.inferStartRepos(cmd.Context(), js, is, key, repoFlags); err != nil {
+		if space.Repos, err = a.inferStartRepos(cmd.Context(), js, is, key, repoFlags, space.Ignores); err != nil {
 			return startPlan{}, err
 		}
 		for i := range c.Spaces {
@@ -268,8 +268,9 @@ func (a *App) offerClone(cmd *cobra.Command, res repos.Resolver, r config.Repo, 
 
 // inferStartRepos finds repositories for a space that configures none: those of the ticket's Jira-linked
 // pull requests, those the board already knows for the space, owner/name --repo flags, those of the
-// space's other sprint tickets, or, in a terminal, the user's answer. They live only in memory; the config is never written.
-func (a *App) inferStartRepos(ctx context.Context, js JiraAPI, is jira.Issue, key ticket.Key, flags []string) ([]config.Repo, error) {
+// space's other sprint tickets, or, in a terminal, the user's answer; repositories the space ignores are
+// skipped unless named with --repo. They live only in memory; the config is never written.
+func (a *App) inferStartRepos(ctx context.Context, js JiraAPI, is jira.Issue, key ticket.Key, flags []string, ignores func(string) bool) ([]config.Repo, error) {
 	var names []string
 	add := func(n string) {
 		n = strings.ToLower(strings.TrimSpace(n))
@@ -277,14 +278,19 @@ func (a *App) inferStartRepos(ctx context.Context, js JiraAPI, is jira.Issue, ke
 			names = append(names, n)
 		}
 	}
+	found := func(n string) {
+		if !ignores(n) {
+			add(n)
+		}
+	}
 	if prs, err := js.DevPullRequests(ctx, is.ID); err == nil {
 		for _, p := range prs {
-			add(p.Repo)
+			found(p.Repo)
 		}
 	}
 	if snap, ok, err := a.cache().Load(); err == nil && ok {
 		for _, r := range snap.Repos[key.Space()] {
-			add(r)
+			found(r)
 		}
 	}
 	for _, f := range flags {
@@ -294,7 +300,7 @@ func (a *App) inferStartRepos(ctx context.Context, js JiraAPI, is jira.Issue, ke
 	}
 	if len(names) == 0 {
 		for _, r := range suggestRepos(ctx, js, key.Space()) {
-			add(r)
+			found(r)
 		}
 	}
 	if len(names) == 0 && a.IsTerminal() {
