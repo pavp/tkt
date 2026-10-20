@@ -62,11 +62,14 @@ type settingsForm struct {
 	repo  bool
 	found []string
 	hint  string
-	// cands are the paths a repeated Tab cycles through; pending is the path whose folders are being listed.
-	cands   []string
-	cand    int
-	pending string
-	browser *dirBrowser
+	// cands are the matches the dropdown shows, picked from source as the user types; dropBase is the
+	// prefix the rows leave out; pending is the value whose listing is on its way.
+	cands    []string
+	cand     int
+	source   []string
+	dropBase string
+	pending  string
+	browser  *dirBrowser
 }
 
 const (
@@ -315,6 +318,21 @@ func (m Model) settingsFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if f.browser != nil {
 		return m.browserKey(k)
 	}
+	if len(f.cands) > 0 {
+		switch k.Type {
+		case tea.KeyDown, tea.KeyTab:
+			f.highlight(1)
+			return m, nil
+		case tea.KeyUp, tea.KeyShiftTab:
+			f.highlight(-1)
+			return m, nil
+		case tea.KeyEnter:
+			return m.pick(max(f.cand, 0))
+		case tea.KeyEsc:
+			f.resetCompletion()
+			return m, nil
+		}
+	}
 	switch k.Type {
 	case tea.KeyEsc:
 		m.settings.form = nil
@@ -366,16 +384,16 @@ func (m Model) settingsFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			f.values[fieldPath] = f.found[i]
 		}
 	case tea.KeyBackspace:
-		f.resetCompletion()
 		if v := []rune(f.values[f.focus]); len(v) > 0 {
 			f.values[f.focus] = string(v[:len(v)-1])
 		}
+		f.refilter()
 	case tea.KeyCtrlU:
 		f.resetCompletion()
 		f.values[f.focus] = ""
 	case tea.KeyRunes, tea.KeySpace:
-		f.resetCompletion()
 		f.values[f.focus] += string(k.Runes)
+		f.refilter()
 	}
 	return m, nil
 }
@@ -531,11 +549,17 @@ func (m Model) settingsModal() string {
 		}
 		return menuBox.Render(s.confirm.question + "\n\n" + dim.Render("y "+verb+" · any other key keeps it"))
 	}
-	f := s.form
-	if f.browser != nil {
-		return f.browser.view()
+	if s.form.browser != nil {
+		return s.form.browser.view()
 	}
+	lines, _ := s.form.lines()
+	return menuBox.Render(strings.Join(lines, "\n"))
+}
+
+// lines renders the form and reports the line where the dropdown's matches start, or -1.
+func (f *settingsForm) lines() ([]string, int) {
 	lines := []string{bold.Render(f.title), ""}
+	drop := -1
 	for i, l := range f.labels {
 		v := f.values[i]
 		if i == f.focus {
@@ -543,13 +567,19 @@ func (m Model) settingsModal() string {
 		} else {
 			lines = append(lines, "  "+dim.Render(l), "   "+v)
 		}
-		if i == f.focus && f.hint != "" {
+		switch {
+		case i == f.focus && len(f.cands) > 0:
+			drop = len(lines)
+			if off, _ := f.dropWindow(); off > 0 {
+				drop++
+			}
+			lines = append(lines, f.dropdownLines()...)
+		case i == f.focus && f.hint != "":
 			lines = append(lines, "   "+keyDim.Render(f.hint))
 		}
 	}
 	keys := "enter save · tab complete · ↑↓ fields · ctrl+o browse folders · esc cancel"
-	lines = append(lines, "", dim.Render(keys))
-	return menuBox.Render(strings.Join(lines, "\n"))
+	return append(lines, "", dim.Render(keys)), drop
 }
 
 func (m Model) settingsFooter() string {
@@ -583,6 +613,11 @@ func (m Model) settingsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case tea.MouseButtonLeft:
 	default:
 		return m, nil
+	}
+	if msg.Action == tea.MouseActionPress && s.form != nil && len(s.form.cands) > 0 {
+		if i := m.dropdownRowAt(msg.Y); i >= 0 {
+			return m.pick(i)
+		}
 	}
 	if msg.Action != tea.MouseActionPress || s.form != nil || s.confirm != nil {
 		return m, nil

@@ -38,10 +38,10 @@ func TestTabCompletesTheTypedFolder(t *testing.T) {
 		hint  string
 	}{
 		{"single match gets its slash", "~/dev/p", 1, "~/dev/personal/", ""},
-		{"common prefix of several matches, case-insensitive", "~/d", 1, "~/d", "dev · Documents · downloads"},
+		{"common prefix of several matches, case-insensitive", "~/d", 1, "~/d", "Documents/"},
 		{"next tab cycles through the matches", "~/d", 2, "~/dev/", ""},
 		{"cycling wraps around", "~/d", 5, "~/dev/", ""},
-		{"common prefix longer than the typed text", "~/do", 1, "~/do", "Documents · downloads"},
+		{"common prefix longer than the typed text", "~/do", 1, "~/do", "downloads/"},
 		{"hidden folders only when asked for", "~/.", 1, "~/.cache/", ""},
 		{"a bare ~ becomes the home folder", "~", 1, "~/", ""},
 		{"no match says so", "~/zz", 1, "~/zz", "no folder starts with zz"},

@@ -6,6 +6,7 @@ Forecast: 380–555 authored changed lines, budget 400 per slice (default) → t
 ## Specs
 
 - S1. "no puedo borrar los repositorios inferidos por los pull request" + "ok vamos con el ignored" + "recuerda que el ignored deberia poderse hacer con mouse tambien" → `d` (or the ✕ clicked with the mouse) on an inferred repository asks for confirmation and adds it to the space's `ignored` list in the config; an ignored repository is no longer used (CI, review requests, account detection) and no longer shown in Settings. Existing configs without `ignored` stay valid.
+- S3. "una pregunta en completation muestra una lista o algo asi?" → "añade el desplegable": when Tab finds several matches (repository or path field), a dropdown of up to 8 rows opens under the field: ↑↓/Tab move and show the match, enter picks without saving the form, esc closes only the dropdown, typing filters without asking GitHub again, a click picks a row.
 - S2. "mostrar lista de repositorios remotos en settings.. un autocompletado o un selector?" + "ok vamos con el tab" → in the repository field, Tab completes `owner/name` from the GitHub repositories of the owners tkt knows (configured and inferred repositories); a repeated Tab cycles the matches; repositories are fetched in the background and cached for the session.
 
 ## Tasks
@@ -13,7 +14,8 @@ Forecast: 380–555 authored changed lines, budget 400 per slice (default) → t
 | ID | Specs | Slice / branch | Route | Status | Commit |
 |---|---|---|---|---|---|
 | T1 | S1 | 1 `feat/repo-settings-1-ignored` | inline, no Writer reason | done (RED→GREEN, independent review) | dc83e66 (303 lines) |
-| T2 | S2 | 2 `feat/repo-settings-2-repo-completion` | inline, no Writer reason | done (RED→GREEN) | see branch (380 lines) |
+| T2 | S2 | 2 `feat/repo-settings-2-repo-completion` | inline, no Writer reason | done (RED→GREEN) | f4a4f2f (380 lines) |
+| T3 | S3 | 3 `feat/repo-settings-3-dropdown` | inline, no Writer reason | done (RED→GREEN) | see branch |
 
 > Before each commit, run `git diff --numstat main` and sum additions + deletions, skipping binary rows (`-\t-`) and generated paths (lockfiles, `__snapshots__/`, files marked `linguist-generated` in `.gitattributes`); if the current work unit — slice or single unit — is over 400 real changed lines, stop: hand the accumulated diff to `slice-diff` (budget 400), then re-forecast every slice not yet started with `slice-plan` (budget 400) — a slice that overran invalidates the estimates that assumed its size, not just its own. Slices already merged stay as they are.
 > Per slice, measure against its base branch. Native grouping: once PR 2 is open, `gh stack link <pr1> <pr2>`.
