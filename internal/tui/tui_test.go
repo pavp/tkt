@@ -1275,3 +1275,57 @@ func TestMenuCopiesTheHighlightedLinkWithC(t *testing.T) {
 		})
 	}
 }
+
+func TestListShowsAgentStates(t *testing.T) {
+	cases := []struct {
+		name      string
+		width     int
+		agents    map[string]string
+		wantAgent bool
+	}{
+		{"inside Herdr", 140, map[string]string{"DEMO-1": "working", "DEMO-2": "blocked"}, true},
+		{"no agents outside Herdr", 140, nil, false},
+		{"a narrow pane drops the column first", 66, map[string]string{"DEMO-1": "working"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			snap := snapshot()
+			snap.Agents = c.agents
+			m := New(board.Snapshot{}, false, &recorder{}, ViewList)
+			next, _ := m.Update(tea.WindowSizeMsg{Width: c.width, Height: 40})
+			next, _ = next.Update(SnapshotMsg{Snap: snap})
+			v := stripANSI(next.View())
+			if got := strings.Contains(v, "AGENT"); got != c.wantAgent {
+				t.Fatalf("AGENT column shown = %v:\n%s", got, v)
+			}
+			titleCols := map[int]bool{}
+			for _, l := range strings.Split(v, "\n") {
+				if lipgloss.Width(l) > c.width {
+					t.Errorf("line wider than the pane: %q", l)
+				}
+				isRow := strings.HasPrefix(l, " ▸ ") || strings.HasPrefix(l, " ! ") || strings.HasPrefix(l, "   ")
+				for _, word := range []string{"TITLE", "Filter accounts", "Keep sort", "Export CSV"} {
+					if i := strings.Index(l, word); i >= 0 && isRow {
+						titleCols[lipgloss.Width(l[:i])] = true
+					}
+				}
+			}
+			if len(titleCols) != 1 {
+				t.Errorf("titles start at different columns %v:\n%s", titleCols, v)
+			}
+			if !c.wantAgent {
+				return
+			}
+			for key, want := range map[string]string{"DEMO-1": "● working", "DEMO-2": "! needs you"} {
+				y := lineIndex(next.View(), key+" ")
+				if y < 0 || !strings.Contains(strings.Split(v, "\n")[y], want) {
+					t.Errorf("%s row lacks %q:\n%s", key, want, v)
+				}
+			}
+			y := lineIndex(next.View(), "DEMO-3 ")
+			if row := strings.Split(v, "\n")[y]; strings.Contains(row, "●") || strings.Contains(row, "○") || strings.Contains(row, "needs you") {
+				t.Errorf("DEMO-3 has no agent: %q", row)
+			}
+		})
+	}
+}

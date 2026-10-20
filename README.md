@@ -20,7 +20,7 @@ Or with Go 1.27+:
 go install github.com/pavp/tkt/cmd/tkt@latest
 ```
 
-Then, inside Herdr, `tkt herdr install` adds the board and ticket panes, offers the `prefix+t` / `prefix+i` shortcuts, and offers sidebar rows that show each workspace's ticket (`ACTO-123 · ✕ CI · #812`) and agent (`● claude working`, `○ claude idle`, `! claude needs you`, `no agent`). Herdr only shows those lines when its config lists them; `tkt herdr uninstall` removes both blocks.
+Then, inside Herdr, `tkt herdr install` adds the board and ticket panes, offers the `prefix+t` / `prefix+i` shortcuts, and offers sidebar rows that show each workspace's ticket (`ACTO-123 · ✕ CI · #812`) and agent (`● claude working`, `○ claude idle`, `! claude needs you`, `no agent`). The board shows the same agent state on its cards and in an AGENT column of the list view. Herdr only shows those lines when its config lists them; `tkt herdr uninstall` removes both blocks.
 
 ### Releasing
 
