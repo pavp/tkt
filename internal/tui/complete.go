@@ -10,12 +10,14 @@ import (
 
 // DirsListedMsg carries the folders inside Path, as listed by ListDirs. Dir is that folder as tkt writes
 // it ("~/src/"), Abs its absolute form, both ending in "/"; Abs is set even when the listing failed.
+// Broken holds the symlinks there whose target is gone.
 type DirsListedMsg struct {
-	Path  string
-	Dir   string
-	Abs   string
-	Names []string
-	Err   error
+	Path   string
+	Dir    string
+	Abs    string
+	Names  []string
+	Broken []string
+	Err    error
 }
 
 const maxShownMatches = 6

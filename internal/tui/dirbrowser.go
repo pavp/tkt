@@ -16,10 +16,21 @@ type dirBrowser struct {
 	req    string
 	dir    string
 	abs    string
-	names  []string
-	cursor int
-	offset int
-	err    string
+	all    []string
+	broken []string
+	// rows are the folders shown: all and broken, narrowed by the hidden toggle and the filter.
+	rows      []browserRow
+	cursor    int
+	offset    int
+	err       string
+	hidden    bool
+	filtering bool
+	filter    string
+}
+
+type browserRow struct {
+	name   string
+	broken bool
 }
 
 func (m Model) openBrowser() (tea.Model, tea.Cmd) {
@@ -48,22 +59,57 @@ func (b *dirBrowser) listed(msg DirsListedMsg) bool {
 	if msg.Path != b.req {
 		return false
 	}
-	b.req, b.dir, b.abs, b.cursor, b.offset, b.err = "", msg.Dir, msg.Abs, 0, 0, ""
-	b.names = nil
-	for _, n := range msg.Names {
-		if !strings.HasPrefix(n, ".") {
-			b.names = append(b.names, n)
-		}
-	}
+	b.req, b.dir, b.abs, b.err = "", msg.Dir, msg.Abs, ""
+	b.all, b.broken = msg.Names, msg.Broken
+	b.filtering, b.filter = false, ""
 	if msg.Err != nil {
 		b.err = msg.Err.Error()
 	}
+	b.refresh()
 	return true
+}
+
+func (b *dirBrowser) refresh() {
+	b.rows = nil
+	keep := func(n string) bool {
+		return (b.hidden || !strings.HasPrefix(n, ".")) && strings.Contains(strings.ToLower(n), strings.ToLower(b.filter))
+	}
+	for _, n := range b.all {
+		if keep(n) {
+			b.rows = append(b.rows, browserRow{name: n})
+		}
+	}
+	for _, n := range b.broken {
+		if keep(n) {
+			b.rows = append(b.rows, browserRow{name: n, broken: true})
+		}
+	}
+	b.cursor, b.offset = 0, 0
 }
 
 func (m Model) browserKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	f := m.settings.form
 	b := f.browser
+	if b.filtering {
+		switch k.Type {
+		case tea.KeyEsc:
+			b.filtering, b.filter = false, ""
+			b.refresh()
+			return m, nil
+		case tea.KeyBackspace:
+			if r := []rune(b.filter); len(r) > 0 {
+				b.filter = string(r[:len(r)-1])
+				b.refresh()
+			}
+			return m, nil
+		case tea.KeyEnter, tea.KeyRight:
+			return m, b.open(m.actions)
+		case tea.KeyRunes, tea.KeySpace:
+			b.filter += string(k.Runes)
+			b.refresh()
+			return m, nil
+		}
+	}
 	switch k.String() {
 	case "esc":
 		f.browser = nil
@@ -86,19 +132,30 @@ func (m Model) browserKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		b.move(1)
 	case "right", "l":
-		if b.cursor < len(b.names) {
-			return m, b.list(m.actions, b.dir+b.names[b.cursor]+"/")
-		}
+		return m, b.open(m.actions)
 	case "left", "h", "backspace":
 		if b.abs != "" && b.abs != "/" {
 			return m, b.list(m.actions, strings.TrimSuffix(path.Dir(strings.TrimSuffix(b.abs, "/")), "/")+"/")
 		}
+	case "/":
+		b.filtering = true
+	case ".":
+		b.hidden = !b.hidden
+		b.refresh()
 	}
 	return m, nil
 }
 
+// open enters the highlighted folder; a broken link has nothing to enter.
+func (b *dirBrowser) open(a Actions) tea.Cmd {
+	if b.cursor >= len(b.rows) || b.rows[b.cursor].broken {
+		return nil
+	}
+	return b.list(a, b.dir+b.rows[b.cursor].name+"/")
+}
+
 func (b *dirBrowser) move(d int) {
-	b.cursor = max(0, min(len(b.names)-1, b.cursor+d))
+	b.cursor = max(0, min(len(b.rows)-1, b.cursor+d))
 	if b.cursor < b.offset {
 		b.offset = b.cursor
 	}
@@ -108,29 +165,50 @@ func (b *dirBrowser) move(d int) {
 }
 
 func (b *dirBrowser) view() string {
-	lines := []string{bold.Render("Choose a folder"), "", keyStyle.Render(b.dir), ""}
+	lines := []string{bold.Render("Choose a folder"), "", keyStyle.Render(b.dir)}
+	if b.filtering || b.filter != "" {
+		lines = append(lines, keyDim.Render("/"+b.filter+"▏"))
+	}
+	lines = append(lines, "")
 	switch {
 	case b.err != "":
 		lines = append(lines, warn.Render("! "+b.err))
-	case b.req != "" && b.names == nil:
+	case b.req != "" && b.rows == nil:
 		lines = append(lines, dim.Render("loading…"))
-	case len(b.names) == 0:
+	case len(b.rows) == 0 && b.filter != "":
+		lines = append(lines, dim.Render("no folder matches "+b.filter))
+	case len(b.rows) == 0:
 		lines = append(lines, dim.Render("no folders here"))
 	}
 	if b.offset > 0 {
 		lines = append(lines, dim.Render("  ↑ more"))
 	}
-	end := min(len(b.names), b.offset+browserRows)
+	end := min(len(b.rows), b.offset+browserRows)
 	for i := b.offset; i < end; i++ {
-		if i == b.cursor {
-			lines = append(lines, selected.Render("▸ "+b.names[i]+"/"))
-		} else {
-			lines = append(lines, "  "+b.names[i]+"/")
+		r := b.rows[i]
+		label := r.name + "/"
+		if r.broken {
+			label = r.name + " (broken link)"
+		}
+		switch {
+		case i == b.cursor:
+			lines = append(lines, selected.Render("▸ "+label))
+		case r.broken:
+			lines = append(lines, dim.Render("  "+label))
+		default:
+			lines = append(lines, "  "+label)
 		}
 	}
-	if end < len(b.names) {
+	if end < len(b.rows) {
 		lines = append(lines, dim.Render("  ↓ more"))
 	}
-	lines = append(lines, "", dim.Render("→ open · ← up · enter choose this folder · esc cancel"))
+	keys := "→ open · ← up · enter choose this folder · / filter · . show hidden · esc cancel"
+	if b.hidden {
+		keys = strings.Replace(keys, ". show hidden", ". hide hidden", 1)
+	}
+	if b.filtering {
+		keys = "type to filter · enter open match · esc clear filter"
+	}
+	lines = append(lines, "", dim.Render(keys))
 	return menuBox.Render(strings.Join(lines, "\n"))
 }

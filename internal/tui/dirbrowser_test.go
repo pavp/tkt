@@ -43,7 +43,7 @@ func TestCtrlOBrowsesFoldersInTheTerminalWithoutANativePicker(t *testing.T) {
 		t.Fatalf("no native picker should open, got %v", r.starts)
 	}
 	v := stripANSI(m.View())
-	for _, want := range []string{"Choose a folder", "~/src/", "▸ api", "web", "→ open · ← up · enter choose this folder · esc cancel"} {
+	for _, want := range []string{"Choose a folder", "~/src/", "▸ api", "web", "→ open · ← up · enter choose this folder · / filter · . show hidden · esc cancel"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("browser missing %q:\n%s", want, v)
 		}
