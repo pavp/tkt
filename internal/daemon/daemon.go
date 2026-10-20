@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -104,6 +105,31 @@ func Listen(port int) (net.Listener, error) {
 
 func infoPath(dir string) string { return filepath.Join(dir, "daemon.json") }
 
+// Healthy reports whether a tkt daemon of this protocol answers on port, and its pid, so a caller can
+// tell it from another daemon that took the port of one that died.
+func Healthy(ctx context.Context, port int) (int, bool) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/health", port), nil)
+	if err != nil {
+		return 0, false
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, false
+	}
+	defer resp.Body.Close()
+	var h struct {
+		OK       bool `json:"ok"`
+		Protocol int  `json:"protocol"`
+		PID      int  `json:"pid"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&h) != nil || !h.OK || h.Protocol != Protocol {
+		return 0, false
+	}
+	return h.PID, true
+}
+
 // ReadInfo reads where a running daemon listens.
 func ReadInfo(dir string) (Info, error) {
 	var info Info
@@ -123,7 +149,12 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	if err := os.WriteFile(infoPath(s.opts.Dir), info, 0o600); err != nil {
 		return err
 	}
-	defer os.Remove(infoPath(s.opts.Dir))
+	defer func() {
+		// Another daemon may have started meanwhile and written its own record; leave that one.
+		if info, err := ReadInfo(s.opts.Dir); err == nil && info.PID == os.Getpid() {
+			os.Remove(infoPath(s.opts.Dir))
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -180,15 +211,41 @@ func (s *Server) syncOnce(ctx context.Context) {
 		return
 	}
 	old, had := s.snap, s.have
+	if snap.Agents == nil {
+		// The sync could not read Herdr; the agents it last reported still stand.
+		snap.Agents = old.Agents
+	}
 	s.snap, s.have = snap, true
 	s.publishChanges(old, had, snap)
+	if had && !maps.Equal(old.Agents, snap.Agents) {
+		s.publish("agent.updated", map[string]any{"agents": snap.Agents})
+	}
 	s.publish("sync.finished", map[string]any{"fetched_at": snap.FetchedAt})
+}
+
+// Board returns the board the daemon serves and whether it has one yet.
+func (s *Server) Board() (board.Snapshot, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.snap, s.have
+}
+
+// SetAgents records the agent state of each ticket, as Herdr reports it between syncs, and tells clients
+// when it changed.
+func (s *Server) SetAgents(agents map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if maps.Equal(s.snap.Agents, agents) {
+		return
+	}
+	s.snap.Agents = agents
+	s.publish("agent.updated", map[string]any{"agents": agents})
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": s.opts.Version, "protocol": Protocol})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": s.opts.Version, "protocol": Protocol, "pid": os.Getpid()})
 	})
 	mux.HandleFunc("GET /v1/tickets", s.authed(s.tickets))
 	mux.HandleFunc("POST /v1/sync", s.authed(s.requestSync))

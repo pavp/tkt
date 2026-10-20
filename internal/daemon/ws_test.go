@@ -304,3 +304,51 @@ func TestEventsAndTicketsLeaveOutTheDevPanelCache(t *testing.T) {
 		t.Errorf("/v1/tickets carries the panel cache: %v", body["panels"])
 	}
 }
+
+func TestSetAgentsSendsAgentUpdatedOnlyOnChange(t *testing.T) {
+	d, srv := wsServer(t, &scriptedSync{}, &board.Snapshot{FetchedAt: fetched})
+	c := joined(t, d, srv)
+	next(t, c)
+	d.SetAgents(map[string]string{"DEMO-1": "working"})
+	d.SetAgents(map[string]string{"DEMO-1": "working"})
+	d.SetAgents(map[string]string{"DEMO-1": "blocked"})
+	for _, want := range []string{"working", "blocked"} {
+		e := next(t, c)
+		if e.Type != "agent.updated" || !strings.Contains(string(e.Data), `"DEMO-1":"`+want+`"`) {
+			t.Errorf("event = %s %s, want agent.updated with %s", e.Type, e.Data, want)
+		}
+	}
+	if snap, ok := d.Board(); !ok || snap.Agents["DEMO-1"] != "blocked" {
+		t.Errorf("board agents = %v", snap.Agents)
+	}
+	if _, body := get(t, d.Handler(), http.MethodGet, "/v1/tickets", d.token); body["agents"] == nil {
+		t.Errorf("/v1/tickets should carry the agents: %v", body)
+	}
+}
+
+func TestSyncWithNewAgentStatesSendsAgentUpdated(t *testing.T) {
+	seed := ticketBoard(fetched, ticket.Ticket{Key: "DEMO-1"})
+	synced := ticketBoard(fetched.Add(time.Minute), ticket.Ticket{Key: "DEMO-1"})
+	synced.Agents = map[string]string{"DEMO-1": "idle"}
+	d, srv := wsServer(t, &scriptedSync{boards: []board.Snapshot{synced}}, &seed)
+	c := joined(t, d, srv)
+	next(t, c)
+	d.syncOnce(context.Background())
+	var got []string
+	for range 3 {
+		got = append(got, next(t, c).Type)
+	}
+	if strings.Join(got, ",") != "sync.started,agent.updated,sync.finished" {
+		t.Errorf("events = %v", got)
+	}
+}
+
+func TestSyncWithoutAgentStatesKeepsTheKnownOnes(t *testing.T) {
+	seed := ticketBoard(fetched, ticket.Ticket{Key: "DEMO-1"})
+	d, _ := wsServer(t, &scriptedSync{boards: []board.Snapshot{ticketBoard(fetched.Add(time.Minute), ticket.Ticket{Key: "DEMO-1"})}}, &seed)
+	d.SetAgents(map[string]string{"DEMO-1": "working"})
+	d.syncOnce(context.Background())
+	if snap, _ := d.Board(); snap.Agents["DEMO-1"] != "working" {
+		t.Errorf("a sync that could not read Herdr dropped the agents: %v", snap.Agents)
+	}
+}

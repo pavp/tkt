@@ -115,3 +115,69 @@ func TestLargeResponse(t *testing.T) {
 		t.Fatalf("large response: %v", err)
 	}
 }
+
+func TestWatchSubscribesAndDeliversEvents(t *testing.T) {
+	f := herdrtest.Start(t)
+	c := herdr.New(f.Path)
+	ctx, cancel := context.WithCancel(context.Background())
+	got := make(chan herdr.Event, 4)
+	done := make(chan error, 1)
+	subs := []herdr.Subscription{{Type: "pane.created"}, {Type: "pane.agent_status_changed", PaneID: "w1:p1"}}
+	go func() { done <- c.Watch(ctx, subs, func(e herdr.Event) { got <- e }) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for f.Watchers() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("never subscribed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if p := f.Last("events.subscribe"); p == nil || len(p["subscriptions"].([]any)) != 2 {
+		t.Fatalf("subscribe params = %v", p)
+	}
+	sub := f.Last("events.subscribe")["subscriptions"].([]any)[1].(map[string]any)
+	if sub["type"] != "pane.agent_status_changed" || sub["pane_id"] != "w1:p1" {
+		t.Errorf("per-pane subscription = %v", sub)
+	}
+	f.Emit(`{"event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","workspace_id":"w1","agent_status":"blocked"}}`)
+	select {
+	case e := <-got:
+		if e.Kind != "pane.agent_status_changed" || !strings.Contains(string(e.Data), `"blocked"`) {
+			t.Errorf("event = %+v", e)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no event")
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Errorf("watch returned %v after cancel", err)
+	}
+}
+
+func TestWatchReportsARefusedSubscription(t *testing.T) {
+	f := herdrtest.Start(t)
+	f.Errors["events.subscribe"] = "missing field pane_id"
+	err := herdr.New(f.Path).Watch(context.Background(), []herdr.Subscription{{Type: "pane.agent_status_changed"}}, func(herdr.Event) {})
+	if err == nil || !strings.Contains(err.Error(), "missing field pane_id") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestWatchEndsWhenHerdrCloses(t *testing.T) {
+	f := herdrtest.Start(t)
+	done := make(chan error, 1)
+	go func() {
+		done <- herdr.New(f.Path).Watch(context.Background(), []herdr.Subscription{{Type: "pane.created"}}, func(herdr.Event) {})
+	}()
+	for f.Watchers() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	f.DropWatchers()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a dropped connection must end the watch with an error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("watch kept running")
+	}
+}

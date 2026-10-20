@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -49,6 +50,10 @@ type App struct {
 	Executable func() (string, error)
 	// OrgMember reports whether a gh token belongs to an active member of a GitHub organization.
 	OrgMember func(ctx context.Context, token, org string) (bool, error)
+	// StartDetached starts a program that outlives tkt, writing its output to logPath, and returns its pid.
+	StartDetached func(name string, args []string, logPath string) (int, error)
+	// Signal sends sig to the process pid.
+	Signal func(pid int, sig syscall.Signal) error
 
 	// tokens remembers Jira tokens read from the credential store, which under WSL costs a PowerShell
 	// start per read; they stay in memory only.
@@ -84,6 +89,8 @@ func NewApp() (*App, error) {
 	a.NewGitHub = a.githubFor
 	a.OrgMember = github.New(nil).OrgMember
 	a.NewHerdr = func() HerdrAPI { return herdr.New(herdr.SocketPath(a.Env.Getenv, a.Env.Home)) }
+	a.StartDetached = startDetached
+	a.Signal = syscall.Kill
 	a.Executable = executable
 	return a, nil
 }
