@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
@@ -1372,7 +1373,7 @@ func (m Model) listLines(row func(key, status, pr, title string) string, prText 
 
 func (m Model) preview() string {
 	if m.status != "" {
-		return truncate(m.status, m.width)
+		return ansi.Truncate(m.status, m.width, "…")
 	}
 	it, okSel := m.current()
 	if !okSel {

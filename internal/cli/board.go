@@ -291,7 +291,7 @@ func (b *boardActions) Open(url string) tea.Cmd {
 	return func() tea.Msg {
 		if b.a.overSSH() {
 			b.a.copyOverTerminal(url)
-			return tui.StatusMsg("over SSH: link copied to your clipboard · " + url)
+			return tui.StatusMsg("✓ link copied · " + hyperlink(url))
 		}
 		if err := b.a.openURL(b.ctx, url); err != nil {
 			return tui.StatusMsg("could not open " + url + ": " + err.Error())
@@ -401,6 +401,9 @@ func (a *App) openURL(ctx context.Context, url string) error {
 func (a *App) overSSH() bool {
 	return a.Env.Getenv("SSH_CONNECTION") != "" || a.Env.Getenv("SSH_TTY") != ""
 }
+
+// hyperlink makes url clickable with OSC 8, so the user's own terminal opens it in the local browser.
+func hyperlink(url string) string { return "\x1b]8;;" + url + "\x1b\\" + url + "\x1b]8;;\x1b\\" }
 
 // copyOverTerminal asks the user's own terminal to copy text with OSC 52, which travels back through SSH.
 func (a *App) copyOverTerminal(text string) {

@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
@@ -1199,5 +1200,20 @@ func TestCardsShowTheAgentState(t *testing.T) {
 	}
 	if strings.Contains(v, "no agent") {
 		t.Errorf("cards without an agent say nothing about it:\n%s", v)
+	}
+}
+
+func TestStatusKeepsAHyperlinkWholeWhenCut(t *testing.T) {
+	const url = "https://example.atlassian.net/browse/DEMO-1234567890"
+	link := "\x1b]8;;" + url + "\x1b\\" + url + "\x1b]8;;\x1b\\"
+	m := loaded(&recorder{})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 40, Height: 40})
+	m, _ = m.Update(StatusMsg("✓ link copied · " + link))
+	p := m.(Model).preview()
+	if w := ansi.StringWidth(p); w > 40 {
+		t.Errorf("status is %d cells wide in a 40-cell pane", w)
+	}
+	if !strings.Contains(p, "\x1b]8;;"+url+"\x1b\\") || !strings.Contains(p, "\x1b]8;;\x1b\\") {
+		t.Errorf("hyperlink broken by the cut: %q", p)
 	}
 }

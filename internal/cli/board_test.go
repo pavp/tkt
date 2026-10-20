@@ -214,8 +214,8 @@ func TestBoardOpenOverSSHCopiesTheLinkToTheLocalClipboard(t *testing.T) {
 		status string
 	}{
 		{"local", nil, false, true, "opened " + url},
-		{"over SSH", map[string]string{"SSH_CONNECTION": "10.0.0.2 5000 10.0.0.1 22"}, true, false, "over SSH: link copied to your clipboard · " + url},
-		{"over SSH with only a tty", map[string]string{"SSH_TTY": "/dev/pts/4"}, true, false, "over SSH: link copied to your clipboard · " + url},
+		{"over SSH", map[string]string{"SSH_CONNECTION": "10.0.0.2 5000 10.0.0.1 22"}, true, false, "✓ link copied · \x1b]8;;" + url + "\x1b\\" + url + "\x1b]8;;\x1b\\"},
+		{"over SSH with only a tty", map[string]string{"SSH_TTY": "/dev/pts/4"}, true, false, "✓ link copied · \x1b]8;;" + url + "\x1b\\" + url + "\x1b]8;;\x1b\\"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
