@@ -108,6 +108,20 @@ func TestMerge(t *testing.T) {
 	}
 }
 
+func TestMergeDropsLinksToAWorktreeNowOnAnotherBranch(t *testing.T) {
+	discovered := []Work{
+		{Key: "DEMO-1", Repo: "example-org/web", Branch: "feature/DEMO-1-homogenize", Path: "/wt/web-DEMO-1", Source: SourceDiscovered},
+	}
+	links := []Work{
+		{Key: "DEMO-1", Repo: "example-org/web", Branch: "feature/DEMO-1-read-repository", Path: "/wt/web-DEMO-1/", Source: SourceAgent},
+		{Key: "DEMO-2", Repo: "example-org/web", Branch: "fix/DEMO-2", Path: "/wt/web-DEMO-2", Source: SourceAgent},
+	}
+	got := Merge(links, discovered)
+	if len(got) != 2 || got[0].Branch != "feature/DEMO-1-homogenize" || got[1].Key != "DEMO-2" {
+		t.Errorf("Merge = %+v", got)
+	}
+}
+
 func TestPrompts(t *testing.T) {
 	p := StartPrompt("DEMO-1", "Filter accounts")
 	for _, want := range []string{"Work on Jira ticket DEMO-1: Filter accounts", "must contain DEMO-1", "tkt context DEMO-1 --images .ticket-assets > .ticket.md", ".git/info/exclude", "tkt link DEMO-1"} {

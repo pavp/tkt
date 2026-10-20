@@ -74,7 +74,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 		Short: "Open Claude Code on a ticket in Herdr workspaces",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.herdrStart(cmd, args, repoFlags, clone)
+			return a.herdrStart(cmd, args, startOpts{repos: repoFlags, clone: clone})
 		},
 	}
 	start.Flags().StringArrayVar(&repoFlags, "repo", nil, "repository to start in; repeat for several")
@@ -333,12 +333,13 @@ func (a *App) removeHerdrKeys(cmd *cobra.Command) error {
 }
 
 // herdrStart opens one Herdr workspace with Claude Code per repository, or focuses the ticket's worktree.
-func (a *App) herdrStart(cmd *cobra.Command, args, repoFlags []string, clone bool) error {
-	plan, err := a.planStart(cmd, args, repoFlags, clone)
+func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) error {
+	h := a.NewHerdr()
+	opts.prefer = func(ws []workspace.Work) (workspace.Work, bool) { return workWithAgent(cmd.Context(), h, ws) }
+	plan, err := a.planStart(cmd, args, opts)
 	if err != nil {
 		return err
 	}
-	h := a.NewHerdr()
 	ctx := cmd.Context()
 	if plan.Existing != nil {
 		ws, wsOK := workspaceAt(ctx, h, plan.Existing.Path)
@@ -505,6 +506,20 @@ func workspaceAt(ctx context.Context, h HerdrAPI, path string) (herdr.Workspace,
 	return herdr.Workspace{}, false
 }
 
+// workWithAgent picks the one worktree an agent works in; with none or several there is nothing to tell.
+func workWithAgent(ctx context.Context, h HerdrAPI, ws []workspace.Work) (workspace.Work, bool) {
+	var found []workspace.Work
+	for _, w := range ws {
+		if _, ok := agentAt(ctx, h, w.Path); ok {
+			found = append(found, w)
+		}
+	}
+	if len(found) != 1 {
+		return workspace.Work{}, false
+	}
+	return found[0], true
+}
+
 // agentAt finds an agent working inside path, which Herdr reports as a worktree only when it created that
 // worktree itself; an agent without a folder is placed by its pane's.
 func agentAt(ctx context.Context, h HerdrAPI, path string) (herdr.Agent, bool) {
@@ -652,7 +667,7 @@ func (a *App) herdrTicketPopup(cmd *cobra.Command) error {
 	if !strings.HasPrefix(strings.ToLower(ans), "y") {
 		return nil
 	}
-	return a.herdrStart(cmd, []string{key}, nil, false)
+	return a.herdrStart(cmd, []string{key}, startOpts{})
 }
 
 // herdrSidebar labels every workspace whose checkout carries a ticket key. cachedOnly is for the startup

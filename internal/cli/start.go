@@ -34,7 +34,7 @@ func newStartCmd(a *App) *cobra.Command {
 			if a.jsonOut {
 				return errInteractive("start")
 			}
-			plan, err := a.planStart(cmd, args, repoFlags, clone)
+			plan, err := a.planStart(cmd, args, startOpts{repos: repoFlags, clone: clone})
 			if err != nil {
 				return err
 			}
@@ -64,7 +64,16 @@ type startPlan struct {
 	Prompt   string
 }
 
-func (a *App) planStart(cmd *cobra.Command, args, repoFlags []string, clone bool) (startPlan, error) {
+// startOpts are the choices a Start may arrive with; prefer, when set, picks among several worktrees
+// without asking, and reports false when it cannot tell.
+type startOpts struct {
+	repos  []string
+	clone  bool
+	prefer func([]workspace.Work) (workspace.Work, bool)
+}
+
+func (a *App) planStart(cmd *cobra.Command, args []string, opts startOpts) (startPlan, error) {
+	repoFlags, clone := opts.repos, opts.clone
 	c, err := a.LoadConfig()
 	if err != nil {
 		return startPlan{}, err
@@ -109,9 +118,15 @@ func (a *App) planStart(cmd *cobra.Command, args, repoFlags []string, clone bool
 			}
 		}
 		if len(existing) > 0 {
-			w, err := a.pickWork(existing)
-			if err != nil {
-				return startPlan{}, err
+			w, ok := workspace.Work{}, false
+			if len(existing) > 1 && opts.prefer != nil {
+				w, ok = opts.prefer(existing)
+			}
+			if !ok {
+				var err error
+				if w, err = a.pickWork(existing); err != nil {
+					return startPlan{}, err
+				}
 			}
 			plan.Existing = &w
 			plan.Prompt = workspace.ContinuePrompt(key, is.Summary)

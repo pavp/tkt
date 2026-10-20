@@ -234,6 +234,39 @@ func TestHerdrStartFocusesTheAgentsPaneInAHerdrWorktree(t *testing.T) {
 	}
 }
 
+func TestHerdrStartPicksTheWorktreeWithTheAgent(t *testing.T) {
+	tests := []struct {
+		name, agents string
+		wantAsk      bool
+		wantWS       string
+	}{
+		{"one has an agent", `[{"pane_id":"w6:p1","workspace_id":"w6","agent":"claude","cwd":"/src/web-DEMO-1-b"}]`, false, "w6"},
+		{"none has an agent", `[]`, true, ""},
+		{"both have agents", `[{"pane_id":"w5:p1","workspace_id":"w5","agent":"claude","cwd":"/src/web-DEMO-1-a"},{"pane_id":"w6:p1","workspace_id":"w6","agent":"claude","cwd":"/src/web-DEMO-1-b"}]`, true, "w5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, f, _ := herdrHarness(t)
+			h.clone(t, "web")
+			h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1-a\nHEAD a\nbranch refs/heads/feature/DEMO-1-a\n\nworktree /src/web-DEMO-1-b\nHEAD b\nbranch refs/heads/feature/DEMO-1-b\n"
+			f.Results["agent.list"] = `{"type":"agent_list","agents":` + tt.agents + `}`
+			f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+			h.app.Stdin = strings.NewReader("\n")
+			if code := h.exec("herdr", "start", "DEMO-1"); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.errOut)
+			}
+			if asked := strings.Contains(h.errOut.String(), "Open which worktree?"); asked != tt.wantAsk {
+				t.Errorf("asked = %v:\n%s", asked, h.errOut)
+			}
+			if tt.wantWS != "" {
+				if got := f.Last("workspace.focus"); got["workspace_id"] != tt.wantWS {
+					t.Errorf("focus = %v", got)
+				}
+			}
+		})
+	}
+}
+
 func TestHerdrStartIgnoresAgentsOutsideTheWorktree(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	h.clone(t, "web")
