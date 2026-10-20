@@ -267,6 +267,76 @@ func TestHerdrStartPicksTheWorktreeWithTheAgent(t *testing.T) {
 	}
 }
 
+const twoWorktrees = "worktree /src/web-DEMO-1-a\nHEAD a\nbranch refs/heads/feature/DEMO-1-a\n\nworktree /src/web-DEMO-1-b\nHEAD b\nbranch refs/heads/feature/DEMO-1-b\n"
+
+func TestStartOpensTheWorktreeAsked(t *testing.T) {
+	h, f, calls := herdrHarness(t)
+	h.clone(t, "web")
+	h.run.out["git worktree list --porcelain"] = twoWorktrees
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+	if code := h.exec("herdr", "start", "DEMO-1", "--worktree", "/src/web-DEMO-1-b/"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if strings.Contains(h.errOut.String(), "Open which worktree?") {
+		t.Errorf("asked although --worktree was given:\n%s", h.errOut)
+	}
+	if got := f.Last("workspace.create"); got["cwd"] != "/src/web-DEMO-1-b" {
+		t.Errorf("workspace.create = %v", got)
+	}
+	if code := h.exec("start", "DEMO-1", "--worktree", "/src/web-DEMO-1-a"); code != 0 || len(*calls) != 1 || (*calls)[0].dir != "/src/web-DEMO-1-a" {
+		t.Errorf("tkt start --worktree: exit %d, launches %+v, %s", code, *calls, h.errOut)
+	}
+	if code := h.exec("herdr", "start", "DEMO-1", "--worktree", "/nope"); code == 0 || !strings.Contains(h.errOut.String(), "DEMO-1 has no worktree at /nope") {
+		t.Errorf("unknown worktree: exit %d, %s", code, h.errOut)
+	}
+}
+
+func TestStartChoices(t *testing.T) {
+	agent := func(ws, cwd string) string {
+		return `{"pane_id":"` + ws + `:p1","workspace_id":"` + ws + `","agent":"claude","agent_status":"working","cwd":"` + cwd + `"}`
+	}
+	tests := []struct {
+		name, worktrees, agents string
+		lastRepos               []string
+		want                    tui.StartChoices
+	}{
+		{"one worktree", "worktree /src/web-DEMO-1-a\nHEAD a\nbranch refs/heads/feature/DEMO-1-a\n", `[]`, nil, tui.StartChoices{}},
+		{"the agent tells", twoWorktrees, `[` + agent("w6", "/src/web-DEMO-1-b") + `]`, nil, tui.StartChoices{}},
+		{"no agent tells", twoWorktrees, `[]`, nil, tui.StartChoices{Worktrees: []tui.WorktreeChoice{
+			{Branch: "feature/DEMO-1-a", Path: "/src/web-DEMO-1-a"}, {Branch: "feature/DEMO-1-b", Path: "/src/web-DEMO-1-b"}}}},
+		{"both have agents", twoWorktrees, `[` + agent("w5", "/src/web-DEMO-1-a") + `,` + agent("w6", "/src/web-DEMO-1-b") + `]`, nil, tui.StartChoices{Worktrees: []tui.WorktreeChoice{
+			{Branch: "feature/DEMO-1-a", Path: "/src/web-DEMO-1-a", Agent: "working"}, {Branch: "feature/DEMO-1-b", Path: "/src/web-DEMO-1-b", Agent: "working"}}}},
+		{"repositories, last used checked", "", `[]`, []string{"example-org/api"}, tui.StartChoices{Repos: []tui.RepoChoice{
+			{Name: "example-org/web"}, {Name: "example-org/api", LastUsed: true, Checked: true}}}},
+		{"repositories, first checked when none was used", "", `[]`, nil, tui.StartChoices{Repos: []tui.RepoChoice{
+			{Name: "example-org/web", Checked: true}, {Name: "example-org/api"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, f, _ := herdrHarness(t)
+			h.clone(t, "web")
+			h.run.out["git worktree list --porcelain"] = tt.worktrees
+			f.Results["agent.list"] = `{"type":"agent_list","agents":` + tt.agents + `}`
+			if tt.lastRepos != nil {
+				st := h.app.loadState()
+				st.LastRepos["DEMO"] = tt.lastRepos
+				h.app.saveState(st)
+			}
+			c, err := h.app.LoadConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := h.app.startChoices(context.Background(), c, "DEMO-1", h.app.NewHerdr())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("got %+v\nwant %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHerdrStartIgnoresAgentsOutsideTheWorktree(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	h.clone(t, "web")

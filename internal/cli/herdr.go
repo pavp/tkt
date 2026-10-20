@@ -69,16 +69,18 @@ func newHerdrCmd(a *App) *cobra.Command {
 	}
 	var repoFlags []string
 	var clone bool
+	var worktree string
 	start := &cobra.Command{
 		Use:   "start KEY",
 		Short: "Open Claude Code on a ticket in Herdr workspaces",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.herdrStart(cmd, args, startOpts{repos: repoFlags, clone: clone})
+			return a.herdrStart(cmd, args, startOpts{repos: repoFlags, clone: clone, worktree: worktree})
 		},
 	}
 	start.Flags().StringArrayVar(&repoFlags, "repo", nil, "repository to start in; repeat for several")
 	start.Flags().BoolVar(&clone, "clone", false, "clone missing repositories without asking")
+	start.Flags().StringVar(&worktree, "worktree", "", "open the ticket's worktree at this path instead of asking which one")
 
 	var keysFlag, noKeys, sidebarFlag, noSidebar bool
 	installCmd := &cobra.Command{
