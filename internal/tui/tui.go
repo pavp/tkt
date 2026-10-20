@@ -424,7 +424,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.effectiveView() == ViewList {
 		lines := strings.Split(strings.TrimRight(m.listView(), "\n"), "\n")
-		_, at := m.listLines(func(k, s, p, t string) string { return "" }, func(item) string { return "" })
+		_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, 0)
 		avail := m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer())
 		start := 0
 		if avail > 0 && len(lines) > avail {
@@ -1323,27 +1323,60 @@ func (m Model) listView() string {
 		prW = max(prW, lipgloss.Width(prText(it)))
 	}
 	prW = min(prW, prWidth)
-	// Narrow panes shrink PR / CI first, then STATUS, so the title always keeps some room.
 	statusW := statusWidth
+	agentW := 0
+	if len(m.snap.Agents) > 0 {
+		agentW = agentWidth + 1
+	}
+	// Narrow panes drop AGENT first, then shrink PR / CI, then STATUS, so the title always keeps some room.
 	const minTitle = 12
-	if short := minTitle - (m.width - 2 - keyWidth - statusW - prW - 3); short > 0 {
+	room := func() int { return m.width - 2 - keyWidth - statusW - agentW - prW - 3 }
+	if minTitle > room() {
+		agentW = 0
+	}
+	if short := minTitle - room(); short > 0 {
 		cut := max(0, min(short, prW-8))
 		prW -= cut
 		statusW -= min(short-cut, statusW-10)
 	}
-	titleWidth := max(minTitle, m.width-2-keyWidth-statusW-prW-3)
-	row := func(key, status, pr, title string) string {
-		return pad(key, keyWidth) + " " + pad(status, statusW) + " " + pad(pr, prW) + " " + truncate(title, titleWidth)
+	titleWidth := max(minTitle, room())
+	row := func(key, status, agent, pr, title string) string {
+		return pad(key, keyWidth) + " " + pad(status, statusW) + " " + agent + pad(pr, prW) + " " + truncate(title, titleWidth)
 	}
-	lines, _ := m.listLines(row, prText)
+	lines, _ := m.listLines(row, prText, agentW)
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// agentWidth fits the longest agent cell, "! needs you".
+const agentWidth = 11
+
+// agentCell words a ticket's agent for the list, padded to agentW (which includes its gap) and colored
+// like the cards unless plain, as on the selected row, whose highlight a color would break.
+func agentCell(status string, agentW int, plain bool) string {
+	if agentW == 0 {
+		return ""
+	}
+	line, kind := board.AgentLine(status)
+	text := ""
+	if kind != board.AgentNone {
+		text = strings.Replace(line, "claude ", "", 1)
+	}
+	cell := pad(text, agentW)
+	if plain || kind == board.AgentNone {
+		return cell
+	}
+	return map[board.AgentKind]lipgloss.Style{board.AgentWorking: keyStyle, board.AgentNeedsYou: warn, board.AgentIdle: dim}[kind].Render(cell)
 }
 
 // listLines lays the list out in two sections, the user's tickets and review requests, and returns for
 // every line the index of the item on it (-1 for titles and spacing), so clicks map back to items.
-func (m Model) listLines(row func(key, status, pr, title string) string, prText func(item) string) ([]string, []int) {
+func (m Model) listLines(row func(key, status, agent, pr, title string) string, prText func(item) string, agentW int) ([]string, []int) {
 	items := m.listItems()
-	lines := []string{"  " + dim.Render(row("KEY", "STATUS", "PR / CI", "TITLE")), dim.Render(strings.Repeat("─", m.width))}
+	header := pad("", agentW)
+	if agentW > 0 {
+		header = pad("AGENT", agentW)
+	}
+	lines := []string{"  " + dim.Render(row("KEY", "STATUS", header, "PR / CI", "TITLE")), dim.Render(strings.Repeat("─", m.width))}
 	at := []int{-1, -1}
 	nTickets := 0
 	for _, it := range items {
@@ -1367,9 +1400,9 @@ func (m Model) listLines(row func(key, status, pr, title string) string, prText 
 		}
 		var line string
 		if it.pr != nil {
-			line = row(string(it.key), "Review requested", prText(it), it.pr.Title)
+			line = row(string(it.key), "Review requested", pad("", agentW), prText(it), it.pr.Title)
 		} else {
-			line = row(string(it.key), it.ticket.Status, prText(it), it.ticket.Summary)
+			line = row(string(it.key), it.ticket.Status, agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), it.ticket.Summary)
 		}
 		switch {
 		case i == m.row:
