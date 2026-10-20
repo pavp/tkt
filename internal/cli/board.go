@@ -212,6 +212,19 @@ func (b *boardActions) ListRepos(owner string) tea.Cmd {
 
 func (b *boardActions) NativePicker() bool { return b.a.nativePicker() }
 
+func (b *boardActions) JiraFields() tea.Cmd {
+	return func() tea.Msg {
+		js, err := b.a.jiraClient(b.cfg())
+		if err != nil {
+			return tui.JiraFieldsListedMsg{Err: err}
+		}
+		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+		defer cancel()
+		names, err := js.FieldNames(ctx)
+		return tui.JiraFieldsListedMsg{Names: names, Err: err}
+	}
+}
+
 // listDirs returns the folders inside dir, symlinks to folders included, and the symlinks whose target
 // is gone, both sorted ignoring case.
 func listDirs(dir string) (names, broken []string, err error) {

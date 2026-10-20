@@ -12,16 +12,17 @@ import (
 
 // fakeJira serves canned Jira data and records the credentials it was built with.
 type fakeJira struct {
-	token     string
-	myselfErr error
-	issues    []jira.Issue
-	searchErr error
-	jql       string
-	details   map[string]jira.Issue
-	comments  map[string][]jira.Comment
-	statuses  map[string][]jira.Status
-	projects  []jira.Project
-	files     map[string]string
+	fieldNames []string
+	token      string
+	myselfErr  error
+	issues     []jira.Issue
+	searchErr  error
+	jql        string
+	details    map[string]jira.Issue
+	comments   map[string][]jira.Comment
+	statuses   map[string][]jira.Status
+	projects   []jira.Project
+	files      map[string]string
 	// devPRs maps issue ids to development-panel PRs; nil means the panel is unavailable.
 	devPRs map[string][]jira.DevPullRequest
 	// devAsked counts development-panel calls; the board makes them concurrently.
@@ -60,6 +61,7 @@ func (f *fakeJira) Statuses(_ context.Context, p string) ([]jira.Status, error) 
 }
 func (f *fakeJira) Projects(context.Context) ([]jira.Project, error) { return f.projects, nil }
 func (f *fakeJira) FieldID(context.Context, string) (string, error)  { return "", jira.ErrFieldNotFound }
+func (f *fakeJira) FieldNames(context.Context) ([]string, error)     { return f.fieldNames, nil }
 func (f *fakeJira) BrowseURL(key string) string                      { return "https://example.atlassian.net/browse/" + key }
 
 func (f *fakeJira) DevPullRequests(_ context.Context, id string) ([]jira.DevPullRequest, error) {

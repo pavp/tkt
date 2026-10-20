@@ -200,6 +200,19 @@ func TestFieldIDFindsAFieldByNameOnce(t *testing.T) {
 	}
 }
 
+func TestFieldNamesAreSortedAndUnique(t *testing.T) {
+	c, _ := server(t, map[string]string{
+		"GET /rest/api/3/field": `[{"id":"summary","name":"Summary"},{"id":"customfield_1","name":"Product"},{"id":"customfield_2","name":"Product"},{"id":"customfield_3","name":"Cloud Product"},{"id":"x","name":""}]`,
+	})
+	got, err := c.FieldNames(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "Cloud Product,Product,Summary" {
+		t.Errorf("FieldNames = %v", got)
+	}
+}
+
 func TestFieldText(t *testing.T) {
 	tests := []struct {
 		raw, want string

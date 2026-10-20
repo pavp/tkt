@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -313,6 +314,22 @@ func (c *Client) FieldID(ctx context.Context, name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%w: %q", ErrFieldNotFound, name)
+}
+
+// FieldNames lists the names of the site's fields, sorted and without repeats, for choosing one.
+func (c *Client) FieldNames(ctx context.Context) ([]string, error) {
+	all, err := c.loadFields(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, fd := range all {
+		if fd.Name != "" && !slices.Contains(out, fd.Name) {
+			out = append(out, fd.Name)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // FieldText words a field's value for display: text as is, an option, user or component by its value or

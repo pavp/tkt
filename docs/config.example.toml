@@ -12,6 +12,7 @@ reviews = "direct"
 site = "example.atlassian.net"
 email = "you@example.com"
 # Optional: a Jira field whose value the board shows for the selected ticket, such as its product.
+# Easier from the board: , (settings) → Board → Ticket label, where Tab completes your Jira's fields.
 # label_field = "Product"
 
 # Optional: the gh account that reads each GitHub organization (`gh auth status` lists them).
