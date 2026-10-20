@@ -299,18 +299,13 @@ func TestNarrowTerminalUsesList(t *testing.T) {
 
 func TestFilters(t *testing.T) {
 	r := &recorder{}
-	m := press(loaded(r), "n", "v")
-	view := m.View()
-	if strings.Contains(view, "DEMO-3") || !strings.Contains(view, "DEMO-1") || strings.Contains(view, "#820") {
-		t.Errorf("needs-you filter should hold my blocked tickets only, no review requests:\n%s", view)
+	m := press(loaded(r), "n")
+	view := stripANSI(m.View())
+	if strings.Contains(view, "DEMO-3") || !strings.Contains(view, "#812") || !strings.Contains(view, "#820") || !strings.Contains(view, "↑↓ ws move") {
+		t.Errorf("PRs filter should list my open PRs and the review requests:\n%s", view)
 	}
-	if v := stripANSI(press(loaded(r), "n").View()); strings.Contains(v, "#820") || !strings.Contains(v, "2 Needs you 1") {
-		t.Errorf("needs-you columns should hide the review strip and count only tickets:\n%s", v)
-	}
-	m = press(m, "r")
-	view = m.View()
-	if strings.Contains(view, "DEMO-1") || !strings.Contains(view, "#820") || !strings.Contains(view, "↑↓ ws move") {
-		t.Errorf("reviews filter:\n%s", view)
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#820"); i++ {
+		m = press(m, "s")
 	}
 	m = press(m, "enter")
 	m, _ = run(m, "enter")
@@ -476,7 +471,7 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "synced 3 min ago", "1 All 4", "2 Needs you 1", "│ Columns │ │ List │", "DEMO-3 · Export CSV\n To Do · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "synced 3 min ago", "1 All 4", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3 · Export CSV\n To Do · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
@@ -490,16 +485,16 @@ func TestMatchesMockupDetails(t *testing.T) {
 func TestTabCyclesFiltersAndNumbersJump(t *testing.T) {
 	m := loaded(&recorder{})
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if !strings.Contains(stripANSI(m.View()), "▸ DEMO-1") || strings.Contains(stripANSI(m.View()), "DEMO-3") {
-		t.Errorf("tab should switch to Needs you:\n%s", stripANSI(m.View()))
+	if v := stripANSI(m.View()); !strings.Contains(v, "▸ #812") || strings.Contains(v, "DEMO-3") {
+		t.Errorf("tab should switch to PRs:\n%s", v)
 	}
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 	if !strings.Contains(stripANSI(m.View()), "DEMO-3") {
 		t.Error("shift+tab should go back to All")
 	}
-	m = press(m, "3")
-	if v := stripANSI(m.View()); strings.Contains(v, "DEMO-1") || !strings.Contains(v, "#820") {
-		t.Errorf("3 should show reviews:\n%s", v)
+	m = press(m, "2")
+	if v := stripANSI(m.View()); strings.Contains(v, "DEMO-3") || !strings.Contains(v, "#820") {
+		t.Errorf("2 should show PRs:\n%s", v)
 	}
 }
 
@@ -558,9 +553,9 @@ func TestMouseSelectsCardsRowsAndFilters(t *testing.T) {
 	}
 
 	header = strings.Split(stripANSI(m.View()), "\n")[1]
-	m = click(m, lipgloss.Width(header[:strings.Index(header, "Needs you")]), 2)
-	if v := stripANSI(m.View()); strings.Contains(v, "DEMO-3") || !strings.Contains(v, "DEMO-1") {
-		t.Errorf("click on Needs you did not filter:\n%s", v)
+	m = click(m, lipgloss.Width(header[:strings.Index(header, "PRs")]), 2)
+	if v := stripANSI(m.View()); strings.Contains(v, "DEMO-3") || !strings.Contains(v, "#812") {
+		t.Errorf("click on PRs did not filter:\n%s", v)
 	}
 }
 
@@ -618,7 +613,7 @@ func TestReviewsRenderLikeTheMockup(t *testing.T) {
 	if !strings.Contains(view, "│ ! #820 │") {
 		t.Errorf("review chip should be boxed with just the PR number:\n%s", view)
 	}
-	next = press(next, "3")
+	next = press(next, "2")
 	line := ""
 	for _, l := range strings.Split(stripANSI(next.View()), "\n") {
 		if strings.Contains(l, "#820") && strings.Contains(l, "Review requested") {
@@ -627,6 +622,9 @@ func TestReviewsRenderLikeTheMockup(t *testing.T) {
 	}
 	if !strings.Contains(line, "Review requested   ✓") || strings.Contains(line, "example-org") {
 		t.Errorf("review row should show only the CI mark, as in the mockup: %q", line)
+	}
+	for i := 0; i < 10 && !strings.Contains(selectedLine(next.View()), "#820"); i++ {
+		next = press(next, "s")
 	}
 	if !strings.Contains(stripANSI(next.View()), "CI passing ✓") {
 		t.Error("preview does not spell out the CI state")
@@ -966,24 +964,24 @@ func TestListGroupsReviewsByRepo(t *testing.T) {
 	}
 }
 
-func TestReviewsFilterTogglesBots(t *testing.T) {
+func TestPRsFilterTogglesBots(t *testing.T) {
 	snap := snapshot()
 	snap.Reviews = append(snap.Reviews, ticket.PullRequest{Repo: "example-org/web", Number: 830, Title: "Bump vite", Author: "dependabot", AuthorBot: true})
 	m := tea.Model(New(snap, false, &recorder{}, ViewColumns))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	if v := stripANSI(m.View()); strings.Contains(v, "#830") || !strings.Contains(v, "3 Reviews 1") || !strings.Contains(v, "1 All 4") {
+	if v := stripANSI(m.View()); strings.Contains(v, "#830") || !strings.Contains(v, "2 PRs 3") || !strings.Contains(v, "1 All 4") {
 		t.Fatalf("bot review shown by default:\n%s", v)
 	}
 	if v := stripANSI(press(m, "b").View()); strings.Contains(v, "#830") {
-		t.Errorf("b outside the reviews filter showed bots:\n%s", v)
+		t.Errorf("b outside the PRs filter showed bots:\n%s", v)
 	}
-	m = press(m, "3")
+	m = press(m, "2")
 	v := stripANSI(m.View())
 	if strings.Contains(v, "#830") || !strings.Contains(v, "b show bots · 1 hidden") || !strings.Contains(v, "b bots") {
 		t.Fatalf("reviews filter before b:\n%s", v)
 	}
 	shown := press(m, "b")
-	if v := stripANSI(shown.View()); !strings.Contains(v, "#830") || !strings.Contains(v, "b hide bots") || !strings.Contains(v, "3 Reviews 2") {
+	if v := stripANSI(shown.View()); !strings.Contains(v, "#830") || !strings.Contains(v, "b hide bots") || !strings.Contains(v, "2 PRs 4") {
 		t.Errorf("b did not show bots:\n%s", v)
 	}
 	if v := stripANSI(press(shown, "b").View()); strings.Contains(v, "#830") {
@@ -1082,55 +1080,71 @@ func TestListMarksBlockedTicketsThatNeedYou(t *testing.T) {
 	}
 }
 
-func TestNeedsYouIsAListThatSaysWhy(t *testing.T) {
+func TestPRsInColumnsExplainsTheList(t *testing.T) {
+	m := press(loaded(&recorder{}), "2", "v", "v")
+	if v := stripANSI(m.View()); !strings.Contains(v, "the PRs filter always shows a list") {
+		t.Errorf("no explanation:\n%s", v)
+	}
+}
+
+func prsSnapshot() board.Snapshot {
 	snap := snapshot()
 	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-4", Summary: "Fix login redirect", Status: "In Review", Category: ticket.InReview,
 		PRs: []ticket.PullRequest{
-			{Number: 815, State: ticket.PROpen, Checks: ticket.ChecksPass, Review: ticket.ReviewChangesRequested},
-			{Number: 816, State: ticket.PROpen, Checks: ticket.ChecksPass},
+			{Repo: "example-org/web", Number: 815, Title: "Redirect after login", URL: "https://github.com/example-org/web/pull/815", State: ticket.PROpen, Checks: ticket.ChecksPass, Review: ticket.ReviewChangesRequested},
+			{Repo: "example-org/api", Number: 816, Title: "Session endpoint", State: ticket.PROpen, Checks: ticket.ChecksPending, Review: ticket.ReviewApproved},
+			{Repo: "example-org/web", Number: 700, Title: "Old attempt", State: ticket.PRMerged},
 		}})
+	return snap
+}
+
+func TestPRsFilterListsMyOpenPRsThenReviews(t *testing.T) {
 	for _, view := range []string{ViewColumns, ViewList} {
-		m := tea.Model(New(snap, false, &recorder{}, view))
+		m := tea.Model(New(prsSnapshot(), false, &recorder{}, view))
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 		m = press(m, "2")
 		v := stripANSI(m.View())
-		if !strings.Contains(v, "KEY") || !strings.Contains(v, "Needs you  2") || strings.Contains(v, "In Progress  ") {
-			t.Fatalf("%s: needs you is not a list:\n%s", view, v)
+		if !strings.Contains(v, "2 PRs 5") || strings.Contains(v, "Reviews 1") || strings.Contains(v, "Needs you") {
+			t.Fatalf("%s: header:\n%s", view, v)
 		}
-		lines := strings.Split(v, "\n")
-		ci, changes := lines[lineIndex(v, "DEMO-1")], lines[lineIndex(v, "DEMO-4")]
-		if !strings.Contains(ci, "CI failing") || !strings.Contains(ci, "#812 ✕") || strings.Contains(ci, "In Progress") {
-			t.Errorf("%s: CI row = %q", view, ci)
+		mine, reviews := strings.Index(v, "Mine  4"), strings.Index(v, "Review requested · example-org/web  1")
+		if mine < 0 || reviews < mine {
+			t.Fatalf("%s: sections missing or out of order:\n%s", view, v)
 		}
-		if !strings.Contains(changes, "Changes requested") || !strings.Contains(changes, "#815") || strings.Contains(changes, "✓") || strings.Contains(changes, "#816") {
-			t.Errorf("%s: changes row = %q", view, changes)
+		rows := map[string]string{"#812": "CI failing", "#815": "Changes requested", "#816": "Approved", "#806": "Open"}
+		for pr, status := range rows {
+			line := strings.Split(v, "\n")[lineIndex(v, pr+" ")]
+			if !strings.Contains(line, status) {
+				t.Errorf("%s: %s row %q lacks %q", view, pr, line, status)
+			}
 		}
-		if strings.Contains(v, "to reviews") || strings.Contains(v, "open review") {
-			t.Errorf("%s: footer offers reviews in needs you:\n%s", view, v)
+		if line := strings.Split(v, "\n")[lineIndex(v, "#815 ")]; !strings.Contains(line, "DEMO-4 · Redirect after login") {
+			t.Errorf("%s: #815 row %q lacks its ticket and title", view, line)
 		}
-	}
-}
-
-func TestReasonsText(t *testing.T) {
-	tests := []struct {
-		rs   []ticket.Reason
-		want string
-	}{
-		{[]ticket.Reason{ticket.ReasonCIFailing}, "CI failing"},
-		{[]ticket.Reason{ticket.ReasonChangesRequested}, "Changes requested"},
-		{[]ticket.Reason{ticket.ReasonCIFailing, ticket.ReasonChangesRequested}, "CI + changes"},
-	}
-	for _, tt := range tests {
-		if got := reasonsText(tt.rs); got != tt.want || len(got) > statusWidth {
-			t.Errorf("reasonsText(%v) = %q, want %q within %d cells", tt.rs, got, tt.want, statusWidth)
+		if strings.Contains(v, "#700") {
+			t.Errorf("%s: merged PR listed:\n%s", view, v)
+		}
+		if a, b := lineIndex(v, "#815 "), lineIndex(v, "#816 "); a > b || lineIndex(v, "#812 ") > lineIndex(v, "#806 ") {
+			t.Errorf("%s: PRs that need you are not first:\n%s", view, v)
 		}
 	}
 }
 
-func TestNeedsYouInColumnsExplainsTheList(t *testing.T) {
-	m := press(loaded(&recorder{}), "2", "v", "v")
-	if v := stripANSI(m.View()); !strings.Contains(v, "the needs-you filter always shows a list") {
-		t.Errorf("no explanation:\n%s", v)
+func TestPRsFilterActsOnTheRowsTicket(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#815"); i++ {
+		m = press(m, "s")
+	}
+	press(m, "f")
+	press(m, "p")
+	if !slices.Contains(r.calls, "fix DEMO-4") || !slices.Contains(r.calls, "open https://github.com/example-org/web/pull/815") {
+		t.Errorf("calls = %v", r.calls)
+	}
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Actions for DEMO-4") {
+		t.Errorf("menu:\n%s", v)
 	}
 }
 
@@ -1179,7 +1193,7 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	m := loaded(&recorder{})
 	lines := strings.Split(stripANSI(m.View()), "\n")
 	first := lines[1]
-	for _, want := range []string{"tkt", "│ 1 All 4 │", "│ 3 Reviews 1 │", "│ Columns │", "│ List │"} {
+	for _, want := range []string{"tkt", "│ 1 All 4 │", "│ 2 PRs 3 │", "│ Columns │", "│ List │"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("title row lacks %q: %q", want, first)
 		}
@@ -1423,7 +1437,7 @@ func TestReviewStripKeepsRoomForTheMoreLabel(t *testing.T) {
 		if y < 0 {
 			t.Fatalf("width %d: no review strip", width)
 		}
-		if !strings.Contains(lines[y], "more · press 3") {
+		if !strings.Contains(lines[y], "more · press 2") {
 			t.Errorf("width %d: the more label is cut: %q", width, lines[y])
 		}
 		if w := lipgloss.Width(lines[y]); w > width {
