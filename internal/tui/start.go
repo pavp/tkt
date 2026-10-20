@@ -66,7 +66,34 @@ func worktreePicker(key ticket.Key, ws []WorktreeChoice) *picker {
 	return p
 }
 
-func (p *picker) action() string { return "Open" }
+func repoPicker(key ticket.Key, rs []RepoChoice) *picker {
+	p := &picker{key: key, title: "Start " + string(key), question: "Which repositories?", multi: true}
+	for _, r := range rs {
+		hint := ""
+		if r.LastUsed {
+			hint = "last used"
+		}
+		p.rows = append(p.rows, pickerRow{label: r.Name, hint: hint, value: r.Name, checked: r.Checked})
+	}
+	return p
+}
+
+func (p *picker) action() string {
+	if p.multi {
+		return "Start"
+	}
+	return "Open"
+}
+
+func (p *picker) rowLabel(r pickerRow) string {
+	switch {
+	case !p.multi:
+		return r.label
+	case r.checked:
+		return "[x] " + r.label
+	}
+	return "[ ] " + r.label
+}
 
 // startChoices runs Start at once when there is nothing to ask, otherwise opens the picker.
 func (m Model) startChoices(msg StartChoicesMsg) (tea.Model, tea.Cmd) {
@@ -75,6 +102,8 @@ func (m Model) startChoices(msg StartChoicesMsg) (tea.Model, tea.Cmd) {
 		m.status = "start " + string(msg.Key) + ": " + msg.Err.Error()
 	case len(msg.Choices.Worktrees) > 1:
 		m.picker = worktreePicker(msg.Key, msg.Choices.Worktrees)
+	case len(msg.Choices.Repos) > 1:
+		m.picker = repoPicker(msg.Key, msg.Choices.Repos)
 	default:
 		return m, m.actions.Start(msg.Key, StartOptions{})
 	}
@@ -83,8 +112,22 @@ func (m Model) startChoices(msg StartChoicesMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) finishPicker() (tea.Model, tea.Cmd) {
 	p := m.picker
+	if !p.multi {
+		m.picker = nil
+		return m, m.actions.Start(p.key, StartOptions{Worktree: p.rows[p.sel].value})
+	}
+	var repos []string
+	for _, r := range p.rows {
+		if r.checked {
+			repos = append(repos, r.value)
+		}
+	}
+	if len(repos) == 0 {
+		m.status = "pick at least one repository"
+		return m, nil
+	}
 	m.picker = nil
-	return m, m.actions.Start(p.key, StartOptions{Worktree: p.rows[p.sel].value})
+	return m, m.actions.Start(p.key, StartOptions{Repos: repos})
 }
 
 func (m Model) pickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -96,6 +139,10 @@ func (m Model) pickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		p.sel = (p.sel + len(p.rows) - 1) % len(p.rows)
 	case "down", "s", "j", "tab":
 		p.sel = (p.sel + 1) % len(p.rows)
+	case " ":
+		if p.multi {
+			p.rows[p.sel].checked = !p.rows[p.sel].checked
+		}
 	case "enter":
 		return m.finishPicker()
 	case "ctrl+c":
@@ -110,16 +157,20 @@ func (m Model) pickerLayout() (box string, firstRow, buttonsRow int, buttons []c
 	p := m.picker
 	inner := 0
 	for _, r := range p.rows {
-		inner = max(inner, 2+lipgloss.Width(r.label)+3+lipgloss.Width(r.hint))
+		inner = max(inner, 2+lipgloss.Width(p.rowLabel(r))+3+lipgloss.Width(r.hint))
 	}
-	inner = max(inner, lipgloss.Width(p.title), lipgloss.Width(p.question), 24)
+	keys := "enter " + strings.ToLower(p.action()) + " · esc cancel"
+	if p.multi {
+		keys = "space toggle · " + keys
+	}
+	inner = max(inner, lipgloss.Width(p.title), lipgloss.Width(p.question), lipgloss.Width(keys))
 	// Border and padding take 6 cells; a narrow pane (the tray panel) gets a narrower box, cutting labels.
 	inner = min(inner, max(20, m.width-6))
 	lines := []string{bold.Render(truncate(p.title, inner)), "", truncate(p.question, inner), ""}
 	firstRow = 1 + len(lines)
 	for i, r := range p.rows {
 		hint := r.hint
-		label := truncate(r.label, max(4, inner-2-3-lipgloss.Width(hint)))
+		label := truncate(p.rowLabel(r), max(4, inner-2-3-lipgloss.Width(hint)))
 		gap := max(3, inner-2-lipgloss.Width(label)-lipgloss.Width(hint))
 		line := "  " + label + strings.Repeat(" ", gap) + dim.Render(hint)
 		if i == p.sel {
@@ -132,7 +183,7 @@ func (m Model) pickerLayout() (box string, firstRow, buttonsRow int, buttons []c
 	act, cancel := selected.Render(" "+p.action()+" "), dim.Render(" Cancel ")
 	// The box's left border and padding put its content 3 cells in.
 	buttons = []chipSpan{{start: 3, width: lipgloss.Width(act)}, {start: 3 + lipgloss.Width(act) + 2, width: lipgloss.Width(cancel)}}
-	lines = append(lines, act+"  "+cancel, "", dim.Render(truncate("enter "+strings.ToLower(p.action())+" · esc cancel", inner)))
+	lines = append(lines, act+"  "+cancel, "", dim.Render(truncate(keys, inner)))
 	return menuBox.Render(strings.Join(lines, "\n")), firstRow, buttonsRow, buttons
 }
 
@@ -161,6 +212,10 @@ func (m Model) pickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		if i := y - firstRow; i >= 0 && i < len(p.rows) {
 			p.sel = i
+			if p.multi {
+				p.rows[i].checked = !p.rows[i].checked
+				return m, nil
+			}
 			return m.finishPicker()
 		}
 		if y == buttonsRow {

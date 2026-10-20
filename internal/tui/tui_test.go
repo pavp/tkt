@@ -800,6 +800,63 @@ func TestWorktreeModalWorksWithTheMouse(t *testing.T) {
 	}
 }
 
+func twoRepos() StartChoices {
+	return StartChoices{Repos: []RepoChoice{{Name: "example-org/web"}, {Name: "example-org/api", LastUsed: true, Checked: true}}}
+}
+
+func TestStartAsksWhichRepositoriesInAModal(t *testing.T) {
+	for _, width := range []int{160, 56} {
+		r := &recorder{choices: twoRepos()}
+		m := tea.Model(New(snapshot(), true, r, ViewList))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+		m = startFromMenu(press(m, "enter"))
+		v := stripANSI(m.View())
+		for _, want := range []string{"Start DEMO-1", "Which repositories?", "[ ] example-org/web", "[x] example-org/api", "last used", "Start", "Cancel", "space toggle"} {
+			if !strings.Contains(v, want) {
+				t.Fatalf("width %d: modal lacks %q:\n%s", width, want, v)
+			}
+		}
+		for i, l := range strings.Split(v, "\n") {
+			if w := lipgloss.Width(l); w > width {
+				t.Errorf("width %d: line %d is %d wide: %q", width, i, w, l)
+			}
+		}
+		if press(m, "enter"); r.last() != "start DEMO-1 repos=example-org/api" {
+			t.Errorf("width %d: default = %v", width, r.calls)
+		}
+	}
+	r := &recorder{choices: twoRepos()}
+	m := startFromMenu(press(loaded(r), "l", "enter"))
+	if press(m, " ", "enter"); r.last() != "start DEMO-1 repos=example-org/web,example-org/api" {
+		t.Errorf("space on web, then enter: %v", r.calls)
+	}
+	m = startFromMenu(press(loaded(r), "l", "enter"))
+	m = press(m, "s", " ", "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "pick at least one repository") || !strings.Contains(v, "Which repositories?") || strings.HasPrefix(r.last(), "start") {
+		t.Errorf("nothing checked: calls %v\n%s", r.calls, v)
+	}
+}
+
+func TestRepositoryModalWorksWithTheMouse(t *testing.T) {
+	r := &recorder{choices: twoRepos()}
+	m := startFromMenu(press(loaded(r), "l", "enter"))
+	at := func(m tea.Model, s string) (int, int) {
+		v := m.View()
+		y := lineIndex(v, s)
+		return strings.Index(strings.Split(stripANSI(v), "\n")[y], s) + 1, y
+	}
+	x, y := at(m, "example-org/web")
+	m = click(m, x, y)
+	if v := stripANSI(m.View()); !strings.Contains(v, "[x] example-org/web") || strings.HasPrefix(r.last(), "start") {
+		t.Fatalf("click on a repository should toggle it, not start:\n%s", v)
+	}
+	_, y = at(m, "Cancel")
+	click(m, strings.Index(strings.Split(stripANSI(m.View()), "\n")[y], "Start")+1, y)
+	if r.last() != "start DEMO-1 repos=example-org/web,example-org/api" {
+		t.Errorf("click on Start: calls = %v", r.calls)
+	}
+}
+
 func TestStartWithNothingToAskRunsAtOnce(t *testing.T) {
 	r := &recorder{}
 	startFromMenu(press(loaded(r), "l", "enter"))
