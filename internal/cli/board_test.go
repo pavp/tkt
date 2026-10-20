@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,6 +147,26 @@ func TestListDirsListsFoldersOnly(t *testing.T) {
 		if msg.Path != c.path || strings.Join(msg.Names, ",") != c.want || msg.Dir != c.dir || msg.Abs != c.abs || (msg.Err != nil) != c.wantErr {
 			t.Errorf("ListDirs(%q) = %+v", c.path, msg)
 		}
+		if c.path == "~/" && strings.Join(msg.Broken, ",") != "broken" {
+			t.Errorf("broken links = %v", msg.Broken)
+		}
+	}
+}
+
+func TestListDirsReportsUnreadableFolders(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every folder")
+	}
+	h := newHarness(t, "")
+	locked := filepath.Join(h.home, "locked")
+	if err := os.Mkdir(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+	b := &boardActions{a: h.app, ctx: context.Background()}
+	msg := b.ListDirs("~/locked/")().(tui.DirsListedMsg)
+	if !errors.Is(msg.Err, os.ErrPermission) || msg.Abs != locked+"/" {
+		t.Errorf("ListDirs = %+v", msg)
 	}
 }
 
