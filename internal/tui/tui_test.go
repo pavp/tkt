@@ -3,15 +3,18 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
@@ -1327,5 +1330,57 @@ func TestListShowsAgentStates(t *testing.T) {
 				t.Errorf("DEMO-3 has no agent: %q", row)
 			}
 		})
+	}
+}
+
+// brokenEscape finds a color sequence cut before its final "m", which terminals draw as garbage.
+var brokenEscape = regexp.MustCompile(`\x1b\[[0-9;]*[^0-9;m]`)
+
+func TestCardFitsPullRequestsBesideTheAgentWithoutBreakingColors(t *testing.T) {
+	tk := ticket.Ticket{Key: "DEMO-1", Summary: "Homogenize the organizations module", Status: "In Progress", Category: ticket.InProgress,
+		PRs: []ticket.PullRequest{
+			{Number: 731, State: ticket.PROpen, Checks: ticket.ChecksPass},
+			{Number: 732, State: ticket.PROpen, Checks: ticket.ChecksPass},
+			{Number: 733, State: ticket.PROpen, Checks: ticket.ChecksPass},
+		}}
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	for _, status := range []string{"idle", "blocked", "working"} {
+		out := card(tk, 30, false, false, status)
+		plain := ansi.Strip(out)
+		if brokenEscape.MatchString(out) || strings.ContainsRune(plain, utf8.RuneError) || !utf8.ValidString(out) {
+			t.Errorf("%s: a cut escape code leaks into the card: %q", status, out)
+		}
+		if !strings.Contains(plain, "#731") || !strings.Contains(plain, "claude") {
+			t.Errorf("%s: card lost its pull request or agent:\n%s", status, plain)
+		}
+		for _, l := range strings.Split(out, "\n") {
+			if lipgloss.Width(l) > 30 {
+				t.Errorf("%s: line wider than the card: %q", status, ansi.Strip(l))
+			}
+		}
+	}
+}
+
+func TestTruncateKeepsColorCodesWhole(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	cases := []struct {
+		in   string
+		n    int
+		want string
+	}{
+		{"plain text here", 6, "plain…"},
+		{"short", 10, "short"},
+		{warn.Render("! CI failing on unit tests"), 8, "! CI fa…"},
+		{keyStyle.Render("▸ ") + "example-org/web " + warn.Render("✕"), 10, "▸ example…"},
+	}
+	for _, c := range cases {
+		got := truncate(c.in, c.n)
+		if brokenEscape.MatchString(got) || ansi.Strip(got) != c.want || lipgloss.Width(got) > c.n {
+			t.Errorf("truncate(%q, %d) = %q", c.in, c.n, got)
+		}
 	}
 }

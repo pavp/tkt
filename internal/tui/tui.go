@@ -1115,7 +1115,7 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 			if lipgloss.Width(prs)+3+lipgloss.Width(line) <= inner {
 				prs += dim.Render(" · ") + styled
 			} else {
-				prs = truncate(prs, max(1, inner-lipgloss.Width(line)-3)) + dim.Render(" · ") + styled
+				prs = coloredPRs(t.PRs, max(1, inner-lipgloss.Width(line)-3)) + dim.Render(" · ") + styled
 			}
 		}
 		lines = append(lines, prs)
@@ -1518,12 +1518,12 @@ func wrapSep(items []string, width int, sep string) string {
 	return strings.Join(append(lines, cur), "\n")
 }
 
+// truncate cuts s to n cells with "…", keeping color codes whole: a cut through one shows as garbage.
 func truncate(s string, n int) string {
-	r := []rune(s)
-	if n <= 1 || len(r) <= n {
+	if n <= 1 || ansi.StringWidth(s) <= n {
 		return s
 	}
-	return string(r[:n-1]) + "…"
+	return ansi.Truncate(s, n, "…")
 }
 
 func orDash(s string) string {
