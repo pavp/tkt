@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/herdr"
@@ -148,6 +149,12 @@ func (b *boardActions) SaveConfig(c config.Config) tea.Cmd {
 }
 
 func (b *boardActions) inHerdr() bool { return b.a.Env.Getenv("HERDR_ENV") == "1" }
+
+func (b *boardActions) Agents(snap board.Snapshot) tea.Cmd {
+	return func() tea.Msg {
+		return tui.AgentsMsg{FetchedAt: snap.FetchedAt, Agents: b.a.agentStatesQuietly(b.ctx, b.cfg(), snap)}
+	}
+}
 
 func (b *boardActions) Refresh() tea.Cmd {
 	return func() tea.Msg {

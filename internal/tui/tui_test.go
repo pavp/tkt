@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -57,8 +58,9 @@ func (r *recorder) cmd(s string) tea.Cmd {
 	r.calls = append(r.calls, s)
 	return func() tea.Msg { return StatusMsg(s) }
 }
-func (r *recorder) Refresh() tea.Cmd           { return r.cmd("refresh") }
-func (r *recorder) Start(k ticket.Key) tea.Cmd { return r.cmd("start " + string(k)) }
+func (r *recorder) Refresh() tea.Cmd              { return r.cmd("refresh") }
+func (r *recorder) Agents(board.Snapshot) tea.Cmd { return r.cmd("agents") }
+func (r *recorder) Start(k ticket.Key) tea.Cmd    { return r.cmd("start " + string(k)) }
 func (r *recorder) TicketPane(k ticket.Key) tea.Cmd {
 	return r.cmd("pane " + string(k))
 }
@@ -120,6 +122,59 @@ func loaded(r *recorder) tea.Model {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snapshot()})
 	return next
+}
+
+func TestInitReadsAgentsOfTheCachedBoardWithoutWaitingForTheRefresh(t *testing.T) {
+	cases := []struct {
+		name       string
+		snap       board.Snapshot
+		wantAgents bool
+	}{
+		{"cached board", snapshot(), true},
+		{"no cached board", board.Snapshot{}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := &recorder{}
+			New(c.snap, c.wantAgents, r, "").Init()
+			if got := slices.Contains(r.calls, "agents"); got != c.wantAgents {
+				t.Errorf("agents requested = %v, calls = %v", got, r.calls)
+			}
+		})
+	}
+}
+
+func TestAgentsApplyOnlyToTheBoardTheyWereReadFor(t *testing.T) {
+	cached := snapshot()
+	fresh := snapshot()
+	fresh.FetchedAt = cached.FetchedAt.Add(time.Minute)
+	fresh.Agents = map[string]string{"DEMO-1": "working"}
+	cases := []struct {
+		name string
+		snap board.Snapshot
+		want string
+	}{
+		{"cached board still shown", cached, "blocked"},
+		{"fresh board arrived first", fresh, "working"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := New(c.snap, true, &recorder{}, "")
+			next, _ := m.Update(AgentsMsg{FetchedAt: cached.FetchedAt, Agents: map[string]string{"DEMO-1": "blocked"}})
+			if got := next.(Model).snap.Agents["DEMO-1"]; got != c.want {
+				t.Errorf("agent of DEMO-1 = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestStaleRefreshKeepsTheAgentsAlreadyRead(t *testing.T) {
+	m := New(snapshot(), true, &recorder{}, "")
+	next, _ := m.Update(AgentsMsg{FetchedAt: snapshot().FetchedAt, Agents: map[string]string{"DEMO-1": "blocked"}})
+	next, _ = next.Update(SnapshotMsg{Snap: snapshot(), Stale: errors.New("offline")})
+	if got := next.(Model).snap.Agents["DEMO-1"]; got != "blocked" {
+		t.Errorf("agent of DEMO-1 = %q after a stale refresh", got)
+	}
 }
 
 func TestInitRefreshes(t *testing.T) {

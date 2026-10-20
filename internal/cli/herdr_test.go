@@ -476,6 +476,31 @@ func TestBoardRefreshCarriesAgentStatesInsideHerdr(t *testing.T) {
 	}
 }
 
+func TestBoardAgentsReadsStatesForTheCachedBoardWithoutFetching(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.env["HERDR_ENV"] = "1"
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[
+		{"workspace_id":"w1","label":"web-DEMO-1","worktree":{"checkout_path":"/src/web-DEMO-1"}}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p1","workspace_id":"w1","agent":"claude","agent_status":"working"}]}`
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cached := board.Snapshot{FetchedAt: time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC), Tickets: []ticket.Ticket{{Key: "DEMO-1", Category: ticket.InProgress}}}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	msg, ok := b.Agents(cached)().(tui.AgentsMsg)
+	if !ok {
+		t.Fatalf("agents = %+v", msg)
+	}
+	if !msg.FetchedAt.Equal(cached.FetchedAt) || msg.Agents["DEMO-1"] != "working" {
+		t.Errorf("agents = %+v", msg)
+	}
+	if n := count(f, "workspace.report_metadata"); n != 0 {
+		t.Errorf("the cached board must not rewrite the sidebar, got %d reports", n)
+	}
+}
+
 func TestHerdrInstallKeepsSidebarRowsDespiteUnrelatedWarnings(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	cfg := herdrConfig(t, h, "[toast]\nenabled = true\n")

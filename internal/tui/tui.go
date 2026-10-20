@@ -18,6 +18,8 @@ import (
 // Actions are the side effects the board triggers; the CLI provides them.
 type Actions interface {
 	Refresh() tea.Cmd
+	// Agents reads the Herdr agent states of snap's tickets; they arrive as an AgentsMsg.
+	Agents(snap board.Snapshot) tea.Cmd
 	Start(key ticket.Key) tea.Cmd
 	TicketPane(key ticket.Key) tea.Cmd
 	Open(url string) tea.Cmd
@@ -66,6 +68,12 @@ type SnapshotMsg struct {
 	Snap  board.Snapshot
 	Stale error
 	Err   error
+}
+
+// AgentsMsg delivers the agent states read for the board fetched at FetchedAt.
+type AgentsMsg struct {
+	FetchedAt time.Time
+	Agents    map[string]string
 }
 
 // StatusMsg shows a one-line result of an action in the footer.
@@ -142,7 +150,14 @@ func New(snap board.Snapshot, haveSnap bool, actions Actions, view string) Model
 	return m
 }
 
-func (m Model) Init() tea.Cmd { return tea.Batch(m.actions.Refresh(), tick()) }
+// Init reads the cached board's agent states apart from the refresh, which waits on Jira and GitHub.
+func (m Model) Init() tea.Cmd {
+	cmds := []tea.Cmd{m.actions.Refresh(), tick()}
+	if !m.snap.FetchedAt.IsZero() {
+		cmds = append(cmds, m.actions.Agents(m.snap))
+	}
+	return tea.Batch(cmds...)
+}
 
 // WithClock replaces the clock, for tests.
 func (m Model) WithClock(now func() time.Time) Model {
@@ -294,9 +309,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "could not refresh: " + msg.Err.Error()
 			return m, nil
 		}
+		if msg.Snap.Agents == nil && msg.Snap.FetchedAt.Equal(m.snap.FetchedAt) {
+			msg.Snap.Agents = m.snap.Agents
+		}
 		m.snap, m.stale = msg.Snap, msg.Stale
 		m.status = ""
 		m.reselect()
+	case AgentsMsg:
+		if msg.FetchedAt.Equal(m.snap.FetchedAt) {
+			m.snap.Agents = msg.Agents
+		}
 	case StatusMsg:
 		m.status = string(msg)
 	case DetailMsg:
