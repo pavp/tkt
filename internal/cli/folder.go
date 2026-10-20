@@ -76,7 +76,7 @@ func (a *App) pickerEnv() pickerEnv {
 // nativePicker reports whether a folder chooser can open where the user sees it: never over SSH, where it
 // would open on the remote desktop, nor under WSL, whose Windows dialog can hang without showing.
 func (a *App) nativePicker() bool {
-	if a.Env.Getenv("SSH_CONNECTION") != "" || a.Env.Getenv("SSH_TTY") != "" {
+	if a.overSSH() {
 		return false
 	}
 	env := a.pickerEnv()
