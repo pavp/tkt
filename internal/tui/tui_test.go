@@ -490,7 +490,7 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "synced 3 min ago", "1 All 4", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3 · Export CSV\n To Do · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 All 4", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3 · Export CSV\n To Do · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
@@ -514,6 +514,47 @@ func TestTabCyclesFiltersAndNumbersJump(t *testing.T) {
 	m = press(m, "2")
 	if v := stripANSI(m.View()); strings.Contains(v, "DEMO-3") || !strings.Contains(v, "#820") {
 		t.Errorf("2 should show PRs:\n%s", v)
+	}
+}
+
+func TestSyncStateSitsBottomRight(t *testing.T) {
+	snap := snapshot()
+	for _, width := range []int{160, 60} {
+		m := New(board.Snapshot{}, false, &recorder{}, ViewColumns).WithClock(func() time.Time { return snap.FetchedAt.Add(3 * time.Minute) })
+		next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+		next, _ = next.Update(SnapshotMsg{Snap: snap})
+		lines := strings.Split(strings.TrimRight(stripANSI(next.View()), "\n"), "\n")
+		last := strings.TrimRight(lines[len(lines)-1], " ")
+		if !strings.HasSuffix(last, "✓ synced 3 min ago") {
+			t.Errorf("width %d: last line %q does not end with the sync state", width, last)
+		}
+		if lineIndex(next.View(), "synced") != len(lines)-1 {
+			t.Errorf("width %d: sync state still in the header:\n%s", width, stripANSI(next.View()))
+		}
+		for i, l := range lines {
+			if w := lipgloss.Width(l); w > width {
+				t.Errorf("width %d: line %d is %d wide: %q", width, i, w, l)
+			}
+		}
+	}
+}
+
+func TestRefreshingSpinsUntilTheBoardArrives(t *testing.T) {
+	m := tea.Model(New(snapshot(), true, &recorder{}, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(m.View()); !strings.Contains(v, "⠋ refreshing…") {
+		t.Fatalf("no spinner while refreshing:\n%s", v)
+	}
+	m, cmd := m.Update(spinMsg{})
+	if cmd == nil || !strings.Contains(stripANSI(m.View()), "⠙ refreshing…") {
+		t.Errorf("spinner did not advance:\n%s", stripANSI(m.View()))
+	}
+	m, _ = m.Update(SnapshotMsg{Snap: snapshot()})
+	if _, cmd := m.Update(spinMsg{}); cmd != nil {
+		t.Error("spinner keeps ticking after the refresh")
+	}
+	if m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")}); cmd == nil || !strings.Contains(stripANSI(m.View()), "refreshing…") {
+		t.Error("g did not restart the spinner")
 	}
 }
 
@@ -1418,21 +1459,25 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	if !strings.Contains(lines[0], "╭") || !strings.Contains(lines[2], "╰") {
 		t.Errorf("filters should be boxed:\n%s\n%s\n%s", lines[0], first, lines[2])
 	}
-	if strings.Index(first, "1 All") < strings.Index(first, "tkt") || !strings.Contains(first, "synced") && !strings.Contains(first, "refreshing") {
-		t.Errorf("controls should sit right of the title, ending with the sync state: %q", first)
+	if strings.Index(first, "1 All") < strings.Index(first, "tkt") || strings.Contains(first, "synced") || strings.Contains(first, "refreshing") {
+		t.Errorf("controls should sit right of the title, the sync state at the bottom: %q", first)
 	}
 	if !strings.HasPrefix(strings.TrimSpace(lines[3]), "──────") {
 		t.Errorf("no rule under the header: %q", lines[3])
 	}
 
-	narrow, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 40})
+	tray, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 40})
+	if tl := strings.Split(stripANSI(tray.View()), "\n"); !strings.Contains(tl[1], "tkt") || !strings.Contains(tl[1], "1 All") {
+		t.Errorf("without the sync state, a 60-column pane keeps the controls on the title row:\n%s\n%s", tl[0], tl[1])
+	}
+	narrow, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 40})
 	nl := strings.Split(stripANSI(narrow.View()), "\n")
 	if !strings.Contains(nl[0], "tkt") || !strings.Contains(nl[1], "1 All") {
 		t.Errorf("a narrow pane should move the controls to the second row:\n%s\n%s", nl[0], nl[1])
 	}
-	for _, l := range nl {
-		if lipgloss.Width(l) > 60 {
-			t.Errorf("line wider than the pane: %q", l)
+	for _, l := range nl[:3] {
+		if lipgloss.Width(l) > 40 {
+			t.Errorf("header line wider than the pane: %q", l)
 		}
 	}
 }

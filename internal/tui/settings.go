@@ -424,7 +424,7 @@ func (m Model) settingsSaved(msg SettingsSavedMsg) (tea.Model, tea.Cmd) {
 	}
 	s.msg = "✓ saved to your config.toml · the board refreshes with it"
 	m.loading = true
-	return m, m.actions.Refresh()
+	return m, tea.Batch(m.actions.Refresh(), m.startSpin())
 }
 
 // settingsLines renders the view and maps each line to its row index (-1 for others), for clicks.

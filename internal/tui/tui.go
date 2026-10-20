@@ -143,12 +143,30 @@ type Model struct {
 	// inStrip means the keyboard cursor is on the review chips above the columns, at stripSel.
 	inStrip  bool
 	stripSel int
+	// spin is the refreshing spinner's frame; spinning says its tick is already running.
+	spin     int
+	spinning bool
 	// showBots also lists review requests on pull requests opened by bots.
 	showBots bool
 }
 
 // tickMsg drives the "synced … ago" label and the periodic refresh.
 type tickMsg time.Time
+
+// spinMsg advances the refreshing spinner; it stops ticking once the board arrives.
+type spinMsg struct{}
+
+var spinFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+const spinEvery = 100 * time.Millisecond
+
+func (m *Model) startSpin() tea.Cmd {
+	if m.spinning {
+		return nil
+	}
+	m.spinning = true
+	return tea.Tick(spinEvery, func(time.Time) tea.Msg { return spinMsg{} })
+}
 
 const (
 	tickEvery    = 30 * time.Second
@@ -165,7 +183,7 @@ func New(snap board.Snapshot, haveSnap bool, actions Actions, view string) Model
 	if view != ViewList {
 		view = ViewColumns
 	}
-	m := Model{snap: snap, loading: true, actions: actions, view: view, filter: FilterAll, width: 160, height: 40, now: time.Now}
+	m := Model{snap: snap, loading: true, spinning: true, actions: actions, view: view, filter: FilterAll, width: 160, height: 40, now: time.Now}
 	if !haveSnap {
 		m.status = "loading…"
 	}
@@ -174,7 +192,7 @@ func New(snap board.Snapshot, haveSnap bool, actions Actions, view string) Model
 
 // Init reads the cached board's agent states apart from the refresh, which waits on Jira and GitHub.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.actions.Refresh(), tick()}
+	cmds := []tea.Cmd{m.actions.Refresh(), tick(), tea.Tick(spinEvery, func(time.Time) tea.Msg { return spinMsg{} })}
 	if !m.snap.FetchedAt.IsZero() {
 		cmds = append(cmds, m.actions.Agents(m.snap))
 	}
@@ -417,9 +435,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		if !m.loading && m.now().Sub(m.snap.FetchedAt) >= refreshEvery {
 			m.loading = true
-			return m, tea.Batch(m.actions.Refresh(), tick())
+			return m, tea.Batch(m.actions.Refresh(), tick(), m.startSpin())
 		}
 		return m, tick()
+	case spinMsg:
+		if !m.loading {
+			m.spinning = false
+			return m, nil
+		}
+		m.spin++
+		return m, tea.Tick(spinEvery, func(time.Time) tea.Msg { return spinMsg{} })
 	case tea.KeyMsg:
 		return m.key(msg)
 	case tea.MouseMsg:
@@ -677,7 +702,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "g":
 		m.loading = true
 		m.status = "refreshing…"
-		return m, m.actions.Refresh()
+		return m, tea.Batch(m.actions.Refresh(), m.startSpin())
 	case "enter", " ":
 		m.openMenu()
 	case ",":
@@ -903,8 +928,8 @@ var (
 	filterOn  = boxSel.Foreground(lipgloss.Color("153")).Bold(true)
 )
 
-// headerLayout places the filter and view buttons, boxed as in the prototype, and the sync state right of
-// the title; on a narrower pane they move to their own row, and unboxed when even that is too narrow.
+// headerLayout places the filter and view buttons, boxed as in the prototype, right of the title; on a
+// narrower pane they move to their own row, and unboxed when even that is too narrow.
 // x and y say where the controls start, h how many rows they take, spans where each button sits from x.
 func (m Model) headerLayout() (title, controls string, x, y, h int, spans []headerSpan) {
 	parts := []string{bold.Render("tkt")}
@@ -912,10 +937,6 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 		parts = append(parts, sp.Space+" · "+board.SprintLabel(sp, m.snap.FetchedAt))
 	}
 	title = strings.Join(parts, " · ")
-	sync := dim.Render(m.syncLabel())
-	if m.stale != nil {
-		sync = warn.Render(m.syncLabel())
-	}
 	var row []string
 	pos := 0
 	for i, it := range m.headerSpec() {
@@ -934,7 +955,6 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 		row = append(row, chip)
 		pos += lipgloss.Width(chip)
 	}
-	row = append(row, "  ", lipgloss.NewStyle().PaddingTop(1).Render(sync))
 	controls = lipgloss.JoinHorizontal(lipgloss.Top, row...)
 	cw := lipgloss.Width(controls)
 	switch {
@@ -962,7 +982,7 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 			pos += 3
 		}
 	}
-	return truncate(title, m.width), wrap(append(items, sync), m.width), 0, 1, 1, spans
+	return truncate(title, m.width), wrap(items, m.width), 0, 1, 1, spans
 }
 
 type headerItem struct {
@@ -998,24 +1018,25 @@ func (m Model) headerItems() []string {
 	return append(out, " "+views+dim.Render(" v"))
 }
 
-// syncLabel says how fresh the board is: refreshing, synced N min ago, or cached when the last refresh failed.
+// syncLabel says how fresh the board is: refreshing (with a spinner), synced N min ago, or cached when the
+// last refresh failed.
 func (m Model) syncLabel() string {
 	switch {
 	case m.loading:
-		return "refreshing…"
+		return spinFrames[m.spin%len(spinFrames)] + " refreshing…"
 	case m.snap.FetchedAt.IsZero():
 		return "not synced yet"
 	case m.stale != nil:
-		return "cached · " + m.snap.FetchedAt.Local().Format("15:04")
+		return "! cached · " + m.snap.FetchedAt.Local().Format("15:04")
 	}
 	d := m.now().Sub(m.snap.FetchedAt)
 	switch {
 	case d < time.Minute:
-		return "synced just now"
+		return "✓ synced just now"
 	case d < time.Hour:
-		return fmt.Sprintf("synced %d min ago", int(d.Minutes()))
+		return fmt.Sprintf("✓ synced %d min ago", int(d.Minutes()))
 	}
-	return "synced " + m.snap.FetchedAt.Local().Format("15:04")
+	return "✓ synced " + m.snap.FetchedAt.Local().Format("15:04")
 }
 
 var reviewChip = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("214")).Padding(0, 1)
@@ -1649,7 +1670,19 @@ func (m Model) footer() string {
 	for i, k := range legend {
 		items[i] = keyStyle.Render(k[0]) + " " + dim.Render(k[1])
 	}
-	return wrapSep(items, m.width, "    ")
+	sync := dim.Render(m.syncLabel())
+	if m.stale != nil {
+		sync = warn.Render(m.syncLabel())
+	}
+	// The sync state sits at the bottom right: on the legend's last line when it fits, else on its own.
+	lines := strings.Split(wrapSep(items, m.width, "    "), "\n")
+	last := lines[len(lines)-1]
+	if gap := m.width - lipgloss.Width(last) - lipgloss.Width(sync); gap >= 4 {
+		lines[len(lines)-1] = last + strings.Repeat(" ", gap) + sync
+	} else {
+		lines = append(lines, strings.Repeat(" ", max(0, m.width-lipgloss.Width(sync)))+sync)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // wrap joins items with two spaces, starting a new line instead of overflowing width.
