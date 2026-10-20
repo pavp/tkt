@@ -206,6 +206,14 @@ func (c *Client) OpenPluginPane(ctx context.Context, p PaneOpen) error {
 	return c.Call(ctx, "plugin.pane.open", p, nil)
 }
 
+func (c *Client) FocusPluginPane(ctx context.Context, paneID string) error {
+	return c.Call(ctx, "plugin.pane.focus", map[string]any{"pane_id": paneID}, nil)
+}
+
+func (c *Client) ClosePluginPane(ctx context.Context, paneID string) error {
+	return c.Call(ctx, "plugin.pane.close", map[string]any{"pane_id": paneID}, nil)
+}
+
 func (c *Client) Notify(ctx context.Context, title, body string) error {
 	return c.Call(ctx, "notification.show", map[string]any{"title": title, "body": body}, nil)
 }
