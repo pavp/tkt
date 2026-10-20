@@ -25,11 +25,12 @@ func TestBrowserFilterNarrowsTheFolders(t *testing.T) {
 		path  string
 	}{
 		{"typing after / filters ignoring case", []tea.KeyMsg{runes("/"), runes("WEB")}, []string{"/WEB", "web-app/", "old-web/"}, []string{"api/"}, ""},
-		{"enter opens the highlighted match", []tea.KeyMsg{runes("/"), runes("web-"), keyEnter}, []string{"~/src/web-app/"}, nil, ""},
+		{"enter chooses the highlighted match", []tea.KeyMsg{runes("/"), runes("web-"), keyEnter}, nil, nil, "~/src/web-app"},
+		{"right opens the highlighted match", []tea.KeyMsg{runes("/"), runes("web-"), keyRight}, []string{"~/src/web-app/"}, nil, ""},
 		{"backspace edits the filter", []tea.KeyMsg{runes("/"), runes("webx"), {Type: tea.KeyBackspace}}, []string{"web-app/"}, []string{"no folder matches"}, ""},
 		{"esc clears the filter and keeps browsing", []tea.KeyMsg{runes("/"), runes("web"), keyEsc}, []string{"api/", "web-app/"}, []string{"/web"}, ""},
 		{"no match says so", []tea.KeyMsg{runes("/"), runes("zz")}, []string{"no folder matches zz"}, []string{"api/"}, ""},
-		{"after esc, enter chooses the folder shown", []tea.KeyMsg{runes("/"), runes("web"), keyEsc, keyEnter}, nil, nil, "~/src"},
+		{"after esc, space chooses the folder shown", []tea.KeyMsg{runes("/"), runes("web"), keyEsc, keySpace}, nil, nil, "~/src"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
