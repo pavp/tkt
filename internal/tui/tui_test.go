@@ -44,6 +44,8 @@ type recorder struct {
 	repos map[string][]string
 	// jiraFields answers JiraFields.
 	jiraFields []string
+	// known is the ticket the last Detail was given.
+	known *ticket.Ticket
 }
 
 func (r *recorder) JiraFields() tea.Cmd {
@@ -599,6 +601,29 @@ func TestRefreshKeepsTheSelectedTicketsPreview(t *testing.T) {
 	}
 	if n := strings.Count(stripANSI(m.View()), "refreshing…"); n != 1 || !strings.HasSuffix(strings.TrimRight(lines[len(lines)-1], " "), "refreshing…") {
 		t.Errorf("refreshing… should show once, at the bottom right (%d times):\n%s", n, strings.Join(lines, "\n"))
+	}
+}
+
+func TestDetailGetsTheBoardsTicket(t *testing.T) {
+	r := &recorder{}
+	press(loaded(r), "l", "i")
+	if r.known == nil || r.known.Key != "DEMO-1" || len(r.known.PRs) != 1 || r.known.PRs[0].Number != 812 {
+		t.Errorf("detail was not given the board's ticket: %+v", r.known)
+	}
+}
+
+func TestSyncStateKeepsItsPlace(t *testing.T) {
+	snap := snapshot()
+	for width := 60; width <= 170; width++ {
+		m := tea.Model(New(board.Snapshot{}, false, &recorder{}, ViewColumns).WithClock(func() time.Time { return snap.FetchedAt.Add(3 * time.Minute) }))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+		m, _ = m.Update(SnapshotMsg{Snap: snap})
+		synced := strings.Split(stripANSI(m.View()), "\n")
+		m, _ = m.Update(SyncingMsg{})
+		refreshing := strings.Split(stripANSI(m.View()), "\n")
+		if a, b := lineIndex(strings.Join(synced, "\n"), "✓ synced"), lineIndex(strings.Join(refreshing, "\n"), "refreshing…"); a != b || len(synced) != len(refreshing) {
+			t.Fatalf("width %d: synced on line %d of %d, refreshing on line %d of %d", width, a, len(synced), b, len(refreshing))
+		}
 	}
 }
 
@@ -1191,8 +1216,9 @@ func TestKeyboardReachesReviewChips(t *testing.T) {
 	}
 }
 
-func (r *recorder) Detail(k ticket.Key) tea.Cmd {
+func (r *recorder) Detail(k ticket.Key, known *ticket.Ticket) tea.Cmd {
 	r.calls = append(r.calls, "detail "+string(k))
+	r.known = known
 	return func() tea.Msg {
 		return DetailMsg{Key: k, Text: string(k) + " · Story · In Progress\nTitle line\n\nDescription\n" + strings.Repeat("body line\n", 60)}
 	}

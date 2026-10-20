@@ -34,7 +34,7 @@ func newShowCmd(a *App) *cobra.Command {
 				return err
 			}
 			if !watch {
-				d, err := a.loadDetail(cmd.Context(), c, key)
+				d, err := a.loadDetail(cmd.Context(), c, key, a.daemonTicket(cmd.Context(), key))
 				if err != nil {
 					return err
 				}
@@ -49,7 +49,7 @@ func newShowCmd(a *App) *cobra.Command {
 			}
 			for {
 				var buf bytes.Buffer
-				d, err := a.loadDetail(cmd.Context(), c, key)
+				d, err := a.loadDetail(cmd.Context(), c, key, a.daemonTicket(cmd.Context(), key))
 				if err != nil {
 					fmt.Fprintf(&buf, "%s · could not refresh: %v\n", key, err)
 				} else {

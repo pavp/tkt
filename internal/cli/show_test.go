@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/jira"
+	"github.com/pavp/tkt/internal/ticket"
 )
 
 const showConfig = `
@@ -173,5 +176,38 @@ func TestContextDownloadFailureIsAWarning(t *testing.T) {
 	}
 	if !strings.Contains(h.errOut.String(), "! mock up.png not downloaded") || !strings.Contains(h.out.String(), "- [mock up.png](") {
 		t.Errorf("stderr %q\n%s", h.errOut, h.out)
+	}
+}
+
+func TestShowTakesPullRequestsFromARunningDaemon(t *testing.T) {
+	h := showHarness(t)
+	gh := h.app.NewGitHub(nil).(*fakeGitHub)
+	h.app.NewGitHub = func(*config.Config) GitHubAPI { return gh }
+	h.app.Executable = func() (string, error) { return "/opt/tkt/bin/tkt", nil }
+	f := &fakeDaemons{board: &board.Snapshot{FetchedAt: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC), Tickets: []ticket.Ticket{
+		{Key: "DEMO-1", PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 900, State: ticket.PROpen, Checks: ticket.ChecksPass}}},
+	}}}
+	f.install(t, h)
+	if code := h.exec("show", "DEMO-1"); code != 0 || gh.prCalls != 1 {
+		t.Fatalf("without a daemon: exit %d, listings %d", code, gh.prCalls)
+	}
+	if _, err := h.app.ensureDaemon(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.exec("show", "DEMO-1"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if out := h.out.String(); gh.prCalls != 1 || !strings.Contains(out, "example-org/web#900") || strings.Contains(out, "#812") {
+		t.Errorf("show should take the daemon's pull requests (listings %d):\n%s", gh.prCalls, out)
+	}
+}
+
+func TestShowNeverStartsTheDaemon(t *testing.T) {
+	h := showHarness(t)
+	h.app.Executable = func() (string, error) { return "/opt/tkt/bin/tkt", nil }
+	f := &fakeDaemons{}
+	f.install(t, h)
+	if code := h.exec("show", "DEMO-1"); code != 0 || f.started.Load() != 0 {
+		t.Errorf("exit %d, daemons started %d", code, f.started.Load())
 	}
 }

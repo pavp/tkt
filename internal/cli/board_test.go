@@ -16,6 +16,7 @@ import (
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/jira"
+	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
 )
 
@@ -55,6 +56,25 @@ func TestBoardActionsRefreshAndFix(t *testing.T) {
 	}
 	if got := b.Fix("DEMO-1")(); got != tui.StatusMsg("outside Herdr: run `tkt fix DEMO-1` to print the prompt") {
 		t.Errorf("fix outside Herdr = %v", got)
+	}
+}
+
+func TestBoardDetailUsesTheBoardsPullRequests(t *testing.T) {
+	h := showHarness(t)
+	gh := h.app.NewGitHub(nil).(*fakeGitHub)
+	h.app.NewGitHub = func(*config.Config) GitHubAPI { return gh }
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	known := ticket.Ticket{Key: "DEMO-1", PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 900, State: ticket.PROpen}}}
+	msg := b.Detail("DEMO-1", &known)().(tui.DetailMsg)
+	if msg.Err != nil || gh.prCalls != 0 || !strings.Contains(msg.Text, "example-org/web#900") || !strings.Contains(msg.Text, "Default to 30 days.") {
+		t.Errorf("detail (listings %d): %+v", gh.prCalls, msg)
+	}
+	if msg := b.Detail("DEMO-1", nil)().(tui.DetailMsg); msg.Err != nil || gh.prCalls != 1 || !strings.Contains(msg.Text, "#812") {
+		t.Errorf("unknown ticket should list pull requests (listings %d): %+v", gh.prCalls, msg)
 	}
 }
 
@@ -152,7 +172,7 @@ func TestBoardDetailRendersTheTicket(t *testing.T) {
 	h, _ := workHarness(t)
 	c, _ := h.app.LoadConfig()
 	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
-	msg := b.Detail("DEMO-7")().(tui.DetailMsg)
+	msg := b.Detail("DEMO-7", nil)().(tui.DetailMsg)
 	if msg.Err != nil || !strings.Contains(msg.Text, "DEMO-7") || !strings.Contains(msg.Text, "Export users") {
 		t.Errorf("detail = %+v", msg)
 	}

@@ -337,9 +337,9 @@ func (b *boardActions) StartChoices(key ticket.Key) tea.Cmd {
 	}
 }
 
-func (b *boardActions) Detail(key ticket.Key) tea.Cmd {
+func (b *boardActions) Detail(key ticket.Key, known *ticket.Ticket) tea.Cmd {
 	return func() tea.Msg {
-		d, err := b.a.loadDetail(b.ctx, b.cfg(), key)
+		d, err := b.a.loadDetail(b.ctx, b.cfg(), key, known)
 		if err != nil {
 			return tui.DetailMsg{Key: key, Err: err}
 		}
@@ -433,7 +433,7 @@ func (b *boardActions) Copy(text, what string) tea.Cmd {
 
 func (b *boardActions) CopyContext(key ticket.Key) tea.Cmd {
 	return func() tea.Msg {
-		d, err := b.a.loadDetail(b.ctx, b.cfg(), key)
+		d, err := b.a.loadDetail(b.ctx, b.cfg(), key, nil)
 		if err != nil {
 			return tui.StatusMsg(err.Error())
 		}

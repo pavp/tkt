@@ -47,7 +47,7 @@ func newFixCmd(a *App) *cobra.Command {
 
 // sendFeedback builds the feedback prompt for key and delivers it, returning what happened.
 func (a *App) sendFeedback(ctx context.Context, c *config.Config, key ticket.Key, printOnly bool) (string, error) {
-	d, err := a.loadDetail(ctx, c, key)
+	d, err := a.loadDetail(ctx, c, key, nil)
 	if err != nil {
 		return "", err
 	}

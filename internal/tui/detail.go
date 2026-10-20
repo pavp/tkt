@@ -27,7 +27,11 @@ type detailView struct {
 
 func (m Model) openDetail(key ticket.Key) (tea.Model, tea.Cmd) {
 	m.detail = &detailView{key: key, loading: true}
-	return m, m.actions.Detail(key)
+	var known *ticket.Ticket
+	if t, ok := m.snap.Find(key); ok {
+		known = &t
+	}
+	return m, m.actions.Detail(key, known)
 }
 
 func (m Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {

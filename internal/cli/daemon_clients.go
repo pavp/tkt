@@ -9,6 +9,7 @@ import (
 
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/daemon"
+	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
 )
 
@@ -36,6 +37,27 @@ func (a *App) daemonSnapshot(ctx context.Context) (board.Snapshot, bool) {
 	}
 	snap, err := c.Tickets(ctx)
 	return snap, err == nil
+}
+
+// daemonTicket returns the running daemon's copy of key, for its pull requests; it never starts a daemon,
+// and is nil without one.
+func (a *App) daemonTicket(ctx context.Context, key ticket.Key) *ticket.Ticket {
+	info, ok := a.runningDaemon(ctx)
+	if !ok {
+		return nil
+	}
+	c, err := daemon.Dial(a.Env.DataDir(), info)
+	if err != nil {
+		return nil
+	}
+	snap, err := c.Tickets(ctx)
+	if err != nil {
+		return nil
+	}
+	if t, ok := snap.Find(key); ok {
+		return &t
+	}
+	return nil
 }
 
 // followDaemon connects the board to the daemon and sends it the daemon's board whenever it changes,
