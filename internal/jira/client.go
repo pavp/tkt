@@ -592,6 +592,34 @@ type Transition struct {
 	Name      string
 	To        string
 	NeedsForm bool
+	// Fields are the form's fields tkt can fill, required ones first.
+	Fields []Field
+}
+
+// The kinds of transition field tkt can fill: one of a list's allowed values, or a user.
+const (
+	KindOption = "option"
+	KindUser   = "user"
+)
+
+type Field struct {
+	ID       string
+	Name     string
+	Kind     string
+	Required bool
+	Options  []Option
+}
+
+type Option struct {
+	ID    string
+	Value string
+}
+
+// Value fills Field with the option or the user (account id) ID.
+type Value struct {
+	Field string
+	Kind  string
+	ID    string
 }
 
 // Transitions lists the transitions Jira allows from the issue's current status.
@@ -608,8 +636,13 @@ func (c *Client) Transitions(ctx context.Context, key string) ([]Transition, err
 				HasDefaultValue bool   `json:"hasDefaultValue"`
 				Name            string `json:"name"`
 				Schema          struct {
+					Type   string `json:"type"`
 					Custom string `json:"custom"`
 				} `json:"schema"`
+				AllowedValues []struct {
+					ID    string `json:"id"`
+					Value string `json:"value"`
+				} `json:"allowedValues"`
 			} `json:"fields"`
 		} `json:"transitions"`
 	}
@@ -619,19 +652,47 @@ func (c *Client) Transitions(ctx context.Context, key string) ([]Transition, err
 	out := make([]Transition, len(body.Transitions))
 	for i, t := range body.Transitions {
 		out[i] = Transition{ID: t.ID, Name: t.Name, To: t.To.Name}
-		for _, f := range t.Fields {
+		for id, f := range t.Fields {
 			planning := f.Schema.Custom == sprintSchema || strings.Contains(strings.ToLower(f.Name), "story point")
 			if !planning || f.Required && !f.HasDefaultValue {
 				out[i].NeedsForm = true
 			}
+			if planning || f.Schema.Type != KindOption && f.Schema.Type != KindUser {
+				continue
+			}
+			field := Field{ID: id, Name: f.Name, Kind: f.Schema.Type, Required: f.Required && !f.HasDefaultValue}
+			for _, v := range f.AllowedValues {
+				field.Options = append(field.Options, Option{ID: v.ID, Value: v.Value})
+			}
+			out[i].Fields = append(out[i].Fields, field)
 		}
+		slices.SortFunc(out[i].Fields, func(a, b Field) int {
+			if a.Required != b.Required {
+				if a.Required {
+					return -1
+				}
+				return 1
+			}
+			return strings.Compare(a.Name, b.Name)
+		})
 	}
 	return out, nil
 }
 
-// Transition moves the issue through the transition with that id.
-func (c *Client) Transition(ctx context.Context, key, id string) error {
+// Transition moves the issue through the transition with that id, filling its form's fields with values.
+func (c *Client) Transition(ctx context.Context, key, id string, values []Value) error {
 	body := map[string]any{"transition": map[string]string{"id": id}}
+	if len(values) > 0 {
+		fields := map[string]any{}
+		for _, v := range values {
+			if v.Kind == KindUser {
+				fields[v.Field] = map[string]string{"accountId": v.ID}
+			} else {
+				fields[v.Field] = map[string]string{"id": v.ID}
+			}
+		}
+		body["fields"] = fields
+	}
 	return c.do(ctx, http.MethodPost, "/rest/api/3/issue/"+url.PathEscape(key)+"/transitions", body, nil)
 }
 

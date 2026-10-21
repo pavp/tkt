@@ -9,11 +9,38 @@ import (
 )
 
 // Transition is a status a ticket can move to from its current one. NeedsForm marks one whose Jira form
-// has a required field, which the board leaves to Jira.
+// asks for what the board cannot fill, which it leaves to Jira; Fields are those it can.
 type Transition struct {
 	ID        string
 	To        string
 	NeedsForm bool
+	Fields    []Field
+}
+
+// The kinds of field the board fills: one of a list's options, or a user.
+const (
+	KindOption = "option"
+	KindUser   = "user"
+)
+
+type Field struct {
+	ID       string
+	Name     string
+	Kind     string
+	Required bool
+	Options  []Option
+}
+
+type Option struct {
+	ID    string
+	Value string
+}
+
+// Value fills Field with an option's or a user's ID.
+type Value struct {
+	Field string
+	Kind  string
+	ID    string
 }
 
 // TransitionsMsg carries the statuses Key can move to.
@@ -77,7 +104,7 @@ func (m Model) moveMenu(k ticket.Key, trs []Transition) *menu {
 		}
 		items = append(items, menuItem{label: tr.To, sub: func() *menu {
 			return &menu{title: "Move " + string(k) + " to " + tr.To + "?", items: []menuItem{
-				{label: "Yes, move it", run: func() tea.Cmd { return a.Transition(k, tr.ID, tr.To) }},
+				{label: "Yes, move it", run: func() tea.Cmd { return a.Transition(k, tr.ID, tr.To, nil) }},
 				{label: "Cancel", run: func() tea.Cmd { return nil }},
 			}}
 		}})

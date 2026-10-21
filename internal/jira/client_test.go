@@ -460,7 +460,10 @@ func TestTransitionsMarkThoseWithAForm(t *testing.T) {
   "customfield_10028":{"required":false,"name":"Story Points","schema":{"type":"number","custom":"com.atlassian.jira.plugin.system.customfieldtypes:float"}},
   "customfield_10020":{"required":false,"name":"Sprint","schema":{"type":"array","custom":"com.pyxis.greenhopper.jira:gh-sprint"}}}},
  {"id":"42","name":"Estimate","hasScreen":true,"to":{"name":"Estimated"},"fields":{"customfield_10028":{"required":true,"hasDefaultValue":false,"name":"Story Points"}}},
- {"id":"51","name":"Blocked","hasScreen":true,"to":{"name":"Blocked"},"fields":{"customfield_10300":{"required":false,"name":"Reason for Blockage"}}},
+ {"id":"51","name":"Blocked","hasScreen":true,"to":{"name":"Blocked"},"fields":{
+  "customfield_10300":{"required":false,"name":"Reason","schema":{"type":"option","custom":"com.atlassian.jira.plugin.system.customfieldtypes:select"},"allowedValues":[{"id":"9001","value":"Waiting on a decision"},{"id":"9002","value":"No access"}]},
+  "customfield_10301":{"required":true,"name":"Owner","schema":{"type":"user"}},
+  "issuelinks":{"required":false,"name":"Linked issues","schema":{"type":"array","items":"issuelinks"}}}},
  {"id":"61","name":"Ceased","hasScreen":true,"to":{"name":"Ceased"}}]}`,
 	})
 	got, err := c.Transitions(context.Background(), "DEMO-12")
@@ -471,7 +474,10 @@ func TestTransitionsMarkThoseWithAForm(t *testing.T) {
 		{ID: "31", Name: "Commit Review", To: "In Review"},
 		{ID: "41", Name: "In progress", To: "In Progress"},
 		{ID: "42", Name: "Estimate", To: "Estimated", NeedsForm: true},
-		{ID: "51", Name: "Blocked", To: "Blocked", NeedsForm: true},
+		{ID: "51", Name: "Blocked", To: "Blocked", NeedsForm: true, Fields: []Field{
+			{ID: "customfield_10301", Name: "Owner", Kind: KindUser, Required: true},
+			{ID: "customfield_10300", Name: "Reason", Kind: KindOption, Options: []Option{{ID: "9001", Value: "Waiting on a decision"}, {ID: "9002", Value: "No access"}}},
+		}},
 		{ID: "61", Name: "Ceased", To: "Ceased"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -484,10 +490,21 @@ func TestTransitionsMarkThoseWithAForm(t *testing.T) {
 
 func TestTransitionPostsTheTransitionID(t *testing.T) {
 	c, calls := server(t, map[string]string{"POST /rest/api/3/issue/DEMO-12/transitions": ""})
-	if err := c.Transition(context.Background(), "DEMO-12", "31"); err != nil {
+	if err := c.Transition(context.Background(), "DEMO-12", "31", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := (*calls)[0].body; !reflect.DeepEqual(got, map[string]any{"transition": map[string]any{"id": "31"}}) {
 		t.Errorf("body = %v", got)
+	}
+	values := []Value{{Field: "customfield_10300", Kind: KindOption, ID: "9001"}, {Field: "customfield_10301", Kind: KindUser, ID: "acc-7"}}
+	if err := c.Transition(context.Background(), "DEMO-12", "51", values); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"transition": map[string]any{"id": "51"}, "fields": map[string]any{
+		"customfield_10300": map[string]any{"id": "9001"},
+		"customfield_10301": map[string]any{"accountId": "acc-7"},
+	}}
+	if got := (*calls)[1].body; !reflect.DeepEqual(got, want) {
+		t.Errorf("body with values = %v", got)
 	}
 }

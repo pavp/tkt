@@ -51,8 +51,9 @@ type recorder struct {
 	jiraFields []string
 	// known is the ticket the last Detail was given.
 	known *ticket.Ticket
-	// transitions answers Transitions.
+	// transitions answers Transitions; values records the last Transition's.
 	transitions []Transition
+	values      []Value
 }
 
 func (r *recorder) Transitions(k ticket.Key) tea.Cmd {
@@ -61,7 +62,8 @@ func (r *recorder) Transitions(k ticket.Key) tea.Cmd {
 	return func() tea.Msg { return TransitionsMsg{Key: k, Transitions: tr} }
 }
 
-func (r *recorder) Transition(k ticket.Key, id, to string) tea.Cmd {
+func (r *recorder) Transition(k ticket.Key, id, to string, values []Value) tea.Cmd {
+	r.values = values
 	r.calls = append(r.calls, "transition "+string(k)+" "+id)
 	return func() tea.Msg { return TransitionedMsg{Key: k, To: to} }
 }
