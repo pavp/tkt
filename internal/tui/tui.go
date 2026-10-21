@@ -263,10 +263,66 @@ func (m *Model) explainList() {
 }
 
 func (m Model) reviews() []ticket.PullRequest {
-	if m.showBots {
-		return m.snap.Reviews
+	reviews := m.snap.Reviews
+	if !m.showBots {
+		reviews = m.snap.WithoutBots().Reviews
 	}
-	return m.snap.WithoutBots().Reviews
+	return slices.DeleteFunc(slices.Clone(reviews), func(pr ticket.PullRequest) bool { return m.repoHidden(pr.Repo) })
+}
+
+// repoHidden reports whether the user hid repo; a pull request whose repository is unknown always shows.
+func (m Model) repoHidden(repo string) bool { return repo != "" && m.hiddenRepos[repo] }
+
+// ticketShown hides a ticket only when every one of its pull requests is in a hidden repository, as a ticket
+// without pull requests belongs to no repository.
+func (m Model) ticketShown(t ticket.Ticket) bool {
+	return len(t.PRs) == 0 || slices.ContainsFunc(t.PRs, func(pr ticket.PullRequest) bool { return !m.repoHidden(pr.Repo) })
+}
+
+// shownTickets are the user's tickets the repository filter leaves.
+func (m Model) shownTickets() []ticket.Ticket {
+	return slices.DeleteFunc(slices.Clone(m.snap.Tickets), func(t ticket.Ticket) bool { return !m.ticketShown(t) })
+}
+
+// boardRepos counts, per repository the board knows, its open pull requests and review requests; the
+// repository filter offers them.
+func (m Model) boardRepos() map[string]int {
+	repos := map[string]int{}
+	add := func(pr ticket.PullRequest) {
+		if pr.Repo == "" {
+			return
+		}
+		if _, ok := repos[pr.Repo]; !ok {
+			repos[pr.Repo] = 0
+		}
+		if pr.State == ticket.PROpen || pr.State == "" {
+			repos[pr.Repo]++
+		}
+	}
+	for _, t := range m.snap.Tickets {
+		for _, pr := range t.PRs {
+			add(pr)
+		}
+	}
+	for _, pr := range m.snap.Reviews {
+		add(pr)
+	}
+	return repos
+}
+
+// repoNotice says how many repositories the filter leaves; it is empty while every one shows.
+func (m Model) repoNotice() string {
+	repos := m.boardRepos()
+	hidden := 0
+	for r := range repos {
+		if m.repoHidden(r) {
+			hidden++
+		}
+	}
+	if hidden == 0 {
+		return ""
+	}
+	return dim.Render(fmt.Sprintf("Showing %d of %d repositories · ", len(repos)-hidden, len(repos))) + keyStyle.Render("R") + dim.Render(" change")
 }
 
 func (m Model) hiddenBots() int { return len(m.snap.Reviews) - len(m.snap.WithoutBots().Reviews) }
@@ -283,7 +339,7 @@ func (m Model) tickets() []ticket.Ticket {
 	if m.filter == FilterPRs {
 		return nil
 	}
-	return m.snap.Tickets
+	return m.shownTickets()
 }
 
 // myPRs lists the open pull requests of the user's tickets by repository, repositories with one that needs
@@ -292,7 +348,7 @@ func (m Model) myPRs() []item {
 	var out []item
 	for _, t := range board.Sorted(m.snap.Tickets) {
 		for _, pr := range t.PRs {
-			if pr.State == ticket.PROpen {
+			if pr.State == ticket.PROpen && !m.repoHidden(pr.Repo) {
 				t, pr := t, pr
 				out = append(out, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), ticket: &t, pr: &pr})
 			}
@@ -583,6 +639,10 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.clickHeader(msg.X - x)
 		return m, nil
 	}
+	if m.repoNotice() != "" && msg.Y == headerLines-1 {
+		m.picker = m.repoFilter()
+		return m, nil
+	}
 	body := msg.Y - headerLines
 	if body < 0 {
 		return m, nil
@@ -731,6 +791,10 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "b":
 		if m.filter == FilterPRs {
 			m.toggleBots()
+		}
+	case "R":
+		if len(m.boardRepos()) > 0 {
+			m.picker = m.repoFilter()
 		}
 	case "n", "r":
 		if m.filter == FilterPRs {
@@ -976,6 +1040,10 @@ func (m Model) header() string {
 	if len(m.snap.Warnings) > 0 {
 		top += "\n" + warn.Render(truncate("! "+strings.Join(m.snap.Warnings, " · "), m.width))
 	}
+	// The notice is the header's last line, where a click opens the repository filter.
+	if notice := m.repoNotice(); notice != "" {
+		top += "\n" + truncate(notice, m.width)
+	}
 	return top
 }
 
@@ -1053,7 +1121,7 @@ type headerItem struct {
 
 func (m Model) headerSpec() []headerItem {
 	return []headerItem{
-		{filter: FilterAll, label: fmt.Sprintf(" 1 All %d ", len(m.snap.Tickets)+len(m.reviews()))},
+		{filter: FilterAll, label: fmt.Sprintf(" 1 All %d ", len(m.shownTickets())+len(m.reviews()))},
 		{filter: FilterPRs, label: fmt.Sprintf(" 2 PRs %d ", len(m.myPRs())+len(m.reviews()))},
 		{view: ViewColumns, label: " Columns "},
 		{view: ViewList, label: " List "},
@@ -1790,7 +1858,7 @@ func (m Model) footer() string {
 	}
 	legend := [][2]string{
 		{move, moveHint}, {"click", clickHint}, {"double-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
-		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-2", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"g", "refresh"}, {"q", "close"},
+		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-2", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"R", "repos"}, {"g", "refresh"}, {"q", "close"},
 	}
 	if m.filter == FilterPRs && m.hiddenBots() > 0 {
 		legend = append(legend[:1], append([][2]string{{"b", "bots"}}, legend[1:]...)...)

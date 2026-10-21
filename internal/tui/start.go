@@ -2,6 +2,9 @@ package tui
 
 import (
 	"cmp"
+	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -47,7 +50,9 @@ type picker struct {
 	title, question string
 	rows            []pickerRow
 	multi           bool
-	sel             int
+	// filter marks the repository filter, which applies the checked repositories instead of starting.
+	filter bool
+	sel    int
 }
 
 type pickerRow struct {
@@ -88,8 +93,22 @@ func repoPicker(key ticket.Key, rs []RepoChoice) *picker {
 	return p
 }
 
+// repoFilter asks which repositories the board shows, each with its open pull requests.
+func (m Model) repoFilter() *picker {
+	counts := m.boardRepos()
+	names := slices.Sorted(maps.Keys(counts))
+	p := &picker{title: "Repositories", question: "Show the pull requests and tickets of", multi: true, filter: true}
+	for _, r := range names {
+		p.rows = append(p.rows, pickerRow{label: r, hint: fmt.Sprintf("%d open", counts[r]), value: r, checked: !m.repoHidden(r)})
+	}
+	return p
+}
+
 func (p *picker) action() string {
-	if p.multi {
+	switch {
+	case p.filter:
+		return "Apply"
+	case p.multi:
 		return "Start"
 	}
 	return "Open"
@@ -137,6 +156,9 @@ func (m Model) finishPicker() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.picker = nil
+	if p.filter {
+		return m.applyRepoFilter(p)
+	}
 	return m, m.actions.Start(p.key, StartOptions{Repos: repos})
 }
 
@@ -152,6 +174,13 @@ func (m Model) pickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case " ":
 		if p.multi {
 			p.rows[p.sel].checked = !p.rows[p.sel].checked
+		}
+	case "a":
+		if p.filter {
+			all := !slices.ContainsFunc(p.rows, func(r pickerRow) bool { return !r.checked })
+			for i := range p.rows {
+				p.rows[i].checked = !all
+			}
 		}
 	case "enter":
 		return m.finishPicker()
@@ -170,7 +199,10 @@ func (m Model) pickerLayout() (box string, firstRow, buttonsRow int, buttons []c
 		inner = max(inner, 2+lipgloss.Width(p.rowLabel(r))+3+lipgloss.Width(r.hint))
 	}
 	keys := "enter " + strings.ToLower(p.action()) + " · esc cancel"
-	if p.multi {
+	switch {
+	case p.filter:
+		keys = "space toggle · a all · " + keys
+	case p.multi:
 		keys = "space toggle · " + keys
 	}
 	inner = max(inner, lipgloss.Width(p.title), lipgloss.Width(p.question), lipgloss.Width(keys))
@@ -244,4 +276,18 @@ func (m Model) pickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// applyRepoFilter hides the repositories left unchecked and remembers them for the board's next opening.
+func (m Model) applyRepoFilter(p *picker) (tea.Model, tea.Cmd) {
+	m.hiddenRepos = map[string]bool{}
+	var hidden []string
+	for _, r := range p.rows {
+		if !r.checked {
+			m.hiddenRepos[r.value] = true
+			hidden = append(hidden, r.value)
+		}
+	}
+	m.reselect()
+	return m, m.actions.SaveState(BoardState{HiddenRepos: hidden})
 }
