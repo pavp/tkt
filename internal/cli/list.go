@@ -159,7 +159,7 @@ func prMark(pr ticket.PullRequest) string {
 	case pr.Checks == ticket.ChecksFail:
 		return "✕"
 	case pr.Checks == ticket.ChecksPending:
-		return "○"
+		return "…"
 	case pr.Checks == ticket.ChecksPass:
 		return "✓"
 	}

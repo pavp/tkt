@@ -142,7 +142,7 @@ func prStateText(pr ticket.PullRequest) string {
 	case pr.Checks == ticket.ChecksFail:
 		return "✕ CI failing"
 	case pr.Checks == ticket.ChecksPending:
-		return "○ CI running"
+		return "… CI running"
 	case pr.Checks == ticket.ChecksPass:
 		return "✓ checks pass"
 	}

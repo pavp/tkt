@@ -784,7 +784,7 @@ func TestTicketRowsNameRepoAndPR(t *testing.T) {
 	m := New(board.Snapshot{}, false, &recorder{}, ViewList)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
-	if v := stripANSI(next.View()); !strings.Contains(v, "#806 ✓ #311 ○") || !strings.Contains(v, " —  ") {
+	if v := stripANSI(next.View()); !strings.Contains(v, "#806 ✓ #311 …") || !strings.Contains(v, " —  ") {
 		t.Errorf("PR / CI column:\n%s", v)
 	}
 }
@@ -1110,7 +1110,7 @@ func TestPRColumnMatchesMockup(t *testing.T) {
 	}{
 		{nil, "—"},
 		{[]ticket.PullRequest{{Number: 812, State: ticket.PROpen, Checks: ticket.ChecksFail}}, "#812 ✕"},
-		{[]ticket.PullRequest{{Number: 806, State: ticket.PROpen, Checks: ticket.ChecksPass}, {Number: 311, State: ticket.PROpen, Checks: ticket.ChecksPending}}, "#806 ✓ #311 ○"},
+		{[]ticket.PullRequest{{Number: 806, State: ticket.PROpen, Checks: ticket.ChecksPass}, {Number: 311, State: ticket.PROpen, Checks: ticket.ChecksPending}}, "#806 ✓ #311 …"},
 		{[]ticket.PullRequest{{Number: 790, State: ticket.PRMerged}}, "#790 merged"},
 		{[]ticket.PullRequest{{Number: 1, State: ticket.PRMerged}, {Number: 2, State: ticket.PRMerged}}, "2 merged"},
 	}

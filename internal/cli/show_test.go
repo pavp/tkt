@@ -250,6 +250,16 @@ func TestDaemonDetailUsesTheBoardsPullRequests(t *testing.T) {
 	}
 }
 
+func TestRunningChecksShowAnEllipsis(t *testing.T) {
+	pr := ticket.PullRequest{Number: 311, State: ticket.PROpen, Checks: ticket.ChecksPending}
+	if got := prMark(pr); got != "…" {
+		t.Errorf("list mark = %q", got)
+	}
+	if got := prStateText(pr); got != "… CI running" {
+		t.Errorf("show text = %q", got)
+	}
+}
+
 func TestShowNeverStartsTheDaemon(t *testing.T) {
 	h := showHarness(t)
 	h.app.Executable = func() (string, error) { return "/opt/tkt/bin/tkt", nil }

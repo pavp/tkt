@@ -1409,7 +1409,7 @@ func checkMark(c ticket.CheckState) string {
 	case ticket.ChecksFail:
 		return "✕"
 	case ticket.ChecksPending:
-		return "○"
+		return "…"
 	case ticket.ChecksPass:
 		return "✓"
 	}
@@ -1426,7 +1426,7 @@ func prMeta(t ticket.Ticket) string {
 		case pr.Checks == ticket.ChecksFail:
 			mark = "✕"
 		case pr.Checks == ticket.ChecksPending:
-			mark = "○"
+			mark = "…"
 		case pr.Checks == ticket.ChecksPass:
 			mark = "✓"
 		}
@@ -1663,7 +1663,7 @@ func ciWord(c ticket.CheckState) string {
 	case ticket.ChecksFail:
 		return "failing ✕"
 	case ticket.ChecksPending:
-		return "running ○"
+		return "running …"
 	case ticket.ChecksPass:
 		return "passing ✓"
 	}
