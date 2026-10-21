@@ -590,6 +590,24 @@ func TestHerdrOpenTicketPane(t *testing.T) {
 	}
 }
 
+func TestHerdrOpenTicketPaneWithoutWorktree(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.env["HERDR_WORKSPACE_ID"] = "w1"
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w1"},{"workspace_id":"w2"}]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[
+		{"pane_id":"w2:p1","workspace_id":"w2","cwd":"/src/api","focused":true},
+		{"pane_id":"w1:p1","workspace_id":"w1","cwd":"/src/notes"},
+		{"pane_id":"w1:p2","workspace_id":"w1","cwd":"/src/web-DEMO-1","focused":true}]}`
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "refactor/demo-1-filter\n"
+	if code := h.exec("herdr", "open-ticket"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	got := f.Last("plugin.pane.open")
+	if got["cwd"] != "/src/web-DEMO-1" || got["workspace_id"] != "w1" || got["env"].(map[string]any)["TKT_KEY"] != "DEMO-1" {
+		t.Errorf("pane = %v", got)
+	}
+}
+
 func TestHerdrTicketPopupDeclines(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	h.env["TKT_KEY"] = "DEMO-7"

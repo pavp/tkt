@@ -125,6 +125,7 @@ type Pane struct {
 	ID          string `json:"pane_id"`
 	WorkspaceID string `json:"workspace_id"`
 	Cwd         string `json:"cwd"`
+	Focused     bool   `json:"focused"`
 }
 
 // CreateWorkspace opens a workspace at cwd and returns it with its root pane.
