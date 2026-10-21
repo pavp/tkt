@@ -659,6 +659,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg, ReposListedMsg, JiraFieldsListedMsg:
 		return m.settingsLookup(msg)
 	case SnapshotMsg:
+		if msg.Snap.Partial && msg.Err == nil {
+			// Jira's board while GitHub answers: shown at once, the refresh still running, agents as they were.
+			msg.Snap.Agents = m.snap.Agents
+			m.snap = msg.Snap
+			m.reselect()
+			return m, nil
+		}
 		m.loading = false
 		if msg.Err != nil {
 			m.status = "could not refresh: " + msg.Err.Error()
@@ -1360,6 +1367,8 @@ var syncSlot = lipgloss.Width("✓ synced 59 min ago")
 // last refresh failed.
 func (m Model) syncLabel() string {
 	switch {
+	case m.loading && m.snap.Partial:
+		return spinFrames[m.spin%len(spinFrames)] + " updating PRs…"
 	case m.loading:
 		return spinFrames[m.spin%len(spinFrames)] + " refreshing…"
 	case m.snap.FetchedAt.IsZero():

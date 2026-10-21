@@ -601,3 +601,26 @@ func TestTheJiraClientIsKeptAcrossSyncs(t *testing.T) {
 		t.Errorf("a new token needs a new client: built %d, %v", built, err)
 	}
 }
+
+func TestBoardRefreshPaintsJiraFirst(t *testing.T) {
+	h, _ := listHarness(t)
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent []tea.Msg
+	b := &boardActions{a: h.app, c: c, ctx: context.Background(), send: func(m tea.Msg) { sent = append(sent, m) }}
+	final, ok := b.Refresh()().(tui.SnapshotMsg)
+	if !ok || final.Err != nil || final.Snap.Partial {
+		t.Fatalf("final = %+v", final)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("sent %d boards before the full one, want the partial", len(sent))
+	}
+	if p, ok := sent[0].(tui.SnapshotMsg); !ok || !p.Snap.Partial || len(p.Snap.Tickets) == 0 {
+		t.Errorf("partial = %+v", sent[0])
+	}
+	if cached, _, _ := h.app.cache().Load(); cached.Partial {
+		t.Error("a partial board must never be cached")
+	}
+}

@@ -60,6 +60,7 @@ func newBoardCmd(a *App) *cobra.Command {
 			defer a.claimBoardPane()()
 			actions := &boardActions{a: a, c: c, ctx: cmd.Context()}
 			prog := tea.NewProgram(tui.New(snap, have, actions, a.boardView(view)).WithState(a.loadBoardState()), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
+			actions.send = prog.Send
 			follow, stop := context.WithCancel(cmd.Context())
 			defer stop()
 			go a.followDaemon(follow, actions, prog.Send)
@@ -119,6 +120,8 @@ type boardActions struct {
 	repos map[string][]string
 	// live is the daemon the board reads from while connected; nil means asking Jira and GitHub itself.
 	live *daemon.Client
+	// send delivers a message to the running board, such as the partial board a refresh paints first.
+	send func(tea.Msg)
 }
 
 func (b *boardActions) setLive(c *daemon.Client) {
@@ -292,7 +295,11 @@ func (b *boardActions) Refresh() tea.Cmd {
 		if c := b.liveClient(); c != nil && c.Sync(ctx) == nil {
 			return nil
 		}
-		snap, stale, err := b.a.loadSnapshot(ctx, b.cfg(), false)
+		var partial func(board.Snapshot)
+		if b.send != nil {
+			partial = func(s board.Snapshot) { b.send(tui.SnapshotMsg{Snap: s, Quiet: true}) }
+		}
+		snap, stale, err := b.a.loadSnapshotWith(ctx, b.cfg(), false, partial)
 		if err == nil && stale == nil {
 			snap.Agents = b.a.refreshSidebarQuietly(ctx, b.cfg(), snap)
 		}
