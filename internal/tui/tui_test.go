@@ -54,6 +54,15 @@ type recorder struct {
 	// transitions answers Transitions; values records the last Transition's.
 	transitions []Transition
 	values      []Value
+	comment     string
+	// users answers Users per query.
+	users map[string][]User
+}
+
+func (r *recorder) Users(k ticket.Key, query string) tea.Cmd {
+	r.calls = append(r.calls, "users "+query)
+	users := r.users[query]
+	return func() tea.Msg { return UsersListedMsg{Key: k, Query: query, Users: users} }
 }
 
 func (r *recorder) Transitions(k ticket.Key) tea.Cmd {
@@ -62,8 +71,8 @@ func (r *recorder) Transitions(k ticket.Key) tea.Cmd {
 	return func() tea.Msg { return TransitionsMsg{Key: k, Transitions: tr} }
 }
 
-func (r *recorder) Transition(k ticket.Key, id, to string, values []Value) tea.Cmd {
-	r.values = values
+func (r *recorder) Transition(k ticket.Key, id, to string, values []Value, comment string) tea.Cmd {
+	r.values, r.comment = values, comment
 	r.calls = append(r.calls, "transition "+string(k)+" "+id)
 	return func() tea.Msg { return TransitionedMsg{Key: k, To: to} }
 }
@@ -2861,9 +2870,6 @@ func TestMoveFillsTheFormBeforeMoving(t *testing.T) {
 			t.Fatalf("form missing %q:\n%s", want, v)
 		}
 	}
-	if strings.Contains(v, "Owner") {
-		t.Errorf("an optional field the board cannot fill should be left out:\n%s", v)
-	}
 
 	m, msg := run(selectMenuItem(t, m, "now"), "enter")
 	m, _ = m.Update(msg)
@@ -2895,7 +2901,7 @@ func TestMoveFillsTheFormBeforeMoving(t *testing.T) {
 
 func TestMoveLeavesToJiraAFormItCannotFill(t *testing.T) {
 	tr := blockedTransition()
-	tr.Fields[2].Required = true
+	tr.Fields = append(tr.Fields, Field{ID: "issuelinks", Name: "Linked issues", Kind: "array", Required: true})
 	m, _ := loaded(&recorder{}).Update(TransitionsMsg{Key: "DEMO-1", Transitions: []Transition{tr}})
 	if v := stripANSI(m.View()); !strings.Contains(v, "Blocked · in Jira ↗") {
 		t.Errorf("a required field the board cannot fill should leave the move to Jira:\n%s", v)
@@ -2916,5 +2922,60 @@ func TestMoveFormFitsANarrowPane(t *testing.T) {
 		if w := lipgloss.Width(l); w > 56 {
 			t.Errorf("line %d cells wide in a 56-column pane: %q", w, stripANSI(l))
 		}
+	}
+}
+
+// typeKeys types text into the board one key at a time, delivering what each key's command answers.
+func typeKeys(m tea.Model, text string) tea.Model {
+	for _, r := range text {
+		var cmd tea.Cmd
+		m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		if cmd != nil {
+			if msg := cmd(); msg != nil {
+				m, _ = m.Update(msg)
+			}
+		}
+	}
+	return m
+}
+
+func TestMoveFormPicksAUserAndWritesAComment(t *testing.T) {
+	r := &recorder{transitions: []Transition{blockedTransition()}, users: map[string][]User{"an": {{ID: "acc-7", Name: "Ana López"}, {ID: "acc-8", Name: "Andrés Gil"}}}}
+	m, _ := loaded(r).Update(TransitionsMsg{Key: "DEMO-1", Transitions: r.transitions})
+	m = press(selectMenuItem(t, m, "Blocked"), "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Owner: —") || !strings.Contains(v, "Comment: —") {
+		t.Fatalf("the form should offer the user field and a comment:\n%s", v)
+	}
+
+	m = typeKeys(press(selectMenuItem(t, m, "Owner"), "enter"), "an")
+	if !slices.Contains(r.calls, "users an") {
+		t.Fatalf("typing should search the assignable users: %v", r.calls)
+	}
+	m, _ = m.Update(UsersListedMsg{Key: "DEMO-1", Query: "a", Users: []User{{ID: "old", Name: "Stale Result"}}})
+	if v := stripANSI(m.View()); !strings.Contains(v, "Ana López") || strings.Contains(v, "Stale Result") {
+		t.Fatalf("the current search's users, not an older one's, should be listed:\n%s", v)
+	}
+	m = press(send(m, tea.KeyMsg{Type: tea.KeyDown}), "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Owner: Andrés Gil") {
+		t.Fatalf("the picked user should show in the form:\n%s", v)
+	}
+
+	m = typeKeys(press(selectMenuItem(t, m, "Comment"), "enter"), "Waiting for keys")
+	m = press(m, "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Comment: Waiting for keys") {
+		t.Fatalf("the comment should show in the form:\n%s", v)
+	}
+	m = press(typeKeys(press(selectMenuItem(t, m, "Comment"), "enter"), " now"), "esc")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Comment: Waiting for keys") || strings.Contains(v, "keys now") {
+		t.Fatalf("esc should leave the comment as it was:\n%s", v)
+	}
+
+	m = press(selectMenuItem(t, m, "Reason"), "enter")
+	m, msg := run(selectMenuItem(t, m, "No access"), "enter")
+	m, _ = m.Update(msg)
+	run(selectMenuItem(t, m, "now"), "enter")
+	want := []Value{{Field: "cf_reason", Kind: KindOption, ID: "9002"}, {Field: "cf_owner", Kind: KindUser, ID: "acc-8"}}
+	if r.last() != "transition DEMO-1 51" || !reflect.DeepEqual(r.values, want) || r.comment != "Waiting for keys" {
+		t.Errorf("moved with %+v and comment %q (%v)", r.values, r.comment, r.calls)
 	}
 }

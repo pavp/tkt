@@ -62,9 +62,12 @@ type Actions interface {
 	SaveState(s BoardState) tea.Cmd
 	// Transitions lists the statuses key can move to in Jira; they arrive as a TransitionsMsg.
 	Transitions(key ticket.Key) tea.Cmd
-	// Transition moves key in Jira through transition id to status to, filling its form with values; the
-	// outcome arrives as a TransitionedMsg. The board calls it only after the user confirmed.
-	Transition(key ticket.Key, id, to string, values []Value) tea.Cmd
+	// Transition moves key in Jira through transition id to status to, filling its form with values and
+	// adding comment when given; the outcome arrives as a TransitionedMsg. The board calls it only after the
+	// user confirmed.
+	Transition(key ticket.Key, id, to string, values []Value, comment string) tea.Cmd
+	// Users lists the users assignable to key that match query; they arrive as a UsersListedMsg.
+	Users(key ticket.Key, query string) tea.Cmd
 }
 
 // BoardState is what the board remembers between openings.
@@ -173,6 +176,7 @@ type Model struct {
 	// team shows the team's tickets beside the user's.
 	team     bool
 	menu     *menu
+	prompt   *formPrompt
 	detail   *detailView
 	settings *settingsView
 	picker   *picker
@@ -731,6 +735,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.transitions(msg)
 	case TransitionedMsg:
 		return m.transitioned(msg)
+	case UsersListedMsg:
+		return m.usersListed(msg)
 	case formMsg:
 		m.menu = m.formMenu(msg.form)
 		m.status = msg.status
@@ -795,6 +801,9 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.picker != nil {
 		return m.pickerMouse(msg)
+	}
+	if m.prompt != nil {
+		return m, nil
 	}
 	if m.menu != nil {
 		switch {
@@ -974,6 +983,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.picker != nil {
 		return m.pickerKey(k)
+	}
+	if m.prompt != nil {
+		return m.promptKey(k)
 	}
 	if m.menu != nil {
 		return m.menuKey(k)
@@ -1202,6 +1214,8 @@ func (m Model) board() string {
 	if m.picker != nil {
 		height := m.height - lineCount(top) - lineCount(bottom0)
 		body = lipgloss.Place(m.width, max(height, lipgloss.Height(m.pickerView())), lipgloss.Center, lipgloss.Center, m.pickerView())
+	} else if m.prompt != nil {
+		body = m.promptPlaced(m.height - lineCount(top) - lineCount(bottom0))
 	} else if m.menu != nil {
 		height := m.height - lineCount(top) - lineCount(bottom0)
 		body = lipgloss.Place(m.width, max(height, lipgloss.Height(m.menuView())), lipgloss.Center, lipgloss.Center, m.menuView())

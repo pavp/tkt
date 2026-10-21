@@ -492,21 +492,39 @@ func TestTransitionsDescribeTheirForms(t *testing.T) {
 
 func TestTransitionPostsTheTransitionID(t *testing.T) {
 	c, calls := server(t, map[string]string{"POST /rest/api/3/issue/DEMO-12/transitions": ""})
-	if err := c.Transition(context.Background(), "DEMO-12", "31", nil); err != nil {
+	if err := c.Transition(context.Background(), "DEMO-12", "31", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := (*calls)[0].body; !reflect.DeepEqual(got, map[string]any{"transition": map[string]any{"id": "31"}}) {
 		t.Errorf("body = %v", got)
 	}
 	values := []Value{{Field: "customfield_10300", Kind: KindOption, ID: "9001"}, {Field: "customfield_10301", Kind: KindUser, ID: "acc-7"}}
-	if err := c.Transition(context.Background(), "DEMO-12", "51", values); err != nil {
+	if err := c.Transition(context.Background(), "DEMO-12", "51", values, "Waiting for the API keys.\n\nAsk Ana."); err != nil {
 		t.Fatal(err)
+	}
+	paragraph := func(text string) any {
+		return map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": text}}}
 	}
 	want := map[string]any{"transition": map[string]any{"id": "51"}, "fields": map[string]any{
 		"customfield_10300": map[string]any{"id": "9001"},
 		"customfield_10301": map[string]any{"accountId": "acc-7"},
-	}}
+	}, "update": map[string]any{"comment": []any{map[string]any{"add": map[string]any{"body": map[string]any{
+		"type": "doc", "version": float64(1), "content": []any{paragraph("Waiting for the API keys."), paragraph("Ask Ana.")},
+	}}}}}}
 	if got := (*calls)[1].body; !reflect.DeepEqual(got, want) {
 		t.Errorf("body with values = %v", got)
+	}
+}
+
+func TestAssignableUsersLeavesOutApps(t *testing.T) {
+	c, calls := server(t, map[string]string{
+		"GET /rest/api/3/user/assignable/search": `[{"accountId":"acc-7","displayName":"Ana López","accountType":"atlassian"},{"accountId":"bot-1","displayName":"Automation","accountType":"app"}]`,
+	})
+	got, err := c.AssignableUsers(context.Background(), "DEMO-12", "an")
+	if err != nil || !reflect.DeepEqual(got, []User{{AccountID: "acc-7", DisplayName: "Ana López"}}) {
+		t.Errorf("users = %+v, %v", got, err)
+	}
+	if q := (*calls)[0].query; !strings.Contains(q, "issueKey=DEMO-12") || !strings.Contains(q, "query=an") {
+		t.Errorf("query = %s", q)
 	}
 }
