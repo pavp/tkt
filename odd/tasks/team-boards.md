@@ -17,7 +17,7 @@ Forecast (slice-plan, 2026-10-21): 595–1020 authored changed lines; slice 1 22
 | ID | Specs | Slice | Route | Status | Commit |
 |---|---|---|---|---|---|
 | T1 | S1, S2 (data: Jira boards and sprints, config, sync) | 1 | inline, no Writer reason | done (RED → GREEN; -race; live: Authorization Center gives 6 team tickets incl. ACTO-165803/165823, 3.9 s) | 73eefdb |
-| T2 | S2, S3, S4, S6 (board notice and sections, init step) | 2 | inline, no Writer reason | pending | |
+| T2 | S2, S3, S4, S6 (board notice and sections, init step) | 2 | inline, no Writer reason | done (RED → GREEN; -race on cli and tui) | 1343300 |
 | T3 | S5, S6 (Settings) | 3 | inline, no Writer reason | pending | |
 
 Native grouping: never grouped: a stack would merge the draft tracker.
@@ -31,3 +31,4 @@ Native grouping: never grouped: a stack would merge the draft tracker.
 - L2 (2026-10-21, user): "seguro pertenece a otro board? no lo entiendo" → board filters confirmed it; ACTO has 126 boards (58 scrum), listed in ~0.9 s.
 - L3 (2026-10-21, user): "si confirmo el plan con chain" (after "una pregunta, ahora mismo solo muestra tickets de board > sprints activos?" was answered: today only sprints, the user's tickets in any open sprint, the team in the user's sprints).
 - L4: slice 1 done (73eefdb): jira Boards(space) (scrum, paginated by startAt) and ActiveSprints(board); config TeamBoard and Space.TeamBoards (`team_boards`), cloned; FetchWith starts the team goroutine at once: activeSprints over the configured boards in parallel, then TeamSprintJQL over their ids; no boards → no search; Ticket.Board from the sprint's board. Live (read-only, Authorization Center configured in memory): both tickets show as team with their board; their Jira status has since changed (Ready to be Released, En revisión).
+- L5: slice 2 done (1343300): init asks "Team boards for KEY (names, comma separated; N scrum boards)" only when the space has scrum boards (so existing flows keep their answers), matching an exact name (any case) or a single name containing the text, warning on none or several; turning Team on without team boards says "no team boards yet · add team boards in Settings (,)"; the list splits the team into "Team · <board>" sections.
