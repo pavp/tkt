@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,7 @@ type Client struct {
 	ws    string
 	token string
 	http  *http.Client
+	slow  *http.Client
 }
 
 // Event is one message the daemon streams.
@@ -43,16 +45,44 @@ func Dial(dir string, info Info) (*Client, error) {
 		return nil, err
 	}
 	addr := fmt.Sprintf("127.0.0.1:%d", info.Port)
-	return &Client{base: "http://" + addr, ws: "ws://" + addr + "/v1/ws", token: strings.TrimSpace(string(b)), http: &http.Client{Timeout: 5 * time.Second}}, nil
+	return &Client{
+		base: "http://" + addr, ws: "ws://" + addr + "/v1/ws", token: strings.TrimSpace(string(b)),
+		http: &http.Client{Timeout: 5 * time.Second}, slow: &http.Client{Timeout: 30 * time.Second},
+	}, nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string) (*http.Response, error) {
+	return c.send(ctx, c.http, method, path)
+}
+
+func (c *Client) send(ctx context.Context, hc *http.Client, method, path string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
-	return c.http.Do(req)
+	return hc.Do(req)
+}
+
+// Ticket decodes one ticket's detail into out. The daemon asks Jira for it, so it may take seconds.
+func (c *Client) Ticket(ctx context.Context, key string, out any) error {
+	path := "/v1/tickets/" + url.PathEscape(key)
+	resp, err := c.send(ctx, c.slow, http.MethodGet, path)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		var e struct{ Message string }
+		if json.NewDecoder(resp.Body).Decode(&e) == nil && e.Message != "" {
+			return fmt.Errorf("tkt daemon: GET %s: %s", path, e.Message)
+		}
+		return fmt.Errorf("tkt daemon: GET %s: %s", path, resp.Status)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("tkt daemon: GET %s: %w", path, err)
+	}
+	return nil
 }
 
 // Tickets returns the board the daemon serves.

@@ -36,7 +36,7 @@ func newContextCmd(a *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			d, err := a.loadDetail(cmd.Context(), c, key, a.daemonTicket(cmd.Context(), key))
+			d, err := a.ticketDetail(cmd.Context(), c, key)
 			if err != nil {
 				return err
 			}

@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/daemon"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
@@ -58,6 +59,20 @@ func (a *App) daemonTicket(ctx context.Context, key ticket.Key) *ticket.Ticket {
 		return &t
 	}
 	return nil
+}
+
+// ticketDetail asks a running daemon for the detail, since it holds the Jira token already and reading
+// the token can take seconds (powershell.exe on WSL); without a daemon that answers, it loads it here.
+func (a *App) ticketDetail(ctx context.Context, c *config.Config, key ticket.Key) (detail, error) {
+	if info, ok := a.runningDaemon(ctx); ok {
+		if dc, err := daemon.Dial(a.Env.DataDir(), info); err == nil {
+			var d detail
+			if err := dc.Ticket(ctx, string(key), &d); err == nil {
+				return d, nil
+			}
+		}
+	}
+	return a.loadDetail(ctx, c, key, a.daemonTicket(ctx, key))
 }
 
 // followDaemon connects the board to the daemon and sends it the daemon's board whenever it changes,

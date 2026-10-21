@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/ticket"
 )
 
 // Protocol is the API's protocol number, reported by /health and checked in the WebSocket hello.
@@ -26,6 +27,10 @@ const Protocol = 1
 
 // SyncFunc fetches a fresh board, writing whatever cache the CLI keeps.
 type SyncFunc func(ctx context.Context) (board.Snapshot, error)
+
+// DetailFunc loads one ticket with its description and comments; known is the board's copy of the ticket,
+// when the board holds it.
+type DetailFunc func(ctx context.Context, key ticket.Key, known *ticket.Ticket) (any, error)
 
 type Options struct {
 	// Dir is the data directory holding the token and daemon.json.
@@ -37,6 +42,8 @@ type Options struct {
 	// Seed, when set, is served until the first sync finishes, so clients see the cached board at once.
 	Seed         *board.Snapshot // HelloTimeout bounds the wait for a WebSocket client's hello; zero means ten seconds.
 	HelloTimeout time.Duration
+	// Detail serves GET /v1/tickets/{key}; nil answers that route with not found.
+	Detail DetailFunc
 }
 
 // Info is what daemon.json records for clients: where the daemon listens and which process it is.
@@ -248,6 +255,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "version": s.opts.Version, "protocol": Protocol, "pid": os.Getpid()})
 	})
 	mux.HandleFunc("GET /v1/tickets", s.authed(s.tickets))
+	mux.HandleFunc("GET /v1/tickets/{key}", s.authed(s.ticket))
 	mux.HandleFunc("POST /v1/sync", s.authed(s.requestSync))
 	mux.HandleFunc("GET /v1/ws", s.ws)
 	return mux
@@ -277,6 +285,31 @@ func (s *Server) tickets(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, public(snap))
+}
+
+func (s *Server) ticket(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Detail == nil {
+		writeError(w, http.StatusNotFound, "not_found", "this daemon serves no ticket details")
+		return
+	}
+	key := ticket.Key(r.PathValue("key"))
+	if keys := ticket.KeysIn(string(key)); len(keys) != 1 || keys[0] != key {
+		writeError(w, http.StatusBadRequest, "bad_key", fmt.Sprintf("%q is not a ticket key like DEMO-123", key))
+		return
+	}
+	s.mu.Lock()
+	snap, have := s.snap, s.have
+	s.mu.Unlock()
+	var known *ticket.Ticket
+	if t, ok := snap.Find(key); have && ok {
+		known = &t
+	}
+	d, err := s.opts.Detail(r.Context(), key, known)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "detail_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
 }
 
 // public leaves out the development-panel cache, which only the sync needs.

@@ -34,7 +34,7 @@ func newShowCmd(a *App) *cobra.Command {
 				return err
 			}
 			if !watch {
-				d, err := a.loadDetail(cmd.Context(), c, key, a.daemonTicket(cmd.Context(), key))
+				d, err := a.ticketDetail(cmd.Context(), c, key)
 				if err != nil {
 					return err
 				}
@@ -47,9 +47,15 @@ func newShowCmd(a *App) *cobra.Command {
 			if interval < 10*time.Second {
 				return errors.New("--interval must be at least 10s")
 			}
+			fmt.Fprint(a.Stdout, "\033[H\033[2J")
+			if t := a.daemonTicket(cmd.Context(), key); t != nil {
+				a.renderHead(a.Stdout, *t)
+				fmt.Fprintln(a.Stdout)
+			}
+			fmt.Fprintf(a.Stdout, "Loading %s…\n", key)
 			for {
 				var buf bytes.Buffer
-				d, err := a.loadDetail(cmd.Context(), c, key, a.daemonTicket(cmd.Context(), key))
+				d, err := a.ticketDetail(cmd.Context(), c, key)
 				if err != nil {
 					fmt.Fprintf(&buf, "%s · could not refresh: %v\n", key, err)
 				} else {
@@ -73,23 +79,7 @@ func newShowCmd(a *App) *cobra.Command {
 }
 
 func (a *App) renderShow(w io.Writer, d detail) {
-	t := d.Ticket
-	fmt.Fprintf(w, "%s · %s · %s\n%s\n%s\n", t.Key, t.Type, t.Status, t.Summary, t.URL)
-	if reasons := t.Attention(); len(reasons) > 0 {
-		parts := make([]string, len(reasons))
-		for i, r := range reasons {
-			parts[i] = string(r)
-		}
-		fmt.Fprintf(w, "! needs you: %s\n", strings.Join(parts, ", "))
-	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Pull requests")
-	if len(t.PRs) == 0 {
-		fmt.Fprintln(w, "  none yet")
-	}
-	for _, pr := range t.PRs {
-		fmt.Fprintf(w, "  %s#%d  %s%s  %s\n", pr.Repo, pr.Number, prStateText(pr), reviewText(pr), pr.URL)
-	}
+	a.renderHead(w, d.Ticket)
 	section(w, "Description", d.Description, "No description.")
 	if d.Acceptance != "" {
 		section(w, "Acceptance criteria", d.Acceptance, "")
@@ -111,6 +101,25 @@ func (a *App) renderShow(w io.Writer, d detail) {
 	}
 	for _, warn := range d.Warnings {
 		fmt.Fprintf(w, "\n! %s\n", warn)
+	}
+}
+
+func (a *App) renderHead(w io.Writer, t ticket.Ticket) {
+	fmt.Fprintf(w, "%s · %s · %s\n%s\n%s\n", t.Key, t.Type, t.Status, t.Summary, t.URL)
+	if reasons := t.Attention(); len(reasons) > 0 {
+		parts := make([]string, len(reasons))
+		for i, r := range reasons {
+			parts[i] = string(r)
+		}
+		fmt.Fprintf(w, "! needs you: %s\n", strings.Join(parts, ", "))
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Pull requests")
+	if len(t.PRs) == 0 {
+		fmt.Fprintln(w, "  none yet")
+	}
+	for _, pr := range t.PRs {
+		fmt.Fprintf(w, "  %s#%d  %s%s  %s\n", pr.Repo, pr.Number, prStateText(pr), reviewText(pr), pr.URL)
 	}
 }
 

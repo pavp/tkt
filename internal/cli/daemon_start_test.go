@@ -32,6 +32,8 @@ type fakeDaemons struct {
 	board *board.Snapshot
 	// version is what the next fake daemon reports; empty means this CLI's Version.
 	version string
+	// detail serves GET /v1/tickets/{key}; nil leaves the route answering not found, like an older daemon.
+	detail daemon.DetailFunc
 }
 
 func (f *fakeDaemons) server() *daemon.Server {
@@ -54,7 +56,7 @@ func (f *fakeDaemons) install(t *testing.T, h *harness) {
 		sync := func(context.Context) (board.Snapshot, error) {
 			return board.Snapshot{}, errors.New("fake daemons do not sync")
 		}
-		s, err := daemon.New(daemon.Options{Dir: h.app.Env.DataDir(), Version: version, Sync: sync, Interval: time.Hour, Seed: seed})
+		s, err := daemon.New(daemon.Options{Dir: h.app.Env.DataDir(), Version: version, Sync: sync, Interval: time.Hour, Seed: seed, Detail: f.detail})
 		if err != nil {
 			return 0, err
 		}
