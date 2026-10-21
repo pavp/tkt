@@ -527,12 +527,14 @@ func TestBoardOpensInTheLastView(t *testing.T) {
 
 func TestTheTeamToggleReachesTheSync(t *testing.T) {
 	h, _ := listHarness(t)
-	h.jira.team = []jira.Issue{{ID: "9", Key: "DEMO-9", Summary: "Theirs", Status: "To Do", StatusCategory: "new", Assignee: "Bea Ruiz"}}
-	h.jira.issues[0].Sprints = []jira.Sprint{{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active"}}
+	h.jira.team = []jira.Issue{{ID: "9", Key: "DEMO-9", Summary: "Theirs", Status: "To Do", StatusCategory: "new", Assignee: "Bea Ruiz",
+		Sprints: []jira.Sprint{{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active"}}}}
+	h.jira.sprints = map[int][]int{5205: {42}}
 	c, err := h.app.LoadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 5205, Name: "Authorization Center"}}
 	snap, err := h.app.fetchSnapshot(context.Background(), c)
 	if err != nil || slices.ContainsFunc(snap.Tickets, func(tk ticket.Ticket) bool { return tk.Team }) {
 		t.Fatalf("off: %v %+v", err, snap.Tickets)
@@ -541,7 +543,9 @@ func TestTheTeamToggleReachesTheSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap, err = h.app.fetchSnapshot(context.Background(), c)
-	if err != nil || !slices.ContainsFunc(snap.Tickets, func(tk ticket.Ticket) bool { return tk.Team && tk.Key == "DEMO-9" }) {
+	if err != nil || !slices.ContainsFunc(snap.Tickets, func(tk ticket.Ticket) bool {
+		return tk.Team && tk.Key == "DEMO-9" && tk.Board == "Authorization Center"
+	}) {
 		t.Errorf("on: %v %+v", err, snap.Tickets)
 	}
 }
@@ -622,5 +626,19 @@ func TestBoardRefreshPaintsJiraFirst(t *testing.T) {
 	}
 	if cached, _, _ := h.app.cache().Load(); cached.Partial {
 		t.Error("a partial board must never be cached")
+	}
+}
+
+func TestBoardActionsListTheSpacesBoards(t *testing.T) {
+	h, _ := listHarness(t)
+	h.jira.boards = map[string][]jira.Board{"DEMO": {{ID: 5205, Name: "Authorization Center"}}}
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	msg, ok := b.JiraBoards("DEMO")().(tui.JiraBoardsListedMsg)
+	if !ok || msg.Err != nil || msg.Space != "DEMO" || !slices.Equal(msg.Boards, []config.TeamBoard{{ID: 5205, Name: "Authorization Center"}}) {
+		t.Errorf("listed = %+v", msg)
 	}
 }

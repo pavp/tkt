@@ -53,6 +53,8 @@ type Actions interface {
 	ListRepos(owner string) tea.Cmd
 	// JiraFields lists the names of the Jira site's fields; they arrive as a JiraFieldsListedMsg.
 	JiraFields() tea.Cmd
+	// JiraBoards lists a space's scrum boards; they arrive as a JiraBoardsListedMsg.
+	JiraBoards(space string) tea.Cmd
 	// NativePicker reports whether PickFolder can show a folder chooser the user will see; without one,
 	// ctrl+o browses folders inside the terminal.
 	NativePicker() bool
@@ -486,6 +488,12 @@ func (m Model) groupTitle(it item, sel bool) string {
 	return mark + bold.Render(it.title) + "  " + dim.Render(count)
 }
 
+// hasTeamBoards reports whether any space names the boards the team comes from.
+func (m Model) hasTeamBoards() bool {
+	c := m.actions.Config()
+	return slices.ContainsFunc(c.Spaces, func(s config.Space) bool { return len(s.TeamBoards) > 0 })
+}
+
 // toggleTeam shows or hides the team's tickets; turning them on saves the choice before the refresh, since
 // the sync reads it to know whether to fetch them.
 func (m *Model) toggleTeam() tea.Cmd {
@@ -497,6 +505,9 @@ func (m *Model) toggleTeam() tea.Cmd {
 		return save
 	}
 	m.status = "showing the team's tickets too · t hides them"
+	if !m.hasTeamBoards() {
+		m.status = "no team boards yet · add team boards in Settings (,)"
+	}
 	return tea.Batch(tea.Sequence(save, m.actions.Refresh()), m.beginLoading())
 }
 
@@ -573,7 +584,9 @@ func (m Model) listItems() []item {
 	if team < 0 {
 		team = len(ts)
 	}
-	for _, t := range append(board.Sorted(ts[:team]), board.Sorted(ts[team:])...) {
+	theirs := board.Sorted(ts[team:])
+	slices.SortStableFunc(theirs, func(a, b ticket.Ticket) int { return strings.Compare(a.Board, b.Board) })
+	for _, t := range append(board.Sorted(ts[:team]), theirs...) {
 		t := t
 		out = append(out, item{key: t.Key, ticket: &t})
 	}
@@ -656,7 +669,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reselect()
 	case SettingsSavedMsg:
 		return m.settingsSaved(msg)
-	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg, ReposListedMsg, JiraFieldsListedMsg:
+	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg, ReposListedMsg, JiraFieldsListedMsg, JiraBoardsListedMsg:
 		return m.settingsLookup(msg)
 	case SnapshotMsg:
 		if msg.Snap.Partial && msg.Err == nil {
@@ -1975,12 +1988,9 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		}
 		lines, at = append(lines, "  "+toggle), append(at, botToggleLine)
 	}
-	nTickets, nTeam := 0, 0
+	nTickets := 0
 	for _, it := range items {
-		switch {
-		case it.ticket != nil && it.ticket.Team && !it.mine():
-			nTeam++
-		case it.ticket != nil && !it.mine():
+		if it.ticket != nil && !it.ticket.Team && !it.mine() {
 			nTickets++
 		}
 	}
@@ -2000,8 +2010,18 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			continue
 		}
 		switch {
-		case it.ticket != nil && it.ticket.Team && !it.mine() && (i == 0 || items[i-1].ticket == nil || !items[i-1].ticket.Team):
-			section("Team", nTeam)
+		case it.ticket != nil && it.ticket.Team && !it.mine() && (i == 0 || items[i-1].ticket == nil || !items[i-1].ticket.Team || items[i-1].ticket.Board != it.ticket.Board):
+			n := 0
+			for _, o := range items[i:] {
+				if o.ticket != nil && o.ticket.Team && o.ticket.Board == it.ticket.Board {
+					n++
+				}
+			}
+			title := "Team"
+			if it.ticket.Board != "" {
+				title += " · " + it.ticket.Board
+			}
+			section(title, n)
 		case i == 0 && it.ticket != nil:
 			section("My tickets", nTickets)
 		}

@@ -215,6 +215,17 @@ func (b *boardActions) ListRepos(owner string) tea.Cmd {
 
 func (b *boardActions) NativePicker() bool { return b.a.nativePicker() }
 
+func (b *boardActions) JiraBoards(space string) tea.Cmd {
+	return func() tea.Msg {
+		js, err := b.a.jiraClient(b.cfg())
+		if err != nil {
+			return tui.JiraBoardsListedMsg{Space: space, Err: err}
+		}
+		boards, err := b.a.teamBoardChoices(b.ctx, js, space)
+		return tui.JiraBoardsListedMsg{Space: space, Boards: boards, Err: err}
+	}
+}
+
 func (b *boardActions) SaveState(s tui.BoardState) tea.Cmd {
 	return func() tea.Msg {
 		if err := b.a.saveBoardState(s); err != nil {

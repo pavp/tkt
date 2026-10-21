@@ -12,7 +12,7 @@ func folderForm(t *testing.T, dirs map[string][]string) (tea.Model, *recorder) {
 	t.Helper()
 	m, r := settingsBoard(t)
 	r.dirs = dirs
-	m = press(m, "l", "a")
+	m = press(m, "l", "l", "a")
 	if !strings.Contains(stripANSI(m.View()), "Add a folder with local clones") {
 		t.Fatalf("no folder form:\n%s", stripANSI(m.View()))
 	}

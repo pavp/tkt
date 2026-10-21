@@ -213,7 +213,9 @@ type Ticket struct {
 	// Assignee is the display name of the person the ticket is assigned to; empty when unassigned.
 	Assignee string `json:"assignee,omitempty"`
 	// Team marks a teammate's or unassigned ticket, shown on request; it never needs the user.
-	Team     bool          `json:"team,omitempty"`
+	Team bool `json:"team,omitempty"`
+	// Board names the team board a team ticket comes from.
+	Board    string        `json:"board,omitempty"`
 	Parent   Key           `json:"parent,omitempty"`
 	URL      string        `json:"url"`
 	PRs      []PullRequest `json:"prs,omitempty"`

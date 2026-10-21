@@ -22,7 +22,7 @@ import (
 func newInitCmd(a *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
-		Short: "Set up tkt: Jira account and token, spaces, repositories and GitHub accounts",
+		Short: "Set up tkt: Jira account and token, spaces, repositories, team boards and GitHub accounts",
 		Long: "Set up tkt interactively. It asks for the Jira site and email, stores and checks the API token,\n" +
 			"reads your spaces and their statuses from Jira, and writes ~/.config/tkt/config.toml. You only\n" +
 			"type what Jira cannot know: which repositories each space uses and where your clones live.",
@@ -177,7 +177,7 @@ func (a *App) runInit(cmd *cobra.Command) error {
 		return errors.New("pick at least one space")
 	}
 
-	fmt.Fprintln(a.Stderr, "\n3/4 Repositories")
+	fmt.Fprintln(a.Stderr, "\n3/4 Repositories and team boards")
 	owners := map[string]bool{}
 	var ownerOrder []string
 	for i := range spaces {
@@ -196,6 +196,9 @@ func (a *App) runInit(cmd *cobra.Command) error {
 				owners[o] = true
 				ownerOrder = append(ownerOrder, o)
 			}
+		}
+		if err := a.askTeamBoards(ctx, js, s); err != nil {
+			return err
 		}
 		statuses, err := js.Statuses(ctx, s.Key)
 		if err != nil {
@@ -275,6 +278,48 @@ func pickProject(projects []jira.Project, choice string) (jira.Project, bool) {
 		}
 	}
 	return jira.Project{}, false
+}
+
+// teamBoardChoices lists the space's scrum boards as the configuration keeps them.
+func (a *App) teamBoardChoices(ctx context.Context, js JiraAPI, space string) ([]config.TeamBoard, error) {
+	boards, err := js.Boards(ctx, space)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]config.TeamBoard, len(boards))
+	for i, b := range boards {
+		out[i] = config.TeamBoard{ID: b.ID, Name: b.Name}
+	}
+	return out, nil
+}
+
+// askTeamBoards asks which of the space's scrum boards make the board's Team mode, by name, when it has any.
+func (a *App) askTeamBoards(ctx context.Context, js JiraAPI, s *config.Space) error {
+	boards, err := a.teamBoardChoices(ctx, js, s.Key)
+	if err != nil {
+		fmt.Fprintf(a.Stderr, "! boards of %s unavailable: %v\n", s.Key, err)
+		return nil
+	}
+	if len(boards) == 0 {
+		return nil
+	}
+	ans, err := a.ask(fmt.Sprintf("Team boards for %s (names, comma separated; %d scrum boards)", s.Key, len(boards)), "")
+	if err != nil {
+		return err
+	}
+	for _, name := range splitList(ans) {
+		b, n := config.MatchBoard(boards, name)
+		switch {
+		case n == 0:
+			fmt.Fprintf(a.Stderr, "! no scrum board of %s is called %q\n", s.Key, name)
+		case n > 1:
+			fmt.Fprintf(a.Stderr, "! %q fits several boards of %s: type more of its name\n", name, s.Key)
+		case !slices.ContainsFunc(s.TeamBoards, func(t config.TeamBoard) bool { return t.ID == b.ID }):
+			s.TeamBoards = append(s.TeamBoards, b)
+			fmt.Fprintf(a.Stderr, "  %s team board: %s\n", s.Key, b.Name)
+		}
+	}
+	return nil
 }
 
 // suggestRepos lists the repositories holding the pull requests Jira links to the user's sprint tickets

@@ -14,8 +14,11 @@ import (
 // fakeJira serves canned Jira data and records the credentials it was built with.
 type fakeJira struct {
 	mu sync.Mutex
-	// team answers the team search; jqls records every search.
-	team       []jira.Issue
+	// team answers the team search; jqls records every search; sprints answers ActiveSprints.
+	team    []jira.Issue
+	sprints map[int][]int
+	// boards answers Boards per space.
+	boards     map[string][]jira.Board
 	jqls       []string
 	fieldNames []string
 	token      string
@@ -50,6 +53,16 @@ func (f *fakeJira) Search(_ context.Context, jql string, _ []string) ([]jira.Iss
 	}
 	f.jql = jql
 	return f.issues, f.searchErr
+}
+
+func (f *fakeJira) Boards(_ context.Context, space string) ([]jira.Board, error) {
+	return f.boards[space], nil
+}
+
+func (f *fakeJira) ActiveSprints(_ context.Context, board int) ([]int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sprints[board], nil
 }
 
 func (f *fakeJira) Issue(_ context.Context, key string, _ ...string) (jira.Issue, error) {
