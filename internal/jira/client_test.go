@@ -451,3 +451,43 @@ func TestActiveSprints(t *testing.T) {
 		t.Errorf("query = %s", (*calls)[0].query)
 	}
 }
+
+func TestTransitionsMarkThoseWithAForm(t *testing.T) {
+	c, calls := server(t, map[string]string{
+		"GET /rest/api/3/issue/DEMO-12/transitions": `{"transitions":[
+ {"id":"31","name":"Commit Review","hasScreen":false,"to":{"name":"In Review"}},
+ {"id":"41","name":"In progress","hasScreen":true,"to":{"name":"In Progress"},"fields":{
+  "customfield_10028":{"required":false,"name":"Story Points","schema":{"type":"number","custom":"com.atlassian.jira.plugin.system.customfieldtypes:float"}},
+  "customfield_10020":{"required":false,"name":"Sprint","schema":{"type":"array","custom":"com.pyxis.greenhopper.jira:gh-sprint"}}}},
+ {"id":"42","name":"Estimate","hasScreen":true,"to":{"name":"Estimated"},"fields":{"customfield_10028":{"required":true,"hasDefaultValue":false,"name":"Story Points"}}},
+ {"id":"51","name":"Blocked","hasScreen":true,"to":{"name":"Blocked"},"fields":{"customfield_10300":{"required":false,"name":"Reason for Blockage"}}},
+ {"id":"61","name":"Ceased","hasScreen":true,"to":{"name":"Ceased"}}]}`,
+	})
+	got, err := c.Transitions(context.Background(), "DEMO-12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Transition{
+		{ID: "31", Name: "Commit Review", To: "In Review"},
+		{ID: "41", Name: "In progress", To: "In Progress"},
+		{ID: "42", Name: "Estimate", To: "Estimated", NeedsForm: true},
+		{ID: "51", Name: "Blocked", To: "Blocked", NeedsForm: true},
+		{ID: "61", Name: "Ceased", To: "Ceased"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("transitions = %+v", got)
+	}
+	if !strings.Contains((*calls)[0].query, "expand=transitions.fields") {
+		t.Errorf("query = %s", (*calls)[0].query)
+	}
+}
+
+func TestTransitionPostsTheTransitionID(t *testing.T) {
+	c, calls := server(t, map[string]string{"POST /rest/api/3/issue/DEMO-12/transitions": ""})
+	if err := c.Transition(context.Background(), "DEMO-12", "31"); err != nil {
+		t.Fatal(err)
+	}
+	if got := (*calls)[0].body; !reflect.DeepEqual(got, map[string]any{"transition": map[string]any{"id": "31"}}) {
+		t.Errorf("body = %v", got)
+	}
+}

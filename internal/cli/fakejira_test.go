@@ -18,7 +18,12 @@ type fakeJira struct {
 	team    []jira.Issue
 	sprints map[int][]int
 	// boards answers Boards per space.
-	boards     map[string][]jira.Board
+	boards map[string][]jira.Board
+	// transitions answers Transitions per key; moved records every Transition as "KEY id".
+	transitions map[string][]jira.Transition
+	moved       []string
+	moveErr     error
+
 	jqls       []string
 	fieldNames []string
 	token      string
@@ -57,6 +62,15 @@ func (f *fakeJira) Search(_ context.Context, jql string, _ []string) ([]jira.Iss
 
 func (f *fakeJira) Boards(_ context.Context, space string) ([]jira.Board, error) {
 	return f.boards[space], nil
+}
+
+func (f *fakeJira) Transitions(_ context.Context, key string) ([]jira.Transition, error) {
+	return f.transitions[key], nil
+}
+
+func (f *fakeJira) Transition(_ context.Context, key, id string) error {
+	f.moved = append(f.moved, key+" "+id)
+	return f.moveErr
 }
 
 func (f *fakeJira) ActiveSprints(_ context.Context, board int) ([]int, error) {

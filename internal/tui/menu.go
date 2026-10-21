@@ -72,6 +72,7 @@ func (m Model) buildMenu(it item) *menu {
 	for _, r := range t.Attention() {
 		items = append(items, menuItem{label: fixLabel(r), key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
 	}
+	items = append(items, m.moveItem(t.Key))
 	items = append(items,
 		menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }},
 		menuItem{label: "Copy the ticket context (.ticket.md)", run: func() tea.Cmd { return a.CopyContext(t.Key) }},
@@ -96,6 +97,7 @@ func (m Model) prMenu(it item) *menu {
 	if t.URL != "" {
 		items = append(items, menuItem{label: "Open " + string(t.Key) + " in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
 	}
+	items = append(items, m.moveItem(t.Key))
 	if pr.URL != "" {
 		items = append(items, menuItem{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
 	}
@@ -104,6 +106,11 @@ func (m Model) prMenu(it item) *menu {
 	}
 	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
 	return &menu{title: fmt.Sprintf("Pull request #%d · %s", pr.Number, t.Key), items: items}
+}
+
+// moveItem asks Jira where the ticket can move from its current status; the choices open as a menu.
+func (m Model) moveItem(k ticket.Key) menuItem {
+	return menuItem{label: "Move to… ▸", run: func() tea.Cmd { return m.actions.Transitions(k) }}
 }
 
 // fixLabel words the fix for a reason; every fix sends all of the ticket's feedback at once.
@@ -209,9 +216,14 @@ func (m Model) runMenuItem(i int) (tea.Model, tea.Cmd) {
 
 func (m Model) menuView() string {
 	mn := m.menu
+	const linkKeys = "enter run · c copy link · esc close"
 	width := lipgloss.Width(mn.title) + 6
 	for _, it := range mn.items {
 		width = max(width, lipgloss.Width(it.label)+8)
+		// The footer grows on an item with a link; sizing for it up front keeps the box still.
+		if it.link != "" {
+			width = max(width, lipgloss.Width(linkKeys)+4)
+		}
 	}
 	lines := []string{bold.Render(mn.title), ""}
 	for i, it := range mn.items {
@@ -229,7 +241,7 @@ func (m Model) menuView() string {
 	}
 	keys := "enter run · esc close"
 	if mn.items[mn.sel].link != "" {
-		keys = "enter run · c copy link · esc close"
+		keys = linkKeys
 	}
 	lines = append(lines, "", dim.Render(keys))
 	return menuBox.Render(strings.Join(lines, "\n"))

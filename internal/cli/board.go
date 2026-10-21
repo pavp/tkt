@@ -226,6 +226,35 @@ func (b *boardActions) JiraBoards(space string) tea.Cmd {
 	}
 }
 
+func (b *boardActions) Transitions(key ticket.Key) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+		defer cancel()
+		js, err := b.a.jiraClient(b.cfg())
+		if err != nil {
+			return tui.TransitionsMsg{Key: key, Err: err}
+		}
+		trs, err := js.Transitions(ctx, string(key))
+		out := make([]tui.Transition, len(trs))
+		for i, t := range trs {
+			out[i] = tui.Transition{ID: t.ID, To: t.To, NeedsForm: t.NeedsForm}
+		}
+		return tui.TransitionsMsg{Key: key, Transitions: out, Err: err}
+	}
+}
+
+func (b *boardActions) Transition(key ticket.Key, id, to string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+		defer cancel()
+		js, err := b.a.jiraClient(b.cfg())
+		if err == nil {
+			err = js.Transition(ctx, string(key), id)
+		}
+		return tui.TransitionedMsg{Key: key, To: to, Err: err}
+	}
+}
+
 func (b *boardActions) SaveState(s tui.BoardState) tea.Cmd {
 	return func() tea.Msg {
 		if err := b.a.saveBoardState(s); err != nil {
