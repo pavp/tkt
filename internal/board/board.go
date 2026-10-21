@@ -370,12 +370,13 @@ func byRepoNumber(a, b ticket.PullRequest) int {
 // waits in To Do unless its status is overridden.
 func ToTicket(c *config.Config, is jira.Issue, url string) ticket.Ticket {
 	t := ticket.Ticket{
-		Key:     ticket.Key(is.Key),
-		Type:    is.Type,
-		Summary: is.Summary,
-		Status:  is.Status,
-		Parent:  ticket.Key(is.Parent),
-		URL:     url,
+		Assignee: is.Assignee,
+		Key:      ticket.Key(is.Key),
+		Type:     is.Type,
+		Summary:  is.Summary,
+		Status:   is.Status,
+		Parent:   ticket.Key(is.Parent),
+		URL:      url,
 	}
 	space, _ := c.Space(t.Space())
 	overrides := space.Categories()

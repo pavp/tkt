@@ -769,3 +769,10 @@ func TestFetchSinceKeepsIgnoredPullRequestsInTheCachedPanel(t *testing.T) {
 		t.Errorf("the previous snapshot was changed: %+v", prev.Panels["DEMO-1"].PRs)
 	}
 }
+
+func TestToTicketKeepsTheAssignee(t *testing.T) {
+	c := &config.Config{}
+	if got := ToTicket(c, jira.Issue{Key: "DEMO-1", Assignee: "Ana López"}, ""); got.Assignee != "Ana López" {
+		t.Errorf("assignee = %q", got.Assignee)
+	}
+}

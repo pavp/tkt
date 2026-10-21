@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -64,6 +65,7 @@ func server(t *testing.T, routes map[string]string) (*Client, *[]recorded) {
 
 const issueJSON = `{"key":"DEMO-12","fields":{
  "summary":"Filter accounts by date",
+ "assignee":{"displayName":"Ana López","accountId":"a1"},
  "issuetype":{"name":"Story","subtask":false},
  "status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},
  "updated":"2026-10-18T09:30:00.000+0200",
@@ -89,6 +91,12 @@ func TestSearchPaginatesAndDecodes(t *testing.T) {
 	}
 	if first.Updated.IsZero() {
 		t.Error("updated not parsed")
+	}
+	if first.Assignee != "Ana López" || got[1].Assignee != "" {
+		t.Errorf("assignees = %q, %q", first.Assignee, got[1].Assignee)
+	}
+	if fields, _ := (*calls)[0].body["fields"].([]any); !slices.Contains(fields, any("assignee")) {
+		t.Errorf("the search should ask for the assignee: %v", fields)
 	}
 	if got[1].Parent != "DEMO-12" || !got[1].Subtask {
 		t.Errorf("second = %+v", got[1])

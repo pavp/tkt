@@ -160,12 +160,14 @@ type Issue struct {
 	Subtask        bool
 	Status         string
 	StatusCategory string
-	Parent         string
-	Updated        time.Time
-	Description    json.RawMessage
-	Attachments    []Attachment
-	Sprints        []Sprint
-	Fields         map[string]json.RawMessage
+	// Assignee is the display name of the person the issue is assigned to; empty when unassigned.
+	Assignee    string
+	Parent      string
+	Updated     time.Time
+	Description json.RawMessage
+	Attachments []Attachment
+	Sprints     []Sprint
+	Fields      map[string]json.RawMessage
 }
 
 type Attachment struct {
@@ -196,6 +198,9 @@ type issueFields struct {
 	Parent *struct {
 		Key string `json:"key"`
 	} `json:"parent"`
+	Assignee *struct {
+		DisplayName string `json:"displayName"`
+	} `json:"assignee"`
 	Updated     string          `json:"updated"`
 	Description json.RawMessage `json:"description"`
 	Attachment  []Attachment    `json:"attachment"`
@@ -224,6 +229,9 @@ func (r rawIssue) decode(sprintField string) (Issue, error) {
 	}
 	if f.Parent != nil {
 		is.Parent = f.Parent.Key
+	}
+	if f.Assignee != nil {
+		is.Assignee = f.Assignee.DisplayName
 	}
 	if f.Updated != "" {
 		if t, err := time.Parse("2006-01-02T15:04:05.000-0700", f.Updated); err == nil {
@@ -361,7 +369,7 @@ func FieldText(raw json.RawMessage) string {
 }
 
 // ListFields are the fields the board needs; Issue() asks for more.
-var ListFields = []string{"summary", "issuetype", "status", "parent", "updated", SprintFieldName}
+var ListFields = []string{"summary", "issuetype", "status", "parent", "updated", "assignee", SprintFieldName}
 
 // Search runs jql over every result page (POST /rest/api/3/search/jql).
 func (c *Client) Search(ctx context.Context, jql string, fields []string) ([]Issue, error) {
