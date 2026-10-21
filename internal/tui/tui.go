@@ -60,6 +60,11 @@ type Actions interface {
 	NativePicker() bool
 	// SaveState remembers the board's state for its next opening; a failure arrives as a StatusMsg.
 	SaveState(s BoardState) tea.Cmd
+	// Transitions lists the statuses key can move to in Jira; they arrive as a TransitionsMsg.
+	Transitions(key ticket.Key) tea.Cmd
+	// Transition moves key in Jira through transition id to status to; the outcome arrives as a
+	// TransitionedMsg. The board calls it only after the user confirmed.
+	Transition(key ticket.Key, id, to string) tea.Cmd
 }
 
 // BoardState is what the board remembers between openings.
@@ -722,6 +727,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = string(msg)
 	case StartChoicesMsg:
 		return m.startChoices(msg)
+	case TransitionsMsg:
+		return m.transitions(msg)
+	case TransitionedMsg:
+		return m.transitioned(msg)
 	case DetailMsg:
 		if m.detail == nil || m.detail.key != msg.Key {
 			return m, nil

@@ -51,6 +51,19 @@ type recorder struct {
 	jiraFields []string
 	// known is the ticket the last Detail was given.
 	known *ticket.Ticket
+	// transitions answers Transitions.
+	transitions []Transition
+}
+
+func (r *recorder) Transitions(k ticket.Key) tea.Cmd {
+	r.calls = append(r.calls, "transitions "+string(k))
+	tr := r.transitions
+	return func() tea.Msg { return TransitionsMsg{Key: k, Transitions: tr} }
+}
+
+func (r *recorder) Transition(k ticket.Key, id, to string) tea.Cmd {
+	r.calls = append(r.calls, "transition "+string(k)+" "+id)
+	return func() tea.Msg { return TransitionedMsg{Key: k, To: to} }
 }
 
 func (r *recorder) JiraBoards(space string) tea.Cmd {
@@ -2738,5 +2751,94 @@ func TestListShowsSubtasksUnderTheirParent(t *testing.T) {
 	}
 	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Actions for DEMO-11") {
 		t.Errorf("a subtask has its own actions:\n%s", v)
+	}
+}
+
+func TestMoveToListsJiraStatusesAndConfirmsBeforeMoving(t *testing.T) {
+	r := &recorder{transitions: []Transition{
+		{ID: "31", To: "In Review"},
+		{ID: "32", To: "In Review"},
+		{ID: "11", To: "To Do"},
+		{ID: "51", To: "Blocked", NeedsForm: true},
+	}}
+	m := selectMenuItem(t, press(loaded(r), "l", "enter"), "Move to…")
+	m, msg := run(m, "enter")
+	if r.last() != "transitions DEMO-1" {
+		t.Fatalf("Move to… ran %v", r.calls)
+	}
+	m, _ = m.Update(msg)
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "Move DEMO-1 to") || strings.Count(v, "In Review") != 1 || !strings.Contains(v, "To Do") || !strings.Contains(v, "Blocked · in Jira ↗") {
+		t.Fatalf("the statuses Jira allows, each once, should be listed:\n%s", v)
+	}
+
+	confirm := press(selectMenuItem(t, m, "In Review"), "enter")
+	if v := stripANSI(confirm.View()); !strings.Contains(v, "Move DEMO-1 to In Review?") || !strings.Contains(v, "Yes, move it") {
+		t.Fatalf("moving should ask first:\n%s", v)
+	}
+	if slices.ContainsFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, "transition ") }) {
+		t.Fatalf("moved before the confirmation: %v", r.calls)
+	}
+	if v := stripANSI(press(confirm, "esc").View()); !strings.Contains(v, "Move DEMO-1 to") {
+		t.Errorf("esc should go back to the statuses:\n%s", v)
+	}
+	if v := stripANSI(press(selectMenuItem(t, confirm, "Cancel"), "enter").View()); strings.Contains(v, "Move DEMO-1") {
+		t.Errorf("Cancel should close without moving:\n%s", v)
+	}
+
+	m, msg = run(selectMenuItem(t, confirm, "Yes, move it"), "enter")
+	if r.last() != "transition DEMO-1 31" {
+		t.Fatalf("Yes ran %v", r.calls)
+	}
+	m, cmd := m.Update(msg)
+	if !strings.Contains(stripANSI(m.View()), "DEMO-1 moved to In Review") || cmd == nil {
+		t.Fatalf("a move should say so and refresh:\n%s", stripANSI(m.View()))
+	}
+	cmd()
+	if !slices.Contains(r.calls, "refresh") {
+		t.Errorf("no refresh after the move: %v", r.calls)
+	}
+
+	_, msg = run(selectMenuItem(t, press(loaded(r), "l", "enter"), "Move to…"), "enter")
+	m, _ = loaded(r).Update(msg)
+	if _, msg := run(selectMenuItem(t, m, "Blocked"), "enter"); msg != StatusMsg("open https://example.atlassian.net/browse/DEMO-1") {
+		t.Errorf("a status with a required form should open Jira, got %v", msg)
+	}
+}
+
+func TestMoveToReportsFailures(t *testing.T) {
+	m := loaded(&recorder{})
+	m, _ = m.Update(TransitionsMsg{Key: "DEMO-1", Err: errors.New("jira down")})
+	if v := stripANSI(m.View()); !strings.Contains(v, "could not load the statuses of DEMO-1: jira down") {
+		t.Errorf("failure to list:\n%s", v)
+	}
+	m, _ = m.Update(TransitionsMsg{Key: "DEMO-1"})
+	if v := stripANSI(m.View()); !strings.Contains(v, "Jira offers no status change for DEMO-1") {
+		t.Errorf("nothing to offer:\n%s", v)
+	}
+	m, cmd := m.Update(TransitionedMsg{Key: "DEMO-1", To: "In Review", Err: errors.New("403 Forbidden")})
+	if v := stripANSI(m.View()); !strings.Contains(v, "could not move DEMO-1 to In Review: 403 Forbidden") || cmd != nil {
+		t.Errorf("failed move:\n%s", v)
+	}
+}
+
+func TestTeamTicketsCannotBeMoved(t *testing.T) {
+	snap := teamSnapshot()
+	i := slices.IndexFunc(snap.Tickets, func(t ticket.Ticket) bool { return t.Team })
+	mn := New(snap, true, &recorder{}, ViewList).buildMenu(item{key: snap.Tickets[i].Key, ticket: &snap.Tickets[i]})
+	for _, it := range mn.items {
+		if strings.Contains(it.label, "Move to") {
+			t.Errorf("a teammate's ticket offered %q", it.label)
+		}
+	}
+}
+
+func TestMenuKeepsItsSizeWhileMovingOverLinks(t *testing.T) {
+	r := &recorder{transitions: []Transition{{ID: "31", To: "Done"}, {ID: "51", To: "Blocked", NeedsForm: true}}}
+	m, _ := loaded(r).Update(TransitionsMsg{Key: "DEMO-1", Transitions: r.transitions})
+	box := func(m tea.Model) (int, int) { v := m.(Model).menuView(); return lipgloss.Width(v), lipgloss.Height(v) }
+	w, h := box(m)
+	if w2, h2 := box(press(m, "s")); w2 != w || h2 != h {
+		t.Errorf("menu went from %dx%d to %dx%d on an item with a link", w, h, w2, h2)
 	}
 }

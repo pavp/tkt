@@ -642,3 +642,29 @@ func TestBoardActionsListTheSpacesBoards(t *testing.T) {
 		t.Errorf("listed = %+v", msg)
 	}
 }
+
+func TestBoardActionsMoveTicketsInJira(t *testing.T) {
+	h, _ := listHarness(t)
+	h.jira.transitions = map[string][]jira.Transition{"DEMO-1": {
+		{ID: "31", Name: "Commit Review", To: "In Review"},
+		{ID: "51", Name: "Blocked", To: "Blocked", NeedsForm: true},
+	}}
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	listed, ok := b.Transitions("DEMO-1")().(tui.TransitionsMsg)
+	want := []tui.Transition{{ID: "31", To: "In Review"}, {ID: "51", To: "Blocked", NeedsForm: true}}
+	if !ok || listed.Err != nil || listed.Key != "DEMO-1" || !slices.Equal(listed.Transitions, want) {
+		t.Errorf("listed = %+v", listed)
+	}
+	moved, ok := b.Transition("DEMO-1", "31", "In Review")().(tui.TransitionedMsg)
+	if !ok || moved != (tui.TransitionedMsg{Key: "DEMO-1", To: "In Review"}) || !slices.Equal(h.jira.moved, []string{"DEMO-1 31"}) {
+		t.Errorf("moved = %+v, calls %v", moved, h.jira.moved)
+	}
+	h.jira.moveErr = errors.New("403 Forbidden")
+	if failed := b.Transition("DEMO-1", "31", "In Review")().(tui.TransitionedMsg); failed.Err == nil {
+		t.Error("a failed move should carry its error")
+	}
+}

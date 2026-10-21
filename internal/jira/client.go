@@ -276,7 +276,7 @@ func (c *Client) resolveFields(ctx context.Context, fields []string) ([]string, 
 				return nil, err
 			}
 			for _, fd := range all {
-				if fd.Schema.Custom == "com.pyxis.greenhopper.jira:gh-sprint" {
+				if fd.Schema.Custom == sprintSchema {
 					c.sprintField = fd.ID
 					break
 				}
@@ -579,6 +579,60 @@ func (c *Client) ActiveSprints(ctx context.Context, board int) ([]int, error) {
 		ids[i] = v.ID
 	}
 	return ids, nil
+}
+
+// sprintSchema is the custom type of Jira Software's Sprint field.
+const sprintSchema = "com.pyxis.greenhopper.jira:gh-sprint"
+
+// Transition moves an issue from its current status to To. NeedsForm marks one whose screen asks for
+// something only Jira's own form can fill: any field but the sprint and story points, which keep their
+// values, or those two when required without a default.
+type Transition struct {
+	ID        string
+	Name      string
+	To        string
+	NeedsForm bool
+}
+
+// Transitions lists the transitions Jira allows from the issue's current status.
+func (c *Client) Transitions(ctx context.Context, key string) ([]Transition, error) {
+	var body struct {
+		Transitions []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			To   struct {
+				Name string `json:"name"`
+			} `json:"to"`
+			Fields map[string]struct {
+				Required        bool   `json:"required"`
+				HasDefaultValue bool   `json:"hasDefaultValue"`
+				Name            string `json:"name"`
+				Schema          struct {
+					Custom string `json:"custom"`
+				} `json:"schema"`
+			} `json:"fields"`
+		} `json:"transitions"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(key)+"/transitions?expand=transitions.fields", nil, &body); err != nil {
+		return nil, err
+	}
+	out := make([]Transition, len(body.Transitions))
+	for i, t := range body.Transitions {
+		out[i] = Transition{ID: t.ID, Name: t.Name, To: t.To.Name}
+		for _, f := range t.Fields {
+			planning := f.Schema.Custom == sprintSchema || strings.Contains(strings.ToLower(f.Name), "story point")
+			if !planning || f.Required && !f.HasDefaultValue {
+				out[i].NeedsForm = true
+			}
+		}
+	}
+	return out, nil
+}
+
+// Transition moves the issue through the transition with that id.
+func (c *Client) Transition(ctx context.Context, key, id string) error {
+	body := map[string]any{"transition": map[string]string{"id": id}}
+	return c.do(ctx, http.MethodPost, "/rest/api/3/issue/"+url.PathEscape(key)+"/transitions", body, nil)
 }
 
 type Sprint struct {

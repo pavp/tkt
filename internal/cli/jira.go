@@ -13,7 +13,7 @@ import (
 	"github.com/pavp/tkt/internal/ticket"
 )
 
-// JiraAPI is the read-only Jira surface commands use.
+// JiraAPI is the Jira surface commands use. Its only write, Transition, runs after the board's confirmation.
 type JiraAPI interface {
 	Myself(ctx context.Context) (jira.User, error)
 	Search(ctx context.Context, jql string, fields []string) ([]jira.Issue, error)
@@ -28,6 +28,8 @@ type JiraAPI interface {
 	Download(ctx context.Context, url string, w io.Writer, maxBytes int64) error
 	ActiveSprints(ctx context.Context, board int) ([]int, error)
 	Boards(ctx context.Context, space string) ([]jira.Board, error)
+	Transitions(ctx context.Context, key string) ([]jira.Transition, error)
+	Transition(ctx context.Context, key, id string) error
 }
 
 // jiraClient builds a Jira client from the configuration and the stored token.
