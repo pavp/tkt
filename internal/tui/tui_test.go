@@ -24,6 +24,8 @@ import (
 
 type recorder struct {
 	calls []string
+	// states records every SaveState.
+	states []BoardState
 	// choices is what StartChoices reports.
 	choices StartChoices
 	cfg     config.Config
@@ -76,6 +78,10 @@ func (r *recorder) ListDirs(path string) tea.Cmd {
 }
 
 func (r *recorder) NativePicker() bool { return !r.noNative }
+func (r *recorder) SaveState(s BoardState) tea.Cmd {
+	r.states = append(r.states, s)
+	return nil
+}
 
 func (r *recorder) ListRepos(owner string) tea.Cmd {
 	r.listed = append(r.listed, "repos "+owner)
@@ -2142,5 +2148,79 @@ func TestCardCutsTheTypeBeforeTheAgent(t *testing.T) {
 	plain := ansi.Strip(card(tk, 30, false, false, "blocked"))
 	if !strings.Contains(plain, "! needs you") || !strings.Contains(plain, "A very long") {
 		t.Errorf("the type should shrink, never the agent:\n%s", plain)
+	}
+}
+
+func TestRepoFilterHidesRepositoriesInThePRsFilter(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2", "R")
+	v := stripANSI(m.View())
+	for _, want := range []string{"Repositories", "[x] example-org/api", "[x] example-org/web", "a all", "Apply"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("filter modal lacks %q:\n%s", want, v)
+		}
+	}
+	m = press(m, " ", "enter")
+	v = stripANSI(m.View())
+	if strings.Contains(v, "#816") || !strings.Contains(v, "#815") || !strings.Contains(v, "Showing 1 of 2 repositories · R change") {
+		t.Errorf("api should be hidden with a notice:\n%s", v)
+	}
+	if len(r.states) == 0 || !slices.Equal(r.states[len(r.states)-1].HiddenRepos, []string{"example-org/api"}) {
+		t.Errorf("saved states = %+v", r.states)
+	}
+	m = press(m, "R", "a", "a", "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "pick at least one repository") {
+		t.Errorf("unchecking every repository should be refused:\n%s", v)
+	}
+	m = press(m, "esc", "R", "a", "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "#816") || strings.Contains(v, "Showing") {
+		t.Errorf("a all should show every repository again:\n%s", v)
+	}
+}
+
+func TestRepoFilterAppliesToAll(t *testing.T) {
+	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenRepos: []string{"example-org/web"}}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "DEMO-4") || strings.Contains(v, "#820") || !strings.Contains(v, "Showing 1 of 2 repositories") {
+		t.Fatalf("a ticket with a pull request in a shown repository stays; the web review hides:\n%s", v)
+	}
+	m = tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenRepos: []string{"example-org/web", "example-org/api"}}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v = stripANSI(m.View())
+	if strings.Contains(v, "DEMO-4") || !strings.Contains(v, "DEMO-1") || !strings.Contains(v, "DEMO-3") {
+		t.Errorf("a ticket hides only when all its pull requests are in hidden repositories:\n%s", v)
+	}
+	if !strings.Contains(v, "1 All 3") {
+		t.Errorf("All counts what it shows:\n%s", v)
+	}
+	for _, view := range []string{ViewColumns} {
+		m := tea.Model(New(prsSnapshot(), false, &recorder{}, view).WithState(BoardState{HiddenRepos: []string{"example-org/web"}}))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+		if v := stripANSI(m.View()); strings.Contains(v, "#820") || !strings.Contains(v, "Showing 1 of 2 repositories") {
+			t.Errorf("%s: the review strip hides hidden repositories with the notice:\n%s", view, v)
+		}
+	}
+}
+
+func TestRepoFilterNoticeOpensTheModalAndFitsTheTrayPanel(t *testing.T) {
+	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenRepos: []string{"example-org/api"}}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	v := stripANSI(m.View())
+	y := lineIndex(v, "Showing 1 of 2")
+	if y < 0 {
+		t.Fatalf("no notice:\n%s", v)
+	}
+	m = click(m, 5, y)
+	v = stripANSI(m.View())
+	if !strings.Contains(v, "[ ] example-org/api") {
+		t.Fatalf("a click on the notice should open the filter:\n%s", v)
+	}
+	for _, l := range strings.Split(v, "\n") {
+		if lipgloss.Width(l) > 56 {
+			t.Errorf("wider than the tray panel: %q", l)
+		}
 	}
 }

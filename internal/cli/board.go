@@ -37,7 +37,7 @@ func newBoardCmd(a *App) *cobra.Command {
 		Short: "Interactive board: columns or list, filters, start, fix CI (the Herdr popup)",
 		Long: "Interactive board. It opens instantly from the cached board and refreshes in the background.\n" +
 			"Keys: arrows, wasd or hjkl move · enter actions menu · f send CI failures or review comments to the agent ·\n" +
-			"i ticket pane · o Jira · p pull request · O/P copy their link · n needs you · r reviews · v columns/list · g refresh · q close.\n" +
+			"i ticket pane · o Jira · p pull request · O/P copy their link · n needs you · r reviews · v columns/list · R repositories to show · g refresh · q close.\n" +
 			"When tkt is not configured, it offers to run the setup; without a Jira token and a cached board, to connect Jira\n" +
 			"first (with a cached board it opens at once and its status line says how to connect).",
 		Args: cobra.NoArgs,
@@ -59,7 +59,7 @@ func newBoardCmd(a *App) *cobra.Command {
 			forceColor(a.Env.Getenv)
 			defer a.claimBoardPane()()
 			actions := &boardActions{a: a, c: c, ctx: cmd.Context()}
-			prog := tea.NewProgram(tui.New(snap, have, actions, view), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
+			prog := tea.NewProgram(tui.New(snap, have, actions, view).WithState(a.loadBoardState()), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
 			follow, stop := context.WithCancel(cmd.Context())
 			defer stop()
 			go a.followDaemon(follow, actions, prog.Send)
@@ -211,6 +211,15 @@ func (b *boardActions) ListRepos(owner string) tea.Cmd {
 }
 
 func (b *boardActions) NativePicker() bool { return b.a.nativePicker() }
+
+func (b *boardActions) SaveState(s tui.BoardState) tea.Cmd {
+	return func() tea.Msg {
+		if err := b.a.saveBoardState(s); err != nil {
+			return tui.StatusMsg("could not remember the board's filters: " + err.Error())
+		}
+		return nil
+	}
+}
 
 func (b *boardActions) JiraFields() tea.Cmd {
 	return func() tea.Msg {
