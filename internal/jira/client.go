@@ -160,12 +160,14 @@ type Issue struct {
 	Subtask        bool
 	Status         string
 	StatusCategory string
-	Parent         string
-	Updated        time.Time
-	Description    json.RawMessage
-	Attachments    []Attachment
-	Sprints        []Sprint
-	Fields         map[string]json.RawMessage
+	// Assignee is the display name of the person the issue is assigned to; empty when unassigned.
+	Assignee    string
+	Parent      string
+	Updated     time.Time
+	Description json.RawMessage
+	Attachments []Attachment
+	Sprints     []Sprint
+	Fields      map[string]json.RawMessage
 }
 
 type Attachment struct {
@@ -196,6 +198,9 @@ type issueFields struct {
 	Parent *struct {
 		Key string `json:"key"`
 	} `json:"parent"`
+	Assignee *struct {
+		DisplayName string `json:"displayName"`
+	} `json:"assignee"`
 	Updated     string          `json:"updated"`
 	Description json.RawMessage `json:"description"`
 	Attachment  []Attachment    `json:"attachment"`
@@ -225,6 +230,9 @@ func (r rawIssue) decode(sprintField string) (Issue, error) {
 	if f.Parent != nil {
 		is.Parent = f.Parent.Key
 	}
+	if f.Assignee != nil {
+		is.Assignee = f.Assignee.DisplayName
+	}
 	if f.Updated != "" {
 		if t, err := time.Parse("2006-01-02T15:04:05.000-0700", f.Updated); err == nil {
 			is.Updated = t
@@ -232,6 +240,7 @@ func (r rawIssue) decode(sprintField string) (Issue, error) {
 	}
 	if raw, ok := r.Fields[sprintField]; ok && sprintField != "" {
 		var sprints []struct {
+			ID      int    `json:"id"`
 			Name    string `json:"name"`
 			State   string `json:"state"`
 			EndDate string `json:"endDate"`
@@ -239,7 +248,7 @@ func (r rawIssue) decode(sprintField string) (Issue, error) {
 		if json.Unmarshal(raw, &sprints) == nil {
 			space, _, _ := strings.Cut(r.Key, "-")
 			for _, sp := range sprints {
-				out := Sprint{Space: space, Name: sp.Name, State: sp.State}
+				out := Sprint{ID: sp.ID, Space: space, Name: sp.Name, State: sp.State}
 				if t, err := time.Parse(time.RFC3339, sp.EndDate); err == nil {
 					out.End = t
 				}
@@ -361,7 +370,7 @@ func FieldText(raw json.RawMessage) string {
 }
 
 // ListFields are the fields the board needs; Issue() asks for more.
-var ListFields = []string{"summary", "issuetype", "status", "parent", "updated", SprintFieldName}
+var ListFields = []string{"summary", "issuetype", "status", "parent", "updated", "assignee", SprintFieldName}
 
 // Search runs jql over every result page (POST /rest/api/3/search/jql).
 func (c *Client) Search(ctx context.Context, jql string, fields []string) ([]Issue, error) {
@@ -403,11 +412,26 @@ func (c *Client) Search(ctx context.Context, jql string, fields []string) ([]Iss
 // finished tickets the user once held, since teams often reassign a ticket (to QA, to a reviewer) when
 // it is done.
 func MySprintJQL(spaces []string) string {
+	return fmt.Sprintf("sprint in openSprints() AND project in (%s) AND (assignee = currentUser() OR (statusCategory = Done AND assignee WAS currentUser())) ORDER BY updated DESC", quotedSpaces(spaces))
+}
+
+func quotedSpaces(spaces []string) string {
 	quoted := make([]string, len(spaces))
 	for i, s := range spaces {
 		quoted[i] = `"` + s + `"`
 	}
-	return fmt.Sprintf("sprint in openSprints() AND project in (%s) AND (assignee = currentUser() OR (statusCategory = Done AND assignee WAS currentUser())) ORDER BY updated DESC", strings.Join(quoted, ", "))
+	return strings.Join(quoted, ", ")
+}
+
+// TeamSprintJQL selects the rest of the given sprints' tickets in the given spaces: assigned to someone else
+// or to nobody, leaving out what MySprintJQL already holds. The sprints are the user's own, since a space's
+// open sprints are every team's.
+func TeamSprintJQL(spaces []string, sprintIDs []int) string {
+	ids := make([]string, len(sprintIDs))
+	for i, id := range sprintIDs {
+		ids[i] = strconv.Itoa(id)
+	}
+	return fmt.Sprintf("sprint in (%s) AND project in (%s) AND (assignee != currentUser() OR assignee IS EMPTY) AND NOT (statusCategory = Done AND assignee WAS currentUser()) ORDER BY updated DESC", strings.Join(ids, ", "), quotedSpaces(spaces))
 }
 
 // Issue fetches one issue with the board fields, its description, attachments, and any extra fields.
@@ -508,6 +532,7 @@ func (c *Client) Projects(ctx context.Context) ([]Project, error) {
 }
 
 type Sprint struct {
+	ID    int       `json:"id,omitempty"`
 	Space string    `json:"space"`
 	Name  string    `json:"name"`
 	State string    `json:"state,omitempty"`

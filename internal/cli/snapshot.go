@@ -52,7 +52,7 @@ func (a *App) fetchSnapshot(ctx context.Context, c *config.Config) (board.Snapsh
 			return board.Snapshot{}, err
 		}
 		prev, _, _ := a.cache().Load()
-		snap, err := board.FetchSince(ctx, c, js, a.NewGitHub(c), a.Now(), prev)
+		snap, err := board.FetchWith(ctx, c, js, a.NewGitHub(c), a.Now(), prev, board.Options{Team: a.loadBoardState().Team})
 		if !errors.Is(err, jira.ErrUnauthorized) || retried {
 			return snap, err
 		}

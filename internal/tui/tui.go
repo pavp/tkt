@@ -68,6 +68,8 @@ type BoardState struct {
 	Collapsed []string `json:"collapsed,omitempty"`
 	// View is the view the user last chose, ViewColumns or ViewList.
 	View string `json:"view,omitempty"`
+	// Team asks the sync for the team's tickets too, those assigned to others or to nobody.
+	Team bool `json:"team,omitempty"`
 }
 
 type ClonesFoundMsg struct {
@@ -159,10 +161,12 @@ type Model struct {
 	hiddenRepos map[string]bool
 	// collapsed holds the PRs filter's collapsed groups.
 	collapsed map[string]bool
-	menu      *menu
-	detail    *detailView
-	settings  *settingsView
-	picker    *picker
+	// team shows the team's tickets beside the user's.
+	team     bool
+	menu     *menu
+	detail   *detailView
+	settings *settingsView
+	picker   *picker
 	// colOffset is how far each column is scrolled; an array so copies of the model never share it.
 	colOffset [8]int
 	// inStrip means the keyboard cursor is on the review chips above the columns, at stripSel.
@@ -248,12 +252,13 @@ func (m Model) WithState(s BoardState) Model {
 	for _, g := range s.Collapsed {
 		m.collapsed[g] = true
 	}
+	m.team = s.Team
 	return m
 }
 
 // state is what the board remembers for its next opening.
 func (m Model) state() BoardState {
-	return BoardState{HiddenRepos: trueKeys(m.hiddenRepos), Collapsed: trueKeys(m.collapsed), View: m.view}
+	return BoardState{HiddenRepos: trueKeys(m.hiddenRepos), Collapsed: trueKeys(m.collapsed), View: m.view, Team: m.team}
 }
 
 func trueKeys(set map[string]bool) []string {
@@ -311,8 +316,19 @@ func (m Model) ticketShown(t ticket.Ticket) bool {
 }
 
 // shownTickets are the user's tickets the repository filter leaves.
+// Team tickets show only while the team is on, after the user's own.
 func (m Model) shownTickets() []ticket.Ticket {
-	return slices.DeleteFunc(slices.Clone(m.snap.Tickets), func(t ticket.Ticket) bool { return !m.ticketShown(t) })
+	var mine, team []ticket.Ticket
+	for _, t := range m.snap.Tickets {
+		switch {
+		case !m.ticketShown(t):
+		case t.Team && m.team:
+			team = append(team, t)
+		case !t.Team:
+			mine = append(mine, t)
+		}
+	}
+	return append(mine, team...)
 }
 
 // boardRepos counts, per repository the board knows (the configured ones and any with pull requests), its
@@ -382,6 +398,9 @@ func (m Model) tickets() []ticket.Ticket {
 func (m Model) myPRs() []item {
 	var out []item
 	for _, t := range board.Sorted(m.snap.Tickets) {
+		if t.Team {
+			continue
+		}
 		for _, pr := range t.PRs {
 			if pr.State == ticket.PROpen && !m.repoHidden(pr.Repo) {
 				t, pr := t, pr
@@ -467,6 +486,20 @@ func (m Model) groupTitle(it item, sel bool) string {
 	return mark + bold.Render(it.title) + "  " + dim.Render(count)
 }
 
+// toggleTeam shows or hides the team's tickets; turning them on saves the choice before the refresh, since
+// the sync reads it to know whether to fetch them.
+func (m *Model) toggleTeam() tea.Cmd {
+	m.team = !m.team
+	m.reselect()
+	save := m.actions.SaveState(m.state())
+	if !m.team {
+		m.status = "showing only your tickets"
+		return save
+	}
+	m.status = "showing the team's tickets too · t hides them"
+	return tea.Batch(tea.Sequence(save, m.actions.Refresh()), m.beginLoading())
+}
+
 // toggleGroup collapses or expands a group and remembers it.
 func (m *Model) toggleGroup(group string) tea.Cmd {
 	// A copy, as models are values and an earlier copy must keep its own groups.
@@ -535,7 +568,12 @@ func (m Model) listItems() []item {
 		return m.prItems()
 	}
 	var out []item
-	for _, t := range board.Sorted(m.tickets()) {
+	ts := m.tickets()
+	team := slices.IndexFunc(ts, func(t ticket.Ticket) bool { return t.Team })
+	if team < 0 {
+		team = len(ts)
+	}
+	for _, t := range append(board.Sorted(ts[:team]), board.Sorted(ts[team:])...) {
 		t := t
 		out = append(out, item{key: t.Key, ticket: &t})
 	}
@@ -757,7 +795,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.effectiveView() == ViewList {
 		lines := strings.Split(strings.TrimRight(m.listView(), "\n"), "\n")
-		_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, 0)
+		_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, 0, 0)
 		avail := m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer())
 		start := 0
 		if avail > 0 && len(lines) > avail {
@@ -847,6 +885,9 @@ func (m *Model) clickHeader(x int) tea.Cmd {
 			if sp.repos {
 				m.picker = m.repoFilter()
 				return nil
+			}
+			if sp.team {
+				return m.toggleTeam()
 			}
 			if sp.filter != "" {
 				m.filter = sp.filter
@@ -988,7 +1029,13 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.actions.Open(url)
 			}
 		}
+	case "t":
+		return m, m.toggleTeam()
 	case "f":
+		if it, ok := m.current(); ok && it.ticket != nil && it.ticket.Team {
+			m.status = fmt.Sprintf("%s is %s's ticket", it.ticket.Key, cmp.Or(it.ticket.Assignee, "nobody"))
+			return m, nil
+		}
 		if it, ok := m.current(); ok && it.ticket != nil {
 			m.status = "sending feedback for " + string(it.ticket.Key) + "…"
 			return m, m.actions.Fix(it.ticket.Key)
@@ -1177,7 +1224,7 @@ func (m Model) header() string {
 type headerSpan struct {
 	start, width int
 	filter, view string
-	repos        bool
+	repos, team  bool
 }
 
 var (
@@ -1200,6 +1247,7 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 	if len(m.boardRepos()) > 0 {
 		specs[0] = append(specs[0], m.reposButton())
 	}
+	specs[0] = append(specs[0], headerItem{team: true, label: " Team "})
 	for pass := 0; pass < 2; pass++ {
 		for _, spec := range specs {
 			var row []string
@@ -1207,17 +1255,17 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 			spans = nil
 			for i, it := range spec {
 				gap := map[bool]int{true: 1, false: 0}[i > 0]
-				if i == len(filterOrder) || it.repos {
+				if i == len(filterOrder) || it.repos || (it.team && !spec[i-1].repos) {
 					gap = 2
 				}
 				row = append(row, strings.Repeat(" ", gap))
 				pos += gap
 				st := filterOff
-				if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.repos && m.repoNotice() != "") {
+				if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.repos && m.repoNotice() != "") || (it.team && m.team) {
 					st = filterOn
 				}
 				chip := st.Render(strings.TrimSpace(it.label))
-				spans = append(spans, headerSpan{start: pos, width: lipgloss.Width(chip), filter: it.filter, view: it.view, repos: it.repos})
+				spans = append(spans, headerSpan{start: pos, width: lipgloss.Width(chip), filter: it.filter, view: it.view, repos: it.repos, team: it.team})
 				row = append(row, chip)
 				pos += lipgloss.Width(chip)
 			}
@@ -1258,8 +1306,8 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 type headerItem struct {
 	filter, view string
 	label        string
-	// repos marks the button that opens the repository filter.
-	repos bool
+	// repos marks the button that opens the repository filter, team the one that shows the team's tickets.
+	repos, team bool
 }
 
 func (m Model) headerSpec() []headerItem {
@@ -1516,8 +1564,12 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 	if !compact {
 		titleLines = 2
 	}
+	title := titleStyle
+	if t.Team {
+		title = dim
+	}
 	for _, l := range wrapWords(t.Summary, inner, titleLines) {
-		lines = append(lines, titleStyle.Render(l))
+		lines = append(lines, title.Render(l))
 	}
 	if !compact {
 		lines = append(lines, coloredPRs(t.PRs, inner))
@@ -1528,14 +1580,22 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 		if info == "" {
 			info = t.Status
 		}
-		// The agent shares the type's line, which has room to spare, so the pull requests keep theirs;
-		// when both do not fit, the type gives way.
-		if text, kind := agentShort(agent); kind != board.AgentNone {
-			room := max(1, inner-lipgloss.Width(text)-3)
-			lines = append(lines, dim.Render(truncate(info, room)+" · ")+agentStyle(kind).Render(text))
-		} else {
-			lines = append(lines, dim.Render(truncate(info, inner)))
+		// The type shares its line with the assignee and the agent, so the pull requests keep theirs; when they
+		// do not all fit, the type gives way first, then the assignee, never the agent.
+		who := " · " + shortName(t.Assignee)
+		text, kind := agentShort(agent)
+		agentW := 0
+		if kind != board.AgentNone {
+			agentW = lipgloss.Width(text) + 3
 		}
+		line := dim.Render(truncate(strings.TrimPrefix(who, " · "), max(1, inner-agentW)))
+		if room := inner - agentW - lipgloss.Width(who); room >= 4 {
+			line = dim.Render(truncate(info, room) + who)
+		}
+		if kind != board.AgentNone {
+			line += dim.Render(" · ") + agentStyle(kind).Render(text)
+		}
+		lines = append(lines, line)
 	}
 	for i, l := range lines {
 		lines[i] = " " + l
@@ -1777,6 +1837,17 @@ func (m Model) listView() string {
 	if len(m.snap.Agents) > 0 && m.filter != FilterPRs {
 		agentW = agentWidth + 1
 	}
+	assigneeW := 0
+	if m.filter != FilterPRs {
+		for _, it := range measured {
+			if it.ticket != nil && !it.mine() {
+				assigneeW = max(assigneeW, lipgloss.Width("ASSIGNEE"), lipgloss.Width(shortName(it.ticket.Assignee)))
+			}
+		}
+		if assigneeW > 0 {
+			assigneeW = min(assigneeW, assigneeMaxWidth) + 1
+		}
+	}
 	// Narrow panes drop AGENT first, then shrink PR / CI, then STATUS, so the title always keeps some room.
 	const minTitle = 12
 	keyW := keyWidth
@@ -1788,9 +1859,12 @@ func (m Model) listView() string {
 			}
 		}
 	}
-	room := func() int { return m.width - 2 - keyW - statusW - agentW - prW - 3 }
+	room := func() int { return m.width - 2 - keyW - statusW - agentW - assigneeW - prW - 3 }
 	if minTitle > room() {
 		agentW = 0
+	}
+	if minTitle > room() {
+		assigneeW = 0
 	}
 	if short := minTitle - room(); short > 0 {
 		cut := max(0, min(short, prW-8))
@@ -1801,7 +1875,7 @@ func (m Model) listView() string {
 	row := func(key, status, agent, pr, title string) string {
 		return pad(key, keyW) + " " + pad(status, statusW) + " " + agent + pad(pr, prW) + " " + truncate(title, titleWidth)
 	}
-	lines, _ := m.listLines(row, prText, agentW)
+	lines, _ := m.listLines(row, prText, agentW, assigneeW)
 	return strings.Join(lines, "\n") + "\n"
 }
 
@@ -1812,6 +1886,31 @@ func (m Model) listHeads() [3]string {
 		return [3]string{"PR", "STATUS", "CI"}
 	}
 	return [3]string{"KEY", "STATUS", "PR / CI"}
+}
+
+// assigneeCell is a list row's assignee, padded to assigneeW (which includes its gap); empty without the column.
+func assigneeCell(name string, assigneeW int) string {
+	if assigneeW == 0 {
+		return ""
+	}
+	return pad(truncate(shortName(name), assigneeW-1), assigneeW)
+}
+
+// assigneeMaxWidth caps the ASSIGNEE column, which shows short names such as "Ana L.".
+const assigneeMaxWidth = 14
+
+// shortName shortens a person's name to the first name and the last name's initial, "Ana L.", for the
+// board's narrow cells; an empty name means the ticket is unassigned.
+func shortName(name string) string {
+	parts := strings.Fields(name)
+	switch len(parts) {
+	case 0:
+		return "unassigned"
+	case 1:
+		return parts[0]
+	}
+	last := []rune(parts[len(parts)-1])
+	return parts[0] + " " + string(last[0]) + "."
 }
 
 // agentWidth fits the longest agent cell, "! needs you".
@@ -1848,11 +1947,14 @@ func agentStyle(kind board.AgentKind) lipgloss.Style {
 // listLines lays the list out in sections, the user's tickets and review requests per repo, and returns for
 // every line the index of the item on it (-1 for titles and spacing, botToggleLine for the bots toggle), so
 // clicks map back to items.
-func (m Model) listLines(row func(key, status, agent, pr, title string) string, prText func(item) string, agentW int) ([]string, []int) {
+func (m Model) listLines(row func(key, status, agent, pr, title string) string, prText func(item) string, agentW, assigneeW int) ([]string, []int) {
 	items := m.listItems()
 	header := pad("", agentW)
 	if agentW > 0 {
 		header = pad("AGENT", agentW)
+	}
+	if assigneeW > 0 {
+		header = pad("ASSIGNEE", assigneeW) + header
 	}
 	heads := m.listHeads()
 	lines := []string{"  " + dim.Render(row(heads[0], heads[1], header, heads[2], "TITLE")), dim.Render(strings.Repeat("─", m.width))}
@@ -1864,9 +1966,12 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		}
 		lines, at = append(lines, "  "+toggle), append(at, botToggleLine)
 	}
-	nTickets := 0
+	nTickets, nTeam := 0, 0
 	for _, it := range items {
-		if it.ticket != nil && !it.mine() {
+		switch {
+		case it.ticket != nil && it.ticket.Team && !it.mine():
+			nTeam++
+		case it.ticket != nil && !it.mine():
 			nTickets++
 		}
 	}
@@ -1885,7 +1990,10 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			lines, at = append(lines, m.groupTitle(it, i == m.row)), append(at, i)
 			continue
 		}
-		if i == 0 && it.ticket != nil {
+		switch {
+		case it.ticket != nil && it.ticket.Team && !it.mine() && (i == 0 || items[i-1].ticket == nil || !items[i-1].ticket.Team):
+			section("Team", nTeam)
+		case i == 0 && it.ticket != nil:
 			section("My tickets", nTickets)
 		}
 		if it.review() && m.filter != FilterPRs && (i == 0 || !items[i-1].review() || items[i-1].pr.Repo != it.pr.Repo) {
@@ -1904,7 +2012,7 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		}
 		switch {
 		case it.review():
-			line = row(string(it.key), statusText(it), pad("", agentW), ci, it.pr.Title)
+			line = row(string(it.key), statusText(it), pad("", assigneeW+agentW), ci, it.pr.Title)
 		case it.mine():
 			status := statusText(it)
 			if i != m.row && needsYou(*it.pr) {
@@ -1912,7 +2020,11 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			}
 			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, cmp.Or(it.pr.Title, it.ticket.Summary))
 		default:
-			line = row(string(it.key), it.ticket.Status, agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), it.ticket.Summary)
+			title := it.ticket.Summary
+			if it.ticket.Team && i != m.row {
+				title = dim.Render(title)
+			}
+			line = row(string(it.key), it.ticket.Status, assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
 		}
 		switch {
 		case i == m.row:
@@ -1965,7 +2077,7 @@ func (m Model) preview() string {
 	}
 	t := it.ticket
 	title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s", t.Key, t.Summary), m.width))
-	parts := []string{t.Status}
+	parts := []string{t.Status, cmp.Or(t.Assignee, "unassigned")}
 	if t.Label != "" {
 		parts = append([]string{t.Label}, parts...)
 	}
@@ -2002,6 +2114,8 @@ func ciWord(c ticket.CheckState) string {
 func actionHint(t ticket.Ticket) string {
 	reasons := t.Attention()
 	switch {
+	case t.Team:
+		return "enter for details"
 	case len(reasons) > 0 && reasons[0] == ticket.ReasonCIFailing:
 		return "f sends the failure to the agent"
 	case len(reasons) > 0:
@@ -2028,7 +2142,7 @@ func (m Model) footer() string {
 	}
 	legend := [][2]string{
 		{move, moveHint}, {"click", clickHint}, {"double-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
-		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-2", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"R", "repos"}, {"g", "refresh"}, {"q", "close"},
+		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-2", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"R", "repos"}, {"t", "team"}, {"g", "refresh"}, {"q", "close"},
 	}
 	if m.filter == FilterPRs && m.hiddenBots() > 0 {
 		legend = append(legend[:1], append([][2]string{{"b", "bots"}}, legend[1:]...)...)

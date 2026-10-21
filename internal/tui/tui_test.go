@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -506,13 +507,13 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 All 4", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3 · Export CSV\n To Do · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 All 4", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3 · Export CSV\n To Do · unassigned · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
 	}
 	next = press(next, "l")
-	if !strings.Contains(stripANSI(next.View()), "DEMO-1 · Filter accounts\n In Progress · CI failing · #812 · f sends the failure to the agent") {
+	if !strings.Contains(stripANSI(next.View()), "DEMO-1 · Filter accounts\n In Progress · unassigned · CI failing · #812 · f sends the failure to the agent") {
 		t.Errorf("preview hint missing:\n%s", stripANSI(next.View()))
 	}
 }
@@ -2084,7 +2085,7 @@ func TestListShowsAgentStates(t *testing.T) {
 var brokenEscape = regexp.MustCompile(`\x1b\[[0-9;]*[^0-9;m]`)
 
 func TestCardFitsPullRequestsBesideTheAgentWithoutBreakingColors(t *testing.T) {
-	tk := ticket.Ticket{Key: "DEMO-1", Summary: "Homogenize the organizations module", Status: "In Progress", Category: ticket.InProgress,
+	tk := ticket.Ticket{Key: "DEMO-1", Summary: "Homogenize the organizations module", Status: "In Progress", Category: ticket.InProgress, Assignee: "Ana López",
 		PRs: []ticket.PullRequest{
 			{Number: 731, State: ticket.PROpen, Checks: ticket.ChecksPass},
 			{Number: 732, State: ticket.PROpen, Checks: ticket.ChecksPass},
@@ -2110,8 +2111,8 @@ func TestCardFitsPullRequestsBesideTheAgentWithoutBreakingColors(t *testing.T) {
 				last = l
 			}
 		}
-		if !strings.Contains(last, "In Progress") && !strings.Contains(last, "In Pr") {
-			t.Errorf("%s: the agent belongs on the type line: %q", status, last)
+		if !strings.Contains(last, "Ana L.") {
+			t.Errorf("%s: the agent belongs on the type and assignee line: %q", status, last)
 		}
 		for _, l := range strings.Split(out, "\n") {
 			if lipgloss.Width(l) > 30 {
@@ -2144,10 +2145,18 @@ func TestTruncateKeepsColorCodesWhole(t *testing.T) {
 }
 
 func TestCardCutsTheTypeBeforeTheAgent(t *testing.T) {
-	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Type: "A very long issue type name", Status: "In Progress"}
-	plain := ansi.Strip(card(tk, 30, false, false, "blocked"))
-	if !strings.Contains(plain, "! needs you") || !strings.Contains(plain, "A very long") {
-		t.Errorf("the type should shrink, never the agent:\n%s", plain)
+	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Type: "A very long issue type name", Status: "In Progress", Assignee: "Ana López"}
+	plain := ansi.Strip(card(tk, 40, false, false, "blocked"))
+	if !strings.Contains(plain, "! needs you") || !strings.Contains(plain, "Ana L.") || !strings.Contains(plain, "A very long") || strings.Contains(plain, "type name") {
+		t.Errorf("the type should shrink first, never the assignee or the agent:\n%s", plain)
+	}
+	plain = ansi.Strip(card(tk, 30, false, false, "blocked"))
+	if !strings.Contains(plain, "Ana L. · ! needs you") {
+		t.Errorf("without room the type goes, the assignee and agent stay:\n%s", plain)
+	}
+	tk.Assignee = ""
+	if plain := ansi.Strip(card(tk, 40, false, false, "")); !strings.Contains(plain, "unassigned") {
+		t.Errorf("an unassigned ticket says so:\n%s", plain)
 	}
 }
 
@@ -2439,6 +2448,176 @@ func TestPRMenuCopiesItsLinksAndKey(t *testing.T) {
 	} {
 		if _, msg := run(selectMenuItem(t, m, label), "enter"); msg != StatusMsg(want) {
 			t.Errorf("%s ran %v", label, msg)
+		}
+	}
+}
+
+func TestTicketsShowTheirAssignee(t *testing.T) {
+	snap := prsSnapshot()
+	snap.Tickets[0].Assignee = "Ana López"
+	snap.Tickets[1].Assignee = ""
+	for _, view := range []string{ViewColumns, ViewList} {
+		m := tea.Model(New(snap, false, &recorder{}, view))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+		v := stripANSI(m.View())
+		if !strings.Contains(v, "Ana L.") || !strings.Contains(v, "unassigned") {
+			t.Errorf("%s: every ticket should show its assignee:\n%s", view, v)
+		}
+	}
+	m := tea.Model(New(snap, true, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	if !strings.Contains(strings.Split(v, "\n")[lineIndex(v, "TITLE")], "ASSIGNEE") {
+		t.Errorf("the list should head its assignee column:\n%s", v)
+	}
+	for !strings.Contains(selectedLine(m.View()), string(snap.Tickets[0].Key)) {
+		m = press(m, "s")
+	}
+	if v := stripANSI(m.View()); !strings.Contains(v, "Ana López") {
+		t.Errorf("the preview should name the assignee in full:\n%s", v)
+	}
+	narrow := tea.Model(New(snap, false, &recorder{}, ViewList))
+	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	for _, l := range strings.Split(stripANSI(narrow.View()), "\n") {
+		if lipgloss.Width(l) > 56 {
+			t.Errorf("wider than the tray panel: %q", l)
+		}
+	}
+}
+
+func TestShortName(t *testing.T) {
+	for in, want := range map[string]string{"Ana López": "Ana L.", "Ana María López Ruiz": "Ana R.", "dev": "dev", "": "unassigned"} {
+		if got := shortName(in); got != want {
+			t.Errorf("shortName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// teamSnapshot adds a teammate's ticket with a failing pull request to prsSnapshot.
+func teamSnapshot() board.Snapshot {
+	snap := prsSnapshot()
+	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-9", Summary: "Their export", Status: "To Do", Category: ticket.ToDo, Team: true, Assignee: "Bea Ruiz",
+		URL: "https://example.atlassian.net/browse/DEMO-9",
+		PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 990, URL: "https://github.com/example-org/web/pull/990", State: ticket.PROpen, Checks: ticket.ChecksFail}}})
+	return snap
+}
+
+func TestTeamToggleShowsTheTeamsTickets(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(teamSnapshot(), true, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(m.View()); strings.Contains(v, "DEMO-9") {
+		t.Fatalf("off by default:\n%s", v)
+	}
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	if len(r.states) == 0 || !r.states[len(r.states)-1].Team {
+		t.Fatalf("t should remember the team: %+v", r.states)
+	}
+	if cmd == nil {
+		t.Fatal("turning the team on should sync")
+	}
+	drain(cmd)
+	if !slices.Contains(r.calls, "refresh") {
+		t.Errorf("turning the team on should refresh after saving: %v", r.calls)
+	}
+	v := stripANSI(m.View())
+	team := lineIndex(v, "Team  1")
+	if team < 0 || lineIndex(v, "DEMO-9") < team || lineIndex(v, "DEMO-1") > team || !strings.Contains(v, "Bea R.") {
+		t.Errorf("team tickets in their own section after the user's:\n%s", v)
+	}
+	if line := strings.Split(v, "\n")[lineIndex(v, "DEMO-9")]; strings.HasPrefix(strings.TrimSpace(line), "!") {
+		t.Errorf("a team ticket never needs the user: %q", line)
+	}
+	if v := stripANSI(press(m, "2").View()); strings.Contains(v, "#990") {
+		t.Errorf("the PRs filter keeps to the user's pull requests:\n%s", v)
+	}
+	m = press(m, "v")
+	if !r.states[len(r.states)-1].Team {
+		t.Errorf("saving the view must keep the team: %+v", r.states[len(r.states)-1])
+	}
+	if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-9") {
+		t.Errorf("the columns show team tickets too:\n%s", v)
+	}
+	m = press(m, "t")
+	if v := stripANSI(m.View()); strings.Contains(v, "DEMO-9") || r.states[len(r.states)-1].Team {
+		t.Errorf("t again hides them at once:\n%s", v)
+	}
+}
+
+func TestTeamTicketsOfferOnlyWhatIsHarmless(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(teamSnapshot(), true, r, ViewList).WithState(BoardState{Team: true}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "DEMO-9"); i++ {
+		m = press(m, "s")
+	}
+	before := len(r.calls)
+	m = press(m, "f")
+	if len(r.calls) != before || !strings.Contains(stripANSI(m.View()), "DEMO-9 is Bea Ruiz's ticket") {
+		t.Errorf("f on a team ticket does nothing but say why: %v\n%s", r.calls, stripANSI(m.View()))
+	}
+	v := stripANSI(press(m, "enter").View())
+	for _, want := range []string{"Actions for DEMO-9 · Bea Ruiz", "Show details", "Open in Jira ↗", "Copy the key DEMO-9"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("menu lacks %q:\n%s", want, v)
+		}
+	}
+	var box []string
+	for _, l := range strings.Split(v, "\n") {
+		if strings.Contains(l, "│") {
+			box = append(box, l)
+		}
+	}
+	for _, unwanted := range []string{"Start", "agent", "ticket pane", "Send"} {
+		if strings.Contains(strings.Join(box, "\n"), unwanted) {
+			t.Errorf("a team ticket's menu offers %q:\n%s", unwanted, v)
+		}
+	}
+}
+
+func TestTeamButtonTogglesAndFitsTheTrayPanel(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(teamSnapshot(), true, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	y := lineIndex(v, "Team")
+	if y < 0 || y > 2 {
+		t.Fatalf("no Team button in the header:\n%s", v)
+	}
+	line := strings.Split(v, "\n")[y]
+	m = click(m, lipgloss.Width(line[:strings.Index(line, "Team")])+1, y)
+	if len(r.states) == 0 || !r.states[len(r.states)-1].Team {
+		t.Errorf("a click on Team should turn it on: %+v", r.states)
+	}
+	narrow := tea.Model(New(teamSnapshot(), true, &recorder{}, ViewList).WithState(BoardState{Team: true}))
+	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	for _, l := range strings.Split(stripANSI(narrow.View()), "\n") {
+		if lipgloss.Width(l) > 56 {
+			t.Errorf("wider than the tray panel: %q", l)
+		}
+	}
+}
+
+// drain runs cmd and every command it batches or sequences, as Bubble Tea would, skipping ticks.
+func drain(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	var msg tea.Msg
+	select {
+	case msg = <-done:
+	case <-time.After(50 * time.Millisecond):
+		return
+	}
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice {
+		return
+	}
+	for i := 0; i < v.Len(); i++ {
+		if c, ok := v.Index(i).Interface().(tea.Cmd); ok {
+			drain(c)
 		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/github"
 	"github.com/pavp/tkt/internal/jira"
@@ -248,5 +249,16 @@ func TestListFindsOlderPRsByKey(t *testing.T) {
 	}
 	if !strings.Contains(h.out.String(), "1 merged") {
 		t.Errorf("older PR found by title not attached:\n%s", h.out)
+	}
+}
+
+func TestListLeavesOutTeamTickets(t *testing.T) {
+	h, _ := listHarness(t)
+	h.app.renderList(board.Snapshot{Tickets: []ticket.Ticket{
+		{Key: "DEMO-1", Summary: "Mine", Status: "In Progress", Category: ticket.InProgress},
+		{Key: "DEMO-9", Summary: "Theirs", Status: "To Do", Category: ticket.ToDo, Team: true},
+	}}, nil)
+	if out := h.out.String(); !strings.Contains(out, "DEMO-1") || strings.Contains(out, "DEMO-9") {
+		t.Errorf("tkt list is the user's tickets:\n%s", out)
 	}
 }

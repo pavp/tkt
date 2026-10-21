@@ -36,7 +36,7 @@ func showHarness(t *testing.T) *harness {
 	}
 	h.jira.details = map[string]jira.Issue{
 		"DEMO-1": {
-			Key: "DEMO-1", Type: "Story", Summary: "Filter accounts by date", Status: "In Progress", StatusCategory: "indeterminate",
+			Key: "DEMO-1", Type: "Story", Summary: "Filter accounts by date", Status: "In Progress", StatusCategory: "indeterminate", Assignee: "Ana López",
 			Description: json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Filter by "},{"type":"text","text":"creation date","marks":[{"type":"strong"}]}]}]}`),
 			Fields: map[string]json.RawMessage{
 				"customfield_10042": json.RawMessage(`{"type":"doc","content":[{"type":"bulletList","content":[{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Range kept in the URL"}]}]}]}]}`),
@@ -61,7 +61,7 @@ func TestShow(t *testing.T) {
 	}
 	out := h.out.String()
 	for _, want := range []string{
-		"DEMO-1 · Story · In Progress",
+		"DEMO-1 · Story · In Progress · Ana López",
 		"https://example.atlassian.net/browse/DEMO-1",
 		"! needs you: CI failing",
 		"example-org/web#812  ✕ CI failing",

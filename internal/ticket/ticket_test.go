@@ -112,6 +112,7 @@ func TestAttention(t *testing.T) {
 		{"conflicts", Ticket{Category: InReview, PRs: []PullRequest{{State: PROpen, Merge: MergeConflicts}}}, []Reason{ReasonConflicts}},
 		{"every reason in order", Ticket{Category: InReview, PRs: []PullRequest{{State: PROpen, Merge: MergeConflicts, Unresolved: 1}, {State: PROpen, Checks: ChecksFail, Review: ReviewChangesRequested}}}, []Reason{ReasonCIFailing, ReasonChangesRequested, ReasonUnresolved, ReasonConflicts}},
 		{"merged PR ignored", Ticket{Category: InReview, PRs: []PullRequest{{State: PRMerged, Checks: ChecksFail, Unresolved: 3}}}, nil},
+		{"team ticket never needs the user", Ticket{Category: InReview, Team: true, PRs: []PullRequest{{State: PROpen, Checks: ChecksFail}}}, nil},
 		{"done ticket ignored", Ticket{Category: Done, PRs: []PullRequest{{State: PROpen, Checks: ChecksFail}}}, nil},
 		{"no PRs", Ticket{Category: ToDo}, nil},
 	}

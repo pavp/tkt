@@ -209,7 +209,11 @@ type Ticket struct {
 	Status   string   `json:"status"`
 	Category Category `json:"category"`
 	// Label is the value of the Jira field the configuration names, such as the ticket's product.
-	Label    string        `json:"label,omitempty"`
+	Label string `json:"label,omitempty"`
+	// Assignee is the display name of the person the ticket is assigned to; empty when unassigned.
+	Assignee string `json:"assignee,omitempty"`
+	// Team marks a teammate's or unassigned ticket, shown on request; it never needs the user.
+	Team     bool          `json:"team,omitempty"`
 	Parent   Key           `json:"parent,omitempty"`
 	URL      string        `json:"url"`
 	PRs      []PullRequest `json:"prs,omitempty"`
@@ -235,7 +239,7 @@ func (t Ticket) Blocked() bool {
 }
 
 func (t Ticket) Attention() []Reason {
-	if t.Category == Done {
+	if t.Category == Done || t.Team {
 		return nil
 	}
 	found := map[Reason]bool{}
