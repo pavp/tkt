@@ -2353,3 +2353,92 @@ func TestViewChoiceIsRemembered(t *testing.T) {
 		t.Errorf("a click on Columns should remember it: %q", got)
 	}
 }
+
+// selectMenuItem moves the open menu's selection to the first item whose label contains label.
+func selectMenuItem(t *testing.T, m tea.Model, label string) tea.Model {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		mn := m.(Model).menu
+		if mn == nil {
+			t.Fatalf("no menu open looking for %q", label)
+		}
+		if strings.Contains(mn.items[mn.sel].label, label) {
+			return m
+		}
+		m = press(m, "s")
+	}
+	t.Fatalf("no menu item %q", label)
+	return m
+}
+
+func TestTicketMenuGathersSeveralPullRequestsInASubmenu(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "DEMO-4"); i++ {
+		m = press(m, "s")
+	}
+	m = press(m, "enter")
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "Pull requests (3) ▸") || strings.Contains(v, "Open #815") {
+		t.Fatalf("several pull requests should sit behind one item:\n%s", v)
+	}
+	m = press(selectMenuItem(t, m, "Pull requests (3)"), "enter")
+	v = stripANSI(m.View())
+	first, second, merged := strings.Index(v, "#815 Changes requested · web"), strings.Index(v, "#816 Approved · api"), strings.Index(v, "#700 merged · web")
+	if !strings.Contains(v, "Pull requests of DEMO-4") || first < 0 || second < first || merged < second {
+		t.Fatalf("submenu should list them, those that need the user first, finished ones last:\n%s", v)
+	}
+	if v := stripANSI(press(m, "esc").View()); !strings.Contains(v, "Actions for DEMO-4") {
+		t.Errorf("esc should go back to the ticket's menu:\n%s", v)
+	}
+	if _, msg := run(m, "enter"); msg != StatusMsg("open https://github.com/example-org/web/pull/815") {
+		t.Errorf("enter ran %v", r.calls)
+	}
+}
+
+func TestPOpensTheOnlyPullRequestOrTheSubmenu(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "DEMO-1"); i++ {
+		m = press(m, "s")
+	}
+	if _, msg := run(m, "p"); msg != StatusMsg("open https://github.com/example-org/web/pull/812") {
+		t.Errorf("p on a ticket with one pull request ran %v", r.calls)
+	}
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "DEMO-4"); i++ {
+		m = press(m, "s")
+	}
+	for _, k := range []string{"p", "P"} {
+		if v := stripANSI(press(m, k).View()); !strings.Contains(v, "Pull requests of DEMO-4") {
+			t.Errorf("%s on a ticket with several pull requests should open the submenu:\n%s", k, v)
+		}
+	}
+}
+
+func TestPRMenuCopiesItsLinksAndKey(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#815"); i++ {
+		m = press(m, "s")
+	}
+	m = press(m, "enter")
+	v := stripANSI(m.View())
+	for _, want := range []string{"Copy the PR link", "Copy the Jira link", "Copy the key DEMO-4"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("PR menu lacks %q:\n%s", want, v)
+		}
+	}
+	for label, want := range map[string]string{
+		"Copy the PR link":    "copy link https://github.com/example-org/web/pull/815",
+		"Copy the Jira link":  "copy link https://example.atlassian.net/browse/DEMO-4",
+		"Copy the key DEMO-4": "copy key DEMO-4",
+	} {
+		if _, msg := run(selectMenuItem(t, m, label), "enter"); msg != StatusMsg(want) {
+			t.Errorf("%s ran %v", label, msg)
+		}
+	}
+}

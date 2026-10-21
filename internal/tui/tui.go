@@ -969,6 +969,10 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "p", "P":
 		if it, ok := m.current(); ok && !it.heading() {
+			if it.pr == nil && it.ticket != nil && len(it.ticket.PRs) > 1 {
+				m.menu = m.prsMenu(*it.ticket)
+				return m, nil
+			}
 			url := ""
 			if it.pr != nil {
 				url = it.pr.URL

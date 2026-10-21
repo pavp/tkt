@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,6 +20,8 @@ type menuItem struct {
 	detail ticket.Key
 	// link is the URL c copies while the item is highlighted.
 	link string
+	// sub, when set, opens another menu, from which esc comes back.
+	sub func() *menu
 }
 
 // menu lists what can be done with the selected ticket or review request.
@@ -26,6 +29,8 @@ type menu struct {
 	title string
 	items []menuItem
 	sel   int
+	// back is the menu esc returns to; nil closes.
+	back *menu
 }
 
 var menuBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("111")).Padding(0, 2)
@@ -52,13 +57,13 @@ func (m Model) buildMenu(it item) *menu {
 	if t.URL != "" {
 		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
 	}
-	for i, pr := range t.PRs {
-		pr := pr
-		key := ""
-		if i == 0 {
-			key = "p"
-		}
-		items = append(items, menuItem{label: "Open " + prRef(pr) + " in GitHub ↗", key: key, link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }})
+	switch len(t.PRs) {
+	case 0:
+	case 1:
+		pr := t.PRs[0]
+		items = append(items, menuItem{label: "Open " + prRef(pr) + " in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }})
+	default:
+		items = append(items, menuItem{label: fmt.Sprintf("Pull requests (%d) ▸", len(t.PRs)), key: "p", sub: func() *menu { return m.prsMenu(t) }})
 	}
 	for _, r := range t.Attention() {
 		items = append(items, menuItem{label: fixLabel(r), key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
@@ -87,6 +92,13 @@ func (m Model) prMenu(it item) *menu {
 	if t.URL != "" {
 		items = append(items, menuItem{label: "Open " + string(t.Key) + " in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
 	}
+	if pr.URL != "" {
+		items = append(items, menuItem{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
+	}
+	if t.URL != "" {
+		items = append(items, menuItem{label: "Copy the Jira link", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
+	}
+	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
 	return &menu{title: fmt.Sprintf("Pull request #%d · %s", pr.Number, t.Key), items: items}
 }
 
@@ -103,6 +115,36 @@ func fixLabel(r ticket.Reason) string {
 	return "Send the CI failure to the agent"
 }
 
+// prsMenu lists a ticket's pull requests to open one, those that need the user first and finished ones last.
+func (m Model) prsMenu(t ticket.Ticket) *menu {
+	a := m.actions
+	prs := slices.Clone(t.PRs)
+	rank := func(pr ticket.PullRequest) int {
+		switch {
+		case pr.State != ticket.PROpen:
+			return 2
+		case needsYou(pr):
+			return 0
+		}
+		return 1
+	}
+	slices.SortStableFunc(prs, func(x, y ticket.PullRequest) int { return rank(x) - rank(y) })
+	var items []menuItem
+	for _, pr := range prs {
+		status := prStatus(pr)
+		if pr.State != ticket.PROpen {
+			status = string(pr.State)
+		}
+		_, repo, _ := strings.Cut(pr.Repo, "/")
+		label := fmt.Sprintf("#%d %s", pr.Number, status)
+		if repo != "" {
+			label += " · " + repo
+		}
+		items = append(items, menuItem{label: label, link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }})
+	}
+	return &menu{title: "Pull requests of " + string(t.Key), items: items}
+}
+
 // startLabel says where Start leads: it focuses the ticket's agent when one already runs.
 func (m Model) startLabel(k ticket.Key) string {
 	if _, kind := board.AgentLine(m.snap.Agents[string(k)]); kind != board.AgentNone {
@@ -115,7 +157,7 @@ func (m Model) menuKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	mn := m.menu
 	switch k.String() {
 	case "esc", "q", "backspace":
-		m.menu = nil
+		m.menu = mn.back
 	case "up", "w", "k":
 		mn.sel = (mn.sel + len(mn.items) - 1) % len(mn.items)
 	case "down", "s", "j", "tab":
@@ -137,8 +179,13 @@ func (m Model) runMenuItem(i int) (tea.Model, tea.Cmd) {
 	if m.menu == nil || i < 0 || i >= len(m.menu.items) {
 		return m, nil
 	}
-	it := m.menu.items[i]
+	it, parent := m.menu.items[i], m.menu
 	m.menu = nil
+	if it.sub != nil {
+		m.menu = it.sub()
+		m.menu.back = parent
+		return m, nil
+	}
 	if it.detail != "" {
 		return m.openDetail(it.detail)
 	}
