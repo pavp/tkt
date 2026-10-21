@@ -68,6 +68,8 @@ type BoardState struct {
 	Collapsed []string `json:"collapsed,omitempty"`
 	// View is the view the user last chose, ViewColumns or ViewList.
 	View string `json:"view,omitempty"`
+	// Team asks the sync for the team's tickets too, those assigned to others or to nobody.
+	Team bool `json:"team,omitempty"`
 }
 
 type ClonesFoundMsg struct {

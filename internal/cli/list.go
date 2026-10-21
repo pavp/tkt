@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -110,12 +111,14 @@ func (a *App) renderList(s board.Snapshot, stale error) {
 		a.printf("\n")
 	}
 
-	if len(s.Tickets) == 0 {
+	// The board may hold the team's tickets too; the list is the user's own.
+	mine := slices.DeleteFunc(slices.Clone(s.Tickets), func(t ticket.Ticket) bool { return t.Team })
+	if len(mine) == 0 {
 		a.printf("No tickets in your open sprints.\n")
 	} else {
 		tw := tabwriter.NewWriter(a.Stdout, 0, 2, 2, ' ', 0)
 		fmt.Fprintln(tw, "KEY\tSTATUS\tPRS\tTITLE")
-		for _, t := range board.Sorted(s.Tickets) {
+		for _, t := range board.Sorted(mine) {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", t.Key, t.Status, prSummary(t.PRs), truncate(t.Summary, 60))
 			for _, st := range t.Subtasks {
 				fmt.Fprintf(tw, "  ↳ %s\t%s\t%s\t%s\n", st.Key, st.Status, prSummary(st.PRs), truncate(st.Summary, 56))

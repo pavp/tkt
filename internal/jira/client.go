@@ -411,11 +411,21 @@ func (c *Client) Search(ctx context.Context, jql string, fields []string) ([]Iss
 // finished tickets the user once held, since teams often reassign a ticket (to QA, to a reviewer) when
 // it is done.
 func MySprintJQL(spaces []string) string {
+	return fmt.Sprintf("sprint in openSprints() AND project in (%s) AND (assignee = currentUser() OR (statusCategory = Done AND assignee WAS currentUser())) ORDER BY updated DESC", quotedSpaces(spaces))
+}
+
+func quotedSpaces(spaces []string) string {
 	quoted := make([]string, len(spaces))
 	for i, s := range spaces {
 		quoted[i] = `"` + s + `"`
 	}
-	return fmt.Sprintf("sprint in openSprints() AND project in (%s) AND (assignee = currentUser() OR (statusCategory = Done AND assignee WAS currentUser())) ORDER BY updated DESC", strings.Join(quoted, ", "))
+	return strings.Join(quoted, ", ")
+}
+
+// TeamSprintJQL selects the rest of the open sprints' tickets in the given spaces: assigned to someone else
+// or to nobody, leaving out what MySprintJQL already holds.
+func TeamSprintJQL(spaces []string) string {
+	return fmt.Sprintf("sprint in openSprints() AND project in (%s) AND (assignee != currentUser() OR assignee IS EMPTY) AND NOT (statusCategory = Done AND assignee WAS currentUser()) ORDER BY updated DESC", quotedSpaces(spaces))
 }
 
 // Issue fetches one issue with the board fields, its description, attachments, and any extra fields.

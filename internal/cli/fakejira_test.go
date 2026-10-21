@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/pavp/tkt/internal/jira"
@@ -12,6 +13,10 @@ import (
 
 // fakeJira serves canned Jira data and records the credentials it was built with.
 type fakeJira struct {
+	mu sync.Mutex
+	// team answers the team search; jqls records every search.
+	team       []jira.Issue
+	jqls       []string
 	fieldNames []string
 	token      string
 	myselfErr  error
@@ -37,6 +42,12 @@ func (f *fakeJira) Myself(context.Context) (jira.User, error) {
 }
 
 func (f *fakeJira) Search(_ context.Context, jql string, _ []string) ([]jira.Issue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.jqls = append(f.jqls, jql)
+	if strings.Contains(jql, "assignee != currentUser()") {
+		return f.team, nil
+	}
 	f.jql = jql
 	return f.issues, f.searchErr
 }

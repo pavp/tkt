@@ -410,3 +410,10 @@ func TestRequestsRetryWhenJiraThrottles(t *testing.T) {
 		})
 	}
 }
+
+func TestTeamSprintJQL(t *testing.T) {
+	want := `sprint in openSprints() AND project in ("DEMO", "OPS") AND (assignee != currentUser() OR assignee IS EMPTY) AND NOT (statusCategory = Done AND assignee WAS currentUser()) ORDER BY updated DESC`
+	if got := TeamSprintJQL([]string{"DEMO", "OPS"}); got != want {
+		t.Errorf("jql = %s", got)
+	}
+}

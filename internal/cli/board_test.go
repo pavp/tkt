@@ -522,3 +522,23 @@ func TestBoardOpensInTheLastView(t *testing.T) {
 		t.Errorf("--view wins over the remembered view: %q", got)
 	}
 }
+
+func TestTheTeamToggleReachesTheSync(t *testing.T) {
+	h, _ := listHarness(t)
+	h.jira.team = []jira.Issue{{ID: "9", Key: "DEMO-9", Summary: "Theirs", Status: "To Do", StatusCategory: "new", Assignee: "Bea Ruiz"}}
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := h.app.fetchSnapshot(context.Background(), c)
+	if err != nil || slices.ContainsFunc(snap.Tickets, func(tk ticket.Ticket) bool { return tk.Team }) {
+		t.Fatalf("off: %v %+v", err, snap.Tickets)
+	}
+	if err := h.app.saveBoardState(tui.BoardState{Team: true}); err != nil {
+		t.Fatal(err)
+	}
+	snap, err = h.app.fetchSnapshot(context.Background(), c)
+	if err != nil || !slices.ContainsFunc(snap.Tickets, func(tk ticket.Ticket) bool { return tk.Team && tk.Key == "DEMO-9" }) {
+		t.Errorf("on: %v %+v", err, snap.Tickets)
+	}
+}

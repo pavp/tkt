@@ -20,9 +20,16 @@ import (
 )
 
 type stubJira struct {
+	mu     sync.Mutex
 	issues []jira.Issue
 	err    error
 	jql    string
+	// team answers the team search, teamErr fails it; jqls records every search and panels every
+	// development panel asked for.
+	team    []jira.Issue
+	teamErr error
+	jqls    []string
+	panels  []string
 	// linked maps issue ids to their development-panel PRs; nil means the panel is unavailable.
 	linked map[string][]jira.DevPullRequest
 	// fieldIDs answers FieldID; fields records what Search asked for.
@@ -32,6 +39,12 @@ type stubJira struct {
 }
 
 func (s *stubJira) Search(_ context.Context, jql string, fields []string) ([]jira.Issue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jqls = append(s.jqls, jql)
+	if strings.Contains(jql, "assignee != currentUser()") {
+		return s.team, s.teamErr
+	}
 	s.jql, s.fields = jql, fields
 	return s.issues, s.err
 }
@@ -45,6 +58,9 @@ func (s *stubJira) FieldID(_ context.Context, name string) (string, error) {
 }
 func (s *stubJira) BrowseURL(k string) string { return "https://example.atlassian.net/browse/" + k }
 func (s *stubJira) DevPullRequests(_ context.Context, id string) ([]jira.DevPullRequest, error) {
+	s.mu.Lock()
+	s.panels = append(s.panels, id)
+	s.mu.Unlock()
 	if s.linked == nil {
 		return nil, errors.New("dev-status: 404")
 	}
@@ -774,5 +790,52 @@ func TestToTicketKeepsTheAssignee(t *testing.T) {
 	c := &config.Config{}
 	if got := ToTicket(c, jira.Issue{Key: "DEMO-1", Assignee: "Ana López"}, ""); got.Assignee != "Ana López" {
 		t.Errorf("assignee = %q", got.Assignee)
+	}
+}
+
+func TestTeamTicketsComeOnlyWhenAsked(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	js := &stubJira{
+		issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate", Assignee: "Dev Example"}},
+		team: []jira.Issue{
+			{ID: "7", Key: "DEMO-7", Summary: "Theirs", Status: "In Progress", StatusCategory: "indeterminate", Assignee: "Bea Ruiz"},
+			{ID: "8", Key: "DEMO-8", Summary: "Nobody's", Status: "To Do", StatusCategory: "new"},
+		},
+		linked: map[string][]jira.DevPullRequest{},
+	}
+	gh := &stubGitHub{prs: []ticket.PullRequest{{Repo: "example-org/web", Number: 70, Branch: "feature/DEMO-7-theirs", State: ticket.PROpen, Checks: ticket.ChecksFail}}}
+	snap, err := FetchWith(context.Background(), cfg(), js, gh, now, Snapshot{}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(js.jqls) != 1 || len(snap.Tickets) != 1 {
+		t.Fatalf("off: searches %v, tickets %+v", js.jqls, snap.Tickets)
+	}
+	js.jqls, js.panels = nil, nil
+	snap, err = FetchWith(context.Background(), cfg(), js, gh, now, Snapshot{}, Options{Team: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(js.jqls, jira.TeamSprintJQL(cfg().SpaceKeys())) {
+		t.Errorf("on: searches %v", js.jqls)
+	}
+	byKey := map[ticket.Key]ticket.Ticket{}
+	for _, tk := range snap.Tickets {
+		byKey[tk.Key] = tk
+	}
+	theirs, nobody, mine := byKey["DEMO-7"], byKey["DEMO-8"], byKey["DEMO-1"]
+	if !theirs.Team || !nobody.Team || mine.Team || theirs.Assignee != "Bea Ruiz" {
+		t.Errorf("team marks: %+v", snap.Tickets)
+	}
+	if len(theirs.PRs) != 1 || theirs.PRs[0].Number != 70 || len(theirs.Attention()) != 0 {
+		t.Errorf("a team ticket takes its PRs from the listing and never needs the user: %+v", theirs)
+	}
+	if slices.Contains(js.panels, "7") || slices.Contains(js.panels, "8") || !slices.Contains(js.panels, "1") {
+		t.Errorf("only the user's tickets ask for their development panel: %v", js.panels)
+	}
+	js.teamErr = errors.New("jira: 500")
+	snap, err = FetchWith(context.Background(), cfg(), js, gh, now, Snapshot{}, Options{Team: true})
+	if err != nil || !slices.ContainsFunc(snap.Warnings, func(w string) bool { return strings.Contains(w, "team tickets unavailable") }) || len(snap.Tickets) != 1 {
+		t.Errorf("a failed team search is a warning: %v %v %+v", err, snap.Warnings, snap.Tickets)
 	}
 }

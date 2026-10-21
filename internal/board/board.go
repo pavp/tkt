@@ -64,6 +64,19 @@ func Fetch(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource
 // FetchSince builds a snapshot like Fetch, reusing prev's development panels for tickets that did not
 // change.
 func FetchSince(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource, now time.Time, prev Snapshot) (Snapshot, error) {
+	return FetchWith(ctx, c, js, gh, now, prev, Options{})
+}
+
+// Options choose what a fetch includes beyond the user's own tickets.
+type Options struct {
+	// Team adds the open sprints' tickets assigned to others or to nobody, marked Team. They cost one more
+	// Jira search: no development panel, no search for older pull requests, and their pull requests come
+	// from the repositories' listing the user's tickets already need.
+	Team bool
+}
+
+// FetchWith builds a snapshot like FetchSince with opts.
+func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSource, now time.Time, prev Snapshot, opts Options) (Snapshot, error) {
 	snap := Snapshot{FetchedAt: now, Panels: map[string]DevPanel{}}
 	if len(c.Spaces) == 0 {
 		return snap, errors.New("no Jira spaces configured: add [[spaces]] to the config or run `tkt init`")
@@ -80,6 +93,18 @@ func FetchSince(ctx context.Context, c *config.Config, js JiraSource, gh GitHubS
 			snap.Warnings = append(snap.Warnings, "ticket labels unavailable: "+err.Error())
 		}
 	}
+	type teamResult struct {
+		issues []jira.Issue
+		err    error
+	}
+	var teamDone chan teamResult
+	if opts.Team {
+		teamDone = make(chan teamResult, 1)
+		go func() {
+			is, err := js.Search(ctx, jira.TeamSprintJQL(c.SpaceKeys()), fields)
+			teamDone <- teamResult{is, err}
+		}()
+	}
 	issues, err := js.Search(ctx, jira.MySprintJQL(c.SpaceKeys()), fields)
 	if err != nil {
 		return snap, err
@@ -88,18 +113,33 @@ func FetchSince(ctx context.Context, c *config.Config, js JiraSource, gh GitHubS
 	ids := make(map[ticket.Key]string, len(issues))
 	updated := make(map[ticket.Key]time.Time, len(issues))
 	seenSprint := map[string]bool{}
-	for _, is := range issues {
+	toTicket := func(is jira.Issue) ticket.Ticket {
 		t := ToTicket(c, is, js.BrowseURL(is.Key))
 		if labelID != "" {
 			t.Label = jira.FieldText(is.Fields[labelID])
 		}
-		tickets = append(tickets, t)
-		ids[ticket.Key(is.Key)] = is.ID
-		updated[ticket.Key(is.Key)] = is.Updated
 		for _, sp := range is.Sprints {
 			if sp.State == "active" && !seenSprint[sp.Name] {
 				seenSprint[sp.Name] = true
 				snap.Sprints = append(snap.Sprints, sp)
+			}
+		}
+		return t
+	}
+	for _, is := range issues {
+		tickets = append(tickets, toTicket(is))
+		ids[ticket.Key(is.Key)] = is.ID
+		updated[ticket.Key(is.Key)] = is.Updated
+	}
+	var team []ticket.Ticket
+	if teamDone != nil {
+		if r := <-teamDone; r.err != nil {
+			snap.Warnings = append(snap.Warnings, "team tickets unavailable: "+r.err.Error())
+		} else {
+			for _, is := range r.issues {
+				t := toTicket(is)
+				t.Team = true
+				team = append(team, t)
 			}
 		}
 	}
@@ -188,7 +228,7 @@ func FetchSince(ctx context.Context, c *config.Config, js JiraSource, gh GitHubS
 		}
 		snap.Warnings = append(snap.Warnings, s.Key+" has no repositories yet: "+why+", so CI and reviews are off; add one in the config")
 	}
-	snap.Tickets = ticket.GroupSubtasks(tickets)
+	snap.Tickets = ticket.GroupSubtasks(append(tickets, ticket.AttachPRs(team, prs)...))
 
 	if reviewsDone != nil {
 		r := <-reviewsDone
