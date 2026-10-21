@@ -383,6 +383,10 @@ func (b *boardActions) ticketPaneOpen(key ticket.Key) tea.Cmd {
 				}
 			}
 		}
+		if pane.WorkspaceID == "" {
+			pane.WorkspaceID = b.a.Env.Getenv("HERDR_WORKSPACE_ID")
+		}
+		pane.TargetPaneID = targetPane(b.ctx, h, pane.WorkspaceID)
 		if err := h.OpenPluginPane(b.ctx, pane); err != nil {
 			return tui.StatusMsg("ticket pane: " + err.Error())
 		}
