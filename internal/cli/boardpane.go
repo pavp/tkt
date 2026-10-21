@@ -24,6 +24,14 @@ func (a *App) loadBoardState() tui.BoardState {
 	return s
 }
 
+// boardView is the view the board opens in: --view when given, else the one the user last chose.
+func (a *App) boardView(flag string) string {
+	if flag != "" {
+		return flag
+	}
+	return a.loadBoardState().View
+}
+
 func (a *App) saveBoardState(s tui.BoardState) error {
 	b, err := json.Marshal(s)
 	if err != nil {

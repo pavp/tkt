@@ -37,7 +37,7 @@ func newBoardCmd(a *App) *cobra.Command {
 		Short: "Interactive board: columns or list, filters, start, fix CI (the Herdr popup)",
 		Long: "Interactive board. It opens instantly from the cached board and refreshes in the background.\n" +
 			"Keys: arrows, wasd or hjkl move · enter actions menu · f send CI failures or review comments to the agent ·\n" +
-			"i ticket pane · o Jira · p pull request · O/P copy their link · n needs you · r reviews · v columns/list · R (or the Repos button) repositories to show · enter or a click on a PRs group title collapses it · g refresh · q close.\n" +
+			"i ticket pane · o Jira · p pull request (a list when there are several) · O/P copy their link · n needs you · r reviews · v columns/list · R (or the Repos button) repositories to show · enter or a click on a PRs group title collapses it · g refresh · q close.\n" +
 			"When tkt is not configured, it offers to run the setup; without a Jira token and a cached board, to connect Jira\n" +
 			"first (with a cached board it opens at once and its status line says how to connect).",
 		Args: cobra.NoArgs,
@@ -59,7 +59,7 @@ func newBoardCmd(a *App) *cobra.Command {
 			forceColor(a.Env.Getenv)
 			defer a.claimBoardPane()()
 			actions := &boardActions{a: a, c: c, ctx: cmd.Context()}
-			prog := tea.NewProgram(tui.New(snap, have, actions, view).WithState(a.loadBoardState()), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
+			prog := tea.NewProgram(tui.New(snap, have, actions, a.boardView(view)).WithState(a.loadBoardState()), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
 			follow, stop := context.WithCancel(cmd.Context())
 			defer stop()
 			go a.followDaemon(follow, actions, prog.Send)
@@ -70,7 +70,7 @@ func newBoardCmd(a *App) *cobra.Command {
 			return err
 		},
 	}
-	cmd.Flags().StringVar(&view, "view", "columns", "initial view: columns or list")
+	cmd.Flags().StringVar(&view, "view", "", "initial view: columns or list (default: the one last used, else columns)")
 	return cmd
 }
 

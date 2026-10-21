@@ -506,3 +506,19 @@ func TestBoardStateIsRememberedInTheDataDir(t *testing.T) {
 		t.Errorf("an unreadable file starts afresh: %+v", got)
 	}
 }
+
+func TestBoardOpensInTheLastView(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	if got := h.app.boardView(""); got != "" {
+		t.Errorf("without a remembered view the board picks its default: %q", got)
+	}
+	if err := h.app.saveBoardState(tui.BoardState{View: tui.ViewList}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.app.boardView(""); got != tui.ViewList {
+		t.Errorf("the last view should open: %q", got)
+	}
+	if got := h.app.boardView(tui.ViewColumns); got != tui.ViewColumns {
+		t.Errorf("--view wins over the remembered view: %q", got)
+	}
+}

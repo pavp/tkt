@@ -66,6 +66,8 @@ type BoardState struct {
 	HiddenRepos []string `json:"hidden_repos,omitempty"`
 	// Collapsed lists the PRs filter's collapsed groups, such as "mine:owner/name" or "review:owner/name".
 	Collapsed []string `json:"collapsed,omitempty"`
+	// View is the view the user last chose, ViewColumns or ViewList.
+	View string `json:"view,omitempty"`
 }
 
 type ClonesFoundMsg struct {
@@ -251,7 +253,7 @@ func (m Model) WithState(s BoardState) Model {
 
 // state is what the board remembers for its next opening.
 func (m Model) state() BoardState {
-	return BoardState{HiddenRepos: trueKeys(m.hiddenRepos), Collapsed: trueKeys(m.collapsed)}
+	return BoardState{HiddenRepos: trueKeys(m.hiddenRepos), Collapsed: trueKeys(m.collapsed), View: m.view}
 }
 
 func trueKeys(set map[string]bool) []string {
@@ -743,8 +745,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	headerLines := lineCount(m.header())
 	if _, _, x, y, h, _ := m.headerLayout(); msg.Y >= y && msg.Y < y+h {
-		m.clickHeader(msg.X - x)
-		return m, nil
+		return m, m.clickHeader(msg.X - x)
 	}
 	if m.repoNotice() != "" && msg.Y == headerLines-1 {
 		m.picker = m.repoFilter()
@@ -839,13 +840,13 @@ func (m *Model) openMenu() {
 }
 
 // clickHeader switches filter or view when x, relative to where the controls start, falls on a button.
-func (m *Model) clickHeader(x int) {
+func (m *Model) clickHeader(x int) tea.Cmd {
 	_, _, _, _, _, spans := m.headerLayout()
 	for _, sp := range spans {
 		if x >= sp.start && x < sp.start+sp.width {
 			if sp.repos {
 				m.picker = m.repoFilter()
-				return
+				return nil
 			}
 			if sp.filter != "" {
 				m.filter = sp.filter
@@ -854,9 +855,13 @@ func (m *Model) clickHeader(x int) {
 			}
 			m.reselect()
 			m.explainList()
-			return
+			if sp.view != "" {
+				return m.actions.SaveState(m.state())
+			}
+			return nil
 		}
 	}
+	return nil
 }
 
 // columnWidth is the width of one column box without its border, so four boxes fill the pane.
@@ -902,6 +907,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.reselect()
 		m.explainList()
+		return m, m.actions.SaveState(m.state())
 	case "b":
 		if m.filter == FilterPRs {
 			m.toggleBots()
@@ -963,6 +969,10 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "p", "P":
 		if it, ok := m.current(); ok && !it.heading() {
+			if it.pr == nil && it.ticket != nil && len(it.ticket.PRs) > 1 {
+				m.menu = m.prsMenu(*it.ticket)
+				return m, nil
+			}
 			url := ""
 			if it.pr != nil {
 				url = it.pr.URL
