@@ -281,13 +281,11 @@ func (m Model) pickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 // applyRepoFilter hides the repositories left unchecked and remembers them for the board's next opening.
 func (m Model) applyRepoFilter(p *picker) (tea.Model, tea.Cmd) {
 	m.hiddenRepos = map[string]bool{}
-	var hidden []string
 	for _, r := range p.rows {
 		if !r.checked {
 			m.hiddenRepos[r.value] = true
-			hidden = append(hidden, r.value)
 		}
 	}
 	m.reselect()
-	return m, m.actions.SaveState(BoardState{HiddenRepos: hidden})
+	return m, m.actions.SaveState(m.state())
 }
