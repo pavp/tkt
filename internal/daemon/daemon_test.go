@@ -28,7 +28,7 @@ type fakeSync struct {
 	err   error
 }
 
-func (f *fakeSync) sync(context.Context) (board.Snapshot, error) {
+func (f *fakeSync) sync(context.Context, func(board.Snapshot)) (board.Snapshot, error) {
 	n := f.calls.Add(1)
 	if f.err != nil {
 		return board.Snapshot{}, f.err

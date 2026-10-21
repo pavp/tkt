@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -115,4 +116,75 @@ func TestDialNeedsTheTokenFile(t *testing.T) {
 	if _, err := Dial(t.TempDir(), Info{Port: 1}); err == nil {
 		t.Error("dialing without a token file should fail rather than create one")
 	}
+}
+
+func TestSyncServesAndAnnouncesThePartialBoardFirst(t *testing.T) {
+	part := board.Snapshot{FetchedAt: fetched.Add(time.Minute), Partial: true, Tickets: []ticket.Ticket{{Key: "DEMO-1", Status: "In Review"}}}
+	full := board.Snapshot{FetchedAt: fetched.Add(time.Minute), Tickets: []ticket.Ticket{{Key: "DEMO-1", Status: "In Review"}}}
+	var mu sync.Mutex
+	fail := false
+	var c *Client
+	var during board.Snapshot
+	syncFn := func(ctx context.Context, partial func(board.Snapshot)) (board.Snapshot, error) {
+		partial(part)
+		mu.Lock()
+		client := c
+		mu.Unlock()
+		if client != nil {
+			b, _ := client.Tickets(ctx)
+			mu.Lock()
+			during = b
+			mu.Unlock()
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if fail {
+			return board.Snapshot{}, errors.New("github: 502")
+		}
+		return full, nil
+	}
+	seed := ticketBoard(fetched, ticket.Ticket{Key: "DEMO-1", Status: "In Progress"})
+	_, client := runningWith(t, Options{Sync: syncFn, Seed: &seed})
+	mu.Lock()
+	c = client
+	mu.Unlock()
+	waitFor(t, func() bool {
+		b, err := c.Tickets(context.Background())
+		return err == nil && !b.Partial && b.FetchedAt.Equal(full.FetchedAt)
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var types []string
+	var partialEvent bool
+	go func() {
+		waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return len(types) > 0 })
+		_ = c.Sync(context.Background())
+	}()
+	_ = c.Events(ctx, func(e Event) {
+		mu.Lock()
+		types = append(types, e.Type)
+		mu.Unlock()
+		if e.Type == "snapshot" && strings.Contains(string(e.Data), `"partial":true`) {
+			partialEvent = true
+		}
+		if e.Type == "sync.finished" {
+			cancel()
+		}
+	})
+	mu.Lock()
+	served := during
+	mu.Unlock()
+	if !partialEvent || !served.Partial {
+		t.Errorf("the partial board should be announced and served while GitHub answers: events %v, served %+v", types, served)
+	}
+
+	mu.Lock()
+	fail = true
+	mu.Unlock()
+	_ = c.Sync(context.Background())
+	waitFor(t, func() bool {
+		b, err := c.Tickets(context.Background())
+		return err == nil && !b.Partial && b.FetchedAt.Equal(full.FetchedAt)
+	})
 }

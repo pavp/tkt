@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"github.com/pavp/tkt/internal/board"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ func daemonHarness(t *testing.T) *harness {
 
 func TestDaemonSyncFetchesAndCachesTheBoard(t *testing.T) {
 	h := daemonHarness(t)
-	snap, err := h.app.daemonSync(context.Background())
+	snap, err := h.app.daemonSync(context.Background(), nil)
 	if err != nil || len(snap.Tickets) != 1 {
 		t.Fatalf("sync = %+v, %v", snap, err)
 	}
@@ -41,11 +42,11 @@ func TestDaemonSyncFetchesAndCachesTheBoard(t *testing.T) {
 
 func TestDaemonSyncReportsAFailedFetch(t *testing.T) {
 	h := daemonHarness(t)
-	if _, err := h.app.daemonSync(context.Background()); err != nil {
+	if _, err := h.app.daemonSync(context.Background(), nil); err != nil {
 		t.Fatal(err)
 	}
 	h.jira.searchErr = errors.New("jira down")
-	if _, err := h.app.daemonSync(context.Background()); err == nil {
+	if _, err := h.app.daemonSync(context.Background(), nil); err == nil {
 		t.Error("a failed fetch must fail the sync, so the daemon keeps its last board")
 	}
 }
@@ -54,5 +55,14 @@ func TestDaemonCommandIsListed(t *testing.T) {
 	h := newHarness(t, baseConfig)
 	if code := h.exec("daemon", "--help"); code != 0 || !strings.Contains(h.out.String(), "run") {
 		t.Errorf("exit %d: %s", code, h.out)
+	}
+}
+
+func TestDaemonSyncHandsThePartialBoardOn(t *testing.T) {
+	h := daemonHarness(t)
+	var partials []board.Snapshot
+	snap, err := h.app.daemonSync(context.Background(), func(p board.Snapshot) { partials = append(partials, p) })
+	if err != nil || snap.Partial || len(partials) != 1 || !partials[0].Partial || len(partials[0].Tickets) != 1 {
+		t.Errorf("sync = %+v, %v; partials %+v", snap, err, partials)
 	}
 }

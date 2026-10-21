@@ -116,7 +116,7 @@ func TestDaemonSyncCarriesAgentStates(t *testing.T) {
 	h.app.NewGitHub = func(*config.Config) GitHubAPI { return &fakeGitHub{} }
 	h.app.Now = func() time.Time { return time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC) }
 	h.jira.issues = []jira.Issue{{ID: "1", Key: "DEMO-1", Status: "In Progress", StatusCategory: "indeterminate"}}
-	snap, err := h.app.daemonSync(context.Background())
+	snap, err := h.app.daemonSync(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

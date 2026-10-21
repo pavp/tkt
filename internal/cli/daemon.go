@@ -100,12 +100,12 @@ func (a *App) daemonDetail(ctx context.Context, key ticket.Key, known *ticket.Ti
 // daemonSync reads the configuration afresh, so changes made in the board's settings apply without a
 // restart, fails when the fetch does, so the daemon keeps its last good board, and rewrites the Herdr
 // sidebar with the new board when Herdr runs.
-func (a *App) daemonSync(ctx context.Context) (board.Snapshot, error) {
+func (a *App) daemonSync(ctx context.Context, partial func(board.Snapshot)) (board.Snapshot, error) {
 	c, err := a.LoadConfig()
 	if err != nil {
 		return board.Snapshot{}, err
 	}
-	snap, stale, err := a.loadSnapshot(ctx, c, false)
+	snap, stale, err := a.loadSnapshotWith(ctx, c, false, partial)
 	if err != nil {
 		return board.Snapshot{}, err
 	}

@@ -25,8 +25,9 @@ import (
 // Protocol is the API's protocol number, reported by /health and checked in the WebSocket hello.
 const Protocol = 1
 
-// SyncFunc fetches a fresh board, writing whatever cache the CLI keeps.
-type SyncFunc func(ctx context.Context) (board.Snapshot, error)
+// SyncFunc fetches a fresh board, writing whatever cache the CLI keeps. It may hand partial the board as
+// Jira tells it before GitHub answers, which the daemon serves and announces until the full one arrives.
+type SyncFunc func(ctx context.Context, partial func(board.Snapshot)) (board.Snapshot, error)
 
 // DetailFunc loads one ticket with its description and comments; known is the board's copy of the ticket,
 // when the board holds it.
@@ -209,11 +210,26 @@ func (s *Server) syncLoop(ctx context.Context) {
 func (s *Server) syncOnce(ctx context.Context) {
 	s.mu.Lock()
 	s.publish("sync.started", struct{}{})
+	before, hadBefore := s.snap, s.have
 	s.mu.Unlock()
-	snap, err := s.opts.Sync(ctx)
+	painted := false
+	snap, err := s.opts.Sync(ctx, func(p board.Snapshot) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if p.Agents == nil {
+			p.Agents = s.snap.Agents
+		}
+		s.snap, s.have, painted = p, true, true
+		s.publish("snapshot", public(p))
+	})
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
+		// A partial board must not outlive its failed sync: the last full one comes back.
+		if painted && hadBefore {
+			s.snap = before
+			s.publish("snapshot", public(before))
+		}
 		s.publish("sync.failed", map[string]string{"message": err.Error()})
 		return
 	}
