@@ -240,6 +240,7 @@ func (r rawIssue) decode(sprintField string) (Issue, error) {
 	}
 	if raw, ok := r.Fields[sprintField]; ok && sprintField != "" {
 		var sprints []struct {
+			ID      int    `json:"id"`
 			Name    string `json:"name"`
 			State   string `json:"state"`
 			EndDate string `json:"endDate"`
@@ -247,7 +248,7 @@ func (r rawIssue) decode(sprintField string) (Issue, error) {
 		if json.Unmarshal(raw, &sprints) == nil {
 			space, _, _ := strings.Cut(r.Key, "-")
 			for _, sp := range sprints {
-				out := Sprint{Space: space, Name: sp.Name, State: sp.State}
+				out := Sprint{ID: sp.ID, Space: space, Name: sp.Name, State: sp.State}
 				if t, err := time.Parse(time.RFC3339, sp.EndDate); err == nil {
 					out.End = t
 				}
@@ -411,11 +412,26 @@ func (c *Client) Search(ctx context.Context, jql string, fields []string) ([]Iss
 // finished tickets the user once held, since teams often reassign a ticket (to QA, to a reviewer) when
 // it is done.
 func MySprintJQL(spaces []string) string {
+	return fmt.Sprintf("sprint in openSprints() AND project in (%s) AND (assignee = currentUser() OR (statusCategory = Done AND assignee WAS currentUser())) ORDER BY updated DESC", quotedSpaces(spaces))
+}
+
+func quotedSpaces(spaces []string) string {
 	quoted := make([]string, len(spaces))
 	for i, s := range spaces {
 		quoted[i] = `"` + s + `"`
 	}
-	return fmt.Sprintf("sprint in openSprints() AND project in (%s) AND (assignee = currentUser() OR (statusCategory = Done AND assignee WAS currentUser())) ORDER BY updated DESC", strings.Join(quoted, ", "))
+	return strings.Join(quoted, ", ")
+}
+
+// TeamSprintJQL selects the rest of the given sprints' tickets in the given spaces: assigned to someone else
+// or to nobody, leaving out what MySprintJQL already holds. The sprints are the user's own, since a space's
+// open sprints are every team's.
+func TeamSprintJQL(spaces []string, sprintIDs []int) string {
+	ids := make([]string, len(sprintIDs))
+	for i, id := range sprintIDs {
+		ids[i] = strconv.Itoa(id)
+	}
+	return fmt.Sprintf("sprint in (%s) AND project in (%s) AND (assignee != currentUser() OR assignee IS EMPTY) AND NOT (statusCategory = Done AND assignee WAS currentUser()) ORDER BY updated DESC", strings.Join(ids, ", "), quotedSpaces(spaces))
 }
 
 // Issue fetches one issue with the board fields, its description, attachments, and any extra fields.
@@ -516,6 +532,7 @@ func (c *Client) Projects(ctx context.Context) ([]Project, error) {
 }
 
 type Sprint struct {
+	ID    int       `json:"id,omitempty"`
 	Space string    `json:"space"`
 	Name  string    `json:"name"`
 	State string    `json:"state,omitempty"`

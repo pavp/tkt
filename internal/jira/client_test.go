@@ -244,13 +244,13 @@ func TestFieldText(t *testing.T) {
 func TestSprintFieldIsDiscoveredAndParsed(t *testing.T) {
 	c, calls := server(t, map[string]string{
 		"GET /rest/api/3/field":       `[{"id":"summary","schema":{}},{"id":"customfield_10020","schema":{"custom":"com.pyxis.greenhopper.jira:gh-sprint"}}]`,
-		"POST /rest/api/3/search/jql": `{"issues":[{"key":"DEMO-1","fields":{"summary":"x","customfield_10020":[{"name":"DEMO S41","state":"closed","endDate":"2026-10-09T17:00:00.000Z"},{"name":"DEMO S42","state":"active","endDate":"2026-10-23T17:00:00.000Z"}]}}],"isLast":true}`,
+		"POST /rest/api/3/search/jql": `{"issues":[{"key":"DEMO-1","fields":{"summary":"x","customfield_10020":[{"name":"DEMO S41","state":"closed","endDate":"2026-10-09T17:00:00.000Z"},{"id":42,"name":"DEMO S42","state":"active","endDate":"2026-10-23T17:00:00.000Z"}]}}],"isLast":true}`,
 	})
 	got, err := c.Search(context.Background(), "x", ListFields)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got[0].Sprints) != 2 || got[0].Sprints[1] != (Sprint{Space: "DEMO", Name: "DEMO S42", State: "active", End: time.Date(2026, 10, 23, 17, 0, 0, 0, time.UTC)}) {
+	if len(got[0].Sprints) != 2 || got[0].Sprints[1] != (Sprint{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active", End: time.Date(2026, 10, 23, 17, 0, 0, 0, time.UTC)}) {
 		t.Errorf("sprints = %+v", got[0].Sprints)
 	}
 	fields := fmt.Sprint((*calls)[1].body["fields"])
@@ -408,5 +408,12 @@ func TestRequestsRetryWhenJiraThrottles(t *testing.T) {
 				t.Errorf("err = %v", err)
 			}
 		})
+	}
+}
+
+func TestTeamSprintJQL(t *testing.T) {
+	want := `sprint in (42, 43) AND project in ("DEMO", "OPS") AND (assignee != currentUser() OR assignee IS EMPTY) AND NOT (statusCategory = Done AND assignee WAS currentUser()) ORDER BY updated DESC`
+	if got := TeamSprintJQL([]string{"DEMO", "OPS"}, []int{42, 43}); got != want {
+		t.Errorf("jql = %s", got)
 	}
 }
