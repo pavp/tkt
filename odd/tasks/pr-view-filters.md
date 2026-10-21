@@ -17,8 +17,8 @@ Forecast (slice-plan, 2026-10-21): slice 1 330–540, slice 2 140–240 authored
 
 | ID | Specs | Slice | Route | Status | Commit |
 |---|---|---|---|---|---|
-| T1 | S4 (board state file, tui ↔ cli) | 1 | inline, no Writer reason | pending | |
-| T2 | S1, S2, S3, S7 (repository filter) | 1 | inline, no Writer reason | pending | |
+| T1 | S4 (board state file, tui ↔ cli) | 1 | inline, no Writer reason | done (RED: did not compile → GREEN) | f2523fc |
+| T2 | S1, S2, S3, S7 (repository filter) | 1 | inline, no Writer reason | done (RED: 3 tests → GREEN; rendered at 100 and 56 columns); slice 1 = 342 changed lines | see slice 1 branch |
 | T3 | S5, S6, S7 (collapsible groups) | 2 | inline, no Writer reason | pending | |
 
 Native grouping: once the last slice's PR is open, group with `gh stack link <pr-slice-1> <pr-slice-2>`; merging any PR then takes every unmerged PR below it. Every branch must live in ONE repository, and the implementer reads back each PR's base and diff and reports that, never the attempt — a PR whose diff grew is mis-grouped, and `gh stack unstack <stack>` must dissolve the stack before any base can be corrected.
@@ -33,3 +33,4 @@ Native grouping: once the last slice's PR is open, group with `gh stack link <pr
 - L3 (2026-10-21, user): "implementalo aca mismo" then "de hecho ese mismo filtro de repositorios tendria sentido que este en la pantalla de all tambien"
 - L4 (2026-10-21, user, after the slice plan): "ok hagamos algo, sube el codigo que tenemos hasta ahora. luego continua con las 2 nuevas slices con stacked" → PR #48 squash-merged (68748e4), no tag or release; slices start from main.
 - L5: design notes — the board persisted nothing before (view and density are per session); `item` gains section-title rows for S5, so every use of `m.current()` must tolerate them.
+- L6: slice 1 done: board-state.json in the data dir; R / a click on the header notice opens the filter (picker in filter mode: "Apply", `a` all/none, at least one repository); filter applied in tickets(), myPRs() and reviews(); All counts what it shows. 342 changed lines against main.
