@@ -2224,3 +2224,115 @@ func TestRepoFilterNoticeOpensTheModalAndFitsTheTrayPanel(t *testing.T) {
 		}
 	}
 }
+
+func TestPRGroupsCollapse(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	if line := selectedLine(stripANSI(m.View())); !strings.Contains(line, "#812") {
+		t.Fatalf("the PRs filter should select its first pull request, not a title: %q", line)
+	}
+	if v := stripANSI(m.View()); !strings.Contains(v, "▾ Mine  2") || !strings.Contains(v, "▾ Review requested · example-org/web  1") {
+		t.Fatalf("expanded titles:\n%s", v)
+	}
+	m = press(m, "w", "enter")
+	v := stripANSI(m.View())
+	if strings.Contains(v, "#812") || strings.Contains(v, "#806") || !strings.Contains(v, "▸ Mine  2 · 1 needs you") {
+		t.Fatalf("enter on a title should collapse it and say what needs the user:\n%s", v)
+	}
+	if strings.Contains(v, "Actions for") || strings.Contains(v, "Pull request #") {
+		t.Errorf("a title opens no menu:\n%s", v)
+	}
+	if len(r.states) == 0 || !slices.Equal(r.states[len(r.states)-1].Collapsed, []string{"mine:"}) {
+		t.Errorf("saved states = %+v", r.states)
+	}
+	m = press(m, " ")
+	if v = stripANSI(m.View()); !strings.Contains(v, "#812") || !strings.Contains(v, "▾ Mine  2") {
+		t.Errorf("space should expand it again:\n%s", v)
+	}
+	if v := stripANSI(press(m, "w", "enter").View()); !strings.Contains(m.(Model).groupTitle(m.(Model).prItems()[0], false), "▾") || !strings.Contains(v, "▸ Mine") {
+		t.Errorf("a toggle on a copy of the board must not change the original:\n%s", v)
+	}
+	y := lineIndex(v, "Review requested · example-org/web")
+	m = click(m, 4, y)
+	if v := stripANSI(m.View()); strings.Contains(v, "#820") || !strings.Contains(v, "▸ Review requested · example-org/web  1 · 1 needs you") {
+		t.Errorf("a click on a title should collapse it:\n%s", v)
+	}
+	m = press(m, "p")
+	if v := stripANSI(m.View()); strings.Contains(v, "has no pull request") {
+		t.Errorf("p on a title should do nothing:\n%s", v)
+	}
+}
+
+func TestCollapsedGroupsAreRestoredAndFitTheTrayPanel(t *testing.T) {
+	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{Collapsed: []string{"review:example-org/web"}}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	v := stripANSI(press(m, "2").View())
+	if strings.Contains(v, "#820") || !strings.Contains(v, "▸ Review requested · example-org/web") {
+		t.Errorf("the remembered collapse should apply:\n%s", v)
+	}
+	for _, l := range strings.Split(v, "\n") {
+		if lipgloss.Width(l) > 56 {
+			t.Errorf("wider than the tray panel: %q", l)
+		}
+	}
+}
+
+func TestRepoFilterListsTheConfiguredRepositories(t *testing.T) {
+	r := &recorder{cfg: config.Config{Spaces: []config.Space{{Key: "DEMO", Repos: []config.Repo{{Name: "example-org/docs"}, {Name: "example-org/web"}}}}}}
+	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(press(m, "R").View())
+	for _, want := range []string{"[x] example-org/docs", "0 open", "[x] example-org/api", "[x] example-org/web"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("filter lacks %q:\n%s", want, v)
+		}
+	}
+}
+
+func TestCollapsingKeepsTheColumns(t *testing.T) {
+	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	v := stripANSI(m.View())
+	head := strings.Split(v, "\n")[lineIndex(v, "TITLE")]
+	for i := 0; i < 10; i++ {
+		if it, _ := m.(Model).current(); it.group == "mine:example-org/api" {
+			break
+		}
+		m = press(m, "s")
+	}
+	v = stripANSI(press(m, "enter").View())
+	if !strings.Contains(v, "▸ Mine · example-org/api") {
+		t.Fatalf("api group not collapsed:\n%s", v)
+	}
+	if got := strings.Split(v, "\n")[lineIndex(v, "TITLE")]; got != head {
+		t.Errorf("collapsing moved the columns:\n%q\n%q", head, got)
+	}
+}
+
+func TestReposButtonOpensAndClosesTheFilter(t *testing.T) {
+	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	y := lineIndex(v, "Repos")
+	if y < 0 {
+		t.Fatalf("no Repos button:\n%s", v)
+	}
+	line := strings.Split(v, "\n")[y]
+	x := lipgloss.Width(line[:strings.Index(line, "Repos")])
+	m = click(m, x+1, y)
+	if v := stripANSI(m.View()); !strings.Contains(v, "[x] example-org/api") {
+		t.Fatalf("a click on Repos should open the filter:\n%s", v)
+	}
+	m = click(m, x+1, y)
+	if v := stripANSI(m.View()); strings.Contains(v, "[x] example-org/api") {
+		t.Errorf("another click on Repos should close it:\n%s", v)
+	}
+	narrow := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	if v := stripANSI(narrow.View()); !strings.Contains(v, "╭") || !strings.Contains(v, "│ List │") {
+		t.Errorf("the tray panel keeps its boxed buttons:\n%s", v)
+	}
+}

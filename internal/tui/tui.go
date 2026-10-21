@@ -4,6 +4,7 @@ package tui
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -63,6 +64,8 @@ type Actions interface {
 type BoardState struct {
 	// HiddenRepos lists the repositories ("owner/name") whose pull requests and tickets the board hides.
 	HiddenRepos []string `json:"hidden_repos,omitempty"`
+	// Collapsed lists the PRs filter's collapsed groups, such as "mine:owner/name" or "review:owner/name".
+	Collapsed []string `json:"collapsed,omitempty"`
 }
 
 type ClonesFoundMsg struct {
@@ -122,10 +125,15 @@ type item struct {
 	key    ticket.Key
 	ticket *ticket.Ticket
 	pr     *ticket.PullRequest
+	// group, set on a group's title row in the PRs filter, names the group; such a row has no ticket or
+	// pull request, only its title, how many pull requests it holds and how many of them need the user.
+	group, title string
+	count, needs int
 }
 
-func (it item) review() bool { return it.pr != nil && it.ticket == nil }
-func (it item) mine() bool   { return it.pr != nil && it.ticket != nil }
+func (it item) review() bool  { return it.pr != nil && it.ticket == nil }
+func (it item) heading() bool { return it.group != "" }
+func (it item) mine() bool    { return it.pr != nil && it.ticket != nil }
 
 type Model struct {
 	// lastClick and lastClickAt detect a double click, which the terminal does not report.
@@ -147,10 +155,12 @@ type Model struct {
 	compact      bool
 	// hiddenRepos holds the repositories ("owner/name") the user chose not to see.
 	hiddenRepos map[string]bool
-	menu        *menu
-	detail      *detailView
-	settings    *settingsView
-	picker      *picker
+	// collapsed holds the PRs filter's collapsed groups.
+	collapsed map[string]bool
+	menu      *menu
+	detail    *detailView
+	settings  *settingsView
+	picker    *picker
 	// colOffset is how far each column is scrolled; an array so copies of the model never share it.
 	colOffset [8]int
 	// inStrip means the keyboard cursor is on the review chips above the columns, at stripSel.
@@ -229,11 +239,30 @@ func (m Model) Init() tea.Cmd {
 
 // WithState restores what the board remembered from its last opening.
 func (m Model) WithState(s BoardState) Model {
-	m.hiddenRepos = map[string]bool{}
+	m.hiddenRepos, m.collapsed = map[string]bool{}, map[string]bool{}
 	for _, r := range s.HiddenRepos {
 		m.hiddenRepos[r] = true
 	}
+	for _, g := range s.Collapsed {
+		m.collapsed[g] = true
+	}
 	return m
+}
+
+// state is what the board remembers for its next opening.
+func (m Model) state() BoardState {
+	return BoardState{HiddenRepos: trueKeys(m.hiddenRepos), Collapsed: trueKeys(m.collapsed)}
+}
+
+func trueKeys(set map[string]bool) []string {
+	var out []string
+	for k, on := range set {
+		if on {
+			out = append(out, k)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // WithClock replaces the clock, for tests.
@@ -284,8 +313,8 @@ func (m Model) shownTickets() []ticket.Ticket {
 	return slices.DeleteFunc(slices.Clone(m.snap.Tickets), func(t ticket.Ticket) bool { return !m.ticketShown(t) })
 }
 
-// boardRepos counts, per repository the board knows, its open pull requests and review requests; the
-// repository filter offers them.
+// boardRepos counts, per repository the board knows (the configured ones and any with pull requests), its
+// open pull requests and review requests; the repository filter offers them.
 func (m Model) boardRepos() map[string]int {
 	repos := map[string]int{}
 	add := func(pr ticket.PullRequest) {
@@ -306,6 +335,10 @@ func (m Model) boardRepos() map[string]int {
 	}
 	for _, pr := range m.snap.Reviews {
 		add(pr)
+	}
+	cfg := m.actions.Config()
+	for _, r := range cfg.Repos() {
+		add(ticket.PullRequest{Repo: r.Name, State: ticket.PRMerged})
 	}
 	return repos
 }
@@ -370,6 +403,80 @@ func (m Model) myPRs() []item {
 	return out
 }
 
+// prItems lays the PRs filter out in groups, the user's pull requests per repository then the review
+// requests per repository, each a title row followed by its pull requests unless the group is collapsed.
+func (m Model) prItems() []item { return m.prLayout(false) }
+
+// prLayout builds prItems; with every true it keeps collapsed groups' rows, which column widths measure so
+// that collapsing a group never moves the columns.
+func (m Model) prLayout(every bool) []item {
+	var out []item
+	add := func(group, title string, rows []item) {
+		needs := 0
+		for _, it := range rows {
+			if it.review() || needsYou(*it.pr) {
+				needs++
+			}
+		}
+		out = append(out, item{key: ticket.Key("group:" + group), group: group, title: title, count: len(rows), needs: needs})
+		if every || !m.collapsed[group] {
+			out = append(out, rows...)
+		}
+	}
+	mine := m.myPRs()
+	for i := 0; i < len(mine); {
+		j, repo := i, mine[i].pr.Repo
+		for j < len(mine) && mine[j].pr.Repo == repo {
+			j++
+		}
+		title := "Mine"
+		if repo != "" {
+			title += " · " + repo
+		}
+		add("mine:"+repo, title, mine[i:j])
+		i = j
+	}
+	reviews := m.reviews()
+	for i := 0; i < len(reviews); {
+		j, repo := i, reviews[i].Repo
+		var rows []item
+		for ; j < len(reviews) && reviews[j].Repo == repo; j++ {
+			pr := reviews[j]
+			rows = append(rows, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr})
+		}
+		add("review:"+repo, "Review requested · "+repo, rows)
+		i = j
+	}
+	return out
+}
+
+// groupTitle renders a group's title row: ▾ while open, ▸ with how many need the user once collapsed.
+func (m Model) groupTitle(it item, sel bool) string {
+	mark, count := "▾ ", strconv.Itoa(it.count)
+	if m.collapsed[it.group] {
+		mark = "▸ "
+		if it.needs > 0 {
+			count += fmt.Sprintf(" · %d needs you", it.needs)
+		}
+	}
+	if sel {
+		return selected.Render(mark + it.title + "  " + count)
+	}
+	return mark + bold.Render(it.title) + "  " + dim.Render(count)
+}
+
+// toggleGroup collapses or expands a group and remembers it.
+func (m *Model) toggleGroup(group string) tea.Cmd {
+	// A copy, as models are values and an earlier copy must keep its own groups.
+	m.collapsed = maps.Clone(m.collapsed)
+	if m.collapsed == nil {
+		m.collapsed = map[string]bool{}
+	}
+	m.collapsed[group] = !m.collapsed[group]
+	m.reselect()
+	return m.actions.SaveState(m.state())
+}
+
 func needsYou(pr ticket.PullRequest) bool {
 	return len(pr.Attention()) > 0
 }
@@ -422,10 +529,10 @@ func (m Model) columns() [][]item {
 }
 
 func (m Model) listItems() []item {
-	var out []item
 	if m.filter == FilterPRs {
-		out = m.myPRs()
+		return m.prItems()
 	}
+	var out []item
 	for _, t := range board.Sorted(m.tickets()) {
 		t := t
 		out = append(out, item{key: t.Key, ticket: &t})
@@ -468,7 +575,7 @@ func (m *Model) reselect() {
 	m.inStrip = false
 	if m.effectiveView() == ViewList {
 		items := m.listItems()
-		m.row = 0
+		m.row = max(0, slices.IndexFunc(items, func(it item) bool { return !it.heading() }))
 		for i, it := range items {
 			if string(it.key) == m.selected {
 				m.row = i
@@ -660,6 +767,9 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		} else if i >= 0 && i < len(at) && at[i] >= 0 {
 			m.row = at[i]
 			m.remember()
+			if it, ok := m.current(); ok && it.heading() {
+				return m, m.toggleGroup(it.group)
+			}
 			m.selectedByClick()
 		}
 		return m, nil
@@ -710,7 +820,7 @@ const doubleClickWindow = 400 * time.Millisecond
 // soon enough to be a double click.
 func (m *Model) selectedByClick() {
 	it, ok := m.current()
-	if !ok {
+	if !ok || it.heading() {
 		return
 	}
 	now := m.now()
@@ -723,7 +833,7 @@ func (m *Model) selectedByClick() {
 }
 
 func (m *Model) openMenu() {
-	if it, ok := m.current(); ok {
+	if it, ok := m.current(); ok && !it.heading() {
 		m.menu = m.buildMenu(it)
 	}
 }
@@ -733,6 +843,10 @@ func (m *Model) clickHeader(x int) {
 	_, _, _, _, _, spans := m.headerLayout()
 	for _, sp := range spans {
 		if x >= sp.start && x < sp.start+sp.width {
+			if sp.repos {
+				m.picker = m.repoFilter()
+				return
+			}
 			if sp.filter != "" {
 				m.filter = sp.filter
 			} else {
@@ -829,6 +943,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "g":
 		return m, tea.Batch(m.actions.Refresh(), m.beginLoading())
 	case "enter", " ":
+		if it, ok := m.current(); ok && it.heading() {
+			return m, m.toggleGroup(it.group)
+		}
 		m.openMenu()
 	case ",":
 		return m.openSettings()
@@ -845,7 +962,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.actions.Copy(it.ticket.URL, "link")
 		}
 	case "p", "P":
-		if it, ok := m.current(); ok {
+		if it, ok := m.current(); ok && !it.heading() {
 			url := ""
 			if it.pr != nil {
 				url = it.pr.URL
@@ -1050,6 +1167,7 @@ func (m Model) header() string {
 type headerSpan struct {
 	start, width int
 	filter, view string
+	repos        bool
 }
 
 var (
@@ -1066,35 +1184,48 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 		parts = append(parts, sp.Space+" · "+board.SprintLabel(sp, m.snap.FetchedAt))
 	}
 	title = strings.Join(parts, " · ")
-	var row []string
-	pos := 0
-	for i, it := range m.headerSpec() {
-		gap := map[bool]int{true: 1, false: 0}[i > 0]
-		if i == len(filterOrder) {
-			gap = 2
-		}
-		row = append(row, strings.Repeat(" ", gap))
-		pos += gap
-		st := filterOff
-		if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) {
-			st = filterOn
-		}
-		chip := st.Render(strings.TrimSpace(it.label))
-		spans = append(spans, headerSpan{start: pos, width: lipgloss.Width(chip), filter: it.filter, view: it.view})
-		row = append(row, chip)
-		pos += lipgloss.Width(chip)
+	// The Repos button shows only where the boxed buttons still fit with it; otherwise R and the notice open
+	// the filter.
+	specs := [][]headerItem{m.headerSpec(), m.headerSpec()}
+	if len(m.boardRepos()) > 0 {
+		specs[0] = append(specs[0], m.reposButton())
 	}
-	controls = lipgloss.JoinHorizontal(lipgloss.Top, row...)
-	cw := lipgloss.Width(controls)
-	switch {
-	case lipgloss.Width(title)+2+cw <= m.width:
-		return title, controls, m.width - cw, 0, 3, spans
-	case cw <= m.width:
-		return truncate(title, m.width), controls, 0, 1, 3, spans
+	for pass := 0; pass < 2; pass++ {
+		for _, spec := range specs {
+			var row []string
+			pos := 0
+			spans = nil
+			for i, it := range spec {
+				gap := map[bool]int{true: 1, false: 0}[i > 0]
+				if i == len(filterOrder) || it.repos {
+					gap = 2
+				}
+				row = append(row, strings.Repeat(" ", gap))
+				pos += gap
+				st := filterOff
+				if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.repos && m.repoNotice() != "") {
+					st = filterOn
+				}
+				chip := st.Render(strings.TrimSpace(it.label))
+				spans = append(spans, headerSpan{start: pos, width: lipgloss.Width(chip), filter: it.filter, view: it.view, repos: it.repos})
+				row = append(row, chip)
+				pos += lipgloss.Width(chip)
+			}
+			controls = lipgloss.JoinHorizontal(lipgloss.Top, row...)
+			cw := lipgloss.Width(controls)
+			// The first pass looks for room on the title row, with the Repos button then without; the second
+			// gives the controls their own row.
+			switch {
+			case pass == 0 && lipgloss.Width(title)+2+cw <= m.width:
+				return title, controls, m.width - cw, 0, 3, spans
+			case pass == 1 && cw <= m.width:
+				return truncate(title, m.width), controls, 0, 1, 3, spans
+			}
+		}
 	}
 	items := m.headerItems()
 	spans = spans[:0]
-	pos = 0
+	pos := 0
 	for i, it := range m.headerSpec() {
 		w := lipgloss.Width(it.label)
 		if i < len(filterOrder) {
@@ -1117,6 +1248,8 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 type headerItem struct {
 	filter, view string
 	label        string
+	// repos marks the button that opens the repository filter.
+	repos bool
 }
 
 func (m Model) headerSpec() []headerItem {
@@ -1126,6 +1259,21 @@ func (m Model) headerSpec() []headerItem {
 		{view: ViewColumns, label: " Columns "},
 		{view: ViewList, label: " List "},
 	}
+}
+
+// reposButton opens the repository filter; it says how many repositories show while any is hidden.
+func (m Model) reposButton() headerItem {
+	repos := m.boardRepos()
+	shown := 0
+	for r := range repos {
+		if !m.repoHidden(r) {
+			shown++
+		}
+	}
+	if shown < len(repos) {
+		return headerItem{repos: true, label: fmt.Sprintf(" Repos %d/%d ", shown, len(repos))}
+	}
+	return headerItem{repos: true, label: " Repos "}
 }
 
 // headerItems renders the filter and view buttons; views sit together after a wider gap.
@@ -1565,6 +1713,8 @@ const (
 func statusText(it item) string {
 	var s string
 	switch {
+	case it.heading():
+		return ""
 	case it.review():
 		s = "Review requested"
 	case it.mine():
@@ -1590,18 +1740,25 @@ func (m Model) listView() string {
 		return dim.Render("  nothing matches this filter")
 	}
 	prText := func(it item) string {
-		if it.pr != nil {
+		switch {
+		case it.heading():
+			return ""
+		case it.pr != nil:
 			return checkMark(it.pr.Checks)
 		}
 		return prRefs(it.ticket.PRs)
 	}
+	measured := items
+	if m.filter == FilterPRs {
+		measured = m.prLayout(true)
+	}
 	prW := lipgloss.Width(m.listHeads()[2])
-	for _, it := range items {
+	for _, it := range measured {
 		prW = max(prW, lipgloss.Width(prText(it)))
 	}
 	prW = min(prW, prWidth)
 	statusW := statusWidth
-	for _, it := range items {
+	for _, it := range measured {
 		statusW = max(statusW, lipgloss.Width(statusText(it)))
 	}
 	statusW = min(statusW, statusMaxWidth)
@@ -1615,8 +1772,10 @@ func (m Model) listView() string {
 	keyW := keyWidth
 	if m.filter == FilterPRs {
 		keyW = lipgloss.Width(m.listHeads()[0])
-		for _, it := range items {
-			keyW = max(keyW, lipgloss.Width(string(it.key)))
+		for _, it := range measured {
+			if !it.heading() {
+				keyW = max(keyW, lipgloss.Width(string(it.key)))
+			}
 		}
 	}
 	room := func() int { return m.width - 2 - keyW - statusW - agentW - prW - 3 }
@@ -1709,23 +1868,17 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		at = append(at, -1)
 	}
 	for i, it := range items {
-		switch {
-		case it.mine() && (i == 0 || items[i-1].pr.Repo != it.pr.Repo):
-			n := 0
-			for _, o := range items[i:] {
-				if o.mine() && o.pr.Repo == it.pr.Repo {
-					n++
-				}
+		if it.heading() {
+			if len(lines) > 2 {
+				lines, at = append(lines, ""), append(at, -1)
 			}
-			title := "Mine"
-			if it.pr.Repo != "" {
-				title += " · " + it.pr.Repo
-			}
-			section(title, n)
-		case i == 0 && it.ticket != nil:
+			lines, at = append(lines, m.groupTitle(it, i == m.row)), append(at, i)
+			continue
+		}
+		if i == 0 && it.ticket != nil {
 			section("My tickets", nTickets)
 		}
-		if it.review() && (i == 0 || !items[i-1].review() || items[i-1].pr.Repo != it.pr.Repo) {
+		if it.review() && m.filter != FilterPRs && (i == 0 || !items[i-1].review() || items[i-1].pr.Repo != it.pr.Repo) {
 			n := 0
 			for _, o := range items[i:] {
 				if o.review() && o.pr.Repo == it.pr.Repo {
@@ -1780,6 +1933,13 @@ func (m Model) preview() string {
 	it, okSel := m.current()
 	if !okSel {
 		return dim.Render("nothing selected")
+	}
+	if it.heading() {
+		verb := "collapse"
+		if m.collapsed[it.group] {
+			verb = "expand"
+		}
+		return titleStyle.Render(truncate(it.title, m.width)) + "\n" + dim.Render(truncate(fmt.Sprintf("%d pull requests · %d need you · enter or click to %s", it.count, it.needs, verb), m.width))
 	}
 	if it.mine() {
 		title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s · %s", it.key, it.ticket.Key, cmp.Or(it.pr.Title, it.ticket.Summary)), m.width))
