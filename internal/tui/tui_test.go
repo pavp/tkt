@@ -2278,3 +2278,61 @@ func TestCollapsedGroupsAreRestoredAndFitTheTrayPanel(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoFilterListsTheConfiguredRepositories(t *testing.T) {
+	r := &recorder{cfg: config.Config{Spaces: []config.Space{{Key: "DEMO", Repos: []config.Repo{{Name: "example-org/docs"}, {Name: "example-org/web"}}}}}}
+	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(press(m, "R").View())
+	for _, want := range []string{"[x] example-org/docs", "0 open", "[x] example-org/api", "[x] example-org/web"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("filter lacks %q:\n%s", want, v)
+		}
+	}
+}
+
+func TestCollapsingKeepsTheColumns(t *testing.T) {
+	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	v := stripANSI(m.View())
+	head := strings.Split(v, "\n")[lineIndex(v, "TITLE")]
+	for i := 0; i < 10; i++ {
+		if it, _ := m.(Model).current(); it.group == "mine:example-org/api" {
+			break
+		}
+		m = press(m, "s")
+	}
+	v = stripANSI(press(m, "enter").View())
+	if !strings.Contains(v, "▸ Mine · example-org/api") {
+		t.Fatalf("api group not collapsed:\n%s", v)
+	}
+	if got := strings.Split(v, "\n")[lineIndex(v, "TITLE")]; got != head {
+		t.Errorf("collapsing moved the columns:\n%q\n%q", head, got)
+	}
+}
+
+func TestReposButtonOpensAndClosesTheFilter(t *testing.T) {
+	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	y := lineIndex(v, "Repos")
+	if y < 0 {
+		t.Fatalf("no Repos button:\n%s", v)
+	}
+	line := strings.Split(v, "\n")[y]
+	x := lipgloss.Width(line[:strings.Index(line, "Repos")])
+	m = click(m, x+1, y)
+	if v := stripANSI(m.View()); !strings.Contains(v, "[x] example-org/api") {
+		t.Fatalf("a click on Repos should open the filter:\n%s", v)
+	}
+	m = click(m, x+1, y)
+	if v := stripANSI(m.View()); strings.Contains(v, "[x] example-org/api") {
+		t.Errorf("another click on Repos should close it:\n%s", v)
+	}
+	narrow := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	if v := stripANSI(narrow.View()); !strings.Contains(v, "╭") || !strings.Contains(v, "│ List │") {
+		t.Errorf("the tray panel keeps its boxed buttons:\n%s", v)
+	}
+}

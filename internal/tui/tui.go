@@ -313,8 +313,8 @@ func (m Model) shownTickets() []ticket.Ticket {
 	return slices.DeleteFunc(slices.Clone(m.snap.Tickets), func(t ticket.Ticket) bool { return !m.ticketShown(t) })
 }
 
-// boardRepos counts, per repository the board knows, its open pull requests and review requests; the
-// repository filter offers them.
+// boardRepos counts, per repository the board knows (the configured ones and any with pull requests), its
+// open pull requests and review requests; the repository filter offers them.
 func (m Model) boardRepos() map[string]int {
 	repos := map[string]int{}
 	add := func(pr ticket.PullRequest) {
@@ -335,6 +335,10 @@ func (m Model) boardRepos() map[string]int {
 	}
 	for _, pr := range m.snap.Reviews {
 		add(pr)
+	}
+	cfg := m.actions.Config()
+	for _, r := range cfg.Repos() {
+		add(ticket.PullRequest{Repo: r.Name, State: ticket.PRMerged})
 	}
 	return repos
 }
@@ -401,7 +405,11 @@ func (m Model) myPRs() []item {
 
 // prItems lays the PRs filter out in groups, the user's pull requests per repository then the review
 // requests per repository, each a title row followed by its pull requests unless the group is collapsed.
-func (m Model) prItems() []item {
+func (m Model) prItems() []item { return m.prLayout(false) }
+
+// prLayout builds prItems; with every true it keeps collapsed groups' rows, which column widths measure so
+// that collapsing a group never moves the columns.
+func (m Model) prLayout(every bool) []item {
 	var out []item
 	add := func(group, title string, rows []item) {
 		needs := 0
@@ -411,7 +419,7 @@ func (m Model) prItems() []item {
 			}
 		}
 		out = append(out, item{key: ticket.Key("group:" + group), group: group, title: title, count: len(rows), needs: needs})
-		if !m.collapsed[group] {
+		if every || !m.collapsed[group] {
 			out = append(out, rows...)
 		}
 	}
@@ -835,6 +843,10 @@ func (m *Model) clickHeader(x int) {
 	_, _, _, _, _, spans := m.headerLayout()
 	for _, sp := range spans {
 		if x >= sp.start && x < sp.start+sp.width {
+			if sp.repos {
+				m.picker = m.repoFilter()
+				return
+			}
 			if sp.filter != "" {
 				m.filter = sp.filter
 			} else {
@@ -1155,6 +1167,7 @@ func (m Model) header() string {
 type headerSpan struct {
 	start, width int
 	filter, view string
+	repos        bool
 }
 
 var (
@@ -1171,35 +1184,48 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 		parts = append(parts, sp.Space+" · "+board.SprintLabel(sp, m.snap.FetchedAt))
 	}
 	title = strings.Join(parts, " · ")
-	var row []string
-	pos := 0
-	for i, it := range m.headerSpec() {
-		gap := map[bool]int{true: 1, false: 0}[i > 0]
-		if i == len(filterOrder) {
-			gap = 2
-		}
-		row = append(row, strings.Repeat(" ", gap))
-		pos += gap
-		st := filterOff
-		if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) {
-			st = filterOn
-		}
-		chip := st.Render(strings.TrimSpace(it.label))
-		spans = append(spans, headerSpan{start: pos, width: lipgloss.Width(chip), filter: it.filter, view: it.view})
-		row = append(row, chip)
-		pos += lipgloss.Width(chip)
+	// The Repos button shows only where the boxed buttons still fit with it; otherwise R and the notice open
+	// the filter.
+	specs := [][]headerItem{m.headerSpec(), m.headerSpec()}
+	if len(m.boardRepos()) > 0 {
+		specs[0] = append(specs[0], m.reposButton())
 	}
-	controls = lipgloss.JoinHorizontal(lipgloss.Top, row...)
-	cw := lipgloss.Width(controls)
-	switch {
-	case lipgloss.Width(title)+2+cw <= m.width:
-		return title, controls, m.width - cw, 0, 3, spans
-	case cw <= m.width:
-		return truncate(title, m.width), controls, 0, 1, 3, spans
+	for pass := 0; pass < 2; pass++ {
+		for _, spec := range specs {
+			var row []string
+			pos := 0
+			spans = nil
+			for i, it := range spec {
+				gap := map[bool]int{true: 1, false: 0}[i > 0]
+				if i == len(filterOrder) || it.repos {
+					gap = 2
+				}
+				row = append(row, strings.Repeat(" ", gap))
+				pos += gap
+				st := filterOff
+				if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.repos && m.repoNotice() != "") {
+					st = filterOn
+				}
+				chip := st.Render(strings.TrimSpace(it.label))
+				spans = append(spans, headerSpan{start: pos, width: lipgloss.Width(chip), filter: it.filter, view: it.view, repos: it.repos})
+				row = append(row, chip)
+				pos += lipgloss.Width(chip)
+			}
+			controls = lipgloss.JoinHorizontal(lipgloss.Top, row...)
+			cw := lipgloss.Width(controls)
+			// The first pass looks for room on the title row, with the Repos button then without; the second
+			// gives the controls their own row.
+			switch {
+			case pass == 0 && lipgloss.Width(title)+2+cw <= m.width:
+				return title, controls, m.width - cw, 0, 3, spans
+			case pass == 1 && cw <= m.width:
+				return truncate(title, m.width), controls, 0, 1, 3, spans
+			}
+		}
 	}
 	items := m.headerItems()
 	spans = spans[:0]
-	pos = 0
+	pos := 0
 	for i, it := range m.headerSpec() {
 		w := lipgloss.Width(it.label)
 		if i < len(filterOrder) {
@@ -1222,6 +1248,8 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 type headerItem struct {
 	filter, view string
 	label        string
+	// repos marks the button that opens the repository filter.
+	repos bool
 }
 
 func (m Model) headerSpec() []headerItem {
@@ -1231,6 +1259,21 @@ func (m Model) headerSpec() []headerItem {
 		{view: ViewColumns, label: " Columns "},
 		{view: ViewList, label: " List "},
 	}
+}
+
+// reposButton opens the repository filter; it says how many repositories show while any is hidden.
+func (m Model) reposButton() headerItem {
+	repos := m.boardRepos()
+	shown := 0
+	for r := range repos {
+		if !m.repoHidden(r) {
+			shown++
+		}
+	}
+	if shown < len(repos) {
+		return headerItem{repos: true, label: fmt.Sprintf(" Repos %d/%d ", shown, len(repos))}
+	}
+	return headerItem{repos: true, label: " Repos "}
 }
 
 // headerItems renders the filter and view buttons; views sit together after a wider gap.
@@ -1705,13 +1748,17 @@ func (m Model) listView() string {
 		}
 		return prRefs(it.ticket.PRs)
 	}
+	measured := items
+	if m.filter == FilterPRs {
+		measured = m.prLayout(true)
+	}
 	prW := lipgloss.Width(m.listHeads()[2])
-	for _, it := range items {
+	for _, it := range measured {
 		prW = max(prW, lipgloss.Width(prText(it)))
 	}
 	prW = min(prW, prWidth)
 	statusW := statusWidth
-	for _, it := range items {
+	for _, it := range measured {
 		statusW = max(statusW, lipgloss.Width(statusText(it)))
 	}
 	statusW = min(statusW, statusMaxWidth)
@@ -1725,7 +1772,7 @@ func (m Model) listView() string {
 	keyW := keyWidth
 	if m.filter == FilterPRs {
 		keyW = lipgloss.Width(m.listHeads()[0])
-		for _, it := range items {
+		for _, it := range measured {
 			if !it.heading() {
 				keyW = max(keyW, lipgloss.Width(string(it.key)))
 			}
