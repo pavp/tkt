@@ -30,6 +30,10 @@ type stubJira struct {
 	teamErr error
 	jqls    []string
 	panels  []string
+	// teamGate, when set, holds the team search until the GitHub listing starts; teamStalled records a
+	// search that gave up waiting, as one that held the listing back would.
+	teamGate    chan struct{}
+	teamStalled bool
 	// linked maps issue ids to their development-panel PRs; nil means the panel is unavailable.
 	linked map[string][]jira.DevPullRequest
 	// fieldIDs answers FieldID; fields records what Search asked for.
@@ -43,6 +47,18 @@ func (s *stubJira) Search(_ context.Context, jql string, fields []string) ([]jir
 	defer s.mu.Unlock()
 	s.jqls = append(s.jqls, jql)
 	if strings.Contains(jql, "assignee != currentUser()") {
+		gate := s.teamGate
+		s.mu.Unlock()
+		if gate != nil {
+			select {
+			case <-gate:
+			case <-time.After(2 * time.Second):
+				s.mu.Lock()
+				s.teamStalled = true
+				s.mu.Unlock()
+			}
+		}
+		s.mu.Lock()
 		return s.team, s.teamErr
 	}
 	s.jql, s.fields = jql, fields
@@ -68,6 +84,8 @@ func (s *stubJira) DevPullRequests(_ context.Context, id string) ([]jira.DevPull
 }
 
 type stubGitHub struct {
+	// listing, when set, is closed as the PR listing starts.
+	listing     chan struct{}
 	prs         []ticket.PullRequest
 	prErr       error
 	reviews     []ticket.PullRequest
@@ -79,6 +97,9 @@ type stubGitHub struct {
 }
 
 func (s *stubGitHub) PullRequests(_ context.Context, repos []string) ([]ticket.PullRequest, error) {
+	if s.listing != nil {
+		close(s.listing)
+	}
 	s.repos = repos
 	return s.prs, s.prErr
 }
@@ -846,5 +867,22 @@ func TestTeamTicketsComeOnlyWhenAsked(t *testing.T) {
 	snap, err = FetchWith(context.Background(), cfg(), js, gh, now, Snapshot{}, Options{Team: true})
 	if err != nil || !slices.ContainsFunc(snap.Warnings, func(w string) bool { return strings.Contains(w, "team tickets unavailable") }) || len(snap.Tickets) != 1 {
 		t.Errorf("a failed team search is a warning: %v %v %+v", err, snap.Warnings, snap.Tickets)
+	}
+}
+
+func TestTheTeamSearchNeverHoldsTheGitHubListingBack(t *testing.T) {
+	gate := make(chan struct{})
+	js := &stubJira{
+		issues:   []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate", Sprints: []jira.Sprint{{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active"}}}},
+		team:     []jira.Issue{{ID: "7", Key: "DEMO-7", Summary: "Theirs", Status: "To Do", StatusCategory: "new"}},
+		linked:   map[string][]jira.DevPullRequest{},
+		teamGate: gate,
+	}
+	gh := &stubGitHub{listing: gate}
+	if _, err := FetchWith(context.Background(), cfg(), js, gh, time.Now(), Snapshot{}, Options{Team: true}); err != nil {
+		t.Fatal(err)
+	}
+	if js.teamStalled {
+		t.Error("the sync waited for the team search before listing pull requests; they should run together")
 	}
 }

@@ -124,7 +124,7 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		}
 	}
 	// The team is whoever shares the user's active sprints: a space's open sprints are every team's, so the
-	// search waits for the user's sprints, then runs beside the development panels.
+	// search waits for the user's sprints, then runs beside the development panels and GitHub, joined last.
 	type teamResult struct {
 		issues []jira.Issue
 		err    error
@@ -136,18 +136,6 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 			is, err := js.Search(ctx, jira.TeamSprintJQL(c.SpaceKeys(), sprintIDs), fields)
 			teamDone <- teamResult{is, err}
 		}()
-	}
-	var team []ticket.Ticket
-	if teamDone != nil {
-		if r := <-teamDone; r.err != nil {
-			snap.Warnings = append(snap.Warnings, "team tickets unavailable: "+r.err.Error())
-		} else {
-			for _, is := range r.issues {
-				t := toTicket(is)
-				t.Team = true
-				team = append(team, t)
-			}
-		}
 	}
 
 	linked := map[ticket.Key][]jira.DevPullRequest{}
@@ -233,6 +221,18 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 			why = "Jira does not show your tickets' pull requests"
 		}
 		snap.Warnings = append(snap.Warnings, s.Key+" has no repositories yet: "+why+", so CI and reviews are off; add one in the config")
+	}
+	var team []ticket.Ticket
+	if teamDone != nil {
+		if r := <-teamDone; r.err != nil {
+			snap.Warnings = append(snap.Warnings, "team tickets unavailable: "+r.err.Error())
+		} else {
+			for _, is := range r.issues {
+				t := toTicket(is)
+				t.Team = true
+				team = append(team, t)
+			}
+		}
 	}
 	snap.Tickets = ticket.GroupSubtasks(append(tickets, ticket.AttachPRs(team, prs)...))
 
