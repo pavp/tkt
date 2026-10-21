@@ -28,6 +28,8 @@ type Snapshot struct {
 	Warnings []string            `json:"warnings,omitempty"`
 	// Panels keeps each ticket's development panel, so the next sync asks Jira only for changed tickets.
 	Panels map[string]DevPanel `json:"panels,omitempty"`
+	// Partial marks a board painted before GitHub answered: Jira's tickets with earlier pull request data.
+	Partial bool `json:"partial,omitempty"`
 }
 
 // DevPanel is a ticket's development panel as last asked: the issue's updated time it belongs to and
@@ -73,6 +75,9 @@ type Options struct {
 	// Jira search: no development panel, no search for older pull requests, and their pull requests come
 	// from the repositories' listing the user's tickets already need.
 	Team bool
+	// Partial, when set, receives the board as Jira tells it while GitHub is still answering, so it can be
+	// painted first; see partialBoard.
+	Partial func(Snapshot)
 }
 
 // FetchWith builds a snapshot like FetchSince with opts.
@@ -178,13 +183,44 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 			reviewsDone <- reviewResult{r, err}
 		}()
 	}
-	var prs []ticket.PullRequest
-	var prErr error
+	type prsResult struct {
+		prs []ticket.PullRequest
+		err error
+	}
+	prsDone := make(chan prsResult, 1)
 	if len(names) > 0 {
-		prs, prErr = gh.PullRequests(ctx, names)
-		if prErr != nil {
-			snap.Warnings = append(snap.Warnings, "pull requests unavailable: "+prErr.Error())
+		go func() {
+			p, err := gh.PullRequests(ctx, names)
+			prsDone <- prsResult{p, err}
+		}()
+	} else {
+		prsDone <- prsResult{}
+	}
+	var team []ticket.Ticket
+	joined := false
+	joinTeam := func() {
+		if joined || teamDone == nil {
+			return
 		}
+		joined = true
+		if r := <-teamDone; r.err != nil {
+			snap.Warnings = append(snap.Warnings, "team tickets unavailable: "+r.err.Error())
+		} else {
+			for _, is := range r.issues {
+				t := toTicket(is)
+				t.Team = true
+				team = append(team, t)
+			}
+		}
+	}
+	if opts.Partial != nil {
+		joinTeam()
+		opts.Partial(partialBoard(snap, tickets, team, linked, prev))
+	}
+	r := <-prsDone
+	prs, prErr := r.prs, r.err
+	if prErr != nil {
+		snap.Warnings = append(snap.Warnings, "pull requests unavailable: "+prErr.Error())
 	}
 	attached := ticket.AttachPRs(tickets, prs)
 	var missing []string
@@ -222,18 +258,7 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		}
 		snap.Warnings = append(snap.Warnings, s.Key+" has no repositories yet: "+why+", so CI and reviews are off; add one in the config")
 	}
-	var team []ticket.Ticket
-	if teamDone != nil {
-		if r := <-teamDone; r.err != nil {
-			snap.Warnings = append(snap.Warnings, "team tickets unavailable: "+r.err.Error())
-		} else {
-			for _, is := range r.issues {
-				t := toTicket(is)
-				t.Team = true
-				team = append(team, t)
-			}
-		}
-	}
+	joinTeam()
 	snap.Tickets = ticket.GroupSubtasks(append(tickets, ticket.AttachPRs(team, prs)...))
 
 	if reviewsDone != nil {
@@ -253,6 +278,28 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		slices.SortStableFunc(snap.Reviews, byRepoNumber)
 	}
 	return snap, nil
+}
+
+// partialBoard is the board as Jira tells it before GitHub answers: each ticket keeps the previous board's
+// pull requests, plus those its development panel links. It shares nothing the fetch goes on changing.
+func partialBoard(snap Snapshot, mine, team []ticket.Ticket, linked map[ticket.Key][]jira.DevPullRequest, prev Snapshot) Snapshot {
+	withPrev := func(ts []ticket.Ticket) []ticket.Ticket {
+		out := slices.Clone(ts)
+		for i := range out {
+			var before []ticket.PullRequest
+			if t, ok := prev.Find(out[i].Key); ok {
+				before = slices.Clone(t.PRs)
+			}
+			out[i].PRs = mergeLinked(before, linked[out[i].Key], nil)
+		}
+		return out
+	}
+	p := Snapshot{FetchedAt: snap.FetchedAt, Sprints: slices.Clone(snap.Sprints), Reviews: slices.Clone(prev.Reviews), Partial: true, Repos: map[string][]string{}}
+	for k, v := range snap.Repos {
+		p.Repos[k] = slices.Clone(v)
+	}
+	p.Tickets = ticket.GroupSubtasks(append(withPrev(mine), withPrev(team)...))
+	return p
 }
 
 // spaceRepos lists each space's repositories: the configured ones plus those holding the pull requests

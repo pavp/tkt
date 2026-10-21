@@ -85,7 +85,10 @@ func (s *stubJira) DevPullRequests(_ context.Context, id string) ([]jira.DevPull
 
 type stubGitHub struct {
 	// listing, when set, is closed as the PR listing starts.
-	listing     chan struct{}
+	listing chan struct{}
+	// hold, when set, keeps the PR listing waiting until it closes; held records a listing that gave up.
+	hold        chan struct{}
+	held        bool
 	prs         []ticket.PullRequest
 	prErr       error
 	reviews     []ticket.PullRequest
@@ -99,6 +102,13 @@ type stubGitHub struct {
 func (s *stubGitHub) PullRequests(_ context.Context, repos []string) ([]ticket.PullRequest, error) {
 	if s.listing != nil {
 		close(s.listing)
+	}
+	if s.hold != nil {
+		select {
+		case <-s.hold:
+		case <-time.After(2 * time.Second):
+			s.held = true
+		}
 	}
 	s.repos = repos
 	return s.prs, s.prErr
@@ -884,5 +894,49 @@ func TestTheTeamSearchNeverHoldsTheGitHubListingBack(t *testing.T) {
 	}
 	if js.teamStalled {
 		t.Error("the sync waited for the team search before listing pull requests; they should run together")
+	}
+}
+
+func TestFetchPaintsJiraBeforeGitHub(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	js := &stubJira{
+		issues: []jira.Issue{
+			{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Review", StatusCategory: "indeterminate", Sprints: []jira.Sprint{{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active"}}},
+			{ID: "2", Key: "DEMO-2", Summary: "New one", Status: "To Do", StatusCategory: "new"},
+		},
+		team:   []jira.Issue{{ID: "7", Key: "DEMO-7", Summary: "Theirs", Status: "To Do", StatusCategory: "new"}},
+		linked: map[string][]jira.DevPullRequest{"2": {{Repo: "example-org/web", Number: 31, Title: "Start", URL: "https://github.com/example-org/web/pull/31", Branch: "feature/DEMO-2-start", Status: "OPEN"}}},
+	}
+	prev := Snapshot{FetchedAt: now.Add(-time.Minute), Tickets: []ticket.Ticket{{Key: "DEMO-1", Status: "In Progress",
+		PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 30, State: ticket.PROpen, Checks: ticket.ChecksFail}}}},
+		Reviews: []ticket.PullRequest{{Repo: "example-org/web", Number: 99, Title: "Theirs"}}}
+	hold := make(chan struct{})
+	gh := &stubGitHub{hold: hold, prs: []ticket.PullRequest{{Repo: "example-org/web", Number: 30, Branch: "feature/DEMO-1-x", State: ticket.PROpen, Checks: ticket.ChecksPass}}}
+	var partial Snapshot
+	paints := 0
+	snap, err := FetchWith(context.Background(), cfg(), js, gh, now, prev, Options{Team: true, Partial: func(s Snapshot) {
+		paints++
+		partial = s
+		close(hold)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paints != 1 || gh.held {
+		t.Fatalf("the partial board should come while GitHub answers: paints %d, listing gave up %v", paints, gh.held)
+	}
+	byKey := map[ticket.Key]ticket.Ticket{}
+	for _, tk := range partial.Tickets {
+		byKey[tk.Key] = tk
+	}
+	mine, fresh, theirs := byKey["DEMO-1"], byKey["DEMO-2"], byKey["DEMO-7"]
+	if !partial.Partial || mine.Status != "In Review" || len(mine.PRs) != 1 || mine.PRs[0].Checks != ticket.ChecksFail {
+		t.Errorf("Jira's news with the previous board's pull requests: %+v", mine)
+	}
+	if len(fresh.PRs) != 1 || fresh.PRs[0].Number != 31 || !theirs.Team || len(partial.Reviews) != 1 {
+		t.Errorf("a new ticket takes its PRs from its development panel, the team shows, reviews stay: %+v %+v %+v", fresh, theirs, partial.Reviews)
+	}
+	if snap.Partial || snap.Tickets[0].Key != "DEMO-1" || snap.Tickets[0].PRs[0].Checks != ticket.ChecksPass {
+		t.Errorf("the full board follows: %+v", snap.Tickets)
 	}
 }

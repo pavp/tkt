@@ -15,7 +15,7 @@ Forecast (slice-plan, 2026-10-21): 355–680 authored changed lines; slice 1 70�
 | ID | Specs | Slice | Route | Status | Commit |
 |---|---|---|---|---|---|
 | T1 | S1, S2 | 1 | inline, no Writer reason | done (RED → GREEN; live: 4 syncs 2.86, 2.80, 2.40, 2.11 s, were 4.4–5.6 s) | 969734b |
-| T2 | S3, S4 (board and CLI without the daemon) | 2 | inline, no Writer reason | pending | |
+| T2 | S3, S4 (board and CLI without the daemon) | 2 | inline, no Writer reason | done (RED → GREEN; -race on board, cli, tui) | e1f8e7b |
 | T3 | S3 (daemon) | 3 | inline, no Writer reason | pending | |
 
 Native grouping: once the last slice's PR is open, group with `gh stack link <pr-1> <pr-2> <pr-3>`; merging any PR then takes every unmerged PR below it. Every branch must live in ONE repository, and the implementer reads back each PR's base and diff and reports that, never the attempt — a PR whose diff grew is mis-grouped, and `gh stack unstack <stack>` must dissolve the stack before any base can be corrected.
@@ -29,3 +29,5 @@ Native grouping: once the last slice's PR is open, group with `gh stack link <pr
 - L2 (2026-10-21, user): "y no se puede separar el pintado? primero jira y cuando llegue la respeusta de github pintar?" then "igual antes de esto, jira ya no te proporciona informacion de las PRS?" → Jira's development panel gives the PRs, their state, reviewers and approvals, comment counts and builds, but not changes requested, conflicts, drafts, unresolved threads or review requests, and costs ~1.2 s per ticket; the first paint uses the cached panels.
 - L3 (2026-10-21, user): "si plantealo asi, hazlo ya" then "si pero tienes razon, primero lleva a main el codigo que ya tenemos y publica, luego sigue con estas 3 slices en stacked" → team board released as v0.1.32 and the `f` fix as v0.1.33 first; slices start from main (682a61e).
 - L4: slice 1 done (969734b): github mergedFields for the merged listing; cli jiraClient keeps one client per site/email/token in App.jiraClients (tokenMu). Live read-only timing: 2.1–2.9 s per sync.
+- L5: slice 2 done (e1f8e7b): board.Options.Partial and Snapshot.Partial; FetchWith lists GitHub in a goroutine and hands partialBoard (previous board's PRs + development-panel links, the team joined, nothing shared with the full board) while it answers; cli loadSnapshotWith/fetchSnapshotWith, boardActions.send = prog.Send for the non-daemon refresh, partial never cached; tui keeps loading and agents on a partial, "updating PRs…".
+- L6 (2026-10-21, user): "funciono lo de abrir los comentarios al agente pero deberia tambien cerrar el pane y redirigir al agente" → separate small change after this slice: `f` from the board closes the board and focuses the agent's pane.

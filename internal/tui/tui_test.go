@@ -2621,3 +2621,26 @@ func drain(cmd tea.Cmd) {
 		}
 	}
 }
+
+func TestAPartialBoardKeepsRefreshing(t *testing.T) {
+	snap := snapshot()
+	snap.Agents = map[string]string{"DEMO-1": "working"}
+	m := tea.Model(New(snap, true, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "g")
+	partial := snapshot()
+	partial.FetchedAt = snap.FetchedAt.Add(time.Minute)
+	partial.Partial = true
+	partial.Tickets = append(partial.Tickets, ticket.Ticket{Key: "DEMO-8", Summary: "Just assigned", Status: "To Do", Category: ticket.ToDo})
+	m, _ = m.Update(SnapshotMsg{Snap: partial, Quiet: true})
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "DEMO-8") || !strings.Contains(v, "updating PRs…") || !strings.Contains(v, "working") {
+		t.Errorf("Jira's board shows at once, still updating, agents kept:\n%s", v)
+	}
+	full := partial
+	full.Partial = false
+	m, _ = m.Update(SnapshotMsg{Snap: full})
+	if v := stripANSI(m.View()); strings.Contains(v, "updating PRs") || strings.Contains(v, "refreshing") {
+		t.Errorf("the full board ends the refresh:\n%s", v)
+	}
+}
