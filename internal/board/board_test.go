@@ -796,9 +796,11 @@ func TestToTicketKeepsTheAssignee(t *testing.T) {
 func TestTeamTicketsComeOnlyWhenAsked(t *testing.T) {
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 	js := &stubJira{
-		issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate", Assignee: "Dev Example"}},
+		issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate", Assignee: "Dev Example",
+			Sprints: []jira.Sprint{{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active"}, {ID: 41, Space: "DEMO", Name: "DEMO S41", State: "closed"}}}},
 		team: []jira.Issue{
-			{ID: "7", Key: "DEMO-7", Summary: "Theirs", Status: "In Progress", StatusCategory: "indeterminate", Assignee: "Bea Ruiz"},
+			{ID: "7", Key: "DEMO-7", Summary: "Theirs", Status: "In Progress", StatusCategory: "indeterminate", Assignee: "Bea Ruiz",
+				Sprints: []jira.Sprint{{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active"}, {ID: 99, Space: "DEMO", Name: "Another team's sprint", State: "active"}}},
 			{ID: "8", Key: "DEMO-8", Summary: "Nobody's", Status: "To Do", StatusCategory: "new"},
 		},
 		linked: map[string][]jira.DevPullRequest{},
@@ -816,8 +818,11 @@ func TestTeamTicketsComeOnlyWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(js.jqls, jira.TeamSprintJQL(cfg().SpaceKeys())) {
-		t.Errorf("on: searches %v", js.jqls)
+	if !slices.Contains(js.jqls, jira.TeamSprintJQL(cfg().SpaceKeys(), []int{42})) {
+		t.Errorf("on: the team search should keep to the user's active sprints: %v", js.jqls)
+	}
+	if len(snap.Sprints) != 1 || snap.Sprints[0].ID != 42 {
+		t.Errorf("only the user's sprints head the board: %+v", snap.Sprints)
 	}
 	byKey := map[ticket.Key]ticket.Ticket{}
 	for _, tk := range snap.Tickets {
@@ -832,6 +837,10 @@ func TestTeamTicketsComeOnlyWhenAsked(t *testing.T) {
 	}
 	if slices.Contains(js.panels, "7") || slices.Contains(js.panels, "8") || !slices.Contains(js.panels, "1") {
 		t.Errorf("only the user's tickets ask for their development panel: %v", js.panels)
+	}
+	sprintless := &stubJira{issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate"}}, team: js.team, linked: js.linked}
+	if _, err := FetchWith(context.Background(), cfg(), sprintless, gh, now, Snapshot{}, Options{Team: true}); err != nil || len(sprintless.jqls) != 1 {
+		t.Errorf("without an active sprint of the user's there is no team to look for: %v %v", err, sprintless.jqls)
 	}
 	js.teamErr = errors.New("jira: 500")
 	snap, err = FetchWith(context.Background(), cfg(), js, gh, now, Snapshot{}, Options{Team: true})

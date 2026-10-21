@@ -526,6 +526,7 @@ func TestBoardOpensInTheLastView(t *testing.T) {
 func TestTheTeamToggleReachesTheSync(t *testing.T) {
 	h, _ := listHarness(t)
 	h.jira.team = []jira.Issue{{ID: "9", Key: "DEMO-9", Summary: "Theirs", Status: "To Do", StatusCategory: "new", Assignee: "Bea Ruiz"}}
+	h.jira.issues[0].Sprints = []jira.Sprint{{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active"}}
 	c, err := h.app.LoadConfig()
 	if err != nil {
 		t.Fatal(err)

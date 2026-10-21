@@ -93,18 +93,6 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 			snap.Warnings = append(snap.Warnings, "ticket labels unavailable: "+err.Error())
 		}
 	}
-	type teamResult struct {
-		issues []jira.Issue
-		err    error
-	}
-	var teamDone chan teamResult
-	if opts.Team {
-		teamDone = make(chan teamResult, 1)
-		go func() {
-			is, err := js.Search(ctx, jira.TeamSprintJQL(c.SpaceKeys()), fields)
-			teamDone <- teamResult{is, err}
-		}()
-	}
 	issues, err := js.Search(ctx, jira.MySprintJQL(c.SpaceKeys()), fields)
 	if err != nil {
 		return snap, err
@@ -118,18 +106,36 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		if labelID != "" {
 			t.Label = jira.FieldText(is.Fields[labelID])
 		}
-		for _, sp := range is.Sprints {
-			if sp.State == "active" && !seenSprint[sp.Name] {
-				seenSprint[sp.Name] = true
-				snap.Sprints = append(snap.Sprints, sp)
-			}
-		}
 		return t
 	}
+	var sprintIDs []int
 	for _, is := range issues {
 		tickets = append(tickets, toTicket(is))
 		ids[ticket.Key(is.Key)] = is.ID
 		updated[ticket.Key(is.Key)] = is.Updated
+		for _, sp := range is.Sprints {
+			if sp.State == "active" && !seenSprint[sp.Name] {
+				seenSprint[sp.Name] = true
+				snap.Sprints = append(snap.Sprints, sp)
+				if sp.ID != 0 {
+					sprintIDs = append(sprintIDs, sp.ID)
+				}
+			}
+		}
+	}
+	// The team is whoever shares the user's active sprints: a space's open sprints are every team's, so the
+	// search waits for the user's sprints, then runs beside the development panels.
+	type teamResult struct {
+		issues []jira.Issue
+		err    error
+	}
+	var teamDone chan teamResult
+	if opts.Team && len(sprintIDs) > 0 {
+		teamDone = make(chan teamResult, 1)
+		go func() {
+			is, err := js.Search(ctx, jira.TeamSprintJQL(c.SpaceKeys(), sprintIDs), fields)
+			teamDone <- teamResult{is, err}
+		}()
 	}
 	var team []ticket.Ticket
 	if teamDone != nil {
