@@ -16,8 +16,8 @@ Forecast (slice-plan, 2026-10-21): 526–837 authored changed lines; slice 1 150
 
 | ID | Specs | Slice | Route | Status | Commit |
 |---|---|---|---|---|---|
-| T1 | S1, S2 (data: fields with kinds and allowed values; transition posts values) | 1 | inline, no Writer reason | pending | |
-| T2 | S1, S2, S3, S4, S6 (form with list fields; Blocked and Ceased from tkt) | 2 | inline, no Writer reason | pending | |
+| T1 | S1, S2 (data: fields with kinds and allowed values; transition posts values) | 1 | inline, no Writer reason | done (RED: did not compile → GREEN) | 6eb5879 |
+| T2 | S1, S2, S3, S4, S6 (form with list fields; Blocked and Ceased from tkt) | 2 | inline, no Writer reason | done (RED: 4 tests → GREEN; rendered at 100 and 56 columns) | slice 2 commit |
 | T3 | S1, S4, S6 (user field: assignable users search with a dropdown) | 3 | inline, no Writer reason | pending | |
 
 Native grouping: never grouped: a stack would merge the draft tracker.
@@ -30,3 +30,5 @@ Native grouping: never grouped: a stack would merge the draft tracker.
 - L1 (2026-10-21, user): "luego me gustaria saber que haria falta para implementar el uso de ceased y blocked desde tkt" then "ok que tal si probamos implementar el de blocked y me avisas para yo probarlo?"
 - L2 (2026-10-21, user): "ok vamos con chain" → 3 slices, Chain.
 - L3: findings (read-only probe on the real Jira): Blocked's form has two select fields (schema type `option`, allowedValues with id and value), a user picker (type `user`) and linked issues (type `array`, items `issuelinks`), all reported optional; Ceased on the Error type has one select field; elsewhere Ceased has no fields. `GET /rest/api/3/user/assignable/search?issueKey=&query=` answers users. Validators are not exposed.
+- L4: slice 1 done (6eb5879, 207 changed lines with this document): jira.Field/Option/Value, Transitions decodes fillable fields (option, user; required first), Transition posts values ({"id"} / {"accountId"}); tui and cli types mapped; the rule for leaving a move to Jira unchanged.
+- L5: slice 2 done (217 changed lines): jira NeedsForm = a required field without default that is neither a list nor a user (or Sprint/story points required); the board fills list fields (formKinds), a required field of another kind leaves the move to Jira, optional ones (users until slice 3, linked issues) are left out. The form is a menu: "Reason *: —" rows open their options ("— none" for optional ones), "Move KEY to STATUS now" needs every required field and posts the values shown, so the form is the confirmation (S4); menus now truncate to the pane's width. Next: a test build for the user (S5), then slice 3.

@@ -584,9 +584,9 @@ func (c *Client) ActiveSprints(ctx context.Context, board int) ([]int, error) {
 // sprintSchema is the custom type of Jira Software's Sprint field.
 const sprintSchema = "com.pyxis.greenhopper.jira:gh-sprint"
 
-// Transition moves an issue from its current status to To. NeedsForm marks one whose screen asks for
-// something only Jira's own form can fill: any field but the sprint and story points, which keep their
-// values, or those two when required without a default.
+// Transition moves an issue from its current status to To. NeedsForm marks one whose screen requires,
+// without a default, a field only Jira's own form can fill: neither a list nor a user, or the sprint or
+// story points, which otherwise keep their values.
 type Transition struct {
 	ID        string
 	Name      string
@@ -654,10 +654,11 @@ func (c *Client) Transitions(ctx context.Context, key string) ([]Transition, err
 		out[i] = Transition{ID: t.ID, Name: t.Name, To: t.To.Name}
 		for id, f := range t.Fields {
 			planning := f.Schema.Custom == sprintSchema || strings.Contains(strings.ToLower(f.Name), "story point")
-			if !planning || f.Required && !f.HasDefaultValue {
-				out[i].NeedsForm = true
-			}
-			if planning || f.Schema.Type != KindOption && f.Schema.Type != KindUser {
+			fillable := !planning && (f.Schema.Type == KindOption || f.Schema.Type == KindUser)
+			if !fillable {
+				if f.Required && !f.HasDefaultValue {
+					out[i].NeedsForm = true
+				}
 				continue
 			}
 			field := Field{ID: id, Name: f.Name, Kind: f.Schema.Type, Required: f.Required && !f.HasDefaultValue}

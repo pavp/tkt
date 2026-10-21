@@ -452,7 +452,7 @@ func TestActiveSprints(t *testing.T) {
 	}
 }
 
-func TestTransitionsMarkThoseWithAForm(t *testing.T) {
+func TestTransitionsDescribeTheirForms(t *testing.T) {
 	c, calls := server(t, map[string]string{
 		"GET /rest/api/3/issue/DEMO-12/transitions": `{"transitions":[
  {"id":"31","name":"Commit Review","hasScreen":false,"to":{"name":"In Review"}},
@@ -464,7 +464,8 @@ func TestTransitionsMarkThoseWithAForm(t *testing.T) {
   "customfield_10300":{"required":false,"name":"Reason","schema":{"type":"option","custom":"com.atlassian.jira.plugin.system.customfieldtypes:select"},"allowedValues":[{"id":"9001","value":"Waiting on a decision"},{"id":"9002","value":"No access"}]},
   "customfield_10301":{"required":true,"name":"Owner","schema":{"type":"user"}},
   "issuelinks":{"required":false,"name":"Linked issues","schema":{"type":"array","items":"issuelinks"}}}},
- {"id":"61","name":"Ceased","hasScreen":true,"to":{"name":"Ceased"}}]}`,
+ {"id":"61","name":"Ceased","hasScreen":true,"to":{"name":"Ceased"}},
+ {"id":"71","name":"Link","hasScreen":true,"to":{"name":"Linked"},"fields":{"issuelinks":{"required":true,"name":"Linked issues","schema":{"type":"array","items":"issuelinks"}}}}]}`,
 	})
 	got, err := c.Transitions(context.Background(), "DEMO-12")
 	if err != nil {
@@ -474,11 +475,12 @@ func TestTransitionsMarkThoseWithAForm(t *testing.T) {
 		{ID: "31", Name: "Commit Review", To: "In Review"},
 		{ID: "41", Name: "In progress", To: "In Progress"},
 		{ID: "42", Name: "Estimate", To: "Estimated", NeedsForm: true},
-		{ID: "51", Name: "Blocked", To: "Blocked", NeedsForm: true, Fields: []Field{
+		{ID: "51", Name: "Blocked", To: "Blocked", Fields: []Field{
 			{ID: "customfield_10301", Name: "Owner", Kind: KindUser, Required: true},
 			{ID: "customfield_10300", Name: "Reason", Kind: KindOption, Options: []Option{{ID: "9001", Value: "Waiting on a decision"}, {ID: "9002", Value: "No access"}}},
 		}},
 		{ID: "61", Name: "Ceased", To: "Ceased"},
+		{ID: "71", Name: "Link", To: "Linked", NeedsForm: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("transitions = %+v", got)

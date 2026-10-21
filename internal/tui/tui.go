@@ -731,6 +731,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.transitions(msg)
 	case TransitionedMsg:
 		return m.transitioned(msg)
+	case formMsg:
+		m.menu = m.formMenu(msg.form)
+		m.status = msg.status
 	case DetailMsg:
 		if m.detail == nil || m.detail.key != msg.Key {
 			return m, nil
