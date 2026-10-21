@@ -2709,7 +2709,7 @@ func TestCardsShowSubtaskProgress(t *testing.T) {
 	}
 }
 
-func TestOpenSubtasksHaveCardsInTheirOwnColumn(t *testing.T) {
+func TestSubtasksHaveCardsInTheirOwnColumn(t *testing.T) {
 	m := tea.Model(New(subtaskSnapshot(), true, &recorder{}, ViewColumns))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 60})
 	cols := m.(Model).columns()
@@ -2724,10 +2724,8 @@ func TestOpenSubtasksHaveCardsInTheirOwnColumn(t *testing.T) {
 	if !slices.Contains(todo, "DEMO-11") || slices.Index(doing, "DEMO-13") != slices.Index(doing, "DEMO-1")+1 {
 		t.Errorf("open subtasks go to their own column, right after a parent sharing it: to do %v, in progress %v", todo, doing)
 	}
-	for _, col := range cols {
-		if slices.Contains(keys(col), "DEMO-12") {
-			t.Errorf("a done subtask only counts in its parent's progress: %v", keys(col))
-		}
+	if done := keys(cols[3]); !slices.Contains(done, "DEMO-12") {
+		t.Errorf("a done subtask has its card in Done, as in Jira: %v", done)
 	}
 	v := stripANSI(m.View())
 	if !strings.Contains(v, "↳ DEMO-11") || !strings.Contains(v, "of DEMO-1") {
