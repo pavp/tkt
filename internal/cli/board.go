@@ -36,7 +36,7 @@ func newBoardCmd(a *App) *cobra.Command {
 		Use:   "board",
 		Short: "Interactive board: columns or list, filters, start, fix CI (the Herdr popup)",
 		Long: "Interactive board. It opens instantly from the cached board and refreshes in the background.\n" +
-			"Keys: arrows, wasd or hjkl move · enter actions menu · f send CI failures or review comments to the agent ·\n" +
+			"Keys: arrows, wasd or hjkl move · enter actions menu · f send CI failures or review comments to the agent and go to it ·\n" +
 			"i ticket pane · o Jira · p pull request (a list when there are several) · O/P copy their link · n needs you · r reviews · v columns/list · R (or the Repos button) repositories to show · t (or the Team button) the team's tickets too · enter or a click on a PRs group title collapses it · g refresh · q close.\n" +
 			"When tkt is not configured, it offers to run the setup; without a Jira token and a cached board, to connect Jira\n" +
 			"first (with a cached board it opens at once and its status line says how to connect).",
@@ -412,16 +412,22 @@ func (b *boardActions) Open(url string) tea.Cmd {
 	}
 }
 
+// Fix sends the ticket's feedback to its agent; inside Herdr the board then steps aside for the agent, as it
+// does for the ticket pane, focusing the agent's pane and closing.
 func (b *boardActions) Fix(key ticket.Key) tea.Cmd {
 	return func() tea.Msg {
-		msg, err := b.a.sendFeedback(b.ctx, b.cfg(), key, false)
+		msg, pane, err := b.a.deliverFeedback(b.ctx, b.cfg(), key, false)
 		if err != nil {
 			return tui.StatusMsg(err.Error())
 		}
 		if !b.inHerdr() {
 			return tui.StatusMsg("outside Herdr: run `tkt fix " + string(key) + "` to print the prompt")
 		}
-		return tui.StatusMsg(msg)
+		if pane == "" {
+			return tui.StatusMsg(msg)
+		}
+		_ = b.a.NewHerdr().FocusPane(b.ctx, pane)
+		return tea.QuitMsg{}
 	}
 }
 
