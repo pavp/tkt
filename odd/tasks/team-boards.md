@@ -18,7 +18,7 @@ Forecast (slice-plan, 2026-10-21): 595–1020 authored changed lines; slice 1 22
 |---|---|---|---|---|---|
 | T1 | S1, S2 (data: Jira boards and sprints, config, sync) | 1 | inline, no Writer reason | done (RED → GREEN; -race; live: Authorization Center gives 6 team tickets incl. ACTO-165803/165823, 3.9 s) | 73eefdb |
 | T2 | S2, S3, S4, S6 (board notice and sections, init step) | 2 | inline, no Writer reason | done (RED → GREEN; -race on cli and tui) | 1343300 |
-| T3 | S5, S6 (Settings) | 3 | inline, no Writer reason | pending | |
+| T3 | S5, S6 (Settings) | 3 | inline, no Writer reason | done (RED → GREEN; -race on tui, cli, board; rendered at 140 and 56 columns) | b186d5a |
 
 Native grouping: never grouped: a stack would merge the draft tracker.
 
@@ -32,3 +32,6 @@ Native grouping: never grouped: a stack would merge the draft tracker.
 - L3 (2026-10-21, user): "si confirmo el plan con chain" (after "una pregunta, ahora mismo solo muestra tickets de board > sprints activos?" was answered: today only sprints, the user's tickets in any open sprint, the team in the user's sprints).
 - L4: slice 1 done (73eefdb): jira Boards(space) (scrum, paginated by startAt) and ActiveSprints(board); config TeamBoard and Space.TeamBoards (`team_boards`), cloned; FetchWith starts the team goroutine at once: activeSprints over the configured boards in parallel, then TeamSprintJQL over their ids; no boards → no search; Ticket.Board from the sprint's board. Live (read-only, Authorization Center configured in memory): both tickets show as team with their board; their Jira status has since changed (Ready to be Released, En revisión).
 - L5: slice 2 done (1343300): init asks "Team boards for KEY (names, comma separated; N scrum boards)" only when the space has scrum boards (so existing flows keep their answers), matching an exact name (any case) or a single name containing the text, warning on none or several; turning Team on without team boards says "no team boards yet · add team boards in Settings (,)"; the list splits the team into "Team · <board>" sections.
+- L6: slice 3 done (b186d5a): Settings lists "TEAM BOARDS" under each space's repositories (rows with ✕, "+ Add team board"); the add form asks Actions.JiraBoards at once, tab completes by prefix, enter accepts an exact name or a single containing one (config.MatchBoard, shared with init) and refuses unknown, ambiguous or repeated boards; d or ✕ removes after confirming; column width counts board names. Next: delivery (Chain) on the user's go.
+- L7 (2026-10-21, user, reviewing the preview): "ok funciona, pero me gustaria que quedara mas separado la parte de repositries de la de boards" → Settings gets a "Team boards" section of its own, second tab, with its own description and column; short tab names when the strip does not fit. Slice 3 measured 402 changed lines against slice 2 (2 over the budget, including these notes).
+- L8 (2026-10-21, user): "si acepto la exception, sube todo y publica" → slice 3 ships as an approved size exception; delivered with the separate fix for review statuses ("En revisión" → In Review) as v0.1.36.

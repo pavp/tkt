@@ -65,6 +65,26 @@ type TeamBoard struct {
 	Name string `toml:"name"`
 }
 
+// MatchBoard finds the board called name, ignoring case, else the boards whose name contains it; n says
+// how many matched, so a name that fits several is refused rather than guessed.
+func MatchBoard(boards []TeamBoard, name string) (TeamBoard, int) {
+	for _, b := range boards {
+		if strings.EqualFold(b.Name, name) {
+			return b, 1
+		}
+	}
+	var found []TeamBoard
+	for _, b := range boards {
+		if strings.Contains(strings.ToLower(b.Name), strings.ToLower(name)) {
+			found = append(found, b)
+		}
+	}
+	if len(found) == 1 {
+		return found[0], 1
+	}
+	return TeamBoard{}, len(found)
+}
+
 // Ignores reports whether repo ("owner/name", any case) is on the space's ignored list.
 func (s Space) Ignores(repo string) bool {
 	return slices.ContainsFunc(s.Ignored, func(r string) bool { return strings.EqualFold(r, repo) })

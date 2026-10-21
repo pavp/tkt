@@ -25,6 +25,8 @@ import (
 
 type recorder struct {
 	calls []string
+	// boards answers JiraBoards per space.
+	boards map[string][]config.TeamBoard
 	// states records every SaveState.
 	states []BoardState
 	// choices is what StartChoices reports.
@@ -49,6 +51,12 @@ type recorder struct {
 	jiraFields []string
 	// known is the ticket the last Detail was given.
 	known *ticket.Ticket
+}
+
+func (r *recorder) JiraBoards(space string) tea.Cmd {
+	r.listed = append(r.listed, "boards "+space)
+	boards := r.boards[space]
+	return func() tea.Msg { return JiraBoardsListedMsg{Space: space, Boards: boards} }
 }
 
 func (r *recorder) JiraFields() tea.Cmd {

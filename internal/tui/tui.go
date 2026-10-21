@@ -53,6 +53,8 @@ type Actions interface {
 	ListRepos(owner string) tea.Cmd
 	// JiraFields lists the names of the Jira site's fields; they arrive as a JiraFieldsListedMsg.
 	JiraFields() tea.Cmd
+	// JiraBoards lists a space's scrum boards; they arrive as a JiraBoardsListedMsg.
+	JiraBoards(space string) tea.Cmd
 	// NativePicker reports whether PickFolder can show a folder chooser the user will see; without one,
 	// ctrl+o browses folders inside the terminal.
 	NativePicker() bool
@@ -667,7 +669,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reselect()
 	case SettingsSavedMsg:
 		return m.settingsSaved(msg)
-	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg, ReposListedMsg, JiraFieldsListedMsg:
+	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg, ReposListedMsg, JiraFieldsListedMsg, JiraBoardsListedMsg:
 		return m.settingsLookup(msg)
 	case SnapshotMsg:
 		if msg.Snap.Partial && msg.Err == nil {

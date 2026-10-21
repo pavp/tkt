@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -123,7 +124,7 @@ func TestSettingsRemovesOnlyAfterConfirming(t *testing.T) {
 
 func TestSettingsEditsLocalCloneFolders(t *testing.T) {
 	m, r := settingsBoard(t)
-	m = send(m, keyTab)
+	m = send(send(m, keyTab), keyTab)
 	if v := stripANSI(m.View()); !strings.Contains(v, "Folders where tkt looks for your local clones") || !strings.Contains(v, "▸ ~/src") {
 		t.Fatalf("roots section:\n%s", v)
 	}
@@ -239,7 +240,7 @@ func TestSettingsFillsTheRepositoryFromThePickedFolder(t *testing.T) {
 func TestSettingsPicksACloneFolder(t *testing.T) {
 	m, r := settingsBoard(t)
 	r.picked = "~/projects"
-	m = send(m, keyTab)
+	m = send(send(m, keyTab), keyTab)
 	m = press(m, "a")
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlO})
 	send(m, keyEnter)
@@ -285,7 +286,7 @@ func TestSettingsKeepsAnInferredRepositoryWhenNotConfirmed(t *testing.T) {
 func TestSettingsSetsTheTicketLabelFromJiraFields(t *testing.T) {
 	m, r := settingsBoard(t)
 	r.jiraFields = []string{"Priority", "Product", "Product(s)", "Summary"}
-	m = send(send(m, keyTab), keyTab)
+	m = send(send(send(m, keyTab), keyTab), keyTab)
 	v := stripANSI(m.View())
 	if !strings.Contains(v, "▸ Ticket label") || !strings.Contains(v, "—") || !strings.Contains(v, "shown first on the selected ticket's detail line") {
 		t.Fatalf("board section:\n%s", v)
@@ -318,7 +319,7 @@ func TestSettingsSetsTheTicketLabelFromJiraFields(t *testing.T) {
 func TestSettingsTicketLabelHintsAnUnknownField(t *testing.T) {
 	m, r := settingsBoard(t)
 	r.jiraFields = []string{"Product"}
-	m = press(send(send(m, keyTab), keyTab), "enter")
+	m = press(send(send(send(m, keyTab), keyTab), keyTab), "enter")
 	m = send(typeText(m, "Team"), keyTab)
 	if v := stripANSI(m.View()); !strings.Contains(v, "no Jira field starts with Team") {
 		t.Errorf("hint:\n%s", v)
@@ -330,10 +331,96 @@ func TestSettingsTicketLabelHintsAnUnknownField(t *testing.T) {
 
 func TestSettingsSectionsCycle(t *testing.T) {
 	m, _ := settingsBoard(t)
-	for i, want := range []string{"Folders where tkt looks", "Ticket label", "example-org/web"} {
+	for i, want := range []string{"Jira boards whose active sprints", "Folders where tkt looks", "Ticket label", "example-org/web"} {
 		m = send(m, keyTab)
 		if v := stripANSI(m.View()); !strings.Contains(v, want) {
 			t.Errorf("tab %d: missing %q:\n%s", i+1, want, v)
+		}
+	}
+}
+
+// selectSettingsRow moves the settings selection to the row showing text.
+func selectSettingsRow(t *testing.T, m tea.Model, text string) tea.Model {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		for _, l := range strings.Split(stripANSI(m.View()), "\n") {
+			if strings.Contains(l, "▸ ") && strings.Contains(l, text) {
+				return m
+			}
+		}
+		m = press(m, "s")
+	}
+	t.Fatalf("no settings row %q:\n%s", text, stripANSI(m.View()))
+	return m
+}
+
+func teamBoardSettings(t *testing.T) (tea.Model, *recorder) {
+	t.Helper()
+	m, r := settingsBoard(t)
+	r.boards = map[string][]config.TeamBoard{"DEMO": {{ID: 418, Name: "User Access Center"}, {ID: 5205, Name: "Authorization Center"}}}
+	return send(m, keyTab), r
+}
+
+func TestSettingsAddsTeamBoards(t *testing.T) {
+	m, r := teamBoardSettings(t)
+	if v := stripANSI(m.View()); !strings.Contains(v, "Jira boards whose active sprints make the board's Team mode") || !strings.Contains(v, "+ Add team board") || strings.Contains(v, "REPOSITORY") {
+		t.Fatalf("team boards should have a section of their own:\n%s", v)
+	}
+	m = send(selectSettingsRow(t, m, "Add team board"), keyEnter)
+	if v := stripANSI(m.View()); !strings.Contains(v, "Add a team board to DEMO") {
+		t.Fatalf("no form:\n%s", v)
+	}
+	m = send(typeText(m, "Auth"), keyTab)
+	if v := stripANSI(m.View()); !strings.Contains(v, "Authorization Center▏") {
+		t.Fatalf("tab should complete the board's name:\n%s", v)
+	}
+	m = send(m, keyEnter)
+	if len(r.saved) != 1 || !slices.Equal(r.saved[0].Spaces[0].TeamBoards, []config.TeamBoard{{ID: 5205, Name: "Authorization Center"}}) {
+		t.Fatalf("saved = %+v", r.saved)
+	}
+	m = send(typeText(send(selectSettingsRow(t, m, "Add team board"), keyEnter), "access"), keyEnter)
+	if len(r.saved) != 2 || len(r.saved[1].Spaces[0].TeamBoards) != 2 || r.saved[1].Spaces[0].TeamBoards[1].ID != 418 {
+		t.Fatalf("a single board containing the text is enough: %+v", r.saved)
+	}
+	if v := stripANSI(m.View()); !strings.Contains(v, "Authorization Center") || !strings.Contains(v, "User Access Center") {
+		t.Errorf("both boards should be listed:\n%s", v)
+	}
+	m = send(typeText(send(selectSettingsRow(t, m, "Add team board"), keyEnter), "nope"), keyEnter)
+	if len(r.saved) != 2 || !strings.Contains(stripANSI(m.View()), `no scrum board of DEMO is called "nope"`) {
+		t.Errorf("an unknown board is refused: %+v\n%s", r.saved, stripANSI(m.View()))
+	}
+	m = send(send(m, tea.KeyMsg{Type: tea.KeyCtrlU}), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Authorization Center")})
+	m = send(m, keyEnter)
+	if len(r.saved) != 2 || !strings.Contains(stripANSI(m.View()), "Authorization Center is already a team board of DEMO") {
+		t.Errorf("a board is added once: %+v\n%s", r.saved, stripANSI(m.View()))
+	}
+}
+
+func TestSettingsRemovesATeamBoard(t *testing.T) {
+	m, r := teamBoardSettings(t)
+	r.cfg.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 5205, Name: "Authorization Center"}}
+	m = send(press(m, "esc", ","), keyTab)
+	if v := stripANSI(press(m, "esc", ",").View()); strings.Contains(v, "Authorization Center") {
+		t.Errorf("the repositories section should not list team boards:\n%s", v)
+	}
+	m = press(selectSettingsRow(t, m, "Authorization Center"), "d")
+	if !strings.Contains(stripANSI(m.View()), "Remove the team board Authorization Center from DEMO? (y/n)") {
+		t.Fatalf("no confirmation:\n%s", stripANSI(m.View()))
+	}
+	send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if len(r.saved) != 1 || len(r.saved[0].Spaces[0].TeamBoards) != 0 {
+		t.Errorf("saved = %+v", r.saved)
+	}
+}
+
+func TestTeamBoardSettingsFitTheTrayPanel(t *testing.T) {
+	m, r := teamBoardSettings(t)
+	r.cfg.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 5205, Name: "Authorization Center for every team in the company"}}
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 56, Height: 40})
+	m = send(press(m, "esc", ","), keyTab)
+	for _, l := range strings.Split(stripANSI(m.View()), "\n") {
+		if lipgloss.Width(l) > 56 {
+			t.Errorf("wider than the tray panel: %q", l)
 		}
 	}
 }
