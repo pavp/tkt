@@ -573,24 +573,48 @@ func (a *App) herdrOpenTicket(cmd *cobra.Command) error {
 	ctx := cmd.Context()
 	h := a.NewHerdr()
 	id := a.Env.Getenv("HERDR_WORKSPACE_ID")
-	all, err := h.Workspaces(ctx)
+	dirs, err := workspaceDirs(ctx, h, id)
 	if err != nil {
 		return err
 	}
-	for _, ws := range all {
-		if ws.ID != id || ws.Worktree == nil {
-			continue
+	for _, dir := range dirs {
+		if key, ok := a.keyAt(ctx, c, dir); ok {
+			return h.OpenPluginPane(ctx, herdr.PaneOpen{
+				PluginID: a.pluginID(), Entrypoint: "ticket", Cwd: dir,
+				Env: map[string]string{"TKT_KEY": string(key)}, WorkspaceID: id,
+			})
 		}
-		key, ok := a.keyAt(ctx, c, ws.Worktree.CheckoutPath)
-		if !ok {
-			break
-		}
-		return h.OpenPluginPane(ctx, herdr.PaneOpen{
-			PluginID: a.pluginID(), Entrypoint: "ticket", Cwd: ws.Worktree.CheckoutPath,
-			Env: map[string]string{"TKT_KEY": string(key)}, WorkspaceID: ws.ID,
-		})
 	}
 	return h.Notify(ctx, "tkt", "This workspace's branch carries no ticket key")
+}
+
+// workspaceDirs lists where a workspace works: its worktree, else its panes' folders with the focused one first,
+// since Herdr knows the worktree only of workspaces it created on one.
+func workspaceDirs(ctx context.Context, h HerdrAPI, id string) ([]string, error) {
+	all, err := h.Workspaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, ws := range all {
+		if ws.ID == id && ws.Worktree != nil {
+			return []string{ws.Worktree.CheckoutPath}, nil
+		}
+	}
+	panes, err := h.Panes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var dirs []string
+	for _, p := range panes {
+		switch {
+		case p.WorkspaceID != id || p.Cwd == "":
+		case p.Focused:
+			dirs = append([]string{p.Cwd}, dirs...)
+		default:
+			dirs = append(dirs, p.Cwd)
+		}
+	}
+	return dirs, nil
 }
 
 var jiraBrowse = regexp.MustCompile(`/browse/([A-Z][A-Z0-9]+-[0-9]+)`)
