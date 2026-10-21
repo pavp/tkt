@@ -12,6 +12,7 @@ import (
 
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/daemon"
+	"github.com/pavp/tkt/internal/ticket"
 )
 
 // syncEvery is how often the daemon refreshes the board from Jira and GitHub.
@@ -74,7 +75,7 @@ func (a *App) runDaemon(ctx context.Context) error {
 	if snap, ok, err := a.cache().Load(); err == nil && ok {
 		seed = &snap
 	}
-	s, err := daemon.New(daemon.Options{Dir: a.Env.DataDir(), Version: Version, Sync: a.daemonSync, Interval: syncEvery, Seed: seed})
+	s, err := daemon.New(daemon.Options{Dir: a.Env.DataDir(), Version: Version, Sync: a.daemonSync, Interval: syncEvery, Seed: seed, Detail: a.daemonDetail})
 	if err != nil {
 		return err
 	}
@@ -85,6 +86,15 @@ func (a *App) runDaemon(ctx context.Context) error {
 	a.printf("tkt daemon listening on %s\n", ln.Addr())
 	go a.watchAgents(ctx, s)
 	return s.Serve(ctx, ln)
+}
+
+// daemonDetail serves GET /v1/tickets/{key} with the configuration read afresh, like each sync.
+func (a *App) daemonDetail(ctx context.Context, key ticket.Key, known *ticket.Ticket) (any, error) {
+	c, err := a.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	return a.loadDetail(ctx, c, key, known)
 }
 
 // daemonSync reads the configuration afresh, so changes made in the board's settings apply without a

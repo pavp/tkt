@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,8 +14,14 @@ import (
 
 func running(t *testing.T, s *scriptedSync, seed *board.Snapshot) (*Server, *Client) {
 	t.Helper()
+	return runningWith(t, Options{Sync: s.sync, Seed: seed})
+}
+
+func runningWith(t *testing.T, o Options) (*Server, *Client) {
+	t.Helper()
 	dir := t.TempDir()
-	d, err := New(Options{Dir: dir, Version: "1.2.3", Sync: s.sync, Interval: time.Hour, Seed: seed})
+	o.Dir, o.Version, o.Interval = dir, "1.2.3", time.Hour
+	d, err := New(o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +55,28 @@ func TestClientReadsTheBoardAndAsksForSyncs(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, func() bool { b, _ := d.Board(); return len(b.Tickets) == 1 && b.Tickets[0].Key == "DEMO-2" })
+}
+
+func TestClientReadsATicketDetail(t *testing.T) {
+	detail := func(_ context.Context, key ticket.Key, _ *ticket.Ticket) (any, error) {
+		if key == "DEMO-9" {
+			return nil, errors.New("jira: DEMO-9 not found")
+		}
+		return map[string]string{"summary": "Filter accounts"}, nil
+	}
+	seed := ticketBoard(fetched, ticket.Ticket{Key: "DEMO-1"})
+	_, c := runningWith(t, Options{Sync: (&scriptedSync{}).sync, Seed: &seed, Detail: detail})
+	var got struct{ Summary string }
+	if err := c.Ticket(context.Background(), "DEMO-1", &got); err != nil || got.Summary != "Filter accounts" {
+		t.Errorf("detail = %+v, %v", got, err)
+	}
+	if err := c.Ticket(context.Background(), "DEMO-9", &got); err == nil || !strings.Contains(err.Error(), "jira: DEMO-9 not found") {
+		t.Errorf("err = %v", err)
+	}
+	_, old := running(t, &scriptedSync{}, &seed)
+	if err := old.Ticket(context.Background(), "DEMO-1", &got); err == nil {
+		t.Error("a daemon without details should fail")
+	}
 }
 
 func TestClientWithoutABoardYetSaysSo(t *testing.T) {

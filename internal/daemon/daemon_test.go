@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -100,6 +101,51 @@ func TestTicketsServesTheSeedThenEachSync(t *testing.T) {
 	_, body = get(t, s.Handler(), http.MethodGet, "/v1/tickets", s.token)
 	if body["fetched_at"] != fetched.Add(time.Minute).Format(time.RFC3339) {
 		t.Errorf("after a sync its board is served: %v", body)
+	}
+}
+
+func TestTicketDetail(t *testing.T) {
+	seed := &board.Snapshot{FetchedAt: fetched, Tickets: []ticket.Ticket{{Key: "DEMO-1", Summary: "Filter accounts"}}}
+	var gotKnown *ticket.Ticket
+	detail := func(_ context.Context, key ticket.Key, known *ticket.Ticket) (any, error) {
+		gotKnown = known
+		if key == "DEMO-9" {
+			return nil, errors.New("jira: DEMO-9 not found")
+		}
+		return map[string]string{"key": string(key)}, nil
+	}
+	s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour, Seed: seed, Detail: detail})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, path, token string
+		code              int
+		want              map[string]any
+		known             bool
+	}{
+		{"a board ticket", "/v1/tickets/DEMO-1", s.token, http.StatusOK, map[string]any{"key": "DEMO-1"}, true},
+		{"a ticket off the board", "/v1/tickets/DEMO-2", s.token, http.StatusOK, map[string]any{"key": "DEMO-2"}, false},
+		{"no token", "/v1/tickets/DEMO-1", "", http.StatusUnauthorized, nil, false},
+		{"not a key", "/v1/tickets/demo-1", s.token, http.StatusBadRequest, map[string]any{"type": "error", "code": "bad_key", "message": `"demo-1" is not a ticket key like DEMO-123`}, false},
+		{"jira fails", "/v1/tickets/DEMO-9", s.token, http.StatusBadGateway, map[string]any{"type": "error", "code": "detail_failed", "message": "jira: DEMO-9 not found"}, false},
+	}
+	for _, tt := range tests {
+		gotKnown = nil
+		code, body := get(t, s.Handler(), http.MethodGet, tt.path, tt.token)
+		if code != tt.code || (tt.want != nil && !maps.Equal(body, tt.want)) {
+			t.Errorf("%s: %d %v", tt.name, code, body)
+		}
+		if (gotKnown != nil) != tt.known || (tt.known && gotKnown.Summary != "Filter accounts") {
+			t.Errorf("%s: known = %+v", tt.name, gotKnown)
+		}
+	}
+}
+
+func TestTicketDetailWithoutALoaderIsNotFound(t *testing.T) {
+	s := newServer(t, &fakeSync{}, &board.Snapshot{FetchedAt: fetched})
+	if code, body := get(t, s.Handler(), http.MethodGet, "/v1/tickets/DEMO-1", s.token); code != http.StatusNotFound || body["code"] != "not_found" {
+		t.Errorf("detail = %d %v", code, body)
 	}
 }
 

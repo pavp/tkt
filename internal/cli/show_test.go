@@ -117,8 +117,11 @@ func TestShowWatchRedrawsUntilCancelled(t *testing.T) {
 	if code := h.exec("show", "DEMO-1", "--watch", "--interval", "30s"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	if n := strings.Count(h.out.String(), "\033[H\033[2J"); n != 2 {
-		t.Errorf("redraws = %d, want 2", n)
+	if n := strings.Count(h.out.String(), "\033[H\033[2J"); n != 3 {
+		t.Errorf("redraws = %d, want 3", n)
+	}
+	if out := h.out.String(); !strings.HasPrefix(out, "\033[H\033[2JLoading DEMO-1…\n") {
+		t.Errorf("the pane should say it is loading before the first load:\n%q", out)
 	}
 	if !strings.Contains(h.out.String(), "every 30s · Ctrl-C to stop") {
 		t.Errorf("footer missing:\n%s", h.out)
@@ -199,6 +202,51 @@ func TestShowTakesPullRequestsFromARunningDaemon(t *testing.T) {
 	}
 	if out := h.out.String(); gh.prCalls != 1 || !strings.Contains(out, "example-org/web#900") || strings.Contains(out, "#812") {
 		t.Errorf("show should take the daemon's pull requests (listings %d):\n%s", gh.prCalls, out)
+	}
+}
+
+func TestShowTakesTheDetailFromARunningDaemon(t *testing.T) {
+	h := showHarness(t)
+	h.app.Executable = func() (string, error) { return "/opt/tkt/bin/tkt", nil }
+	f := &fakeDaemons{
+		board: &board.Snapshot{FetchedAt: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC), Tickets: []ticket.Ticket{
+			{Key: "DEMO-1", Summary: "Filter accounts by date", PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 900, State: ticket.PROpen}}},
+		}},
+		detail: func(_ context.Context, key ticket.Key, known *ticket.Ticket) (any, error) {
+			return detail{Ticket: *known, Description: "Loaded by the daemon"}, nil
+		},
+	}
+	f.install(t, h)
+	if _, err := h.app.ensureDaemon(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.jira.details = nil
+	if code := h.exec("show", "DEMO-1"); code != 0 || !strings.Contains(h.out.String(), "Loaded by the daemon") {
+		t.Fatalf("exit %d: %s\n%s", code, h.errOut, h.out)
+	}
+
+	h.out.Reset()
+	h.app.Sleep = func(context.Context, time.Duration) error { return context.Canceled }
+	if code := h.exec("show", "DEMO-1", "--watch"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	out := h.out.String()
+	head, loading, loaded := strings.Index(out, "example-org/web#900"), strings.Index(out, "Loading DEMO-1…"), strings.Index(out, "Loaded by the daemon")
+	if head < 0 || loading < head || loaded < loading || strings.Count(out[:loading], "Description") != 0 {
+		t.Errorf("the board's copy should show before the detail loads:\n%s", out)
+	}
+}
+
+func TestDaemonDetailUsesTheBoardsPullRequests(t *testing.T) {
+	h := showHarness(t)
+	known := &ticket.Ticket{Key: "DEMO-1", PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 900, State: ticket.PROpen}}}
+	got, err := h.app.daemonDetail(context.Background(), "DEMO-1", known)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := got.(detail)
+	if len(d.Ticket.PRs) != 1 || d.Ticket.PRs[0].Number != 900 || !strings.Contains(d.Description, "creation date") {
+		t.Errorf("detail = %+v", d)
 	}
 }
 
