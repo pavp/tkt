@@ -124,6 +124,12 @@ const prFields = `number title url state isDraft mergeStateStatus headRefName he
   latestOpinionatedReviews(first: 100) { nodes { state } }
   reviewThreads(first: 100) { nodes { isResolved } }`
 
+// mergedFields is what a merged pull request needs: the board shows it as merged, so its checks, reviews
+// and threads, the costliest fields, are left out (they halved the listing's time).
+const mergedFields = `number title url state headRefName headRefOid
+  author { login __typename }
+  repository { nameWithOwner }`
+
 type prNode struct {
 	Number           int    `json:"number"`
 	Title            string `json:"title"`
@@ -243,7 +249,7 @@ func (c *Client) PullRequests(ctx context.Context, repos []string) ([]ticket.Pul
 			o, name, _ := strings.Cut(r, "/")
 			fmt.Fprintf(&b, "  r%d: repository(owner: %q, name: %q) {\n", i, o, name)
 			fmt.Fprintf(&b, "    open: pullRequests(states: OPEN, first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { %s } }\n", prFields)
-			fmt.Fprintf(&b, "    merged: pullRequests(states: MERGED, first: 20, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { %s } }\n", prFields)
+			fmt.Fprintf(&b, "    merged: pullRequests(states: MERGED, first: 20, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { %s } }\n", mergedFields)
 			b.WriteString("  }\n")
 		}
 		b.WriteString("}")
