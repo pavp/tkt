@@ -24,7 +24,7 @@ type scriptedSync struct {
 	err    error
 }
 
-func (s *scriptedSync) sync(context.Context) (board.Snapshot, error) {
+func (s *scriptedSync) sync(context.Context, func(board.Snapshot)) (board.Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.err != nil {

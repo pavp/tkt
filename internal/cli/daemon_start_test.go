@@ -53,7 +53,7 @@ func (f *fakeDaemons) install(t *testing.T, h *harness) {
 		seed := f.board
 		version := cmp.Or(f.version, Version)
 		f.mu.Unlock()
-		sync := func(context.Context) (board.Snapshot, error) {
+		sync := func(context.Context, func(board.Snapshot)) (board.Snapshot, error) {
 			return board.Snapshot{}, errors.New("fake daemons do not sync")
 		}
 		s, err := daemon.New(daemon.Options{Dir: h.app.Env.DataDir(), Version: version, Sync: sync, Interval: time.Hour, Seed: seed, Detail: f.detail})
