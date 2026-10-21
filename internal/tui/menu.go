@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -49,6 +50,9 @@ func (m Model) buildMenu(it item) *menu {
 		return m.prMenu(it)
 	}
 	t := *it.ticket
+	if t.Team {
+		return m.teamMenu(t)
+	}
 	items := []menuItem{
 		{label: m.startLabel(t.Key), run: func() tea.Cmd { return a.StartChoices(t.Key) }},
 		{label: "Show details", key: "i", detail: t.Key},
@@ -113,6 +117,17 @@ func fixLabel(r ticket.Reason) string {
 		return "Ask the agent to resolve the conflicts"
 	}
 	return "Send the CI failure to the agent"
+}
+
+// teamMenu offers what is harmless on someone else's ticket: reading it, opening it in Jira, copying its key.
+func (m Model) teamMenu(t ticket.Ticket) *menu {
+	a := m.actions
+	items := []menuItem{{label: "Show details", key: "i", detail: t.Key}}
+	if t.URL != "" {
+		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
+	}
+	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
+	return &menu{title: "Actions for " + string(t.Key) + " · " + cmp.Or(t.Assignee, "unassigned"), items: items}
 }
 
 // prsMenu lists a ticket's pull requests to open one, those that need the user first and finished ones last.
