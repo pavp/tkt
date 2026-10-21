@@ -251,7 +251,24 @@ func (b *boardActions) Transitions(key ticket.Key) tea.Cmd {
 	}
 }
 
-func (b *boardActions) Transition(key ticket.Key, id, to string, values []tui.Value) tea.Cmd {
+func (b *boardActions) Users(key ticket.Key, query string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+		defer cancel()
+		js, err := b.a.jiraClient(b.cfg())
+		if err != nil {
+			return tui.UsersListedMsg{Key: key, Query: query, Err: err}
+		}
+		found, err := js.AssignableUsers(ctx, string(key), query)
+		users := make([]tui.User, len(found))
+		for i, u := range found {
+			users[i] = tui.User{ID: u.AccountID, Name: u.DisplayName}
+		}
+		return tui.UsersListedMsg{Key: key, Query: query, Users: users, Err: err}
+	}
+}
+
+func (b *boardActions) Transition(key ticket.Key, id, to string, values []tui.Value, comment string) tea.Cmd {
 	vs := make([]jira.Value, len(values))
 	for i, v := range values {
 		vs[i] = jira.Value{Field: v.Field, Kind: v.Kind, ID: v.ID}
@@ -261,7 +278,7 @@ func (b *boardActions) Transition(key ticket.Key, id, to string, values []tui.Va
 		defer cancel()
 		js, err := b.a.jiraClient(b.cfg())
 		if err == nil {
-			err = js.Transition(ctx, string(key), id, vs)
+			err = js.Transition(ctx, string(key), id, vs, comment)
 		}
 		return tui.TransitionedMsg{Key: key, To: to, Err: err}
 	}

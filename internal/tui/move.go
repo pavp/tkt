@@ -1,10 +1,15 @@
 package tui
 
 import (
+	"cmp"
+	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/pavp/tkt/internal/ticket"
 )
@@ -82,15 +87,40 @@ func (m Model) transitioned(msg TransitionedMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.actions.Refresh(), loading)
 }
 
-// formKinds are the kinds of field the board's form fills.
-var formKinds = []string{KindOption}
+// User is someone a ticket can be assigned to.
+type User struct {
+	ID   string
+	Name string
+}
 
-// moveForm is a transition's form being filled; chosen maps a field's ID to its option.
+// UsersListedMsg carries the users assignable to Key that match Query.
+type UsersListedMsg struct {
+	Key   ticket.Key
+	Query string
+	Users []User
+	Err   error
+}
+
+// formKinds are the kinds of field the board's form fills.
+var formKinds = []string{KindOption, KindUser}
+
+// moveForm is a transition's form being filled; chosen maps a field's ID to its option or user.
 type moveForm struct {
-	key    ticket.Key
-	tr     Transition
-	fields []Field
-	chosen map[string]Option
+	key     ticket.Key
+	tr      Transition
+	fields  []Field
+	chosen  map[string]Option
+	comment string
+}
+
+// formPrompt is the text box a form row opens: the comment, or a user field's search, whose matches list
+// below it.
+type formPrompt struct {
+	form  moveForm
+	field *Field
+	text  string
+	users []User
+	sel   int
 }
 
 // formMsg shows form, with status in the footer.
@@ -139,6 +169,10 @@ func (m Model) formMenu(f moveForm) *menu {
 		if o, ok := f.chosen[field.ID]; ok {
 			value = o.Value
 		}
+		if field.Kind == KindUser {
+			items = append(items, menuItem{label: name + ": " + value, prompt: &formPrompt{form: f, field: &field}})
+			continue
+		}
 		items = append(items, menuItem{label: name + ": " + value, sub: func() *menu {
 			var opts []menuItem
 			if !field.Required {
@@ -150,6 +184,7 @@ func (m Model) formMenu(f moveForm) *menu {
 			return &menu{title: field.Name, items: opts}
 		}})
 	}
+	items = append(items, menuItem{label: "Comment: " + cmp.Or(f.comment, "—"), prompt: &formPrompt{form: f, text: f.comment}})
 	move := func() tea.Cmd {
 		var values []Value
 		for _, field := range f.fields {
@@ -162,7 +197,7 @@ func (m Model) formMenu(f moveForm) *menu {
 			}
 			values = append(values, Value{Field: field.ID, Kind: field.Kind, ID: o.ID})
 		}
-		return m.actions.Transition(f.key, f.tr.ID, f.tr.To, values)
+		return m.actions.Transition(f.key, f.tr.ID, f.tr.To, values, f.comment)
 	}
 	items = append(items,
 		menuItem{label: "Move " + string(f.key) + " to " + f.tr.To + " now", run: move},
@@ -200,10 +235,129 @@ func (m Model) moveMenu(k ticket.Key, trs []Transition) *menu {
 		}
 		items = append(items, menuItem{label: tr.To, sub: func() *menu {
 			return &menu{title: "Move " + string(k) + " to " + tr.To + "?", items: []menuItem{
-				{label: "Yes, move it", run: func() tea.Cmd { return a.Transition(k, tr.ID, tr.To, nil) }},
+				{label: "Yes, move it", run: func() tea.Cmd { return a.Transition(k, tr.ID, tr.To, nil, "") }},
 				{label: "Cancel", run: func() tea.Cmd { return nil }},
 			}}
 		}})
 	}
 	return &menu{title: "Move " + string(k) + " to", items: items}
+}
+
+func (m Model) promptKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	p := m.prompt
+	switch k.Type {
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyEsc:
+		m.prompt, m.menu = nil, m.formMenu(p.form)
+	case tea.KeyEnter:
+		f := p.form
+		switch {
+		case p.field == nil:
+			f.comment = strings.TrimSpace(p.text)
+		case len(p.users) > 0:
+			u := p.users[p.sel]
+			f = f.with(p.field.ID, &Option{ID: u.ID, Value: u.Name})
+		default:
+			m.status = "type part of a name to find " + p.field.Name
+			return m, nil
+		}
+		m.prompt, m.menu, m.status = nil, m.formMenu(f), ""
+	case tea.KeyUp:
+		p.sel = max(0, p.sel-1)
+	case tea.KeyDown:
+		p.sel = min(max(0, len(p.users)-1), p.sel+1)
+	case tea.KeyBackspace:
+		if r := []rune(p.text); len(r) > 0 {
+			p.text = string(r[:len(r)-1])
+			return m, m.searchUsers()
+		}
+	case tea.KeyRunes, tea.KeySpace:
+		p.text += string(k.Runes)
+		if k.Type == tea.KeySpace {
+			p.text += " "
+		}
+		return m, m.searchUsers()
+	}
+	return m, nil
+}
+
+// searchUsers asks for the users matching a user field's text once it has two letters.
+func (m Model) searchUsers() tea.Cmd {
+	p := m.prompt
+	if p.field == nil {
+		return nil
+	}
+	if len([]rune(strings.TrimSpace(p.text))) < 2 {
+		p.users, p.sel = nil, 0
+		return nil
+	}
+	return m.actions.Users(p.form.key, p.text)
+}
+
+func (m Model) usersListed(msg UsersListedMsg) (tea.Model, tea.Cmd) {
+	p := m.prompt
+	if p == nil || p.field == nil || p.form.key != msg.Key || p.text != msg.Query {
+		return m, nil
+	}
+	if msg.Err != nil {
+		m.status = "could not search users: " + msg.Err.Error()
+		return m, nil
+	}
+	p.users, p.sel = msg.Users, 0
+	return m, nil
+}
+
+func (m Model) promptView() string {
+	p := m.prompt
+	width := 56
+	if m.width > 0 {
+		width = min(width, m.width-2)
+	}
+	inner := width - 6
+	title, hint := "Comment", "enter keep · esc back"
+	if p.field != nil {
+		title, hint = p.field.Name, "type to search · ↑↓ choose · enter pick · esc back"
+	}
+	text := []rune(p.text)
+	if len(text) > inner-3 {
+		text = text[len(text)-(inner-3):]
+	}
+	lines := []string{bold.Render(ansi.Truncate(title, inner, "…")), "", "> " + string(text) + "█"}
+	if p.field != nil {
+		lines = append(lines, "")
+		if len(p.users) == 0 {
+			lines = append(lines, dim.Render("no matches yet"))
+		}
+		const rows = 8
+		start := max(0, p.sel-rows+1)
+		end := min(len(p.users), start+rows)
+		more := func(n int, arrow string) string {
+			if n == 0 {
+				return ""
+			}
+			return dim.Render(fmt.Sprintf("%s %d more", arrow, n))
+		}
+		// Both lines stay, blank when nothing is hidden, so the box keeps its height while scrolling.
+		if len(p.users) > rows {
+			lines = append(lines, more(start, "↑"))
+		}
+		for i := start; i < end; i++ {
+			name := ansi.Truncate(p.users[i].Name, inner-2, "…")
+			if i == p.sel {
+				lines = append(lines, selected.Render("▸ "+name))
+			} else {
+				lines = append(lines, "  "+name)
+			}
+		}
+		if len(p.users) > rows {
+			lines = append(lines, more(len(p.users)-end, "↓"))
+		}
+	}
+	lines = append(lines, "", dim.Render(ansi.Truncate(hint, inner, "…")))
+	return menuBox.Width(width - 2).Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) promptPlaced(height int) string {
+	return lipgloss.Place(m.width, max(height, lipgloss.Height(m.promptView())), lipgloss.Center, lipgloss.Center, m.promptView())
 }

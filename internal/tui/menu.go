@@ -24,6 +24,8 @@ type menuItem struct {
 	link string
 	// sub, when set, opens another menu, from which esc comes back.
 	sub func() *menu
+	// prompt, when set, opens a form's text box.
+	prompt *formPrompt
 }
 
 // menu lists what can be done with the selected ticket or review request.
@@ -211,6 +213,11 @@ func (m Model) runMenuItem(i int) (tea.Model, tea.Cmd) {
 	}
 	if it.detail != "" {
 		return m.openDetail(it.detail)
+	}
+	if it.prompt != nil {
+		p := *it.prompt
+		m.prompt = &p
+		return m, nil
 	}
 	return m, it.run()
 }

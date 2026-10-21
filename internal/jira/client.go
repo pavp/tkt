@@ -680,9 +680,20 @@ func (c *Client) Transitions(ctx context.Context, key string) ([]Transition, err
 	return out, nil
 }
 
-// Transition moves the issue through the transition with that id, filling its form's fields with values.
-func (c *Client) Transition(ctx context.Context, key, id string, values []Value) error {
+// Transition moves the issue through the transition with that id, filling its form's fields with values
+// and adding comment, when given, as the transition's comment.
+func (c *Client) Transition(ctx context.Context, key, id string, values []Value, comment string) error {
 	body := map[string]any{"transition": map[string]string{"id": id}}
+	if comment != "" {
+		var paragraphs []any
+		for _, line := range strings.Split(comment, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				paragraphs = append(paragraphs, map[string]any{"type": "paragraph", "content": []any{map[string]string{"type": "text", "text": line}}})
+			}
+		}
+		doc := map[string]any{"type": "doc", "version": 1, "content": paragraphs}
+		body["update"] = map[string]any{"comment": []any{map[string]any{"add": map[string]any{"body": doc}}}}
+	}
 	if len(values) > 0 {
 		fields := map[string]any{}
 		for _, v := range values {
@@ -695,6 +706,26 @@ func (c *Client) Transition(ctx context.Context, key, id string, values []Value)
 		body["fields"] = fields
 	}
 	return c.do(ctx, http.MethodPost, "/rest/api/3/issue/"+url.PathEscape(key)+"/transitions", body, nil)
+}
+
+// AssignableUsers lists the people who can be assigned key whose name or email matches query, leaving out
+// apps.
+func (c *Client) AssignableUsers(ctx context.Context, key, query string) ([]User, error) {
+	var found []struct {
+		User
+		AccountType string `json:"accountType"`
+	}
+	q := url.Values{"issueKey": {key}, "query": {query}, "maxResults": {"20"}}
+	if err := c.do(ctx, http.MethodGet, "/rest/api/3/user/assignable/search?"+q.Encode(), nil, &found); err != nil {
+		return nil, err
+	}
+	var out []User
+	for _, u := range found {
+		if u.AccountType == "" || u.AccountType == "atlassian" {
+			out = append(out, u.User)
+		}
+	}
+	return out, nil
 }
 
 type Sprint struct {
