@@ -1432,7 +1432,7 @@ func TestPRsInColumnsExplainsTheList(t *testing.T) {
 
 func prsSnapshot() board.Snapshot {
 	snap := snapshot()
-	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-4", Summary: "Fix login redirect", Status: "In Review", Category: ticket.InReview,
+	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-4", Summary: "Fix login redirect", Status: "In Review", Category: ticket.InReview, URL: "https://example.atlassian.net/browse/DEMO-4",
 		PRs: []ticket.PullRequest{
 			{Repo: "example-org/web", Number: 815, Title: "Redirect after login", URL: "https://github.com/example-org/web/pull/815", State: ticket.PROpen, Checks: ticket.ChecksPass, Review: ticket.ReviewChangesRequested},
 			{Repo: "example-org/api", Number: 816, Title: "Session endpoint", State: ticket.PROpen, Checks: ticket.ChecksPending, Review: ticket.ReviewApproved},
@@ -1486,8 +1486,52 @@ func TestPRsFilterActsOnTheRowsTicket(t *testing.T) {
 	if !slices.Contains(r.calls, "fix DEMO-4") || !slices.Contains(r.calls, "open https://github.com/example-org/web/pull/815") {
 		t.Errorf("calls = %v", r.calls)
 	}
-	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Actions for DEMO-4") {
-		t.Errorf("menu:\n%s", v)
+}
+
+func TestPRMenuLeadsWithThePullRequest(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#815"); i++ {
+		m = press(m, "s")
+	}
+	m = press(m, "enter")
+	v := stripANSI(m.View())
+	for _, want := range []string{"Pull request #815 · DEMO-4", "Open #815 in GitHub ↗", "Send the review comments to the agent", "Start · open the agent", "Open the ticket pane next to its agent", "Show details of DEMO-4", "Open DEMO-4 in Jira ↗"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("PR menu missing %q:\n%s", want, v)
+		}
+	}
+	for _, unwanted := range []string{"Actions for", "#816", "Send the CI failure"} {
+		if strings.Contains(v, unwanted) {
+			t.Errorf("PR menu offers %q:\n%s", unwanted, v)
+		}
+	}
+	if _, msg := run(m, "enter"); msg != StatusMsg("open https://github.com/example-org/web/pull/815") {
+		t.Errorf("first item ran %v", r.calls)
+	}
+}
+
+func TestPRsListHeadsItsColumns(t *testing.T) {
+	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(m.View()); !strings.Contains(v, "KEY") || !strings.Contains(v, "PR / CI") {
+		t.Fatalf("All keeps its headers:\n%s", v)
+	}
+	m = press(m, "2")
+	v := stripANSI(m.View())
+	lines := strings.Split(v, "\n")
+	head := lines[lineIndex(v, "TITLE")]
+	if strings.Contains(head, "KEY") || strings.Contains(head, "PR / CI") || !strings.Contains(head, " PR ") || !strings.Contains(head, "CI TITLE") {
+		t.Fatalf("PRs headers = %q", head)
+	}
+	for _, pr := range []string{"#812", "#806"} {
+		row := []rune(lines[lineIndex(v, pr+" ")])
+		mark, title := strings.Index(head, "CI TITLE"), strings.Index(head, "TITLE")
+		if mark < 0 || string(row[len([]rune(head[:mark]))]) == " " || string(row[len([]rune(head[:title]))]) != "D" {
+			t.Errorf("%s row does not sit under its headers:\n%q\n%q", pr, head, string(row))
+		}
 	}
 }
 

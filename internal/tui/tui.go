@@ -1463,7 +1463,7 @@ func (m Model) listView() string {
 		}
 		return prRefs(it.ticket.PRs)
 	}
-	prW := lipgloss.Width("PR / CI")
+	prW := lipgloss.Width(m.listHeads()[2])
 	for _, it := range items {
 		prW = max(prW, lipgloss.Width(prText(it)))
 	}
@@ -1490,6 +1490,15 @@ func (m Model) listView() string {
 	}
 	lines, _ := m.listLines(row, prText, agentW)
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// listHeads names the key, status and PR columns; the PRs filter lists pull requests by number with only
+// their CI mark, so its headers say so and the mark's column stays narrow.
+func (m Model) listHeads() [3]string {
+	if m.filter == FilterPRs {
+		return [3]string{"PR", "STATUS", "CI"}
+	}
+	return [3]string{"KEY", "STATUS", "PR / CI"}
 }
 
 // agentWidth fits the longest agent cell, "! needs you".
@@ -1532,7 +1541,8 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 	if agentW > 0 {
 		header = pad("AGENT", agentW)
 	}
-	lines := []string{"  " + dim.Render(row("KEY", "STATUS", header, "PR / CI", "TITLE")), dim.Render(strings.Repeat("─", m.width))}
+	heads := m.listHeads()
+	lines := []string{"  " + dim.Render(row(heads[0], heads[1], header, heads[2], "TITLE")), dim.Render(strings.Repeat("─", m.width))}
 	at := []int{-1, -1}
 	if m.filter == FilterPRs && m.hiddenBots() > 0 {
 		toggle := keyStyle.Render("b") + " " + dim.Render(fmt.Sprintf("show bots · %d hidden", m.hiddenBots()))

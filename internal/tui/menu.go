@@ -40,14 +40,12 @@ func (m Model) buildMenu(it item) *menu {
 			{label: "Open the pull request in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }},
 		}}
 	}
-	t := *it.ticket
-	// Start focuses the ticket's agent when one already runs, so the label says where it leads.
-	start := "Start · open the agent"
-	if _, kind := board.AgentLine(m.snap.Agents[string(t.Key)]); kind != board.AgentNone {
-		start = "Go to the agent in Herdr"
+	if it.mine() {
+		return m.prMenu(it)
 	}
+	t := *it.ticket
 	items := []menuItem{
-		{label: start, run: func() tea.Cmd { return a.StartChoices(t.Key) }},
+		{label: m.startLabel(t.Key), run: func() tea.Cmd { return a.StartChoices(t.Key) }},
 		{label: "Show details", key: "i", detail: t.Key},
 		{label: "Open the ticket pane next to its agent", run: func() tea.Cmd { return a.TicketPane(t.Key) }},
 	}
@@ -74,6 +72,37 @@ func (m Model) buildMenu(it item) *menu {
 		menuItem{label: "Copy the ticket context (.ticket.md)", run: func() tea.Cmd { return a.CopyContext(t.Key) }},
 	)
 	return &menu{title: "Actions for " + string(t.Key), items: items}
+}
+
+// prMenu acts on one of the user's pull requests first, then on its ticket, leaving out the ticket's other
+// pull requests, which have rows of their own in the PRs filter.
+func (m Model) prMenu(it item) *menu {
+	a := m.actions
+	pr, t := *it.pr, *it.ticket
+	items := []menuItem{{label: fmt.Sprintf("Open #%d in GitHub ↗", pr.Number), key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}}
+	switch {
+	case pr.Checks == ticket.ChecksFail:
+		items = append(items, menuItem{label: "Send the CI failure to the agent", key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
+	case pr.Review == ticket.ReviewChangesRequested:
+		items = append(items, menuItem{label: "Send the review comments to the agent", key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
+	}
+	items = append(items,
+		menuItem{label: m.startLabel(t.Key), run: func() tea.Cmd { return a.StartChoices(t.Key) }},
+		menuItem{label: "Open the ticket pane next to its agent", run: func() tea.Cmd { return a.TicketPane(t.Key) }},
+		menuItem{label: "Show details of " + string(t.Key), key: "i", detail: t.Key},
+	)
+	if t.URL != "" {
+		items = append(items, menuItem{label: "Open " + string(t.Key) + " in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
+	}
+	return &menu{title: fmt.Sprintf("Pull request #%d · %s", pr.Number, t.Key), items: items}
+}
+
+// startLabel says where Start leads: it focuses the ticket's agent when one already runs.
+func (m Model) startLabel(k ticket.Key) string {
+	if _, kind := board.AgentLine(m.snap.Agents[string(k)]); kind != board.AgentNone {
+		return "Go to the agent in Herdr"
+	}
+	return "Start · open the agent"
 }
 
 func (m Model) menuKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
