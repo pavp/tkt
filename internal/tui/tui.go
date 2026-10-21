@@ -567,8 +567,8 @@ func prStatus(pr ticket.PullRequest) string {
 	return "Open"
 }
 
-// columns places each ticket in its column and each open subtask in its own: right after its parent when
-// they share a column, else after that column's tickets. Done subtasks only count in their parent's progress.
+// columns places each ticket in its column and each subtask in its own, done ones included as Jira does:
+// right after its parent when they share a column, else after that column's tickets.
 func (m Model) columns() [][]item {
 	cols := make([][]item, len(ticket.Columns))
 	ts := m.tickets()
@@ -581,7 +581,7 @@ func (m Model) columns() [][]item {
 			}
 			for j := range t.Subtasks {
 				st := t.Subtasks[j]
-				if st.Category != c || st.Category == ticket.Done {
+				if st.Category != c {
 					continue
 				}
 				it := item{key: st.Key, ticket: &st, parent: t.Key}
