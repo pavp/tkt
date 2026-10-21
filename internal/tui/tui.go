@@ -1343,16 +1343,12 @@ func coloredPRs(prs []ticket.PullRequest, width int) string {
 	used := 0
 	for _, pr := range open {
 		ref := fmt.Sprintf("#%d", pr.Number)
-		markText, style := checkMark(pr.Checks), dim
-		switch {
-		case pr.State == ticket.PRMerged:
+		markText, style := checkMark(pr.Checks), checkStyle(pr.Checks)
+		switch pr.State {
+		case ticket.PRMerged:
 			markText, style = "merged", ok
-		case pr.State == ticket.PRClosed:
-			markText = "closed"
-		case pr.Checks == ticket.ChecksFail:
-			style = warn
-		case pr.Checks == ticket.ChecksPass:
-			style = ok
+		case ticket.PRClosed:
+			markText, style = "closed", dim
 		}
 		w := lipgloss.Width(ref) + 1 + lipgloss.Width(markText)
 		if used > 0 && used+1+w > width {
@@ -1408,6 +1404,17 @@ func prRefs(prs []ticket.PullRequest) string {
 		parts = append(parts, f)
 	}
 	return strings.Join(parts, " ")
+}
+
+// checkStyle colors a CI mark: failing like what needs the user, passing like the accent, the rest dimmed.
+func checkStyle(c ticket.CheckState) lipgloss.Style {
+	switch c {
+	case ticket.ChecksFail:
+		return warn
+	case ticket.ChecksPass:
+		return ok
+	}
+	return dim
 }
 
 func checkMark(c ticket.CheckState) string {
@@ -1505,7 +1512,14 @@ func (m Model) listView() string {
 	}
 	// Narrow panes drop AGENT first, then shrink PR / CI, then STATUS, so the title always keeps some room.
 	const minTitle = 12
-	room := func() int { return m.width - 2 - keyWidth - statusW - agentW - prW - 3 }
+	keyW := keyWidth
+	if m.filter == FilterPRs {
+		keyW = lipgloss.Width(m.listHeads()[0])
+		for _, it := range items {
+			keyW = max(keyW, lipgloss.Width(string(it.key)))
+		}
+	}
+	room := func() int { return m.width - 2 - keyW - statusW - agentW - prW - 3 }
 	if minTitle > room() {
 		agentW = 0
 	}
@@ -1516,7 +1530,7 @@ func (m Model) listView() string {
 	}
 	titleWidth := max(minTitle, room())
 	row := func(key, status, agent, pr, title string) string {
-		return pad(key, keyWidth) + " " + pad(status, statusW) + " " + agent + pad(pr, prW) + " " + truncate(title, titleWidth)
+		return pad(key, keyW) + " " + pad(status, statusW) + " " + agent + pad(pr, prW) + " " + truncate(title, titleWidth)
 	}
 	lines, _ := m.listLines(row, prText, agentW)
 	return strings.Join(lines, "\n") + "\n"
@@ -1614,16 +1628,20 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			section("Review requested · "+it.pr.Repo, n)
 		}
 		var line string
+		ci := prText(it)
+		if it.pr != nil && i != m.row {
+			ci = checkStyle(it.pr.Checks).Render(ci)
+		}
 		switch {
 		case it.review():
-			line = row(string(it.key), statusText(it), pad("", agentW), prText(it), it.pr.Title)
+			line = row(string(it.key), statusText(it), pad("", agentW), ci, it.pr.Title)
 		case it.mine():
 			status := statusText(it)
 			if i != m.row && needsYou(*it.pr) {
 				status = warn.Render(status)
 			}
 			title := cmp.Or(it.pr.Title, it.ticket.Summary)
-			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), prText(it), string(it.ticket.Key)+" · "+title)
+			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, string(it.ticket.Key)+" · "+title)
 		default:
 			line = row(string(it.key), it.ticket.Status, agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), it.ticket.Summary)
 		}

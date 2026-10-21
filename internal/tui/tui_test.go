@@ -1549,6 +1549,32 @@ func TestPRsListLeavesOutTheAgent(t *testing.T) {
 	}
 }
 
+func TestPRsListFitsThePRColumnAndColorsCI(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	raw := m.View()
+	v := stripANSI(raw)
+	if head := strings.Split(v, "\n")[lineIndex(v, "TITLE")]; !strings.Contains(head, "  PR   STATUS") {
+		t.Errorf("the PR column should fit its numbers: %q", head)
+	}
+	if line := strings.Split(v, "\n")[lineIndex(v, "#815 ")]; !strings.Contains(line, "#815 Changes requested") {
+		t.Errorf("#815 row = %q", line)
+	}
+	for _, l := range strings.Split(raw, "\n") {
+		plain := ansi.Strip(l)
+		switch {
+		case strings.Contains(plain, "#815 ") && !strings.Contains(l, ok.Render("✓")):
+			t.Errorf("a passing check should be colored: %q", l)
+		case strings.Contains(plain, "#812 ") && strings.Contains(l, warn.Render("✕")):
+			t.Errorf("the selected row keeps its highlight unbroken: %q", l)
+		}
+	}
+}
+
 func TestPRsListHeadsItsColumns(t *testing.T) {
 	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
