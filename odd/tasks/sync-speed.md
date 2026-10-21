@@ -14,9 +14,9 @@ Forecast (slice-plan, 2026-10-21): 355–680 authored changed lines; slice 1 70�
 
 | ID | Specs | Slice | Route | Status | Commit |
 |---|---|---|---|---|---|
-| T1 | S1, S2 | 1 | inline, no Writer reason | done (RED → GREEN; live: 4 syncs 2.86, 2.80, 2.40, 2.11 s, were 4.4–5.6 s) | 969734b |
-| T2 | S3, S4 (board and CLI without the daemon) | 2 | inline, no Writer reason | done (RED → GREEN; -race on board, cli, tui) | e1f8e7b |
-| T3 | S3 (daemon) | 3 | inline, no Writer reason | done (RED → GREEN; -race ×5 on the new daemon test) | 8bfa292 |
+| T1 | S1, S2 | 1 | inline, no Writer reason | done (RED → GREEN; live: 4 syncs 2.86, 2.80, 2.40, 2.11 s, were 4.4–5.6 s) | cb7715e (#59) |
+| T2 | S3, S4 (board and CLI without the daemon) | 2 | inline, no Writer reason | done (RED → GREEN; -race on board, cli, tui) | 0487f9f (#60) |
+| T3 | S3 (daemon) | 3 | inline, no Writer reason | done (RED → GREEN; -race ×5 on the new daemon test) | fefa0e2 (#61) |
 
 Native grouping: once the last slice's PR is open, group with `gh stack link <pr-1> <pr-2> <pr-3>`; merging any PR then takes every unmerged PR below it. Every branch must live in ONE repository, and the implementer reads back each PR's base and diff and reports that, never the attempt — a PR whose diff grew is mis-grouped, and `gh stack unstack <stack>` must dissolve the stack before any base can be corrected.
 
@@ -32,3 +32,5 @@ Native grouping: once the last slice's PR is open, group with `gh stack link <pr
 - L5: slice 2 done (e1f8e7b): board.Options.Partial and Snapshot.Partial; FetchWith lists GitHub in a goroutine and hands partialBoard (previous board's PRs + development-panel links, the team joined, nothing shared with the full board) while it answers; cli loadSnapshotWith/fetchSnapshotWith, boardActions.send = prog.Send for the non-daemon refresh, partial never cached; tui keeps loading and agents on a partial, "updating PRs…".
 - L6 (2026-10-21, user): "funciono lo de abrir los comentarios al agente pero deberia tambien cerrar el pane y redirigir al agente" → separate small change after this slice: `f` from the board closes the board and focuses the agent's pane.
 - L7: slice 3 done (8bfa292): daemon.SyncFunc takes a partial callback; syncOnce stores the partial (keeping agents), serves it from /v1/tickets and publishes `snapshot`; a sync failing after a partial restores and republishes the last full board; cli daemonSync passes it through loadSnapshotWith. The board already turns a `snapshot` event into a /v1/tickets read, so it paints "updating PRs…" with no change.
+- L8 (2026-10-21): live read-only timing before delivery: the partial board in 0.5–0.9 s and the full one in 2.6–3.0 s, with the team on or off.
+- L9 (2026-10-21, user): "si sube todo y publica" → the `f` change first (PR #58, 130439a, v0.1.34); the stack rebased onto it with `git rebase --update-refs main` (conflicts: both appended a test to internal/cli/board_test.go, rebuilt from main's file plus slice 1's test; both edited the same docs/design.md paragraph, combined), each slice's tests run on its own; PRs #59, #60, #61 opened stacked and linked as gh stack #62 (read back: #59 → main +95/−3, #60 → slice 1 +198/−23, #61 → slice 2 +113/−14, same repository), CI green on all three, merged atomically with `gh stack merge 61 --yes --squash` (cb7715e, 0487f9f, fefa0e2), tagged v0.1.35 (release with 5 assets), slice branches deleted. Feature delivered.
