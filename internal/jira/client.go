@@ -531,6 +531,56 @@ func (c *Client) Projects(ctx context.Context) ([]Project, error) {
 	return resp.Values, nil
 }
 
+// Board is a Jira Software scrum board, whose active sprints make a team's work.
+type Board struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+// Boards lists a space's scrum boards, the ones with sprints.
+func (c *Client) Boards(ctx context.Context, space string) ([]Board, error) {
+	var out []Board
+	for at := 0; ; {
+		var page struct {
+			IsLast bool `json:"isLast"`
+			Values []struct {
+				Board
+				Type string `json:"type"`
+			} `json:"values"`
+		}
+		q := url.Values{"projectKeyOrId": {space}, "type": {"scrum"}, "maxResults": {"50"}, "startAt": {strconv.Itoa(at)}}
+		if err := c.do(ctx, http.MethodGet, "/rest/agile/1.0/board?"+q.Encode(), nil, &page); err != nil {
+			return nil, err
+		}
+		for _, v := range page.Values {
+			if v.Type == "" || v.Type == "scrum" {
+				out = append(out, v.Board)
+			}
+		}
+		at += len(page.Values)
+		if page.IsLast || len(page.Values) == 0 {
+			return out, nil
+		}
+	}
+}
+
+// ActiveSprints returns the ids of a board's active sprints.
+func (c *Client) ActiveSprints(ctx context.Context, board int) ([]int, error) {
+	var page struct {
+		Values []struct {
+			ID int `json:"id"`
+		} `json:"values"`
+	}
+	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/rest/agile/1.0/board/%d/sprint?state=active", board), nil, &page); err != nil {
+		return nil, err
+	}
+	ids := make([]int, len(page.Values))
+	for i, v := range page.Values {
+		ids[i] = v.ID
+	}
+	return ids, nil
+}
+
 type Sprint struct {
 	ID    int       `json:"id,omitempty"`
 	Space string    `json:"space"`

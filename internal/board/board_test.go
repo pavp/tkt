@@ -30,6 +30,8 @@ type stubJira struct {
 	teamErr error
 	jqls    []string
 	panels  []string
+	// sprints answers ActiveSprints per board.
+	sprints map[int][]int
 	// teamGate, when set, holds the team search until the GitHub listing starts; teamStalled records a
 	// search that gave up waiting, as one that held the listing back would.
 	teamGate    chan struct{}
@@ -63,6 +65,12 @@ func (s *stubJira) Search(_ context.Context, jql string, fields []string) ([]jir
 	}
 	s.jql, s.fields = jql, fields
 	return s.issues, s.err
+}
+
+func (s *stubJira) ActiveSprints(_ context.Context, board int) ([]int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sprints[board], nil
 }
 
 func (s *stubJira) FieldID(_ context.Context, name string) (string, error) {
@@ -121,6 +129,13 @@ func (s *stubGitHub) ReviewRequests(_ context.Context, repos []string, direct bo
 	s.reviewCalls++
 	s.reviewRepos, s.direct = repos, direct
 	return s.reviews, s.reviewErr
+}
+
+// teamCfg is cfg with a team board on DEMO.
+func teamCfg() *config.Config {
+	c := cfg()
+	c.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 5205, Name: "Authorization Center"}}
+	return c
 }
 
 func cfg() *config.Config {
@@ -831,13 +846,14 @@ func TestTeamTicketsComeOnlyWhenAsked(t *testing.T) {
 			Sprints: []jira.Sprint{{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active"}, {ID: 41, Space: "DEMO", Name: "DEMO S41", State: "closed"}}}},
 		team: []jira.Issue{
 			{ID: "7", Key: "DEMO-7", Summary: "Theirs", Status: "In Progress", StatusCategory: "indeterminate", Assignee: "Bea Ruiz",
-				Sprints: []jira.Sprint{{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active"}, {ID: 99, Space: "DEMO", Name: "Another team's sprint", State: "active"}}},
+				Sprints: []jira.Sprint{{ID: 11807, Space: "DEMO", Name: "DEMO S42", State: "active"}, {ID: 99, Space: "DEMO", Name: "Another team's sprint", State: "active"}}},
 			{ID: "8", Key: "DEMO-8", Summary: "Nobody's", Status: "To Do", StatusCategory: "new"},
 		},
 		linked: map[string][]jira.DevPullRequest{},
 	}
 	gh := &stubGitHub{prs: []ticket.PullRequest{{Repo: "example-org/web", Number: 70, Branch: "feature/DEMO-7-theirs", State: ticket.PROpen, Checks: ticket.ChecksFail}}}
-	snap, err := FetchWith(context.Background(), cfg(), js, gh, now, Snapshot{}, Options{})
+	js.sprints = map[int][]int{5205: {11807}}
+	snap, err := FetchWith(context.Background(), teamCfg(), js, gh, now, Snapshot{}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -845,12 +861,12 @@ func TestTeamTicketsComeOnlyWhenAsked(t *testing.T) {
 		t.Fatalf("off: searches %v, tickets %+v", js.jqls, snap.Tickets)
 	}
 	js.jqls, js.panels = nil, nil
-	snap, err = FetchWith(context.Background(), cfg(), js, gh, now, Snapshot{}, Options{Team: true})
+	snap, err = FetchWith(context.Background(), teamCfg(), js, gh, now, Snapshot{}, Options{Team: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(js.jqls, jira.TeamSprintJQL(cfg().SpaceKeys(), []int{42})) {
-		t.Errorf("on: the team search should keep to the user's active sprints: %v", js.jqls)
+	if !slices.Contains(js.jqls, jira.TeamSprintJQL(cfg().SpaceKeys(), []int{11807})) {
+		t.Errorf("on: the team search should cover the team boards' active sprints: %v", js.jqls)
 	}
 	if len(snap.Sprints) != 1 || snap.Sprints[0].ID != 42 {
 		t.Errorf("only the user's sprints head the board: %+v", snap.Sprints)
@@ -860,7 +876,7 @@ func TestTeamTicketsComeOnlyWhenAsked(t *testing.T) {
 		byKey[tk.Key] = tk
 	}
 	theirs, nobody, mine := byKey["DEMO-7"], byKey["DEMO-8"], byKey["DEMO-1"]
-	if !theirs.Team || !nobody.Team || mine.Team || theirs.Assignee != "Bea Ruiz" {
+	if !theirs.Team || !nobody.Team || mine.Team || theirs.Assignee != "Bea Ruiz" || theirs.Board != "Authorization Center" {
 		t.Errorf("team marks: %+v", snap.Tickets)
 	}
 	if len(theirs.PRs) != 1 || theirs.PRs[0].Number != 70 || len(theirs.Attention()) != 0 {
@@ -869,12 +885,12 @@ func TestTeamTicketsComeOnlyWhenAsked(t *testing.T) {
 	if slices.Contains(js.panels, "7") || slices.Contains(js.panels, "8") || !slices.Contains(js.panels, "1") {
 		t.Errorf("only the user's tickets ask for their development panel: %v", js.panels)
 	}
-	sprintless := &stubJira{issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate"}}, team: js.team, linked: js.linked}
-	if _, err := FetchWith(context.Background(), cfg(), sprintless, gh, now, Snapshot{}, Options{Team: true}); err != nil || len(sprintless.jqls) != 1 {
-		t.Errorf("without an active sprint of the user's there is no team to look for: %v %v", err, sprintless.jqls)
+	boardless := &stubJira{issues: js.issues, team: js.team, linked: js.linked}
+	if _, err := FetchWith(context.Background(), cfg(), boardless, gh, now, Snapshot{}, Options{Team: true}); err != nil || len(boardless.jqls) != 1 {
+		t.Errorf("without team boards there is no team to look for: %v %v", err, boardless.jqls)
 	}
 	js.teamErr = errors.New("jira: 500")
-	snap, err = FetchWith(context.Background(), cfg(), js, gh, now, Snapshot{}, Options{Team: true})
+	snap, err = FetchWith(context.Background(), teamCfg(), js, gh, now, Snapshot{}, Options{Team: true})
 	if err != nil || !slices.ContainsFunc(snap.Warnings, func(w string) bool { return strings.Contains(w, "team tickets unavailable") }) || len(snap.Tickets) != 1 {
 		t.Errorf("a failed team search is a warning: %v %v %+v", err, snap.Warnings, snap.Tickets)
 	}
@@ -887,9 +903,10 @@ func TestTheTeamSearchNeverHoldsTheGitHubListingBack(t *testing.T) {
 		team:     []jira.Issue{{ID: "7", Key: "DEMO-7", Summary: "Theirs", Status: "To Do", StatusCategory: "new"}},
 		linked:   map[string][]jira.DevPullRequest{},
 		teamGate: gate,
+		sprints:  map[int][]int{5205: {11807}},
 	}
 	gh := &stubGitHub{listing: gate}
-	if _, err := FetchWith(context.Background(), cfg(), js, gh, time.Now(), Snapshot{}, Options{Team: true}); err != nil {
+	if _, err := FetchWith(context.Background(), teamCfg(), js, gh, time.Now(), Snapshot{}, Options{Team: true}); err != nil {
 		t.Fatal(err)
 	}
 	if js.teamStalled {
@@ -914,7 +931,8 @@ func TestFetchPaintsJiraBeforeGitHub(t *testing.T) {
 	gh := &stubGitHub{hold: hold, prs: []ticket.PullRequest{{Repo: "example-org/web", Number: 30, Branch: "feature/DEMO-1-x", State: ticket.PROpen, Checks: ticket.ChecksPass}}}
 	var partial Snapshot
 	paints := 0
-	snap, err := FetchWith(context.Background(), cfg(), js, gh, now, prev, Options{Team: true, Partial: func(s Snapshot) {
+	js.sprints = map[int][]int{5205: {11807}}
+	snap, err := FetchWith(context.Background(), teamCfg(), js, gh, now, prev, Options{Team: true, Partial: func(s Snapshot) {
 		paints++
 		partial = s
 		close(hold)

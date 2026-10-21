@@ -1,9 +1,11 @@
 package board
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -49,6 +51,7 @@ type JiraSource interface {
 	FieldID(ctx context.Context, name string) (string, error)
 	BrowseURL(key string) string
 	DevPullRequests(ctx context.Context, issueID string) ([]jira.DevPullRequest, error)
+	ActiveSprints(ctx context.Context, board int) ([]int, error)
 }
 
 type GitHubSource interface {
@@ -98,6 +101,31 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 			snap.Warnings = append(snap.Warnings, "ticket labels unavailable: "+err.Error())
 		}
 	}
+	// The team is the active sprints of the boards the user picked; its search runs beside everything
+	// else and is joined last.
+	type teamResult struct {
+		issues []jira.Issue
+		boards map[int]string
+		err    error
+	}
+	var teamDone chan teamResult
+	var boards []config.TeamBoard
+	for _, s := range c.Spaces {
+		boards = append(boards, s.TeamBoards...)
+	}
+	if opts.Team && len(boards) > 0 {
+		teamDone = make(chan teamResult, 1)
+		go func() {
+			sprints, err := activeSprints(ctx, js, boards)
+			if err != nil || len(sprints) == 0 {
+				teamDone <- teamResult{err: err}
+				return
+			}
+			ids := slices.Sorted(maps.Keys(sprints))
+			is, err := js.Search(ctx, jira.TeamSprintJQL(c.SpaceKeys(), ids), fields)
+			teamDone <- teamResult{is, sprints, err}
+		}()
+	}
 	issues, err := js.Search(ctx, jira.MySprintJQL(c.SpaceKeys()), fields)
 	if err != nil {
 		return snap, err
@@ -113,7 +141,6 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		}
 		return t
 	}
-	var sprintIDs []int
 	for _, is := range issues {
 		tickets = append(tickets, toTicket(is))
 		ids[ticket.Key(is.Key)] = is.ID
@@ -122,27 +149,9 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 			if sp.State == "active" && !seenSprint[sp.Name] {
 				seenSprint[sp.Name] = true
 				snap.Sprints = append(snap.Sprints, sp)
-				if sp.ID != 0 {
-					sprintIDs = append(sprintIDs, sp.ID)
-				}
 			}
 		}
 	}
-	// The team is whoever shares the user's active sprints: a space's open sprints are every team's, so the
-	// search waits for the user's sprints, then runs beside the development panels and GitHub, joined last.
-	type teamResult struct {
-		issues []jira.Issue
-		err    error
-	}
-	var teamDone chan teamResult
-	if opts.Team && len(sprintIDs) > 0 {
-		teamDone = make(chan teamResult, 1)
-		go func() {
-			is, err := js.Search(ctx, jira.TeamSprintJQL(c.SpaceKeys(), sprintIDs), fields)
-			teamDone <- teamResult{is, err}
-		}()
-	}
-
 	linked := map[ticket.Key][]jira.DevPullRequest{}
 	devFailed := map[ticket.Key]bool{}
 	ignoredAny := map[string]bool{}
@@ -209,6 +218,12 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 			for _, is := range r.issues {
 				t := toTicket(is)
 				t.Team = true
+				for _, sp := range is.Sprints {
+					if name, ok := r.boards[sp.ID]; ok {
+						t.Board = name
+						break
+					}
+				}
 				team = append(team, t)
 			}
 		}
@@ -278,6 +293,36 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		slices.SortStableFunc(snap.Reviews, byRepoNumber)
 	}
 	return snap, nil
+}
+
+// activeSprints asks each team board for its active sprints, all at once, and maps each sprint to its
+// board's name.
+func activeSprints(ctx context.Context, js JiraSource, boards []config.TeamBoard) (map[int]string, error) {
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	out := map[int]string{}
+	var firstErr error
+	for _, b := range boards {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ids, err := js.ActiveSprints(ctx, b.ID)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				firstErr = cmp.Or(firstErr, fmt.Errorf("board %s: %w", b.Name, err))
+				return
+			}
+			for _, id := range ids {
+				out[id] = b.Name
+			}
+		}()
+	}
+	wg.Wait()
+	if len(out) == 0 {
+		return nil, firstErr
+	}
+	return out, nil
 }
 
 // partialBoard is the board as Jira tells it before GitHub answers: each ticket keeps the previous board's

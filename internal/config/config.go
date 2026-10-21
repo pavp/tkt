@@ -55,6 +55,14 @@ type Space struct {
 	Repos           []Repo            `toml:"repos,omitempty"`
 	// Ignored lists repositories inferred from Jira that tkt must not use; a configured one still counts.
 	Ignored []string `toml:"ignored,omitempty"`
+	// TeamBoards are the Jira boards whose active sprints make the board's Team mode.
+	TeamBoards []TeamBoard `toml:"team_boards,omitempty"`
+}
+
+// TeamBoard is a Jira scrum board by id, the name kept to show it without asking Jira.
+type TeamBoard struct {
+	ID   int    `toml:"id"`
+	Name string `toml:"name"`
 }
 
 // Ignores reports whether repo ("owner/name", any case) is on the space's ignored list.
@@ -250,6 +258,7 @@ func (c Config) Clone() Config {
 		s.StatusOverrides = maps.Clone(s.StatusOverrides)
 		s.Repos = slices.Clone(s.Repos)
 		s.Ignored = slices.Clone(s.Ignored)
+		s.TeamBoards = slices.Clone(s.TeamBoards)
 		out.Spaces[i] = s
 	}
 	return out
