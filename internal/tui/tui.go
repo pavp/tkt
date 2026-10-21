@@ -135,6 +135,8 @@ type item struct {
 	// pull request, only its title, how many pull requests it holds and how many of them need the user.
 	group, title string
 	count, needs int
+	// parent, set on a subtask's own row or card, names the ticket it belongs to.
+	parent ticket.Key
 }
 
 func (it item) review() bool  { return it.pr != nil && it.ticket == nil }
@@ -560,16 +562,32 @@ func prStatus(pr ticket.PullRequest) string {
 	return "Open"
 }
 
+// columns places each ticket in its column and each open subtask in its own: right after its parent when
+// they share a column, else after that column's tickets. Done subtasks only count in their parent's progress.
 func (m Model) columns() [][]item {
 	cols := make([][]item, len(ticket.Columns))
 	ts := m.tickets()
 	for ci, c := range ticket.Columns {
+		var elsewhere []item
 		for i := range ts {
-			if ts[i].Category == c {
-				t := ts[i]
+			t := ts[i]
+			if t.Category == c {
 				cols[ci] = append(cols[ci], item{key: t.Key, ticket: &t})
 			}
+			for j := range t.Subtasks {
+				st := t.Subtasks[j]
+				if st.Category != c || st.Category == ticket.Done {
+					continue
+				}
+				it := item{key: st.Key, ticket: &st, parent: t.Key}
+				if t.Category == c {
+					cols[ci] = append(cols[ci], it)
+				} else {
+					elsewhere = append(elsewhere, it)
+				}
+			}
 		}
+		cols[ci] = append(cols[ci], elsewhere...)
 	}
 	return cols
 }
@@ -589,6 +607,10 @@ func (m Model) listItems() []item {
 	for _, t := range append(board.Sorted(ts[:team]), theirs...) {
 		t := t
 		out = append(out, item{key: t.Key, ticket: &t})
+		for j := range t.Subtasks {
+			st := t.Subtasks[j]
+			out = append(out, item{key: st.Key, ticket: &st, parent: t.Key})
+		}
 	}
 	for _, pr := range m.reviews() {
 		out = append(out, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr})
@@ -1509,7 +1531,8 @@ func (m Model) columnsView(height int) string {
 			parts = append(parts, moreLine("↑", off))
 		}
 		for ri := off; ri < end; ri++ {
-			parts = append(parts, card(*cols[ci][ri].ticket, inner, ci == m.col && ri == m.row && !m.inStrip, m.compact, m.snap.Agents[string(cols[ci][ri].key)]))
+			it := cols[ci][ri]
+			parts = append(parts, card(cardTicket(it), inner, ci == m.col && ri == m.row && !m.inStrip, m.compact, m.snap.Agents[string(it.key)]))
 		}
 		if scroll {
 			parts = append(parts, moreLine("↓", n-end))
@@ -1556,6 +1579,35 @@ var (
 	keyDim      = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 )
 
+// subtaskProgress words a parent's subtasks, "1/3 subtasks · 1 to do": how many are done and how many have
+// not started though their parent has.
+func subtaskProgress(t ticket.Ticket) string {
+	done, todo := 0, 0
+	for _, st := range t.Subtasks {
+		switch {
+		case st.Category == ticket.Done:
+			done++
+		case st.Category == ticket.ToDo && t.Category != ticket.ToDo:
+			todo++
+		}
+	}
+	out := fmt.Sprintf("%d/%d subtasks", done, len(t.Subtasks))
+	if todo > 0 {
+		out += fmt.Sprintf(" · %d to do", todo)
+	}
+	return out
+}
+
+// cardTicket is what an item's card shows: a subtask's key marked ↳ and its parent named where the type goes.
+func cardTicket(it item) ticket.Ticket {
+	t := *it.ticket
+	if it.parent != "" {
+		t.Key = ticket.Key("↳ " + string(t.Key))
+		t.Type = "of " + string(it.parent)
+	}
+	return t
+}
+
 // card renders one ticket in its own bordered box: key and attention flag, title, then (unless compact)
 // its pull requests with colored CI marks and a dimmed line with type and subtasks.
 func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
@@ -1597,7 +1649,8 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 		lines = append(lines, coloredPRs(t.PRs, inner))
 		info := t.Type
 		if len(t.Subtasks) > 0 {
-			info = strings.TrimSpace(fmt.Sprintf("%s · %d subtasks", info, len(t.Subtasks)))
+			// Progress leads the type, so a narrow card cuts the type before what is left to do.
+			info = strings.TrimSuffix(subtaskProgress(t)+" · "+info, " · ")
 		}
 		if info == "" {
 			info = t.Status
@@ -1990,7 +2043,7 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 	}
 	nTickets := 0
 	for _, it := range items {
-		if it.ticket != nil && !it.ticket.Team && !it.mine() {
+		if it.ticket != nil && !it.ticket.Team && !it.mine() && it.parent == "" {
 			nTickets++
 		}
 	}
@@ -2049,11 +2102,14 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			}
 			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, cmp.Or(it.pr.Title, it.ticket.Summary))
 		default:
-			title := it.ticket.Summary
-			if it.ticket.Team && i != m.row {
+			title, key := it.ticket.Summary, string(it.key)
+			if (it.ticket.Team || it.ticket.Category == ticket.Done && it.parent != "") && i != m.row {
 				title = dim.Render(title)
 			}
-			line = row(string(it.key), it.ticket.Status, assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
+			if it.parent != "" {
+				key = "↳ " + key
+			}
+			line = row(key, it.ticket.Status, assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
 		}
 		switch {
 		case i == m.row:
