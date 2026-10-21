@@ -285,7 +285,7 @@ func (m Model) myPRs() []item {
 }
 
 func needsYou(pr ticket.PullRequest) bool {
-	return pr.Checks == ticket.ChecksFail || pr.Review == ticket.ReviewChangesRequested
+	return len(pr.Attention()) > 0
 }
 
 func boolRank(b bool) int {
@@ -304,7 +304,9 @@ func prStatus(pr ticket.PullRequest) string {
 	case pr.Review == ticket.ReviewChangesRequested:
 		return string(ticket.ReasonChangesRequested)
 	case pr.Merge == ticket.MergeConflicts:
-		return "Conflicts"
+		return string(ticket.ReasonConflicts)
+	case pr.Unresolved > 0:
+		return fmt.Sprintf("%d unresolved", pr.Unresolved)
 	case pr.Draft:
 		return "Draft"
 	case pr.Merge == ticket.MergeReady:

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -90,5 +91,24 @@ func TestChangeRequests(t *testing.T) {
 	c = New(staticTokens(map[string]string{"example-org": "tok"})).WithEndpoints(base, h)
 	if _, err := c.ChangeRequests(context.Background(), "example-org/web", 1); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestUnresolvedThreads(t *testing.T) {
+	base, h, calls := gqlServer(t, func(string) (int, string) {
+		return 200, `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[
+		  {"isResolved":false,"path":"web/form.go","line":7,"comments":{"nodes":[{"author":{"login":"sam"},"body":"Rename this"},{"author":{"login":"alex"},"body":"Why?"}]}},
+		  {"isResolved":true,"path":"web/old.go","line":3,"comments":{"nodes":[{"author":{"login":"sam"},"body":"Done"}]}}]}}}}}`
+	})
+	got, err := New(staticTokens(map[string]string{"example-org": "work"})).WithEndpoints(base, h).UnresolvedThreads(context.Background(), "example-org/web", 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ReviewThread{{Path: "web/form.go", Line: 7, Comments: []ThreadComment{{Author: "sam", Body: "Rename this"}, {Author: "alex", Body: "Why?"}}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("threads = %+v", got)
+	}
+	if v := (*calls)[0].vars; v["owner"] != "example-org" || v["name"] != "web" || v["number"] != float64(40) {
+		t.Errorf("vars = %v", v)
 	}
 }

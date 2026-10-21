@@ -25,7 +25,7 @@ func pr(repo string, num int, branch, state, review, checks string) string {
 	return `{"number":` + itoa(num) + `,"title":"PR ` + itoa(num) + `","url":"https://github.com/` + repo + `/pull/` + itoa(num) +
 		`","state":"` + state + `","headRefName":"` + branch + `","headRefOid":"sha` + itoa(num) + `","reviewDecision":` + rv +
 		`,"author":{"login":"alex"},"repository":{"nameWithOwner":"` + repo + `"},"commits":{"nodes":[{"commit":{"statusCheckRollup":` + rollup + `}}]},` +
-		`"latestOpinionatedReviews":{"nodes":[]}}`
+		`"latestOpinionatedReviews":{"nodes":[]},"reviewThreads":{"nodes":[]}}`
 }
 
 func itoa(n int) string {
@@ -152,6 +152,24 @@ func TestPullRequestsReadDraftsAndMergeState(t *testing.T) {
 		if !strings.Contains((*calls)[0].query, "mergeStateStatus") {
 			t.Errorf("query does not ask for the merge state:\n%s", (*calls)[0].query)
 		}
+	}
+}
+
+func TestPullRequestsCountUnresolvedThreads(t *testing.T) {
+	threads := `"reviewThreads":{"nodes":[{"isResolved":false},{"isResolved":true},{"isResolved":false}]}`
+	node := strings.Replace(pr("example-org/web", 9, "feature/DEMO-1-x", "OPEN", "", "SUCCESS"), `"reviewThreads":{"nodes":[]}`, threads, 1)
+	base, h, calls := gqlServer(t, func(string) (int, string) {
+		return 200, `{"data":{"r0":{"open":{"nodes":[` + node + `]},"merged":{"nodes":[]}}}}`
+	})
+	got, err := New(staticTokens(map[string]string{"example-org": "work"})).WithEndpoints(base, h).PullRequests(context.Background(), []string{"example-org/web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Unresolved != 2 {
+		t.Errorf("PRs = %+v, want 2 unresolved", got)
+	}
+	if !strings.Contains((*calls)[0].query, "reviewThreads") {
+		t.Errorf("query does not ask for review threads:\n%s", (*calls)[0].query)
 	}
 }
 

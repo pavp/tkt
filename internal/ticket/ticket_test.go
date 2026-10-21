@@ -108,7 +108,10 @@ func TestAttention(t *testing.T) {
 		{"failing CI", Ticket{Category: InProgress, PRs: []PullRequest{{State: PROpen, Checks: ChecksFail}}}, []Reason{ReasonCIFailing}},
 		{"changes requested", Ticket{Category: InReview, PRs: []PullRequest{{State: PROpen, Checks: ChecksPass, Review: ReviewChangesRequested}}}, []Reason{ReasonChangesRequested}},
 		{"both across repos", Ticket{Category: InReview, PRs: []PullRequest{{State: PROpen, Checks: ChecksFail}, {State: PROpen, Review: ReviewChangesRequested}}}, []Reason{ReasonCIFailing, ReasonChangesRequested}},
-		{"merged PR ignored", Ticket{Category: InReview, PRs: []PullRequest{{State: PRMerged, Checks: ChecksFail}}}, nil},
+		{"unresolved comments", Ticket{Category: InReview, PRs: []PullRequest{{State: PROpen, Checks: ChecksPass, Unresolved: 2}}}, []Reason{ReasonUnresolved}},
+		{"conflicts", Ticket{Category: InReview, PRs: []PullRequest{{State: PROpen, Merge: MergeConflicts}}}, []Reason{ReasonConflicts}},
+		{"every reason in order", Ticket{Category: InReview, PRs: []PullRequest{{State: PROpen, Merge: MergeConflicts, Unresolved: 1}, {State: PROpen, Checks: ChecksFail, Review: ReviewChangesRequested}}}, []Reason{ReasonCIFailing, ReasonChangesRequested, ReasonUnresolved, ReasonConflicts}},
+		{"merged PR ignored", Ticket{Category: InReview, PRs: []PullRequest{{State: PRMerged, Checks: ChecksFail, Unresolved: 3}}}, nil},
 		{"done ticket ignored", Ticket{Category: Done, PRs: []PullRequest{{State: PROpen, Checks: ChecksFail}}}, nil},
 		{"no PRs", Ticket{Category: ToDo}, nil},
 	}

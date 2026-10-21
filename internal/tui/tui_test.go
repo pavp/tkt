@@ -1520,7 +1520,8 @@ func TestPRStatus(t *testing.T) {
 	}{
 		{ticket.PullRequest{Checks: ticket.ChecksFail, Merge: ticket.MergeConflicts, Draft: true}, "CI failing"},
 		{ticket.PullRequest{Review: ticket.ReviewChangesRequested, Merge: ticket.MergeConflicts}, "Changes requested"},
-		{ticket.PullRequest{Review: ticket.ReviewApproved, Merge: ticket.MergeConflicts}, "Conflicts"},
+		{ticket.PullRequest{Review: ticket.ReviewApproved, Merge: ticket.MergeConflicts, Unresolved: 2}, "Conflicts"},
+		{ticket.PullRequest{Review: ticket.ReviewApproved, Merge: ticket.MergeReady, Unresolved: 2}, "2 unresolved"},
 		{ticket.PullRequest{Draft: true, Checks: ticket.ChecksPass}, "Draft"},
 		{ticket.PullRequest{Review: ticket.ReviewApproved, Merge: ticket.MergeReady}, "Ready to merge"},
 		{ticket.PullRequest{Checks: ticket.ChecksPass, Merge: ticket.MergeReady}, "Ready to merge"},
@@ -1532,6 +1533,34 @@ func TestPRStatus(t *testing.T) {
 	for _, tt := range tests {
 		if got := prStatus(tt.pr); got != tt.want {
 			t.Errorf("prStatus(%+v) = %q, want %q", tt.pr, got, tt.want)
+		}
+	}
+}
+
+func TestPRMenuOffersTheFixForItsReason(t *testing.T) {
+	tests := []struct {
+		pr   ticket.PullRequest
+		want string
+	}{
+		{ticket.PullRequest{Checks: ticket.ChecksFail}, "Send the CI failure to the agent"},
+		{ticket.PullRequest{Review: ticket.ReviewChangesRequested}, "Send the review comments to the agent"},
+		{ticket.PullRequest{Unresolved: 1}, "Send the unresolved comments to the agent"},
+		{ticket.PullRequest{Merge: ticket.MergeConflicts}, "Ask the agent to resolve the conflicts"},
+	}
+	for _, tt := range tests {
+		pr := tt.pr
+		pr.Repo, pr.Number, pr.State, pr.URL = "example-org/web", 900, ticket.PROpen, "https://github.com/example-org/web/pull/900"
+		snap := prsSnapshot()
+		snap.Tickets = []ticket.Ticket{{Key: "DEMO-9", Summary: "Rename", Status: "In Review", Category: ticket.InReview, PRs: []ticket.PullRequest{pr}}}
+		m := tea.Model(New(snap, false, &recorder{}, ViewList))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+		v := stripANSI(press(m, "2", "enter").View())
+		if !strings.Contains(v, tt.want) {
+			t.Errorf("%+v: menu lacks %q:\n%s", tt.pr, tt.want, v)
+		}
+		row := strings.Split(stripANSI(press(m, "2", "s").View()), "\n")
+		if line := row[lineIndex(strings.Join(row, "\n"), "#900 ")]; !strings.HasPrefix(strings.TrimSpace(line), "!") {
+			t.Errorf("%+v: the row should be marked as needing the user: %q", tt.pr, line)
 		}
 	}
 }

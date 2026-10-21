@@ -121,7 +121,8 @@ const prFields = `number title url state isDraft mergeStateStatus headRefName he
   author { login __typename }
   repository { nameWithOwner }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-  latestOpinionatedReviews(first: 100) { nodes { state } }`
+  latestOpinionatedReviews(first: 100) { nodes { state } }
+  reviewThreads(first: 100) { nodes { isResolved } }`
 
 type prNode struct {
 	Number           int    `json:"number"`
@@ -154,6 +155,11 @@ type prNode struct {
 			State string `json:"state"`
 		} `json:"nodes"`
 	} `json:"latestOpinionatedReviews"`
+	ReviewThreads struct {
+		Nodes []struct {
+			IsResolved bool `json:"isResolved"`
+		} `json:"nodes"`
+	} `json:"reviewThreads"`
 }
 
 func (n prNode) toPR() ticket.PullRequest {
@@ -188,6 +194,11 @@ func (n prNode) toPR() ticket.PullRequest {
 		pr.Merge = ticket.MergeReady
 	case n.MergeStateStatus == "DIRTY":
 		pr.Merge = ticket.MergeConflicts
+	}
+	for _, th := range n.ReviewThreads.Nodes {
+		if !th.IsResolved {
+			pr.Unresolved++
+		}
 	}
 	for _, r := range n.LatestOpinionatedReviews.Nodes {
 		if r.State == "APPROVED" {

@@ -187,6 +187,8 @@ type PullRequest struct {
 	Approvals int        `json:"approvals,omitempty"`
 	Draft     bool       `json:"draft,omitempty"`
 	Merge     MergeState `json:"merge,omitempty"`
+	// Unresolved counts the review threads nobody has resolved yet.
+	Unresolved int `json:"unresolved,omitempty"`
 }
 
 // ApprovalsText words the approvals, such as "2 approvals"; it is empty without any.
@@ -221,6 +223,8 @@ type Reason string
 const (
 	ReasonCIFailing        Reason = "CI failing"
 	ReasonChangesRequested Reason = "Changes requested"
+	ReasonUnresolved       Reason = "Unresolved comments"
+	ReasonConflicts        Reason = "Conflicts"
 )
 
 // Attention lists why an open ticket needs the user: failing CI or requested changes on any open PR.
@@ -234,20 +238,41 @@ func (t Ticket) Attention() []Reason {
 	if t.Category == Done {
 		return nil
 	}
-	var ci, changes bool
+	found := map[Reason]bool{}
 	for _, pr := range t.PRs {
-		if pr.State != PROpen {
-			continue
+		for _, r := range pr.Attention() {
+			found[r] = true
 		}
-		ci = ci || pr.Checks == ChecksFail
-		changes = changes || pr.Review == ReviewChangesRequested
 	}
 	var out []Reason
-	if ci {
+	for _, r := range reasons {
+		if found[r] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// reasons orders what needs the user, most urgent first.
+var reasons = []Reason{ReasonCIFailing, ReasonChangesRequested, ReasonUnresolved, ReasonConflicts}
+
+// Attention lists why an open pull request needs the user, most urgent first.
+func (pr PullRequest) Attention() []Reason {
+	if pr.State != PROpen {
+		return nil
+	}
+	var out []Reason
+	if pr.Checks == ChecksFail {
 		out = append(out, ReasonCIFailing)
 	}
-	if changes {
+	if pr.Review == ReviewChangesRequested {
 		out = append(out, ReasonChangesRequested)
+	}
+	if pr.Unresolved > 0 {
+		out = append(out, ReasonUnresolved)
+	}
+	if pr.Merge == MergeConflicts {
+		out = append(out, ReasonConflicts)
 	}
 	return out
 }

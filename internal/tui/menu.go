@@ -61,11 +61,7 @@ func (m Model) buildMenu(it item) *menu {
 		items = append(items, menuItem{label: "Open " + prRef(pr) + " in GitHub ↗", key: key, link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }})
 	}
 	for _, r := range t.Attention() {
-		label := "Send the CI failure to the agent"
-		if r == ticket.ReasonChangesRequested {
-			label = "Send the review comments to the agent"
-		}
-		items = append(items, menuItem{label: label, key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
+		items = append(items, menuItem{label: fixLabel(r), key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
 	}
 	items = append(items,
 		menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }},
@@ -80,11 +76,8 @@ func (m Model) prMenu(it item) *menu {
 	a := m.actions
 	pr, t := *it.pr, *it.ticket
 	items := []menuItem{{label: fmt.Sprintf("Open #%d in GitHub ↗", pr.Number), key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}}
-	switch {
-	case pr.Checks == ticket.ChecksFail:
-		items = append(items, menuItem{label: "Send the CI failure to the agent", key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
-	case pr.Review == ticket.ReviewChangesRequested:
-		items = append(items, menuItem{label: "Send the review comments to the agent", key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
+	if reasons := pr.Attention(); len(reasons) > 0 {
+		items = append(items, menuItem{label: fixLabel(reasons[0]), key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
 	}
 	items = append(items,
 		menuItem{label: m.startLabel(t.Key), run: func() tea.Cmd { return a.StartChoices(t.Key) }},
@@ -95,6 +88,19 @@ func (m Model) prMenu(it item) *menu {
 		items = append(items, menuItem{label: "Open " + string(t.Key) + " in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
 	}
 	return &menu{title: fmt.Sprintf("Pull request #%d · %s", pr.Number, t.Key), items: items}
+}
+
+// fixLabel words the fix for a reason; every fix sends all of the ticket's feedback at once.
+func fixLabel(r ticket.Reason) string {
+	switch r {
+	case ticket.ReasonChangesRequested:
+		return "Send the review comments to the agent"
+	case ticket.ReasonUnresolved:
+		return "Send the unresolved comments to the agent"
+	case ticket.ReasonConflicts:
+		return "Ask the agent to resolve the conflicts"
+	}
+	return "Send the CI failure to the agent"
 }
 
 // startLabel says where Start leads: it focuses the ticket's agent when one already runs.

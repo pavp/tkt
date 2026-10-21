@@ -21,6 +21,7 @@ type fakeGitHub struct {
 	err         error
 	failed      map[string][]github.FailedCheck
 	changes     map[int][]github.ChangeRequest
+	threads     map[int][]github.ReviewThread
 	older       []ticket.PullRequest
 	keysAsked   []string
 	repos       map[string][]string
@@ -44,6 +45,9 @@ func (f *fakeGitHub) FailedChecks(_ context.Context, repo, sha string) ([]github
 }
 func (f *fakeGitHub) ChangeRequests(_ context.Context, _ string, n int) ([]github.ChangeRequest, error) {
 	return f.changes[n], nil
+}
+func (f *fakeGitHub) UnresolvedThreads(_ context.Context, _ string, n int) ([]github.ReviewThread, error) {
+	return f.threads[n], nil
 }
 
 func (f *fakeGitHub) PullRequests(context.Context, []string) ([]ticket.PullRequest, error) {
