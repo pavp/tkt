@@ -757,7 +757,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.effectiveView() == ViewList {
 		lines := strings.Split(strings.TrimRight(m.listView(), "\n"), "\n")
-		_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, 0)
+		_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, 0, 0)
 		avail := m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer())
 		start := 0
 		if avail > 0 && len(lines) > avail {
@@ -1528,14 +1528,22 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 		if info == "" {
 			info = t.Status
 		}
-		// The agent shares the type's line, which has room to spare, so the pull requests keep theirs;
-		// when both do not fit, the type gives way.
-		if text, kind := agentShort(agent); kind != board.AgentNone {
-			room := max(1, inner-lipgloss.Width(text)-3)
-			lines = append(lines, dim.Render(truncate(info, room)+" · ")+agentStyle(kind).Render(text))
-		} else {
-			lines = append(lines, dim.Render(truncate(info, inner)))
+		// The type shares its line with the assignee and the agent, so the pull requests keep theirs; when they
+		// do not all fit, the type gives way first, then the assignee, never the agent.
+		who := " · " + shortName(t.Assignee)
+		text, kind := agentShort(agent)
+		agentW := 0
+		if kind != board.AgentNone {
+			agentW = lipgloss.Width(text) + 3
 		}
+		line := dim.Render(truncate(strings.TrimPrefix(who, " · "), max(1, inner-agentW)))
+		if room := inner - agentW - lipgloss.Width(who); room >= 4 {
+			line = dim.Render(truncate(info, room) + who)
+		}
+		if kind != board.AgentNone {
+			line += dim.Render(" · ") + agentStyle(kind).Render(text)
+		}
+		lines = append(lines, line)
 	}
 	for i, l := range lines {
 		lines[i] = " " + l
@@ -1777,6 +1785,17 @@ func (m Model) listView() string {
 	if len(m.snap.Agents) > 0 && m.filter != FilterPRs {
 		agentW = agentWidth + 1
 	}
+	assigneeW := 0
+	if m.filter != FilterPRs {
+		for _, it := range measured {
+			if it.ticket != nil && !it.mine() {
+				assigneeW = max(assigneeW, lipgloss.Width("ASSIGNEE"), lipgloss.Width(shortName(it.ticket.Assignee)))
+			}
+		}
+		if assigneeW > 0 {
+			assigneeW = min(assigneeW, assigneeMaxWidth) + 1
+		}
+	}
 	// Narrow panes drop AGENT first, then shrink PR / CI, then STATUS, so the title always keeps some room.
 	const minTitle = 12
 	keyW := keyWidth
@@ -1788,9 +1807,12 @@ func (m Model) listView() string {
 			}
 		}
 	}
-	room := func() int { return m.width - 2 - keyW - statusW - agentW - prW - 3 }
+	room := func() int { return m.width - 2 - keyW - statusW - agentW - assigneeW - prW - 3 }
 	if minTitle > room() {
 		agentW = 0
+	}
+	if minTitle > room() {
+		assigneeW = 0
 	}
 	if short := minTitle - room(); short > 0 {
 		cut := max(0, min(short, prW-8))
@@ -1801,7 +1823,7 @@ func (m Model) listView() string {
 	row := func(key, status, agent, pr, title string) string {
 		return pad(key, keyW) + " " + pad(status, statusW) + " " + agent + pad(pr, prW) + " " + truncate(title, titleWidth)
 	}
-	lines, _ := m.listLines(row, prText, agentW)
+	lines, _ := m.listLines(row, prText, agentW, assigneeW)
 	return strings.Join(lines, "\n") + "\n"
 }
 
@@ -1812,6 +1834,31 @@ func (m Model) listHeads() [3]string {
 		return [3]string{"PR", "STATUS", "CI"}
 	}
 	return [3]string{"KEY", "STATUS", "PR / CI"}
+}
+
+// assigneeCell is a list row's assignee, padded to assigneeW (which includes its gap); empty without the column.
+func assigneeCell(name string, assigneeW int) string {
+	if assigneeW == 0 {
+		return ""
+	}
+	return pad(truncate(shortName(name), assigneeW-1), assigneeW)
+}
+
+// assigneeMaxWidth caps the ASSIGNEE column, which shows short names such as "Ana L.".
+const assigneeMaxWidth = 14
+
+// shortName shortens a person's name to the first name and the last name's initial, "Ana L.", for the
+// board's narrow cells; an empty name means the ticket is unassigned.
+func shortName(name string) string {
+	parts := strings.Fields(name)
+	switch len(parts) {
+	case 0:
+		return "unassigned"
+	case 1:
+		return parts[0]
+	}
+	last := []rune(parts[len(parts)-1])
+	return parts[0] + " " + string(last[0]) + "."
 }
 
 // agentWidth fits the longest agent cell, "! needs you".
@@ -1848,11 +1895,14 @@ func agentStyle(kind board.AgentKind) lipgloss.Style {
 // listLines lays the list out in sections, the user's tickets and review requests per repo, and returns for
 // every line the index of the item on it (-1 for titles and spacing, botToggleLine for the bots toggle), so
 // clicks map back to items.
-func (m Model) listLines(row func(key, status, agent, pr, title string) string, prText func(item) string, agentW int) ([]string, []int) {
+func (m Model) listLines(row func(key, status, agent, pr, title string) string, prText func(item) string, agentW, assigneeW int) ([]string, []int) {
 	items := m.listItems()
 	header := pad("", agentW)
 	if agentW > 0 {
 		header = pad("AGENT", agentW)
+	}
+	if assigneeW > 0 {
+		header = pad("ASSIGNEE", assigneeW) + header
 	}
 	heads := m.listHeads()
 	lines := []string{"  " + dim.Render(row(heads[0], heads[1], header, heads[2], "TITLE")), dim.Render(strings.Repeat("─", m.width))}
@@ -1904,7 +1954,7 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		}
 		switch {
 		case it.review():
-			line = row(string(it.key), statusText(it), pad("", agentW), ci, it.pr.Title)
+			line = row(string(it.key), statusText(it), pad("", assigneeW+agentW), ci, it.pr.Title)
 		case it.mine():
 			status := statusText(it)
 			if i != m.row && needsYou(*it.pr) {
@@ -1912,7 +1962,7 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			}
 			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, cmp.Or(it.pr.Title, it.ticket.Summary))
 		default:
-			line = row(string(it.key), it.ticket.Status, agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), it.ticket.Summary)
+			line = row(string(it.key), it.ticket.Status, assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), it.ticket.Summary)
 		}
 		switch {
 		case i == m.row:
@@ -1965,7 +2015,7 @@ func (m Model) preview() string {
 	}
 	t := it.ticket
 	title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s", t.Key, t.Summary), m.width))
-	parts := []string{t.Status}
+	parts := []string{t.Status, cmp.Or(t.Assignee, "unassigned")}
 	if t.Label != "" {
 		parts = append([]string{t.Label}, parts...)
 	}

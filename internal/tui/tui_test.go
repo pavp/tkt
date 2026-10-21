@@ -506,13 +506,13 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 All 4", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3 · Export CSV\n To Do · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 All 4", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3 · Export CSV\n To Do · unassigned · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
 	}
 	next = press(next, "l")
-	if !strings.Contains(stripANSI(next.View()), "DEMO-1 · Filter accounts\n In Progress · CI failing · #812 · f sends the failure to the agent") {
+	if !strings.Contains(stripANSI(next.View()), "DEMO-1 · Filter accounts\n In Progress · unassigned · CI failing · #812 · f sends the failure to the agent") {
 		t.Errorf("preview hint missing:\n%s", stripANSI(next.View()))
 	}
 }
@@ -2084,7 +2084,7 @@ func TestListShowsAgentStates(t *testing.T) {
 var brokenEscape = regexp.MustCompile(`\x1b\[[0-9;]*[^0-9;m]`)
 
 func TestCardFitsPullRequestsBesideTheAgentWithoutBreakingColors(t *testing.T) {
-	tk := ticket.Ticket{Key: "DEMO-1", Summary: "Homogenize the organizations module", Status: "In Progress", Category: ticket.InProgress,
+	tk := ticket.Ticket{Key: "DEMO-1", Summary: "Homogenize the organizations module", Status: "In Progress", Category: ticket.InProgress, Assignee: "Ana López",
 		PRs: []ticket.PullRequest{
 			{Number: 731, State: ticket.PROpen, Checks: ticket.ChecksPass},
 			{Number: 732, State: ticket.PROpen, Checks: ticket.ChecksPass},
@@ -2110,8 +2110,8 @@ func TestCardFitsPullRequestsBesideTheAgentWithoutBreakingColors(t *testing.T) {
 				last = l
 			}
 		}
-		if !strings.Contains(last, "In Progress") && !strings.Contains(last, "In Pr") {
-			t.Errorf("%s: the agent belongs on the type line: %q", status, last)
+		if !strings.Contains(last, "Ana L.") {
+			t.Errorf("%s: the agent belongs on the type and assignee line: %q", status, last)
 		}
 		for _, l := range strings.Split(out, "\n") {
 			if lipgloss.Width(l) > 30 {
@@ -2144,10 +2144,18 @@ func TestTruncateKeepsColorCodesWhole(t *testing.T) {
 }
 
 func TestCardCutsTheTypeBeforeTheAgent(t *testing.T) {
-	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Type: "A very long issue type name", Status: "In Progress"}
-	plain := ansi.Strip(card(tk, 30, false, false, "blocked"))
-	if !strings.Contains(plain, "! needs you") || !strings.Contains(plain, "A very long") {
-		t.Errorf("the type should shrink, never the agent:\n%s", plain)
+	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Type: "A very long issue type name", Status: "In Progress", Assignee: "Ana López"}
+	plain := ansi.Strip(card(tk, 40, false, false, "blocked"))
+	if !strings.Contains(plain, "! needs you") || !strings.Contains(plain, "Ana L.") || !strings.Contains(plain, "A very long") || strings.Contains(plain, "type name") {
+		t.Errorf("the type should shrink first, never the assignee or the agent:\n%s", plain)
+	}
+	plain = ansi.Strip(card(tk, 30, false, false, "blocked"))
+	if !strings.Contains(plain, "Ana L. · ! needs you") {
+		t.Errorf("without room the type goes, the assignee and agent stay:\n%s", plain)
+	}
+	tk.Assignee = ""
+	if plain := ansi.Strip(card(tk, 40, false, false, "")); !strings.Contains(plain, "unassigned") {
+		t.Errorf("an unassigned ticket says so:\n%s", plain)
 	}
 }
 
@@ -2439,6 +2447,47 @@ func TestPRMenuCopiesItsLinksAndKey(t *testing.T) {
 	} {
 		if _, msg := run(selectMenuItem(t, m, label), "enter"); msg != StatusMsg(want) {
 			t.Errorf("%s ran %v", label, msg)
+		}
+	}
+}
+
+func TestTicketsShowTheirAssignee(t *testing.T) {
+	snap := prsSnapshot()
+	snap.Tickets[0].Assignee = "Ana López"
+	snap.Tickets[1].Assignee = ""
+	for _, view := range []string{ViewColumns, ViewList} {
+		m := tea.Model(New(snap, false, &recorder{}, view))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+		v := stripANSI(m.View())
+		if !strings.Contains(v, "Ana L.") || !strings.Contains(v, "unassigned") {
+			t.Errorf("%s: every ticket should show its assignee:\n%s", view, v)
+		}
+	}
+	m := tea.Model(New(snap, true, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	if !strings.Contains(strings.Split(v, "\n")[lineIndex(v, "TITLE")], "ASSIGNEE") {
+		t.Errorf("the list should head its assignee column:\n%s", v)
+	}
+	for !strings.Contains(selectedLine(m.View()), string(snap.Tickets[0].Key)) {
+		m = press(m, "s")
+	}
+	if v := stripANSI(m.View()); !strings.Contains(v, "Ana López") {
+		t.Errorf("the preview should name the assignee in full:\n%s", v)
+	}
+	narrow := tea.Model(New(snap, false, &recorder{}, ViewList))
+	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	for _, l := range strings.Split(stripANSI(narrow.View()), "\n") {
+		if lipgloss.Width(l) > 56 {
+			t.Errorf("wider than the tray panel: %q", l)
+		}
+	}
+}
+
+func TestShortName(t *testing.T) {
+	for in, want := range map[string]string{"Ana López": "Ana L.", "Ana María López Ruiz": "Ana R.", "dev": "dev", "": "unassigned"} {
+		if got := shortName(in); got != want {
+			t.Errorf("shortName(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

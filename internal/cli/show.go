@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -105,7 +106,7 @@ func (a *App) renderShow(w io.Writer, d detail) {
 }
 
 func (a *App) renderHead(w io.Writer, t ticket.Ticket) {
-	fmt.Fprintf(w, "%s · %s · %s\n%s\n%s\n", t.Key, t.Type, t.Status, t.Summary, t.URL)
+	fmt.Fprintf(w, "%s · %s · %s · %s\n%s\n%s\n", t.Key, t.Type, t.Status, cmp.Or(t.Assignee, "unassigned"), t.Summary, t.URL)
 	if reasons := t.Attention(); len(reasons) > 0 {
 		parts := make([]string, len(reasons))
 		for i, r := range reasons {
