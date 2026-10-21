@@ -27,6 +27,7 @@ type JiraAPI interface {
 	DevPullRequests(ctx context.Context, issueID string) ([]jira.DevPullRequest, error)
 	Download(ctx context.Context, url string, w io.Writer, maxBytes int64) error
 	ActiveSprints(ctx context.Context, board int) ([]int, error)
+	Boards(ctx context.Context, space string) ([]jira.Board, error)
 }
 
 // jiraClient builds a Jira client from the configuration and the stored token.

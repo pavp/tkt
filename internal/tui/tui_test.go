@@ -2644,3 +2644,24 @@ func TestAPartialBoardKeepsRefreshing(t *testing.T) {
 		t.Errorf("the full board ends the refresh:\n%s", v)
 	}
 }
+
+func TestTeamListIsSplitByBoard(t *testing.T) {
+	snap := teamSnapshot()
+	snap.Tickets[len(snap.Tickets)-1].Board = "Authorization Center"
+	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-10", Summary: "Access review", Status: "To Do", Category: ticket.ToDo, Team: true, Board: "User Access Center"})
+	m := tea.Model(New(snap, true, &recorder{cfg: config.Config{Spaces: []config.Space{{Key: "DEMO", TeamBoards: []config.TeamBoard{{ID: 1, Name: "x"}}}}}}, ViewList).WithState(BoardState{Team: true}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	auth, access := lineIndex(v, "Team · Authorization Center  1"), lineIndex(v, "Team · User Access Center  1")
+	if auth < 0 || access < 0 || lineIndex(v, "DEMO-9") < auth || lineIndex(v, "DEMO-10") < access {
+		t.Errorf("the team should be split by board:\n%s", v)
+	}
+}
+
+func TestTeamWithoutBoardsSaysWhereToAddThem(t *testing.T) {
+	m := tea.Model(New(teamSnapshot(), true, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(press(m, "t").View()); !strings.Contains(v, "add team boards in Settings (,)") {
+		t.Errorf("turning the team on without boards should say where to add them:\n%s", v)
+	}
+}
