@@ -59,6 +59,8 @@ type App struct {
 	// start per read; they stay in memory only.
 	tokenMu sync.Mutex
 	tokens  map[string]string
+	// jiraClients keeps one Jira client per site, email and token; tokenMu guards it too.
+	jiraClients map[string]JiraAPI
 
 	in *bufio.Reader
 

@@ -88,6 +88,18 @@ func TestPullRequestsBatchesPerOwner(t *testing.T) {
 	if len(*calls) != 2 {
 		t.Fatalf("calls = %d, want one per owner", len(*calls))
 	}
+	q := (*calls)[0].query
+	for _, seg := range strings.Split(q, "open: ")[1:] {
+		if open, _, _ := strings.Cut(seg, "merged: "); !strings.Contains(open, "reviewThreads") {
+			t.Errorf("open pull requests keep every field: %s", open)
+		}
+	}
+	for _, seg := range strings.Split(q, "merged: ")[1:] {
+		merged, _, _ := strings.Cut(seg, "open: ")
+		if strings.Contains(merged, "reviewThreads") || strings.Contains(merged, "statusCheckRollup") || !strings.Contains(merged, "headRefName") {
+			t.Errorf("merged pull requests should ask only for what the board shows: %s", merged)
+		}
+	}
 	if (*calls)[0].auth != "Bearer work" || (*calls)[1].auth != "Bearer personal" {
 		t.Errorf("auth = %q, %q", (*calls)[0].auth, (*calls)[1].auth)
 	}

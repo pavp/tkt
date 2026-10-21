@@ -572,3 +572,32 @@ func TestBoardFixGoesToTheAgent(t *testing.T) {
 		t.Errorf("a failure keeps the board open and says why: %v", got)
 	}
 }
+
+func TestTheJiraClientIsKeptAcrossSyncs(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	site, _ := config.SiteURL(c.Jira.Site)
+	h.creds[credstore.JiraKey(site, c.Jira.Email)] = "tok"
+	built := 0
+	h.app.NewJira = func(_, _, _ string) JiraAPI {
+		built++
+		return &fakeJira{}
+	}
+	first, err := h.app.jiraClient(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _ := h.app.jiraClient(c)
+	if built != 1 || first != second {
+		t.Errorf("built %d clients, want one kept for the process", built)
+	}
+	if err := h.app.saveJiraToken(site, c.Jira.Email, "another"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.app.jiraClient(c); err != nil || built != 2 {
+		t.Errorf("a new token needs a new client: built %d, %v", built, err)
+	}
+}

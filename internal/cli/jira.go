@@ -41,7 +41,19 @@ func (a *App) jiraClient(c *config.Config) (JiraAPI, error) {
 	if err != nil {
 		return nil, err
 	}
-	return a.NewJira(site, c.Jira.Email, token), nil
+	// One client per site, email and token, kept for the process: it remembers the field ids it looked up,
+	// which the daemon would otherwise ask Jira again on every sync.
+	key := site + "\x00" + c.Jira.Email + "\x00" + token
+	a.tokenMu.Lock()
+	defer a.tokenMu.Unlock()
+	if js, ok := a.jiraClients[key]; ok {
+		return js, nil
+	}
+	if a.jiraClients == nil {
+		a.jiraClients = map[string]JiraAPI{}
+	}
+	a.jiraClients[key] = a.NewJira(site, c.Jira.Email, token)
+	return a.jiraClients[key], nil
 }
 
 // saveJiraToken stores a Jira token and makes it the one this process uses.
