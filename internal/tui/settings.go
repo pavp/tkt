@@ -13,11 +13,15 @@ import (
 
 const (
 	sectionRepos = iota
+	sectionTeamBoards
 	sectionRoots
 	sectionBoard
 )
 
-var sectionNames = []string{"Spaces & repositories", "Local clones", "Board"}
+var sectionNames = []string{"Spaces & repositories", "Team boards", "Local clones", "Board"}
+
+// shortSectionNames stand in when the full names do not fit, as in the tray panel.
+var shortSectionNames = []string{"Repos", "Team boards", "Clones", "Board"}
 
 type rowKind int
 
@@ -115,6 +119,16 @@ func (s *settingsView) rows() []settingsRow {
 	if s.section == sectionBoard {
 		return []settingsRow{{kind: rowLabel, name: s.cfg.Jira.LabelField}}
 	}
+	if s.section == sectionTeamBoards {
+		for si, sp := range s.cfg.Spaces {
+			out = append(out, settingsRow{kind: rowSpace, space: si})
+			for bi, b := range sp.TeamBoards {
+				out = append(out, settingsRow{kind: rowTeamBoard, space: si, idx: bi, name: b.Name})
+			}
+			out = append(out, settingsRow{kind: rowAddTeamBoard, space: si})
+		}
+		return out
+	}
 	if s.section == sectionRoots {
 		for i, r := range s.cfg.RepoRoots {
 			out = append(out, settingsRow{kind: rowRoot, idx: i, name: r})
@@ -132,10 +146,6 @@ func (s *settingsView) rows() []settingsRow {
 			}
 		}
 		out = append(out, settingsRow{kind: rowAddRepo, space: si})
-		for bi, b := range sp.TeamBoards {
-			out = append(out, settingsRow{kind: rowTeamBoard, space: si, idx: bi, name: b.Name})
-		}
-		out = append(out, settingsRow{kind: rowAddTeamBoard, space: si})
 	}
 	return out
 }
@@ -493,17 +503,28 @@ func (m Model) settingsSaved(msg SettingsSavedMsg) (tea.Model, tea.Cmd) {
 // settingsLines renders the view and maps each line to its row index (-1 for others), for clicks.
 func (m Model) settingsLines() ([]string, []int) {
 	s := m.settings
-	tabs := make([]string, len(sectionNames))
-	for i, n := range sectionNames {
-		tabs[i] = dim.Render(" " + n + " ")
-		if i == s.section {
-			tabs[i] = selected.Render(" " + n + " ")
+	strip := func(names []string) string {
+		tabs := make([]string, len(names))
+		for i, n := range names {
+			tabs[i] = dim.Render(" " + n + " ")
+			if i == s.section {
+				tabs[i] = selected.Render(" " + n + " ")
+			}
 		}
+		return strings.Join(tabs, " ")
 	}
-	lines := []string{bold.Render("Settings") + dim.Render(" · changes are saved to your config.toml"), strings.Join(tabs, " "), ""}
+	tabs := strip(sectionNames)
+	if lipgloss.Width(tabs) > m.width {
+		tabs = strip(shortSectionNames)
+	}
+	lines := []string{bold.Render("Settings") + dim.Render(" · changes are saved to your config.toml"), tabs, ""}
 	at := []int{-1, -1, -1}
+	if s.section == sectionTeamBoards {
+		lines, at = append(lines, truncate(dim.Render("Jira boards whose active sprints make the board's Team mode"), m.width)), append(at, -1)
+	}
 	repoW, pathW := m.settingsColumns()
 	rootW := m.rootsWidth()
+	boardW := m.boardsWidth()
 	for i, r := range s.rows() {
 		mark := "  "
 		if i == s.row {
@@ -521,8 +542,10 @@ func (m Model) settingsLines() ([]string, []int) {
 				name += dim.Render(" · " + sp.Name)
 			}
 			lines, at = append(lines, name), append(at, -1)
-			line = "  " + dim.Render(pad("REPOSITORY", repoW)+" "+pad("LOCAL PATH", pathW))
-			lines, at = append(lines, line), append(at, -1)
+			if s.section == sectionRepos {
+				line = "  " + dim.Render(pad("REPOSITORY", repoW)+" "+pad("LOCAL PATH", pathW))
+				lines, at = append(lines, line), append(at, -1)
+			}
 			continue
 		case rowRepo:
 			repo := s.cfg.Spaces[r.space].Repos[r.idx]
@@ -532,7 +555,7 @@ func (m Model) settingsLines() ([]string, []int) {
 		case rowAddRepo:
 			line = mark + keyDim.Render("+ Add repository")
 		case rowTeamBoard:
-			line = mark + pad(truncate(r.name, repoW), repoW) + " " + pad("", pathW) + " " + removeMark
+			line = mark + pad(truncate(r.name, boardW), boardW) + " " + removeMark
 		case rowAddTeamBoard:
 			line = mark + keyDim.Render("+ Add team board")
 		case rowRoot:
@@ -541,9 +564,6 @@ func (m Model) settingsLines() ([]string, []int) {
 			line = mark + keyDim.Render("+ Add folder")
 		case rowLabel:
 			line = mark + pad("Ticket label", 14) + " " + orDash(r.name)
-		}
-		if (r.kind == rowTeamBoard || r.kind == rowAddTeamBoard) && i > 0 && s.rows()[i-1].kind != rowTeamBoard {
-			lines, at = append(lines, truncate("  "+dim.Render("TEAM BOARDS · their active sprints make the board's Team mode"), m.width)), append(at, -1)
 		}
 		if s.section == sectionRoots && i == 0 {
 			lines, at = append(lines, dim.Render("Folders where tkt looks for your local clones")), append(at, -1)
@@ -570,13 +590,21 @@ func (m Model) settingsColumns() (repoW, pathW int) {
 		for _, name := range m.settings.inferred[sp.Key] {
 			repoW = max(repoW, lipgloss.Width(name))
 		}
-		for _, b := range sp.TeamBoards {
-			repoW = max(repoW, lipgloss.Width(b.Name))
-		}
 	}
 	repoW = min(repoW, max(24, m.width*2/5))
 	pathW = min(pathW, max(16, m.width-repoW-8))
 	return repoW, pathW
+}
+
+// boardsWidth is the width of the board column in the team boards section.
+func (m Model) boardsWidth() int {
+	w := 10
+	for _, sp := range m.settings.cfg.Spaces {
+		for _, b := range sp.TeamBoards {
+			w = max(w, lipgloss.Width(b.Name))
+		}
+	}
+	return min(w, max(16, m.width-6))
 }
 
 // rootsWidth is the width of the folder column in the local clones section.
@@ -589,8 +617,11 @@ func (m Model) rootsWidth() int {
 }
 
 func (m Model) removeX() int {
-	if m.settings.section == sectionRoots {
+	switch m.settings.section {
+	case sectionRoots:
 		return 2 + m.rootsWidth() + 1
+	case sectionTeamBoards:
+		return 2 + m.boardsWidth() + 1
 	}
 	repoW, pathW := m.settingsColumns()
 	return 2 + repoW + 1 + pathW + 1
