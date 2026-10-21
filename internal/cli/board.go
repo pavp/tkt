@@ -59,7 +59,7 @@ func newBoardCmd(a *App) *cobra.Command {
 			forceColor(a.Env.Getenv)
 			defer a.claimBoardPane()()
 			actions := &boardActions{a: a, c: c, ctx: cmd.Context()}
-			prog := tea.NewProgram(tui.New(snap, have, actions, view).WithState(a.loadBoardState()), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
+			prog := tea.NewProgram(tui.New(snap, have, actions, a.boardView(view)).WithState(a.loadBoardState()), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
 			follow, stop := context.WithCancel(cmd.Context())
 			defer stop()
 			go a.followDaemon(follow, actions, prog.Send)
@@ -70,7 +70,7 @@ func newBoardCmd(a *App) *cobra.Command {
 			return err
 		},
 	}
-	cmd.Flags().StringVar(&view, "view", "columns", "initial view: columns or list")
+	cmd.Flags().StringVar(&view, "view", "", "initial view: columns or list (default: the one last used, else columns)")
 	return cmd
 }
 

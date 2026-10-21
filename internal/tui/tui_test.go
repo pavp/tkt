@@ -2336,3 +2336,20 @@ func TestReposButtonOpensAndClosesTheFilter(t *testing.T) {
 		t.Errorf("the tray panel keeps its boxed buttons:\n%s", v)
 	}
 }
+
+func TestViewChoiceIsRemembered(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(prsSnapshot(), false, r, ViewColumns).WithState(BoardState{HiddenRepos: []string{"example-org/api"}}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "v")
+	if len(r.states) == 0 || r.states[len(r.states)-1].View != ViewList || !slices.Equal(r.states[len(r.states)-1].HiddenRepos, []string{"example-org/api"}) {
+		t.Fatalf("v should remember the list and keep the rest: %+v", r.states)
+	}
+	v := stripANSI(m.View())
+	y := lineIndex(v, "Columns")
+	line := strings.Split(v, "\n")[y]
+	m = click(m, lipgloss.Width(line[:strings.Index(line, "Columns")])+1, y)
+	if got := r.states[len(r.states)-1].View; got != ViewColumns {
+		t.Errorf("a click on Columns should remember it: %q", got)
+	}
+}
