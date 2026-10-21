@@ -36,6 +36,9 @@ func server(t *testing.T, routes map[string]string) (*Client, *[]recorded) {
 		}
 		calls = append(calls, rec)
 		key := r.Method + " " + r.URL.Path
+		if at := r.URL.Query().Get("startAt"); at != "" && at != "0" {
+			key += "#" + at
+		}
 		if tok, ok := rec.body["nextPageToken"].(string); ok {
 			key += "#" + tok
 		}
@@ -415,5 +418,36 @@ func TestTeamSprintJQL(t *testing.T) {
 	want := `sprint in (42, 43) AND project in ("DEMO", "OPS") AND (assignee != currentUser() OR assignee IS EMPTY) AND NOT (statusCategory = Done AND assignee WAS currentUser()) ORDER BY updated DESC`
 	if got := TeamSprintJQL([]string{"DEMO", "OPS"}, []int{42, 43}); got != want {
 		t.Errorf("jql = %s", got)
+	}
+}
+
+func TestBoardsListsASpacesScrumBoards(t *testing.T) {
+	c, calls := server(t, map[string]string{
+		"GET /rest/agile/1.0/board":   `{"isLast":false,"values":[{"id":418,"name":"User Access Center","type":"scrum"},{"id":12,"name":"Ops kanban","type":"kanban"}]}`,
+		"GET /rest/agile/1.0/board#2": `{"isLast":true,"values":[{"id":5205,"name":"Authorization Center","type":"scrum"}]}`,
+	})
+	got, err := c.Boards(context.Background(), "DEMO")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Board{{ID: 418, Name: "User Access Center"}, {ID: 5205, Name: "Authorization Center"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("boards = %+v", got)
+	}
+	if q := (*calls)[0].query; !strings.Contains(q, "projectKeyOrId=DEMO") || !strings.Contains(q, "type=scrum") {
+		t.Errorf("query = %s", q)
+	}
+}
+
+func TestActiveSprints(t *testing.T) {
+	c, calls := server(t, map[string]string{
+		"GET /rest/agile/1.0/board/5205/sprint": `{"isLast":true,"values":[{"id":11807,"state":"active"}]}`,
+	})
+	got, err := c.ActiveSprints(context.Background(), 5205)
+	if err != nil || !reflect.DeepEqual(got, []int{11807}) {
+		t.Errorf("sprints = %v, %v", got, err)
+	}
+	if !strings.Contains((*calls)[0].query, "state=active") {
+		t.Errorf("query = %s", (*calls)[0].query)
 	}
 }

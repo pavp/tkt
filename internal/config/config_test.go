@@ -202,3 +202,26 @@ func TestIgnoredRepositoriesRoundTrip(t *testing.T) {
 		t.Error("Clone shares the ignored list")
 	}
 }
+
+func TestTeamBoardsRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tkt", "config.toml")
+	c := &Config{
+		Jira:   Jira{Site: "example.atlassian.net", Email: "dev@example.com"},
+		Spaces: []Space{{Key: "DEMO", TeamBoards: []TeamBoard{{ID: 5205, Name: "Authorization Center"}}}},
+	}
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Spaces[0].TeamBoards) != 1 || got.Spaces[0].TeamBoards[0] != (TeamBoard{ID: 5205, Name: "Authorization Center"}) {
+		t.Errorf("team boards = %+v", got.Spaces[0].TeamBoards)
+	}
+	clone := got.Clone()
+	clone.Spaces[0].TeamBoards[0].Name = "changed"
+	if got.Spaces[0].TeamBoards[0].Name != "Authorization Center" {
+		t.Error("Clone shares the team boards")
+	}
+}
