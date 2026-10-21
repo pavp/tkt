@@ -584,14 +584,42 @@ func (c *Client) ActiveSprints(ctx context.Context, board int) ([]int, error) {
 // sprintSchema is the custom type of Jira Software's Sprint field.
 const sprintSchema = "com.pyxis.greenhopper.jira:gh-sprint"
 
-// Transition moves an issue from its current status to To. NeedsForm marks one whose screen asks for
-// something only Jira's own form can fill: any field but the sprint and story points, which keep their
-// values, or those two when required without a default.
+// Transition moves an issue from its current status to To. NeedsForm marks one whose screen requires,
+// without a default, a field only Jira's own form can fill: neither a list nor a user, or the sprint or
+// story points, which otherwise keep their values.
 type Transition struct {
 	ID        string
 	Name      string
 	To        string
 	NeedsForm bool
+	// Fields are the form's fields tkt can fill, required ones first.
+	Fields []Field
+}
+
+// The kinds of transition field tkt can fill: one of a list's allowed values, or a user.
+const (
+	KindOption = "option"
+	KindUser   = "user"
+)
+
+type Field struct {
+	ID       string
+	Name     string
+	Kind     string
+	Required bool
+	Options  []Option
+}
+
+type Option struct {
+	ID    string
+	Value string
+}
+
+// Value fills Field with the option or the user (account id) ID.
+type Value struct {
+	Field string
+	Kind  string
+	ID    string
 }
 
 // Transitions lists the transitions Jira allows from the issue's current status.
@@ -608,8 +636,13 @@ func (c *Client) Transitions(ctx context.Context, key string) ([]Transition, err
 				HasDefaultValue bool   `json:"hasDefaultValue"`
 				Name            string `json:"name"`
 				Schema          struct {
+					Type   string `json:"type"`
 					Custom string `json:"custom"`
 				} `json:"schema"`
+				AllowedValues []struct {
+					ID    string `json:"id"`
+					Value string `json:"value"`
+				} `json:"allowedValues"`
 			} `json:"fields"`
 		} `json:"transitions"`
 	}
@@ -619,20 +652,80 @@ func (c *Client) Transitions(ctx context.Context, key string) ([]Transition, err
 	out := make([]Transition, len(body.Transitions))
 	for i, t := range body.Transitions {
 		out[i] = Transition{ID: t.ID, Name: t.Name, To: t.To.Name}
-		for _, f := range t.Fields {
+		for id, f := range t.Fields {
 			planning := f.Schema.Custom == sprintSchema || strings.Contains(strings.ToLower(f.Name), "story point")
-			if !planning || f.Required && !f.HasDefaultValue {
-				out[i].NeedsForm = true
+			fillable := !planning && (f.Schema.Type == KindOption || f.Schema.Type == KindUser)
+			if !fillable {
+				if f.Required && !f.HasDefaultValue {
+					out[i].NeedsForm = true
+				}
+				continue
 			}
+			field := Field{ID: id, Name: f.Name, Kind: f.Schema.Type, Required: f.Required && !f.HasDefaultValue}
+			for _, v := range f.AllowedValues {
+				field.Options = append(field.Options, Option{ID: v.ID, Value: v.Value})
+			}
+			out[i].Fields = append(out[i].Fields, field)
 		}
+		slices.SortFunc(out[i].Fields, func(a, b Field) int {
+			if a.Required != b.Required {
+				if a.Required {
+					return -1
+				}
+				return 1
+			}
+			return strings.Compare(a.Name, b.Name)
+		})
 	}
 	return out, nil
 }
 
-// Transition moves the issue through the transition with that id.
-func (c *Client) Transition(ctx context.Context, key, id string) error {
+// Transition moves the issue through the transition with that id, filling its form's fields with values
+// and adding comment, when given, as the transition's comment.
+func (c *Client) Transition(ctx context.Context, key, id string, values []Value, comment string) error {
 	body := map[string]any{"transition": map[string]string{"id": id}}
+	if comment != "" {
+		var paragraphs []any
+		for _, line := range strings.Split(comment, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				paragraphs = append(paragraphs, map[string]any{"type": "paragraph", "content": []any{map[string]string{"type": "text", "text": line}}})
+			}
+		}
+		doc := map[string]any{"type": "doc", "version": 1, "content": paragraphs}
+		body["update"] = map[string]any{"comment": []any{map[string]any{"add": map[string]any{"body": doc}}}}
+	}
+	if len(values) > 0 {
+		fields := map[string]any{}
+		for _, v := range values {
+			if v.Kind == KindUser {
+				fields[v.Field] = map[string]string{"accountId": v.ID}
+			} else {
+				fields[v.Field] = map[string]string{"id": v.ID}
+			}
+		}
+		body["fields"] = fields
+	}
 	return c.do(ctx, http.MethodPost, "/rest/api/3/issue/"+url.PathEscape(key)+"/transitions", body, nil)
+}
+
+// AssignableUsers lists the people who can be assigned key whose name or email matches query, leaving out
+// apps.
+func (c *Client) AssignableUsers(ctx context.Context, key, query string) ([]User, error) {
+	var found []struct {
+		User
+		AccountType string `json:"accountType"`
+	}
+	q := url.Values{"issueKey": {key}, "query": {query}, "maxResults": {"20"}}
+	if err := c.do(ctx, http.MethodGet, "/rest/api/3/user/assignable/search?"+q.Encode(), nil, &found); err != nil {
+		return nil, err
+	}
+	var out []User
+	for _, u := range found {
+		if u.AccountType == "" || u.AccountType == "atlassian" {
+			out = append(out, u.User)
+		}
+	}
+	return out, nil
 }
 
 type Sprint struct {

@@ -452,7 +452,7 @@ func TestActiveSprints(t *testing.T) {
 	}
 }
 
-func TestTransitionsMarkThoseWithAForm(t *testing.T) {
+func TestTransitionsDescribeTheirForms(t *testing.T) {
 	c, calls := server(t, map[string]string{
 		"GET /rest/api/3/issue/DEMO-12/transitions": `{"transitions":[
  {"id":"31","name":"Commit Review","hasScreen":false,"to":{"name":"In Review"}},
@@ -460,8 +460,12 @@ func TestTransitionsMarkThoseWithAForm(t *testing.T) {
   "customfield_10028":{"required":false,"name":"Story Points","schema":{"type":"number","custom":"com.atlassian.jira.plugin.system.customfieldtypes:float"}},
   "customfield_10020":{"required":false,"name":"Sprint","schema":{"type":"array","custom":"com.pyxis.greenhopper.jira:gh-sprint"}}}},
  {"id":"42","name":"Estimate","hasScreen":true,"to":{"name":"Estimated"},"fields":{"customfield_10028":{"required":true,"hasDefaultValue":false,"name":"Story Points"}}},
- {"id":"51","name":"Blocked","hasScreen":true,"to":{"name":"Blocked"},"fields":{"customfield_10300":{"required":false,"name":"Reason for Blockage"}}},
- {"id":"61","name":"Ceased","hasScreen":true,"to":{"name":"Ceased"}}]}`,
+ {"id":"51","name":"Blocked","hasScreen":true,"to":{"name":"Blocked"},"fields":{
+  "customfield_10300":{"required":false,"name":"Reason","schema":{"type":"option","custom":"com.atlassian.jira.plugin.system.customfieldtypes:select"},"allowedValues":[{"id":"9001","value":"Waiting on a decision"},{"id":"9002","value":"No access"}]},
+  "customfield_10301":{"required":true,"name":"Owner","schema":{"type":"user"}},
+  "issuelinks":{"required":false,"name":"Linked issues","schema":{"type":"array","items":"issuelinks"}}}},
+ {"id":"61","name":"Ceased","hasScreen":true,"to":{"name":"Ceased"}},
+ {"id":"71","name":"Link","hasScreen":true,"to":{"name":"Linked"},"fields":{"issuelinks":{"required":true,"name":"Linked issues","schema":{"type":"array","items":"issuelinks"}}}}]}`,
 	})
 	got, err := c.Transitions(context.Background(), "DEMO-12")
 	if err != nil {
@@ -471,8 +475,12 @@ func TestTransitionsMarkThoseWithAForm(t *testing.T) {
 		{ID: "31", Name: "Commit Review", To: "In Review"},
 		{ID: "41", Name: "In progress", To: "In Progress"},
 		{ID: "42", Name: "Estimate", To: "Estimated", NeedsForm: true},
-		{ID: "51", Name: "Blocked", To: "Blocked", NeedsForm: true},
+		{ID: "51", Name: "Blocked", To: "Blocked", Fields: []Field{
+			{ID: "customfield_10301", Name: "Owner", Kind: KindUser, Required: true},
+			{ID: "customfield_10300", Name: "Reason", Kind: KindOption, Options: []Option{{ID: "9001", Value: "Waiting on a decision"}, {ID: "9002", Value: "No access"}}},
+		}},
 		{ID: "61", Name: "Ceased", To: "Ceased"},
+		{ID: "71", Name: "Link", To: "Linked", NeedsForm: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("transitions = %+v", got)
@@ -484,10 +492,39 @@ func TestTransitionsMarkThoseWithAForm(t *testing.T) {
 
 func TestTransitionPostsTheTransitionID(t *testing.T) {
 	c, calls := server(t, map[string]string{"POST /rest/api/3/issue/DEMO-12/transitions": ""})
-	if err := c.Transition(context.Background(), "DEMO-12", "31"); err != nil {
+	if err := c.Transition(context.Background(), "DEMO-12", "31", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := (*calls)[0].body; !reflect.DeepEqual(got, map[string]any{"transition": map[string]any{"id": "31"}}) {
 		t.Errorf("body = %v", got)
+	}
+	values := []Value{{Field: "customfield_10300", Kind: KindOption, ID: "9001"}, {Field: "customfield_10301", Kind: KindUser, ID: "acc-7"}}
+	if err := c.Transition(context.Background(), "DEMO-12", "51", values, "Waiting for the API keys.\n\nAsk Ana."); err != nil {
+		t.Fatal(err)
+	}
+	paragraph := func(text string) any {
+		return map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": text}}}
+	}
+	want := map[string]any{"transition": map[string]any{"id": "51"}, "fields": map[string]any{
+		"customfield_10300": map[string]any{"id": "9001"},
+		"customfield_10301": map[string]any{"accountId": "acc-7"},
+	}, "update": map[string]any{"comment": []any{map[string]any{"add": map[string]any{"body": map[string]any{
+		"type": "doc", "version": float64(1), "content": []any{paragraph("Waiting for the API keys."), paragraph("Ask Ana.")},
+	}}}}}}
+	if got := (*calls)[1].body; !reflect.DeepEqual(got, want) {
+		t.Errorf("body with values = %v", got)
+	}
+}
+
+func TestAssignableUsersLeavesOutApps(t *testing.T) {
+	c, calls := server(t, map[string]string{
+		"GET /rest/api/3/user/assignable/search": `[{"accountId":"acc-7","displayName":"Ana López","accountType":"atlassian"},{"accountId":"bot-1","displayName":"Automation","accountType":"app"}]`,
+	})
+	got, err := c.AssignableUsers(context.Background(), "DEMO-12", "an")
+	if err != nil || !reflect.DeepEqual(got, []User{{AccountID: "acc-7", DisplayName: "Ana López"}}) {
+		t.Errorf("users = %+v, %v", got, err)
+	}
+	if q := (*calls)[0].query; !strings.Contains(q, "issueKey=DEMO-12") || !strings.Contains(q, "query=an") {
+		t.Errorf("query = %s", q)
 	}
 }

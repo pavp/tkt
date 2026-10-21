@@ -51,8 +51,18 @@ type recorder struct {
 	jiraFields []string
 	// known is the ticket the last Detail was given.
 	known *ticket.Ticket
-	// transitions answers Transitions.
+	// transitions answers Transitions; values records the last Transition's.
 	transitions []Transition
+	values      []Value
+	comment     string
+	// users answers Users per query.
+	users map[string][]User
+}
+
+func (r *recorder) Users(k ticket.Key, query string) tea.Cmd {
+	r.calls = append(r.calls, "users "+query)
+	users := r.users[query]
+	return func() tea.Msg { return UsersListedMsg{Key: k, Query: query, Users: users} }
 }
 
 func (r *recorder) Transitions(k ticket.Key) tea.Cmd {
@@ -61,7 +71,8 @@ func (r *recorder) Transitions(k ticket.Key) tea.Cmd {
 	return func() tea.Msg { return TransitionsMsg{Key: k, Transitions: tr} }
 }
 
-func (r *recorder) Transition(k ticket.Key, id, to string) tea.Cmd {
+func (r *recorder) Transition(k ticket.Key, id, to string, values []Value, comment string) tea.Cmd {
+	r.values, r.comment = values, comment
 	r.calls = append(r.calls, "transition "+string(k)+" "+id)
 	return func() tea.Msg { return TransitionedMsg{Key: k, To: to} }
 }
@@ -2838,5 +2849,153 @@ func TestMenuKeepsItsSizeWhileMovingOverLinks(t *testing.T) {
 	w, h := box(m)
 	if w2, h2 := box(press(m, "s")); w2 != w || h2 != h {
 		t.Errorf("menu went from %dx%d to %dx%d on an item with a link", w, h, w2, h2)
+	}
+}
+
+func blockedTransition() Transition {
+	return Transition{ID: "51", To: "Blocked", Fields: []Field{
+		{ID: "cf_reason", Name: "Reason", Kind: KindOption, Required: true, Options: []Option{{ID: "9001", Value: "Waiting on a decision"}, {ID: "9002", Value: "No access"}}},
+		{ID: "cf_source", Name: "Source", Kind: KindOption, Options: []Option{{ID: "9101", Value: "Customer"}}},
+		{ID: "cf_owner", Name: "Owner", Kind: KindUser},
+	}}
+}
+
+func TestMoveFillsTheFormBeforeMoving(t *testing.T) {
+	r := &recorder{transitions: []Transition{blockedTransition()}}
+	m, _ := loaded(r).Update(TransitionsMsg{Key: "DEMO-1", Transitions: r.transitions})
+	m = press(selectMenuItem(t, m, "Blocked"), "enter")
+	v := stripANSI(m.View())
+	for _, want := range []string{"Move DEMO-1 to Blocked", "Reason *: —", "Source: —", "Move DEMO-1 to Blocked now", "Cancel"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("form missing %q:\n%s", want, v)
+		}
+	}
+
+	m, msg := run(selectMenuItem(t, m, "now"), "enter")
+	m, _ = m.Update(msg)
+	if v := stripANSI(m.View()); !strings.Contains(v, "choose Reason first") || !strings.Contains(v, "Reason *: —") {
+		t.Fatalf("moving without a required field should keep the form open and say so:\n%s", v)
+	}
+	if slices.ContainsFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, "transition ") }) {
+		t.Fatalf("moved without a required field: %v", r.calls)
+	}
+
+	m = press(selectMenuItem(t, m, "Reason"), "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Waiting on a decision") || !strings.Contains(v, "No access") {
+		t.Fatalf("a list field should offer its options:\n%s", v)
+	}
+	m, msg = run(selectMenuItem(t, m, "No access"), "enter")
+	m, _ = m.Update(msg)
+	if v := stripANSI(m.View()); !strings.Contains(v, "Reason *: No access") {
+		t.Fatalf("the chosen option should show in the form:\n%s", v)
+	}
+	m, msg = run(selectMenuItem(t, m, "now"), "enter")
+	if r.last() != "transition DEMO-1 51" || !reflect.DeepEqual(r.values, []Value{{Field: "cf_reason", Kind: KindOption, ID: "9002"}}) {
+		t.Fatalf("Move ran %v with %+v", r.calls, r.values)
+	}
+	m, _ = m.Update(msg)
+	if !strings.Contains(stripANSI(m.View()), "DEMO-1 moved to Blocked") {
+		t.Errorf("no word of the move:\n%s", stripANSI(m.View()))
+	}
+}
+
+func TestMoveLeavesToJiraAFormItCannotFill(t *testing.T) {
+	tr := blockedTransition()
+	tr.Fields = append(tr.Fields, Field{ID: "issuelinks", Name: "Linked issues", Kind: "array", Required: true})
+	m, _ := loaded(&recorder{}).Update(TransitionsMsg{Key: "DEMO-1", Transitions: []Transition{tr}})
+	if v := stripANSI(m.View()); !strings.Contains(v, "Blocked · in Jira ↗") {
+		t.Errorf("a required field the board cannot fill should leave the move to Jira:\n%s", v)
+	}
+}
+
+func TestMoveFormFitsANarrowPane(t *testing.T) {
+	tr := blockedTransition()
+	tr.Fields[0].Options[0].Value = "Pending delivery from another product of the company"
+	m := tea.Model(New(snapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	m, _ = m.Update(TransitionsMsg{Key: "DEMO-1", Transitions: []Transition{tr}})
+	m = press(selectMenuItem(t, m, "Blocked"), "enter")
+	m = press(selectMenuItem(t, m, "Reason"), "enter")
+	m, msg := run(selectMenuItem(t, m, "Pending"), "enter")
+	m, _ = m.Update(msg)
+	for _, l := range strings.Split(m.View(), "\n") {
+		if w := lipgloss.Width(l); w > 56 {
+			t.Errorf("line %d cells wide in a 56-column pane: %q", w, stripANSI(l))
+		}
+	}
+}
+
+// typeKeys types text into the board one key at a time, delivering what each key's command answers.
+func typeKeys(m tea.Model, text string) tea.Model {
+	for _, r := range text {
+		var cmd tea.Cmd
+		m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		if cmd != nil {
+			if msg := cmd(); msg != nil {
+				m, _ = m.Update(msg)
+			}
+		}
+	}
+	return m
+}
+
+func TestMoveFormPicksAUserAndWritesAComment(t *testing.T) {
+	r := &recorder{transitions: []Transition{blockedTransition()}, users: map[string][]User{"an": {{ID: "acc-7", Name: "Ana López"}, {ID: "acc-8", Name: "Andrés Gil"}}}}
+	m, _ := loaded(r).Update(TransitionsMsg{Key: "DEMO-1", Transitions: r.transitions})
+	m = press(selectMenuItem(t, m, "Blocked"), "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Owner: —") || !strings.Contains(v, "Comment: —") {
+		t.Fatalf("the form should offer the user field and a comment:\n%s", v)
+	}
+
+	m = typeKeys(press(selectMenuItem(t, m, "Owner"), "enter"), "an")
+	if !slices.Contains(r.calls, "users an") {
+		t.Fatalf("typing should search the assignable users: %v", r.calls)
+	}
+	m, _ = m.Update(UsersListedMsg{Key: "DEMO-1", Query: "a", Users: []User{{ID: "old", Name: "Stale Result"}}})
+	if v := stripANSI(m.View()); !strings.Contains(v, "Ana López") || strings.Contains(v, "Stale Result") {
+		t.Fatalf("the current search's users, not an older one's, should be listed:\n%s", v)
+	}
+	m = press(send(m, tea.KeyMsg{Type: tea.KeyDown}), "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Owner: Andrés Gil") {
+		t.Fatalf("the picked user should show in the form:\n%s", v)
+	}
+
+	m = typeKeys(press(selectMenuItem(t, m, "Comment"), "enter"), "Waiting for keys")
+	m = press(m, "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Comment: Waiting for keys") {
+		t.Fatalf("the comment should show in the form:\n%s", v)
+	}
+	m = press(typeKeys(press(selectMenuItem(t, m, "Comment"), "enter"), " now"), "esc")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Comment: Waiting for keys") || strings.Contains(v, "keys now") {
+		t.Fatalf("esc should leave the comment as it was:\n%s", v)
+	}
+
+	m = press(selectMenuItem(t, m, "Reason"), "enter")
+	m, msg := run(selectMenuItem(t, m, "No access"), "enter")
+	m, _ = m.Update(msg)
+	run(selectMenuItem(t, m, "now"), "enter")
+	want := []Value{{Field: "cf_reason", Kind: KindOption, ID: "9002"}, {Field: "cf_owner", Kind: KindUser, ID: "acc-8"}}
+	if r.last() != "transition DEMO-1 51" || !reflect.DeepEqual(r.values, want) || r.comment != "Waiting for keys" {
+		t.Errorf("moved with %+v and comment %q (%v)", r.values, r.comment, r.calls)
+	}
+}
+
+func TestUserSearchScrollsToTheSelection(t *testing.T) {
+	var many []User
+	for i := 1; i <= 12; i++ {
+		many = append(many, User{ID: strconv.Itoa(i), Name: fmt.Sprintf("Person %02d", i)})
+	}
+	r := &recorder{users: map[string][]User{"pe": many}}
+	m, _ := loaded(r).Update(TransitionsMsg{Key: "DEMO-1", Transitions: []Transition{blockedTransition()}})
+	m = typeKeys(press(selectMenuItem(t, press(selectMenuItem(t, m, "Blocked"), "enter"), "Owner"), "enter"), "pe")
+	for i := 0; i < 11; i++ {
+		m = send(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "▸ Person 12") || strings.Contains(v, "Person 01") || !strings.Contains(v, "↑ 4 more") {
+		t.Errorf("the list should scroll to the selected user and say what is hidden above:\n%s", v)
+	}
+	if v := stripANSI(send(m, tea.KeyMsg{Type: tea.KeyDown}).View()); !strings.Contains(v, "▸ Person 12") {
+		t.Errorf("down on the last user should stay on it:\n%s", v)
 	}
 }

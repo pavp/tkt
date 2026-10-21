@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/ticket"
@@ -23,6 +24,8 @@ type menuItem struct {
 	link string
 	// sub, when set, opens another menu, from which esc comes back.
 	sub func() *menu
+	// prompt, when set, opens a form's text box.
+	prompt *formPrompt
 }
 
 // menu lists what can be done with the selected ticket or review request.
@@ -211,6 +214,11 @@ func (m Model) runMenuItem(i int) (tea.Model, tea.Cmd) {
 	if it.detail != "" {
 		return m.openDetail(it.detail)
 	}
+	if it.prompt != nil {
+		p := *it.prompt
+		m.prompt = &p
+		return m, nil
+	}
 	return m, it.run()
 }
 
@@ -225,13 +233,17 @@ func (m Model) menuView() string {
 			width = max(width, lipgloss.Width(linkKeys)+4)
 		}
 	}
-	lines := []string{bold.Render(mn.title), ""}
+	// Border and padding take 6 cells around the content, which is width-4 wide.
+	if m.width > 0 {
+		width = min(width, m.width-2)
+	}
+	lines := []string{bold.Render(ansi.Truncate(mn.title, width-4, "…")), ""}
 	for i, it := range mn.items {
 		hint := ""
 		if it.key != "" {
 			hint = keyStyle.Render(it.key)
 		}
-		label := it.label
+		label := ansi.Truncate(it.label, width-8, "…")
 		gap := max(2, width-4-lipgloss.Width(label)-lipgloss.Width(hint))
 		line := label + strings.Repeat(" ", gap) + hint
 		if i == mn.sel {

@@ -22,7 +22,11 @@ type fakeJira struct {
 	// transitions answers Transitions per key; moved records every Transition as "KEY id".
 	transitions map[string][]jira.Transition
 	moved       []string
+	values      []jira.Value
+	comment     string
 	moveErr     error
+	// users answers AssignableUsers.
+	users []jira.User
 
 	jqls       []string
 	fieldNames []string
@@ -68,9 +72,14 @@ func (f *fakeJira) Transitions(_ context.Context, key string) ([]jira.Transition
 	return f.transitions[key], nil
 }
 
-func (f *fakeJira) Transition(_ context.Context, key, id string) error {
+func (f *fakeJira) Transition(_ context.Context, key, id string, values []jira.Value, comment string) error {
 	f.moved = append(f.moved, key+" "+id)
+	f.values, f.comment = values, comment
 	return f.moveErr
+}
+
+func (f *fakeJira) AssignableUsers(context.Context, string, string) ([]jira.User, error) {
+	return f.users, nil
 }
 
 func (f *fakeJira) ActiveSprints(_ context.Context, board int) ([]int, error) {

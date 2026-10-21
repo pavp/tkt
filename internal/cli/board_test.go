@@ -647,7 +647,10 @@ func TestBoardActionsMoveTicketsInJira(t *testing.T) {
 	h, _ := listHarness(t)
 	h.jira.transitions = map[string][]jira.Transition{"DEMO-1": {
 		{ID: "31", Name: "Commit Review", To: "In Review"},
-		{ID: "51", Name: "Blocked", To: "Blocked", NeedsForm: true},
+		{ID: "51", Name: "Blocked", To: "Blocked", Fields: []jira.Field{
+			{ID: "customfield_10300", Name: "Reason", Kind: jira.KindOption, Required: true, Options: []jira.Option{{ID: "9001", Value: "Waiting on a decision"}}},
+			{ID: "customfield_10301", Name: "Owner", Kind: jira.KindUser},
+		}},
 	}}
 	c, err := h.app.LoadConfig()
 	if err != nil {
@@ -655,16 +658,28 @@ func TestBoardActionsMoveTicketsInJira(t *testing.T) {
 	}
 	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
 	listed, ok := b.Transitions("DEMO-1")().(tui.TransitionsMsg)
-	want := []tui.Transition{{ID: "31", To: "In Review"}, {ID: "51", To: "Blocked", NeedsForm: true}}
-	if !ok || listed.Err != nil || listed.Key != "DEMO-1" || !slices.Equal(listed.Transitions, want) {
+	want := []tui.Transition{{ID: "31", To: "In Review"}, {ID: "51", To: "Blocked", Fields: []tui.Field{
+		{ID: "customfield_10300", Name: "Reason", Kind: tui.KindOption, Required: true, Options: []tui.Option{{ID: "9001", Value: "Waiting on a decision"}}},
+		{ID: "customfield_10301", Name: "Owner", Kind: tui.KindUser},
+	}}}
+	if !ok || listed.Err != nil || listed.Key != "DEMO-1" || !reflect.DeepEqual(listed.Transitions, want) {
 		t.Errorf("listed = %+v", listed)
 	}
-	moved, ok := b.Transition("DEMO-1", "31", "In Review")().(tui.TransitionedMsg)
+	moved, ok := b.Transition("DEMO-1", "31", "In Review", nil, "")().(tui.TransitionedMsg)
 	if !ok || moved != (tui.TransitionedMsg{Key: "DEMO-1", To: "In Review"}) || !slices.Equal(h.jira.moved, []string{"DEMO-1 31"}) {
 		t.Errorf("moved = %+v, calls %v", moved, h.jira.moved)
 	}
+	b.Transition("DEMO-1", "51", "Blocked", []tui.Value{{Field: "customfield_10300", Kind: tui.KindOption, ID: "9001"}}, "Waiting for keys")()
+	if got := h.jira.values; !reflect.DeepEqual(got, []jira.Value{{Field: "customfield_10300", Kind: jira.KindOption, ID: "9001"}}) || h.jira.comment != "Waiting for keys" {
+		t.Errorf("values passed = %+v, comment %q", got, h.jira.comment)
+	}
+	h.jira.users = []jira.User{{AccountID: "acc-7", DisplayName: "Ana López"}}
+	users, ok := b.Users("DEMO-1", "an")().(tui.UsersListedMsg)
+	if !ok || users.Err != nil || users.Key != "DEMO-1" || users.Query != "an" || !slices.Equal(users.Users, []tui.User{{ID: "acc-7", Name: "Ana López"}}) {
+		t.Errorf("users = %+v", users)
+	}
 	h.jira.moveErr = errors.New("403 Forbidden")
-	if failed := b.Transition("DEMO-1", "31", "In Review")().(tui.TransitionedMsg); failed.Err == nil {
+	if failed := b.Transition("DEMO-1", "31", "In Review", nil, "")().(tui.TransitionedMsg); failed.Err == nil {
 		t.Error("a failed move should carry its error")
 	}
 }
