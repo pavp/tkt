@@ -51,7 +51,7 @@ func TestKeyInBranchFiltersBySpace(t *testing.T) {
 }
 
 func TestCategoryFor(t *testing.T) {
-	overrides := map[string]Category{"Code Review": InReview}
+	overrides := map[string]Category{"Code Review": InReview, "Revisión técnica": InProgress}
 	tests := []struct {
 		status, category string
 		want             Category
@@ -61,6 +61,12 @@ func TestCategoryFor(t *testing.T) {
 		{"Code Review", "indeterminate", InReview},
 		{"Done", "done", Done},
 		{"Weird", "", ToDo},
+		{"En revisión", "indeterminate", InReview},
+		{"In Review", "indeterminate", InReview},
+		{"Peer revision", "indeterminate", InReview},
+		{"Revisión técnica", "indeterminate", InProgress},
+		{"Reviewed", "done", Done},
+		{"Review backlog", "new", ToDo},
 	}
 	for _, tt := range tests {
 		if got := CategoryFor(tt.status, tt.category, overrides); got != tt.want {

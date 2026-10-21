@@ -17,6 +17,7 @@ import (
 	"github.com/pavp/tkt/internal/github"
 	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/jira"
+	"github.com/pavp/tkt/internal/ticket"
 )
 
 func newInitCmd(a *App) *cobra.Command {
@@ -206,7 +207,7 @@ func (a *App) runInit(cmd *cobra.Command) error {
 			continue
 		}
 		for _, st := range statuses {
-			if st.Category == "indeterminate" && strings.Contains(strings.ToLower(st.Name), "review") {
+			if st.Category == "indeterminate" && ticket.Reviewing(st.Name) {
 				if s.StatusOverrides == nil {
 					s.StatusOverrides = map[string]string{}
 				}

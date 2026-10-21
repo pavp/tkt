@@ -102,14 +102,23 @@ func CategoryFor(status, statusCategory string, overrides map[string]Category) C
 	if c, ok := overrides[status]; ok {
 		return c
 	}
-	switch statusCategory {
-	case "done":
+	switch {
+	case statusCategory == "done":
 		return Done
-	case "indeterminate":
+	case statusCategory == "indeterminate" && Reviewing(status):
+		return InReview
+	case statusCategory == "indeterminate":
 		return InProgress
 	default:
 		return ToDo
 	}
+}
+
+// Reviewing reports whether a status name says the work is in review, in English or Spanish ("Code Review",
+// "En revisión"); Jira files such statuses as in progress.
+func Reviewing(status string) bool {
+	s := strings.ToLower(status)
+	return strings.Contains(s, "review") || strings.Contains(s, "revisi")
 }
 
 type CheckState string
