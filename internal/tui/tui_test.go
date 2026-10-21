@@ -813,7 +813,7 @@ func TestCardsShowDetailsAndDensityToggles(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	v := stripANSI(next.View())
-	for _, want := range []string{"#812 ✕", "Story · 1 subtasks"} {
+	for _, want := range []string{"#812 ✕", "0/1 subtasks · Story"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("detailed card missing %q:\n%s", want, v)
 		}
@@ -2671,5 +2671,72 @@ func TestTeamWithoutBoardsSaysWhereToAddThem(t *testing.T) {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	if v := stripANSI(press(m, "t").View()); !strings.Contains(v, "add team boards in Settings (,)") {
 		t.Errorf("turning the team on without boards should say where to add them:\n%s", v)
+	}
+}
+
+// subtaskSnapshot gives DEMO-1 (In Progress) a subtask to do, one in progress and one done.
+func subtaskSnapshot() board.Snapshot {
+	snap := snapshot()
+	i := slices.IndexFunc(snap.Tickets, func(t ticket.Ticket) bool { return t.Key == "DEMO-1" })
+	snap.Tickets[i].Subtasks = []ticket.Ticket{
+		{Key: "DEMO-11", Summary: "Write the migration", Status: "To Do", Category: ticket.ToDo, Parent: "DEMO-1"},
+		{Key: "DEMO-12", Summary: "Agree the schema", Status: "Done", Category: ticket.Done, Parent: "DEMO-1"},
+		{Key: "DEMO-13", Summary: "Wire the filter", Status: "In Progress", Category: ticket.InProgress, Parent: "DEMO-1"},
+	}
+	return snap
+}
+
+func TestCardsShowSubtaskProgress(t *testing.T) {
+	snap := subtaskSnapshot()
+	tk := snap.Tickets[slices.IndexFunc(snap.Tickets, func(t ticket.Ticket) bool { return t.Key == "DEMO-1" })]
+	tk.Type = "Story"
+	plain := ansi.Strip(card(tk, 40, false, false, ""))
+	if !strings.Contains(plain, "1/3 subtasks · 1 to do") {
+		t.Errorf("the parent should show its progress and what is still to do:\n%s", plain)
+	}
+}
+
+func TestOpenSubtasksHaveCardsInTheirOwnColumn(t *testing.T) {
+	m := tea.Model(New(subtaskSnapshot(), true, &recorder{}, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 60})
+	cols := m.(Model).columns()
+	keys := func(col []item) []string {
+		var out []string
+		for _, it := range col {
+			out = append(out, string(it.key))
+		}
+		return out
+	}
+	todo, doing := keys(cols[0]), keys(cols[1])
+	if !slices.Contains(todo, "DEMO-11") || slices.Index(doing, "DEMO-13") != slices.Index(doing, "DEMO-1")+1 {
+		t.Errorf("open subtasks go to their own column, right after a parent sharing it: to do %v, in progress %v", todo, doing)
+	}
+	for _, col := range cols {
+		if slices.Contains(keys(col), "DEMO-12") {
+			t.Errorf("a done subtask only counts in its parent's progress: %v", keys(col))
+		}
+	}
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "↳ DEMO-11") || !strings.Contains(v, "of DEMO-1") {
+		t.Errorf("a subtask card names itself and its parent:\n%s", v)
+	}
+}
+
+func TestListShowsSubtasksUnderTheirParent(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(subtaskSnapshot(), true, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	parent := lineIndex(v, "DEMO-1 ")
+	for i, k := range []string{"↳ DEMO-11", "↳ DEMO-12", "↳ DEMO-13"} {
+		if lineIndex(v, k) != parent+1+i {
+			t.Errorf("%s should sit under DEMO-1, in order:\n%s", k, v)
+		}
+	}
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "DEMO-11"); i++ {
+		m = press(m, "s")
+	}
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Actions for DEMO-11") {
+		t.Errorf("a subtask has its own actions:\n%s", v)
 	}
 }
