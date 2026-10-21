@@ -581,11 +581,32 @@ func (a *App) herdrOpenTicket(cmd *cobra.Command) error {
 		if key, ok := a.keyAt(ctx, c, dir); ok {
 			return h.OpenPluginPane(ctx, herdr.PaneOpen{
 				PluginID: a.pluginID(), Entrypoint: "ticket", Cwd: dir,
-				Env: map[string]string{"TKT_KEY": string(key)}, WorkspaceID: id,
+				Env: map[string]string{"TKT_KEY": string(key)}, WorkspaceID: id, TargetPaneID: targetPane(ctx, h, id),
 			})
 		}
 	}
 	return h.Notify(ctx, "tkt", "This workspace's branch carries no ticket key")
+}
+
+// targetPane picks the pane a split opens beside in a workspace: its focused pane, else its first.
+func targetPane(ctx context.Context, h HerdrAPI, workspaceID string) string {
+	panes, err := h.Panes(ctx)
+	if err != nil {
+		return ""
+	}
+	var first string
+	for _, p := range panes {
+		if p.WorkspaceID != workspaceID {
+			continue
+		}
+		if p.Focused {
+			return p.ID
+		}
+		if first == "" {
+			first = p.ID
+		}
+	}
+	return first
 }
 
 // workspaceDirs lists where a workspace works: its worktree, else its panes' folders with the focused one first,

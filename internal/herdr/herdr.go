@@ -198,17 +198,22 @@ func (c *Client) Prompt(ctx context.Context, target, text string) error {
 }
 
 type PaneOpen struct {
-	PluginID    string            `json:"plugin_id"`
-	Entrypoint  string            `json:"entrypoint"`
-	Placement   string            `json:"placement,omitempty"`
-	Cwd         string            `json:"cwd,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	Width       string            `json:"width,omitempty"`
-	Height      string            `json:"height,omitempty"`
-	WorkspaceID string            `json:"workspace_id,omitempty"`
+	PluginID     string            `json:"plugin_id"`
+	Entrypoint   string            `json:"entrypoint"`
+	Placement    string            `json:"placement,omitempty"`
+	Cwd          string            `json:"cwd,omitempty"`
+	Env          map[string]string `json:"env,omitempty"`
+	Width        string            `json:"width,omitempty"`
+	Height       string            `json:"height,omitempty"`
+	WorkspaceID  string            `json:"workspace_id,omitempty"`
+	TargetPaneID string            `json:"target_pane_id,omitempty"`
 }
 
 func (c *Client) OpenPluginPane(ctx context.Context, p PaneOpen) error {
+	// Herdr rejects a split that names a workspace, even beside a target pane; the target already places it.
+	if p.TargetPaneID != "" {
+		p.WorkspaceID = ""
+	}
 	return c.Call(ctx, "plugin.pane.open", p, nil)
 }
 

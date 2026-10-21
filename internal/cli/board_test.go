@@ -147,6 +147,7 @@ func TestBoardTicketPaneGoesToTheTicketWorkspace(t *testing.T) {
 	h.clone(t, "web")
 	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1\nHEAD a\nbranch refs/heads/feature/DEMO-1-filter\n"
 	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w5","worktree":{"checkout_path":"/src/web-DEMO-1"}}]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w2:p1","workspace_id":"w2","focused":true},{"pane_id":"w5:p1","workspace_id":"w5"},{"pane_id":"w5:p2","workspace_id":"w5","focused":true}]}`
 	c, err := h.app.LoadConfig()
 	if err != nil {
 		t.Fatal(err)
@@ -163,7 +164,7 @@ func TestBoardTicketPaneGoesToTheTicketWorkspace(t *testing.T) {
 	if got := f.Last("workspace.focus"); got["workspace_id"] != "w5" {
 		t.Errorf("focus = %v", got)
 	}
-	if got := f.Last("plugin.pane.open"); got["workspace_id"] != "w5" || got["cwd"] != "/src/web-DEMO-1" || got["env"].(map[string]any)["TKT_KEY"] != "DEMO-1" {
+	if got := f.Last("plugin.pane.open"); got["workspace_id"] != nil || got["target_pane_id"] != "w5:p2" || got["cwd"] != "/src/web-DEMO-1" || got["env"].(map[string]any)["TKT_KEY"] != "DEMO-1" {
 		t.Errorf("pane = %v", got)
 	}
 }

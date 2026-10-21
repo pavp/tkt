@@ -494,6 +494,7 @@ func TestHerdrRefreshLabelsTicketWorkspaces(t *testing.T) {
 func TestHerdrRestoreUsesCacheOnly(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w1","worktree":{"checkout_path":"/src/web-DEMO-1"}}]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w1:p1","workspace_id":"w1","cwd":"/src/web-DEMO-1"}]}`
 	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
 	if code := h.exec("herdr", "restore"); code != 0 || count(f, "workspace.report_metadata") != 0 {
 		t.Fatalf("restore without cache: exit %d, reports %d", code, count(f, "workspace.report_metadata"))
@@ -575,12 +576,13 @@ func TestHerdrOpenTicketPane(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	h.env["HERDR_WORKSPACE_ID"] = "w1"
 	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w1","worktree":{"checkout_path":"/src/web-DEMO-1"}}]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w1:p1","workspace_id":"w1","cwd":"/src/web-DEMO-1"}]}`
 	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-1-filter\n"
 	if code := h.exec("herdr", "open-ticket"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
 	got := f.Last("plugin.pane.open")
-	if got["entrypoint"] != "ticket" || got["cwd"] != "/src/web-DEMO-1" || got["env"].(map[string]any)["TKT_KEY"] != "DEMO-1" {
+	if got["entrypoint"] != "ticket" || got["target_pane_id"] != "w1:p1" || got["cwd"] != "/src/web-DEMO-1" || got["env"].(map[string]any)["TKT_KEY"] != "DEMO-1" {
 		t.Errorf("pane = %v", got)
 	}
 	h.run.out["git rev-parse --abbrev-ref HEAD"] = "main\n"
@@ -603,7 +605,7 @@ func TestHerdrOpenTicketPaneWithoutWorktree(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
 	got := f.Last("plugin.pane.open")
-	if got["cwd"] != "/src/web-DEMO-1" || got["workspace_id"] != "w1" || got["env"].(map[string]any)["TKT_KEY"] != "DEMO-1" {
+	if got["cwd"] != "/src/web-DEMO-1" || got["target_pane_id"] != "w1:p2" || got["workspace_id"] != nil || got["env"].(map[string]any)["TKT_KEY"] != "DEMO-1" {
 		t.Errorf("pane = %v", got)
 	}
 }
