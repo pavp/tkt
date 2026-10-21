@@ -117,21 +117,23 @@ func (c *Client) query(ctx context.Context, owner, q string, vars map[string]any
 	return json.Unmarshal(env.Data, out)
 }
 
-const prFields = `number title url state isDraft headRefName headRefOid reviewDecision
+const prFields = `number title url state isDraft mergeStateStatus headRefName headRefOid reviewDecision
   author { login __typename }
   repository { nameWithOwner }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
   latestOpinionatedReviews(first: 100) { nodes { state } }`
 
 type prNode struct {
-	Number         int    `json:"number"`
-	Title          string `json:"title"`
-	URL            string `json:"url"`
-	State          string `json:"state"`
-	HeadRefName    string `json:"headRefName"`
-	HeadRefOid     string `json:"headRefOid"`
-	ReviewDecision string `json:"reviewDecision"`
-	Author         *struct {
+	Number           int    `json:"number"`
+	Title            string `json:"title"`
+	URL              string `json:"url"`
+	State            string `json:"state"`
+	HeadRefName      string `json:"headRefName"`
+	HeadRefOid       string `json:"headRefOid"`
+	ReviewDecision   string `json:"reviewDecision"`
+	IsDraft          bool   `json:"isDraft"`
+	MergeStateStatus string `json:"mergeStateStatus"`
+	Author           *struct {
 		Login    string `json:"login"`
 		Typename string `json:"__typename"`
 	} `json:"author"`
@@ -178,6 +180,14 @@ func (n prNode) toPR() ticket.PullRequest {
 		pr.Review = ticket.ReviewChangesRequested
 	case "REVIEW_REQUIRED":
 		pr.Review = ticket.ReviewRequired
+	}
+	pr.Draft = n.IsDraft
+	switch {
+	case pr.State != ticket.PROpen:
+	case n.MergeStateStatus == "CLEAN", n.MergeStateStatus == "HAS_HOOKS":
+		pr.Merge = ticket.MergeReady
+	case n.MergeStateStatus == "DIRTY":
+		pr.Merge = ticket.MergeConflicts
 	}
 	for _, r := range n.LatestOpinionatedReviews.Nodes {
 		if r.State == "APPROVED" {

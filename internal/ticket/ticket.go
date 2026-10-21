@@ -161,6 +161,15 @@ const (
 	ReviewRequired         ReviewDecision = "review_required"
 )
 
+// MergeState says whether GitHub would merge a pull request now; empty when it would not for another
+// reason, or has not worked it out yet.
+type MergeState string
+
+const (
+	MergeReady     MergeState = "ready"
+	MergeConflicts MergeState = "conflicts"
+)
+
 type PullRequest struct {
 	Repo   string         `json:"repo"`
 	Number int            `json:"number"`
@@ -175,7 +184,9 @@ type PullRequest struct {
 	AuthorBot bool   `json:"author_bot,omitempty"`
 	HeadSHA   string `json:"head_sha,omitempty"`
 	// Approvals counts the reviewers whose latest review approves the pull request.
-	Approvals int `json:"approvals,omitempty"`
+	Approvals int        `json:"approvals,omitempty"`
+	Draft     bool       `json:"draft,omitempty"`
+	Merge     MergeState `json:"merge,omitempty"`
 }
 
 // ApprovalsText words the approvals, such as "2 approvals"; it is empty without any.

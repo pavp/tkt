@@ -125,6 +125,36 @@ func TestPullRequestsCountApprovals(t *testing.T) {
 	}
 }
 
+func TestPullRequestsReadDraftsAndMergeState(t *testing.T) {
+	tests := []struct {
+		state, draft, merge string
+		want                ticket.MergeState
+	}{
+		{"OPEN", "false", "CLEAN", ticket.MergeReady},
+		{"OPEN", "false", "HAS_HOOKS", ticket.MergeReady},
+		{"OPEN", "false", "DIRTY", ticket.MergeConflicts},
+		{"OPEN", "false", "BLOCKED", ""},
+		{"OPEN", "true", "DRAFT", ""},
+		{"MERGED", "false", "DIRTY", ""},
+	}
+	for _, tt := range tests {
+		node := strings.Replace(pr("example-org/web", 9, "feature/DEMO-1-x", tt.state, "", "SUCCESS"), "{", `{"isDraft":`+tt.draft+`,"mergeStateStatus":"`+tt.merge+`",`, 1)
+		base, h, calls := gqlServer(t, func(string) (int, string) {
+			return 200, `{"data":{"r0":{"open":{"nodes":[` + node + `]},"merged":{"nodes":[]}}}}`
+		})
+		got, err := New(staticTokens(map[string]string{"example-org": "work"})).WithEndpoints(base, h).PullRequests(context.Background(), []string{"example-org/web"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0].Merge != tt.want || got[0].Draft != (tt.draft == "true") {
+			t.Errorf("%s/%s/%s: PRs = %+v", tt.state, tt.draft, tt.merge, got)
+		}
+		if !strings.Contains((*calls)[0].query, "mergeStateStatus") {
+			t.Errorf("query does not ask for the merge state:\n%s", (*calls)[0].query)
+		}
+	}
+}
+
 func TestPullRequestsErrors(t *testing.T) {
 	base, h, _ := gqlServer(t, func(string) (int, string) { return 200, `{"data":{"r0":null}}` })
 	c := New(staticTokens(map[string]string{"example-org": "t"})).WithEndpoints(base, h)

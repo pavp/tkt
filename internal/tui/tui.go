@@ -295,14 +295,20 @@ func boolRank(b bool) int {
 	return 0
 }
 
-// prStatus words where one of the user's pull requests stands: what needs the user first, then the review,
-// as the CI mark beside it already shows a running check.
+// prStatus words where one of the user's pull requests stands: what needs the user first, then whether it
+// can merge, then the review, as the CI mark beside it already shows a running check.
 func prStatus(pr ticket.PullRequest) string {
 	switch {
 	case pr.Checks == ticket.ChecksFail:
 		return string(ticket.ReasonCIFailing)
 	case pr.Review == ticket.ReviewChangesRequested:
 		return string(ticket.ReasonChangesRequested)
+	case pr.Merge == ticket.MergeConflicts:
+		return "Conflicts"
+	case pr.Draft:
+		return "Draft"
+	case pr.Merge == ticket.MergeReady:
+		return "Ready to merge"
 	case pr.Review == ticket.ReviewApproved:
 		return "Approved"
 	case pr.Review == ticket.ReviewRequired:
@@ -1493,7 +1499,8 @@ func (m Model) listView() string {
 	}
 	statusW = min(statusW, statusMaxWidth)
 	agentW := 0
-	if len(m.snap.Agents) > 0 {
+	// The agent belongs to the ticket, so in the PRs filter it would repeat on every pull request of one ticket.
+	if len(m.snap.Agents) > 0 && m.filter != FilterPRs {
 		agentW = agentWidth + 1
 	}
 	// Narrow panes drop AGENT first, then shrink PR / CI, then STATUS, so the title always keeps some room.

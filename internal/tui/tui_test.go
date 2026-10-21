@@ -1513,6 +1513,42 @@ func TestPRMenuLeadsWithThePullRequest(t *testing.T) {
 	}
 }
 
+func TestPRStatus(t *testing.T) {
+	tests := []struct {
+		pr   ticket.PullRequest
+		want string
+	}{
+		{ticket.PullRequest{Checks: ticket.ChecksFail, Merge: ticket.MergeConflicts, Draft: true}, "CI failing"},
+		{ticket.PullRequest{Review: ticket.ReviewChangesRequested, Merge: ticket.MergeConflicts}, "Changes requested"},
+		{ticket.PullRequest{Review: ticket.ReviewApproved, Merge: ticket.MergeConflicts}, "Conflicts"},
+		{ticket.PullRequest{Draft: true, Checks: ticket.ChecksPass}, "Draft"},
+		{ticket.PullRequest{Review: ticket.ReviewApproved, Merge: ticket.MergeReady}, "Ready to merge"},
+		{ticket.PullRequest{Checks: ticket.ChecksPass, Merge: ticket.MergeReady}, "Ready to merge"},
+		{ticket.PullRequest{Review: ticket.ReviewApproved}, "Approved"},
+		{ticket.PullRequest{Review: ticket.ReviewRequired}, "Waiting review"},
+		{ticket.PullRequest{Checks: ticket.ChecksPending}, "CI running"},
+		{ticket.PullRequest{Checks: ticket.ChecksPass}, "Open"},
+	}
+	for _, tt := range tests {
+		if got := prStatus(tt.pr); got != tt.want {
+			t.Errorf("prStatus(%+v) = %q, want %q", tt.pr, got, tt.want)
+		}
+	}
+}
+
+func TestPRsListLeavesOutTheAgent(t *testing.T) {
+	snap := prsSnapshot()
+	snap.Agents = map[string]string{"DEMO-1": "working", "DEMO-4": "working"}
+	m := tea.Model(New(snap, false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(m.View()); !strings.Contains(v, "AGENT") {
+		t.Fatalf("All should show the agent:\n%s", v)
+	}
+	if v := stripANSI(press(m, "2").View()); strings.Contains(v, "AGENT") || strings.Contains(v, "working") {
+		t.Errorf("the PRs filter should leave out the agent, which belongs to the ticket:\n%s", v)
+	}
+}
+
 func TestPRsListHeadsItsColumns(t *testing.T) {
 	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
