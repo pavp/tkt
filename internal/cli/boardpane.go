@@ -2,14 +2,38 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/tui"
 )
 
 func (a *App) boardPaneFile() string { return filepath.Join(a.Env.DataDir(), "board-pane") }
+
+func (a *App) boardStateFile() string { return filepath.Join(a.Env.DataDir(), "board-state.json") }
+
+// loadBoardState reads what the board remembers; a missing or unreadable file starts afresh.
+func (a *App) loadBoardState() tui.BoardState {
+	var s tui.BoardState
+	if b, err := os.ReadFile(a.boardStateFile()); err == nil && json.Unmarshal(b, &s) != nil {
+		return tui.BoardState{}
+	}
+	return s
+}
+
+func (a *App) saveBoardState(s tui.BoardState) error {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(a.Env.DataDir(), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(a.boardStateFile(), b, 0o600)
+}
 
 // claimBoardPane records the Herdr pane the board runs in, so open-board can bring that board to another
 // workspace instead of leaving it behind; the returned func removes the record unless a newer board took it.

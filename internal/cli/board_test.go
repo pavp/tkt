@@ -481,3 +481,28 @@ func TestSyncAsksJiraOnlyForChangedTickets(t *testing.T) {
 		}
 	}
 }
+
+func TestBoardStateIsRememberedInTheDataDir(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	if got := h.app.loadBoardState(); len(got.HiddenRepos) != 0 {
+		t.Errorf("without a file the state is empty: %+v", got)
+	}
+	b := &boardActions{a: h.app, ctx: context.Background()}
+	want := tui.BoardState{HiddenRepos: []string{"example-org/api"}}
+	if msg := b.SaveState(want)(); msg != nil {
+		t.Fatalf("save = %v", msg)
+	}
+	if got := h.app.loadBoardState(); !slices.Equal(got.HiddenRepos, want.HiddenRepos) {
+		t.Errorf("state = %+v", got)
+	}
+	file := filepath.Join(h.app.Env.DataDir(), "board-state.json")
+	if info, err := os.Stat(file); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("state file = %v, %v", info, err)
+	}
+	if err := os.WriteFile(file, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.app.loadBoardState(); len(got.HiddenRepos) != 0 {
+		t.Errorf("an unreadable file starts afresh: %+v", got)
+	}
+}

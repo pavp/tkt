@@ -59,7 +59,7 @@ func newBoardCmd(a *App) *cobra.Command {
 			forceColor(a.Env.Getenv)
 			defer a.claimBoardPane()()
 			actions := &boardActions{a: a, c: c, ctx: cmd.Context()}
-			prog := tea.NewProgram(tui.New(snap, have, actions, view), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
+			prog := tea.NewProgram(tui.New(snap, have, actions, view).WithState(a.loadBoardState()), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
 			follow, stop := context.WithCancel(cmd.Context())
 			defer stop()
 			go a.followDaemon(follow, actions, prog.Send)
@@ -211,6 +211,15 @@ func (b *boardActions) ListRepos(owner string) tea.Cmd {
 }
 
 func (b *boardActions) NativePicker() bool { return b.a.nativePicker() }
+
+func (b *boardActions) SaveState(s tui.BoardState) tea.Cmd {
+	return func() tea.Msg {
+		if err := b.a.saveBoardState(s); err != nil {
+			return tui.StatusMsg("could not remember the board's filters: " + err.Error())
+		}
+		return nil
+	}
+}
 
 func (b *boardActions) JiraFields() tea.Cmd {
 	return func() tea.Msg {

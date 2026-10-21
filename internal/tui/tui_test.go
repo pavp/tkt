@@ -24,6 +24,8 @@ import (
 
 type recorder struct {
 	calls []string
+	// states records every SaveState.
+	states []BoardState
 	// choices is what StartChoices reports.
 	choices StartChoices
 	cfg     config.Config
@@ -76,6 +78,10 @@ func (r *recorder) ListDirs(path string) tea.Cmd {
 }
 
 func (r *recorder) NativePicker() bool { return !r.noNative }
+func (r *recorder) SaveState(s BoardState) tea.Cmd {
+	r.states = append(r.states, s)
+	return nil
+}
 
 func (r *recorder) ListRepos(owner string) tea.Cmd {
 	r.listed = append(r.listed, "repos "+owner)

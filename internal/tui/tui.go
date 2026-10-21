@@ -55,6 +55,14 @@ type Actions interface {
 	// NativePicker reports whether PickFolder can show a folder chooser the user will see; without one,
 	// ctrl+o browses folders inside the terminal.
 	NativePicker() bool
+	// SaveState remembers the board's state for its next opening; a failure arrives as a StatusMsg.
+	SaveState(s BoardState) tea.Cmd
+}
+
+// BoardState is what the board remembers between openings.
+type BoardState struct {
+	// HiddenRepos lists the repositories ("owner/name") whose pull requests and tickets the board hides.
+	HiddenRepos []string `json:"hidden_repos,omitempty"`
 }
 
 type ClonesFoundMsg struct {
@@ -137,10 +145,12 @@ type Model struct {
 	status       string
 	now          func() time.Time
 	compact      bool
-	menu         *menu
-	detail       *detailView
-	settings     *settingsView
-	picker       *picker
+	// hiddenRepos holds the repositories ("owner/name") the user chose not to see.
+	hiddenRepos map[string]bool
+	menu        *menu
+	detail      *detailView
+	settings    *settingsView
+	picker      *picker
 	// colOffset is how far each column is scrolled; an array so copies of the model never share it.
 	colOffset [8]int
 	// inStrip means the keyboard cursor is on the review chips above the columns, at stripSel.
@@ -215,6 +225,15 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, m.actions.Agents(m.snap))
 	}
 	return tea.Batch(cmds...)
+}
+
+// WithState restores what the board remembered from its last opening.
+func (m Model) WithState(s BoardState) Model {
+	m.hiddenRepos = map[string]bool{}
+	for _, r := range s.HiddenRepos {
+		m.hiddenRepos[r] = true
+	}
+	return m
 }
 
 // WithClock replaces the clock, for tests.
