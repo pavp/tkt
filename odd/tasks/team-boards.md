@@ -16,7 +16,7 @@ Forecast (slice-plan, 2026-10-21): 595–1020 authored changed lines; slice 1 22
 
 | ID | Specs | Slice | Route | Status | Commit |
 |---|---|---|---|---|---|
-| T1 | S1, S2 (data: Jira boards and sprints, config, sync) | 1 | inline, no Writer reason | pending | |
+| T1 | S1, S2 (data: Jira boards and sprints, config, sync) | 1 | inline, no Writer reason | done (RED → GREEN; -race; live: Authorization Center gives 6 team tickets incl. ACTO-165803/165823, 3.9 s) | 73eefdb |
 | T2 | S2, S3, S4, S6 (board notice and sections, init step) | 2 | inline, no Writer reason | pending | |
 | T3 | S5, S6 (Settings) | 3 | inline, no Writer reason | pending | |
 
@@ -30,3 +30,4 @@ Native grouping: never grouped: a stack would merge the draft tracker.
 - L1 (2026-10-21, user): "ok faltaria mostrar las tareas blocked tambien en todo con el identificador" then "en jira veo dos tareas blocked 165803 y 165823 que no veo en el tkt board (team)" → read-only: both are Blocked, unassigned, in active sprint 11807 of board 5205 "Authorization Center"; the user's tickets are in sprint 11803 of board 418 "User Access Center"; both sprints are named "015 - 20261023 - 26". The team query matched board 418 exactly (14 tickets: 11 as team, 3 done-and-was-mine among the user's).
 - L2 (2026-10-21, user): "seguro pertenece a otro board? no lo entiendo" → board filters confirmed it; ACTO has 126 boards (58 scrum), listed in ~0.9 s.
 - L3 (2026-10-21, user): "si confirmo el plan con chain" (after "una pregunta, ahora mismo solo muestra tickets de board > sprints activos?" was answered: today only sprints, the user's tickets in any open sprint, the team in the user's sprints).
+- L4: slice 1 done (73eefdb): jira Boards(space) (scrum, paginated by startAt) and ActiveSprints(board); config TeamBoard and Space.TeamBoards (`team_boards`), cloned; FetchWith starts the team goroutine at once: activeSprints over the configured boards in parallel, then TeamSprintJQL over their ids; no boards → no search; Ticket.Board from the sprint's board. Live (read-only, Authorization Center configured in memory): both tickets show as team with their board; their Jira status has since changed (Ready to be Released, En revisión).
