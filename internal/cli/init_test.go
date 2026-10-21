@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -250,5 +251,38 @@ func TestInitOffersGhLoginWithoutAnAccount(t *testing.T) {
 	}
 	if !strings.Contains(h.errOut.String(), "gh has no logged-in GitHub account") || !strings.Contains(h.errOut.String(), "✓ GitHub access for example-org") {
 		t.Errorf("stderr:\n%s", h.errOut)
+	}
+}
+
+func TestInitAsksForTeamBoards(t *testing.T) {
+	answers := strings.Join([]string{
+		"example.atlassian.net",
+		"dev@example.com",
+		"tok-1",
+		"1",
+		"example-org/web",
+		"authorization center, access, nope, Center",
+		"~/src",
+		"n",
+		"dev-work",
+	}, "\n") + "\n"
+	h := initHarness(t, answers)
+	h.jira.boards = map[string][]jira.Board{"DEMO": {{ID: 418, Name: "User Access Center"}, {ID: 5205, Name: "Authorization Center"}}}
+	if code := h.exec("init"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	c, err := config.Load(h.app.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []config.TeamBoard{{ID: 5205, Name: "Authorization Center"}, {ID: 418, Name: "User Access Center"}}
+	if !reflect.DeepEqual(c.Spaces[0].TeamBoards, want) {
+		t.Errorf("team boards = %+v", c.Spaces[0].TeamBoards)
+	}
+	errOut := h.errOut.String()
+	for _, w := range []string{"Team boards for DEMO (names, comma separated; 2 scrum boards)", `! no scrum board of DEMO is called "nope"`, `! "Center" fits several boards of DEMO`} {
+		if !strings.Contains(errOut, w) {
+			t.Errorf("stderr missing %q:\n%s", w, errOut)
+		}
 	}
 }

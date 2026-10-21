@@ -22,7 +22,7 @@ import (
 func newInitCmd(a *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
-		Short: "Set up tkt: Jira account and token, spaces, repositories and GitHub accounts",
+		Short: "Set up tkt: Jira account and token, spaces, repositories, team boards and GitHub accounts",
 		Long: "Set up tkt interactively. It asks for the Jira site and email, stores and checks the API token,\n" +
 			"reads your spaces and their statuses from Jira, and writes ~/.config/tkt/config.toml. You only\n" +
 			"type what Jira cannot know: which repositories each space uses and where your clones live.",
@@ -177,7 +177,7 @@ func (a *App) runInit(cmd *cobra.Command) error {
 		return errors.New("pick at least one space")
 	}
 
-	fmt.Fprintln(a.Stderr, "\n3/4 Repositories")
+	fmt.Fprintln(a.Stderr, "\n3/4 Repositories and team boards")
 	owners := map[string]bool{}
 	var ownerOrder []string
 	for i := range spaces {
@@ -196,6 +196,9 @@ func (a *App) runInit(cmd *cobra.Command) error {
 				owners[o] = true
 				ownerOrder = append(ownerOrder, o)
 			}
+		}
+		if err := a.askTeamBoards(ctx, js, s); err != nil {
+			return err
 		}
 		statuses, err := js.Statuses(ctx, s.Key)
 		if err != nil {
@@ -275,6 +278,55 @@ func pickProject(projects []jira.Project, choice string) (jira.Project, bool) {
 		}
 	}
 	return jira.Project{}, false
+}
+
+// askTeamBoards asks which of the space's scrum boards make the board's Team mode, by name, when it has any.
+func (a *App) askTeamBoards(ctx context.Context, js JiraAPI, s *config.Space) error {
+	boards, err := js.Boards(ctx, s.Key)
+	if err != nil {
+		fmt.Fprintf(a.Stderr, "! boards of %s unavailable: %v\n", s.Key, err)
+		return nil
+	}
+	if len(boards) == 0 {
+		return nil
+	}
+	ans, err := a.ask(fmt.Sprintf("Team boards for %s (names, comma separated; %d scrum boards)", s.Key, len(boards)), "")
+	if err != nil {
+		return err
+	}
+	for _, name := range splitList(ans) {
+		b, n := matchBoard(boards, name)
+		switch {
+		case n == 0:
+			fmt.Fprintf(a.Stderr, "! no scrum board of %s is called %q\n", s.Key, name)
+		case n > 1:
+			fmt.Fprintf(a.Stderr, "! %q fits several boards of %s: type more of its name\n", name, s.Key)
+		case !slices.ContainsFunc(s.TeamBoards, func(t config.TeamBoard) bool { return t.ID == b.ID }):
+			s.TeamBoards = append(s.TeamBoards, config.TeamBoard{ID: b.ID, Name: b.Name})
+			fmt.Fprintf(a.Stderr, "  %s team board: %s\n", s.Key, b.Name)
+		}
+	}
+	return nil
+}
+
+// matchBoard finds the board called name, ignoring case, else the boards whose name contains it; n says
+// how many matched, so a name that fits several is refused rather than guessed.
+func matchBoard(boards []jira.Board, name string) (jira.Board, int) {
+	for _, b := range boards {
+		if strings.EqualFold(b.Name, name) {
+			return b, 1
+		}
+	}
+	var found []jira.Board
+	for _, b := range boards {
+		if strings.Contains(strings.ToLower(b.Name), strings.ToLower(name)) {
+			found = append(found, b)
+		}
+	}
+	if len(found) == 1 {
+		return found[0], 1
+	}
+	return jira.Board{}, len(found)
 }
 
 // suggestRepos lists the repositories holding the pull requests Jira links to the user's sprint tickets
