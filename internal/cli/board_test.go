@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
@@ -541,5 +543,32 @@ func TestTheTeamToggleReachesTheSync(t *testing.T) {
 	snap, err = h.app.fetchSnapshot(context.Background(), c)
 	if err != nil || !slices.ContainsFunc(snap.Tickets, func(tk ticket.Ticket) bool { return tk.Team && tk.Key == "DEMO-9" }) {
 		t.Errorf("on: %v %+v", err, snap.Tickets)
+	}
+}
+
+func TestBoardFixGoesToTheAgent(t *testing.T) {
+	h, _, f := fixHarness(t)
+	h.env["HERDR_ENV"] = "1"
+	h.clone(t, "web")
+	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1\nHEAD a\nbranch refs/heads/feature/DEMO-1-filter\n"
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w1","worktree":{"checkout_path":"/src/web-DEMO-1"}}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p2","workspace_id":"w1","agent":"claude"}]}`
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	if _, ok := b.Fix("DEMO-1")().(tea.QuitMsg); !ok {
+		t.Error("after sending the feedback the board should close")
+	}
+	if got := f.Last("agent.prompt"); got["target"] != "w1:p2" {
+		t.Errorf("prompt = %v", got)
+	}
+	if got := f.Last("pane.focus"); got == nil || got["pane_id"] != "w1:p2" {
+		t.Errorf("the agent's pane should get the focus: %v", got)
+	}
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[]}`
+	if got, ok := b.Fix("DEMO-1")().(tui.StatusMsg); !ok || !strings.Contains(string(got), "no agent is running") {
+		t.Errorf("a failure keeps the board open and says why: %v", got)
 	}
 }

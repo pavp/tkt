@@ -50,25 +50,32 @@ func newFixCmd(a *App) *cobra.Command {
 
 // sendFeedback builds the feedback prompt for key and delivers it, returning what happened.
 func (a *App) sendFeedback(ctx context.Context, c *config.Config, key ticket.Key, printOnly bool) (string, error) {
+	msg, _, err := a.deliverFeedback(ctx, c, key, printOnly)
+	return msg, err
+}
+
+// deliverFeedback is sendFeedback also naming the agent's pane it prompted; it is empty when the prompt
+// was only printed.
+func (a *App) deliverFeedback(ctx context.Context, c *config.Config, key ticket.Key, printOnly bool) (msg, pane string, err error) {
 	d, err := a.loadDetail(ctx, c, key, nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	prompt, err := a.feedbackPrompt(ctx, c, d.Ticket)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if printOnly || a.Env.Getenv("HERDR_ENV") != "1" {
-		return prompt, nil
+		return prompt, "", nil
 	}
-	pane, err := a.agentPaneFor(ctx, c, key)
+	pane, err = a.agentPaneFor(ctx, c, key)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if err := a.NewHerdr().Prompt(ctx, pane, prompt); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return fmt.Sprintf("✓ Sent %s's feedback to its agent", key), nil
+	return fmt.Sprintf("✓ Sent %s's feedback to its agent", key), pane, nil
 }
 
 func (a *App) feedbackPrompt(ctx context.Context, c *config.Config, t ticket.Ticket) (string, error) {
