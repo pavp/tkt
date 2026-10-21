@@ -2979,3 +2979,23 @@ func TestMoveFormPicksAUserAndWritesAComment(t *testing.T) {
 		t.Errorf("moved with %+v and comment %q (%v)", r.values, r.comment, r.calls)
 	}
 }
+
+func TestUserSearchScrollsToTheSelection(t *testing.T) {
+	var many []User
+	for i := 1; i <= 12; i++ {
+		many = append(many, User{ID: strconv.Itoa(i), Name: fmt.Sprintf("Person %02d", i)})
+	}
+	r := &recorder{users: map[string][]User{"pe": many}}
+	m, _ := loaded(r).Update(TransitionsMsg{Key: "DEMO-1", Transitions: []Transition{blockedTransition()}})
+	m = typeKeys(press(selectMenuItem(t, press(selectMenuItem(t, m, "Blocked"), "enter"), "Owner"), "enter"), "pe")
+	for i := 0; i < 11; i++ {
+		m = send(m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "▸ Person 12") || strings.Contains(v, "Person 01") || !strings.Contains(v, "↑ 4 more") {
+		t.Errorf("the list should scroll to the selected user and say what is hidden above:\n%s", v)
+	}
+	if v := stripANSI(send(m, tea.KeyMsg{Type: tea.KeyDown}).View()); !strings.Contains(v, "▸ Person 12") {
+		t.Errorf("down on the last user should stay on it:\n%s", v)
+	}
+}

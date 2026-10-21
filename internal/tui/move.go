@@ -2,6 +2,7 @@ package tui
 
 import (
 	"cmp"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -328,13 +329,29 @@ func (m Model) promptView() string {
 		if len(p.users) == 0 {
 			lines = append(lines, dim.Render("no matches yet"))
 		}
-		for i, u := range p.users[:min(len(p.users), 8)] {
-			name := ansi.Truncate(u.Name, inner-2, "…")
+		const rows = 8
+		start := max(0, p.sel-rows+1)
+		end := min(len(p.users), start+rows)
+		more := func(n int, arrow string) string {
+			if n == 0 {
+				return ""
+			}
+			return dim.Render(fmt.Sprintf("%s %d more", arrow, n))
+		}
+		// Both lines stay, blank when nothing is hidden, so the box keeps its height while scrolling.
+		if len(p.users) > rows {
+			lines = append(lines, more(start, "↑"))
+		}
+		for i := start; i < end; i++ {
+			name := ansi.Truncate(p.users[i].Name, inner-2, "…")
 			if i == p.sel {
 				lines = append(lines, selected.Render("▸ "+name))
 			} else {
 				lines = append(lines, "  "+name)
 			}
+		}
+		if len(p.users) > rows {
+			lines = append(lines, more(len(p.users)-end, "↓"))
 		}
 	}
 	lines = append(lines, "", dim.Render(ansi.Truncate(hint, inner, "…")))
