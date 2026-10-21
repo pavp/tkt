@@ -784,7 +784,7 @@ func TestTicketRowsNameRepoAndPR(t *testing.T) {
 	m := New(board.Snapshot{}, false, &recorder{}, ViewList)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
-	if v := stripANSI(next.View()); !strings.Contains(v, "#806 ✓ #311 ○") || !strings.Contains(v, " —  ") {
+	if v := stripANSI(next.View()); !strings.Contains(v, "#806 ✓ #311 …") || !strings.Contains(v, " —  ") {
 		t.Errorf("PR / CI column:\n%s", v)
 	}
 }
@@ -1110,7 +1110,7 @@ func TestPRColumnMatchesMockup(t *testing.T) {
 	}{
 		{nil, "—"},
 		{[]ticket.PullRequest{{Number: 812, State: ticket.PROpen, Checks: ticket.ChecksFail}}, "#812 ✕"},
-		{[]ticket.PullRequest{{Number: 806, State: ticket.PROpen, Checks: ticket.ChecksPass}, {Number: 311, State: ticket.PROpen, Checks: ticket.ChecksPending}}, "#806 ✓ #311 ○"},
+		{[]ticket.PullRequest{{Number: 806, State: ticket.PROpen, Checks: ticket.ChecksPass}, {Number: 311, State: ticket.PROpen, Checks: ticket.ChecksPending}}, "#806 ✓ #311 …"},
 		{[]ticket.PullRequest{{Number: 790, State: ticket.PRMerged}}, "#790 merged"},
 		{[]ticket.PullRequest{{Number: 1, State: ticket.PRMerged}, {Number: 2, State: ticket.PRMerged}}, "2 merged"},
 	}
@@ -1432,10 +1432,10 @@ func TestPRsInColumnsExplainsTheList(t *testing.T) {
 
 func prsSnapshot() board.Snapshot {
 	snap := snapshot()
-	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-4", Summary: "Fix login redirect", Status: "In Review", Category: ticket.InReview,
+	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-4", Summary: "Fix login redirect", Status: "In Review", Category: ticket.InReview, URL: "https://example.atlassian.net/browse/DEMO-4",
 		PRs: []ticket.PullRequest{
 			{Repo: "example-org/web", Number: 815, Title: "Redirect after login", URL: "https://github.com/example-org/web/pull/815", State: ticket.PROpen, Checks: ticket.ChecksPass, Review: ticket.ReviewChangesRequested},
-			{Repo: "example-org/api", Number: 816, Title: "Session endpoint", State: ticket.PROpen, Checks: ticket.ChecksPending, Review: ticket.ReviewApproved},
+			{Repo: "example-org/api", Number: 816, Title: "Session endpoint", State: ticket.PROpen, Checks: ticket.ChecksPending, Review: ticket.ReviewApproved, Approvals: 2},
 			{Repo: "example-org/web", Number: 700, Title: "Old attempt", State: ticket.PRMerged},
 		}})
 	return snap
@@ -1450,19 +1450,19 @@ func TestPRsFilterListsMyOpenPRsThenReviews(t *testing.T) {
 		if !strings.Contains(v, "2 PRs 5") || strings.Contains(v, "Reviews 1") || strings.Contains(v, "Needs you") {
 			t.Fatalf("%s: header:\n%s", view, v)
 		}
-		mine, reviews := strings.Index(v, "Mine  4"), strings.Index(v, "Review requested · example-org/web  1")
+		mine, reviews := strings.Index(v, "Mine"), strings.Index(v, "Review requested · example-org/web  1")
 		if mine < 0 || reviews < mine {
 			t.Fatalf("%s: sections missing or out of order:\n%s", view, v)
 		}
-		rows := map[string]string{"#812": "CI failing", "#815": "Changes requested", "#816": "Approved", "#806": "Open"}
+		rows := map[string]string{"#812": "CI failing", "#815": "Changes requested", "#816": "Approved · 2 approvals", "#806": "Open"}
 		for pr, status := range rows {
 			line := strings.Split(v, "\n")[lineIndex(v, pr+" ")]
 			if !strings.Contains(line, status) {
 				t.Errorf("%s: %s row %q lacks %q", view, pr, line, status)
 			}
 		}
-		if line := strings.Split(v, "\n")[lineIndex(v, "#815 ")]; !strings.Contains(line, "DEMO-4 · Redirect after login") {
-			t.Errorf("%s: #815 row %q lacks its ticket and title", view, line)
+		if line := strings.Split(v, "\n")[lineIndex(v, "#815 ")]; !strings.Contains(line, "Redirect after login") || strings.Contains(line, "DEMO-4 ·") {
+			t.Errorf("%s: #815 row %q should show the pull request's own title", view, line)
 		}
 		if strings.Contains(v, "#700") {
 			t.Errorf("%s: merged PR listed:\n%s", view, v)
@@ -1486,8 +1486,168 @@ func TestPRsFilterActsOnTheRowsTicket(t *testing.T) {
 	if !slices.Contains(r.calls, "fix DEMO-4") || !slices.Contains(r.calls, "open https://github.com/example-org/web/pull/815") {
 		t.Errorf("calls = %v", r.calls)
 	}
-	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Actions for DEMO-4") {
-		t.Errorf("menu:\n%s", v)
+}
+
+func TestPRMenuLeadsWithThePullRequest(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#815"); i++ {
+		m = press(m, "s")
+	}
+	m = press(m, "enter")
+	v := stripANSI(m.View())
+	for _, want := range []string{"Pull request #815 · DEMO-4", "Open #815 in GitHub ↗", "Send the review comments to the agent", "Start · open the agent", "Open the ticket pane next to its agent", "Show details of DEMO-4", "Open DEMO-4 in Jira ↗"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("PR menu missing %q:\n%s", want, v)
+		}
+	}
+	for _, unwanted := range []string{"Actions for", "#816", "Send the CI failure"} {
+		if strings.Contains(v, unwanted) {
+			t.Errorf("PR menu offers %q:\n%s", unwanted, v)
+		}
+	}
+	if _, msg := run(m, "enter"); msg != StatusMsg("open https://github.com/example-org/web/pull/815") {
+		t.Errorf("first item ran %v", r.calls)
+	}
+}
+
+func TestPRStatus(t *testing.T) {
+	tests := []struct {
+		pr   ticket.PullRequest
+		want string
+	}{
+		{ticket.PullRequest{Checks: ticket.ChecksFail, Merge: ticket.MergeConflicts, Draft: true}, "CI failing"},
+		{ticket.PullRequest{Review: ticket.ReviewChangesRequested, Merge: ticket.MergeConflicts}, "Changes requested"},
+		{ticket.PullRequest{Review: ticket.ReviewApproved, Merge: ticket.MergeConflicts, Unresolved: 2}, "Conflicts"},
+		{ticket.PullRequest{Review: ticket.ReviewApproved, Merge: ticket.MergeReady, Unresolved: 2}, "2 unresolved"},
+		{ticket.PullRequest{Draft: true, Checks: ticket.ChecksPass}, "Draft"},
+		{ticket.PullRequest{Review: ticket.ReviewApproved, Merge: ticket.MergeReady}, "Ready to merge"},
+		{ticket.PullRequest{Checks: ticket.ChecksPass, Merge: ticket.MergeReady}, "Ready to merge"},
+		{ticket.PullRequest{Review: ticket.ReviewApproved}, "Approved"},
+		{ticket.PullRequest{Review: ticket.ReviewRequired}, "Waiting review"},
+		{ticket.PullRequest{Checks: ticket.ChecksPending}, "CI running"},
+		{ticket.PullRequest{Checks: ticket.ChecksPass}, "Open"},
+	}
+	for _, tt := range tests {
+		if got := prStatus(tt.pr); got != tt.want {
+			t.Errorf("prStatus(%+v) = %q, want %q", tt.pr, got, tt.want)
+		}
+	}
+}
+
+func TestPRMenuOffersTheFixForItsReason(t *testing.T) {
+	tests := []struct {
+		pr   ticket.PullRequest
+		want string
+	}{
+		{ticket.PullRequest{Checks: ticket.ChecksFail}, "Send the CI failure to the agent"},
+		{ticket.PullRequest{Review: ticket.ReviewChangesRequested}, "Send the review comments to the agent"},
+		{ticket.PullRequest{Unresolved: 1}, "Send the unresolved comments to the agent"},
+		{ticket.PullRequest{Merge: ticket.MergeConflicts}, "Ask the agent to resolve the conflicts"},
+	}
+	for _, tt := range tests {
+		pr := tt.pr
+		pr.Repo, pr.Number, pr.State, pr.URL = "example-org/web", 900, ticket.PROpen, "https://github.com/example-org/web/pull/900"
+		snap := prsSnapshot()
+		snap.Tickets = []ticket.Ticket{{Key: "DEMO-9", Summary: "Rename", Status: "In Review", Category: ticket.InReview, PRs: []ticket.PullRequest{pr}}}
+		m := tea.Model(New(snap, false, &recorder{}, ViewList))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+		v := stripANSI(press(m, "2", "enter").View())
+		if !strings.Contains(v, tt.want) {
+			t.Errorf("%+v: menu lacks %q:\n%s", tt.pr, tt.want, v)
+		}
+		row := strings.Split(stripANSI(press(m, "2", "s").View()), "\n")
+		if line := row[lineIndex(strings.Join(row, "\n"), "#900 ")]; !strings.HasPrefix(strings.TrimSpace(line), "!") {
+			t.Errorf("%+v: the row should be marked as needing the user: %q", tt.pr, line)
+		}
+	}
+}
+
+func TestPRsListGroupsMyPullRequestsByRepository(t *testing.T) {
+	snap := prsSnapshot()
+	pr := func(repo string, n int, c ticket.CheckState, r ticket.ReviewDecision) ticket.PullRequest {
+		return ticket.PullRequest{Repo: "example-org/" + repo, Number: n, Title: fmt.Sprintf("refactor: DEMO-9 step %d", n), State: ticket.PROpen, Checks: c, Review: r}
+	}
+	snap.Tickets = []ticket.Ticket{{Key: "DEMO-9", Summary: "Split the module", Status: "In Review", Category: ticket.InReview, PRs: []ticket.PullRequest{
+		pr("alpha", 1, ticket.ChecksPass, ""), pr("zeta", 2, ticket.ChecksPass, ""), pr("alpha", 3, ticket.ChecksFail, ""), pr("beta", 4, ticket.ChecksPass, ticket.ReviewChangesRequested),
+	}}}
+	m := tea.Model(New(snap, false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(press(m, "2").View())
+	order := []string{"Mine · example-org/alpha  2", "#3 ", "#1 ", "Mine · example-org/beta  1", "#4 ", "Mine · example-org/zeta  1", "#2 ", "Review requested · example-org/web  1"}
+	last := -1
+	for _, want := range order {
+		at := lineIndex(v, want)
+		if at <= last {
+			t.Fatalf("%q out of order (repositories that need the user first, then by name):\n%s", want, v)
+		}
+		last = at
+	}
+	if line := strings.Split(v, "\n")[lineIndex(v, "#2 ")]; !strings.Contains(line, "refactor: DEMO-9 step 2") || strings.Contains(line, "DEMO-9 · ") {
+		t.Errorf("the title should be the pull request's own: %q", line)
+	}
+}
+
+func TestPRsListLeavesOutTheAgent(t *testing.T) {
+	snap := prsSnapshot()
+	snap.Agents = map[string]string{"DEMO-1": "working", "DEMO-4": "working"}
+	m := tea.Model(New(snap, false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(m.View()); !strings.Contains(v, "AGENT") {
+		t.Fatalf("All should show the agent:\n%s", v)
+	}
+	if v := stripANSI(press(m, "2").View()); strings.Contains(v, "AGENT") || strings.Contains(v, "working") {
+		t.Errorf("the PRs filter should leave out the agent, which belongs to the ticket:\n%s", v)
+	}
+}
+
+func TestPRsListFitsThePRColumnAndColorsCI(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	raw := m.View()
+	v := stripANSI(raw)
+	if head := strings.Split(v, "\n")[lineIndex(v, "TITLE")]; !strings.Contains(head, "  PR   STATUS") {
+		t.Errorf("the PR column should fit its numbers: %q", head)
+	}
+	if line := strings.Split(v, "\n")[lineIndex(v, "#815 ")]; !strings.Contains(line, "#815 Changes requested") {
+		t.Errorf("#815 row = %q", line)
+	}
+	for _, l := range strings.Split(raw, "\n") {
+		plain := ansi.Strip(l)
+		switch {
+		case strings.Contains(plain, "#815 ") && !strings.Contains(l, ok.Render("✓")):
+			t.Errorf("a passing check should be colored: %q", l)
+		case strings.Contains(plain, "#812 ") && strings.Contains(l, warn.Render("✕")):
+			t.Errorf("the selected row keeps its highlight unbroken: %q", l)
+		}
+	}
+}
+
+func TestPRsListHeadsItsColumns(t *testing.T) {
+	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(m.View()); !strings.Contains(v, "KEY") || !strings.Contains(v, "PR / CI") {
+		t.Fatalf("All keeps its headers:\n%s", v)
+	}
+	m = press(m, "2")
+	v := stripANSI(m.View())
+	lines := strings.Split(v, "\n")
+	head := lines[lineIndex(v, "TITLE")]
+	if strings.Contains(head, "KEY") || strings.Contains(head, "PR / CI") || !strings.Contains(head, " PR ") || !strings.Contains(head, "CI TITLE") {
+		t.Fatalf("PRs headers = %q", head)
+	}
+	for _, pr := range []string{"#812", "#806"} {
+		row := []rune(lines[lineIndex(v, pr+" ")])
+		mark, title := strings.Index(head, "CI TITLE"), strings.Index(head, "TITLE")
+		if mark < 0 || string(row[len([]rune(head[:mark]))]) == " " || string(row[len([]rune(head[:title]))]) == " " {
+			t.Errorf("%s row does not sit under its headers:\n%q\n%q", pr, head, string(row))
+		}
 	}
 }
 

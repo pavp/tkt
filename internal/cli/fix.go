@@ -19,10 +19,11 @@ func newFixCmd(a *App) *cobra.Command {
 	var printOnly bool
 	cmd := &cobra.Command{
 		Use:   "fix [KEY]",
-		Short: "Send a ticket's failing CI log or requested review changes to its agent",
-		Long: "Collect the failing check logs and the requested-change review comments of a ticket's open pull\n" +
-			"requests, and send them to the ticket's Claude Code agent in Herdr as a prompt. Outside Herdr, or with\n" +
-			"--print, the prompt is printed instead. Nothing is written to Jira or GitHub.",
+		Short: "Send a ticket's failing CI, review comments and merge conflicts to its agent",
+		Long: "Collect the failing check logs, the requested-change reviews, the unresolved review comments and\n" +
+			"the merge conflicts of a ticket's open pull requests, and send them to the ticket's Claude Code agent\n" +
+			"in Herdr as a prompt. Outside Herdr, or with --print, the prompt is printed instead. Nothing is written\n" +
+			"to Jira or GitHub.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := a.LoadConfig()
@@ -100,9 +101,21 @@ func (a *App) feedbackPrompt(ctx context.Context, c *config.Config, t ticket.Tic
 				writeReview(&b, pr, r)
 			}
 		}
+		if pr.Unresolved > 0 {
+			threads, err := gh.UnresolvedThreads(ctx, pr.Repo, pr.Number)
+			if err != nil {
+				return "", err
+			}
+			for _, th := range threads {
+				writeThread(&b, pr, th)
+			}
+		}
+		if pr.Merge == ticket.MergeConflicts {
+			fmt.Fprintf(&b, "%s#%d has merge conflicts with its base branch: rebase it onto the base branch, resolve the conflicts, and push with --force-with-lease.\n\n", pr.Repo, pr.Number)
+		}
 	}
 	if b.Len() == 0 {
-		return "", fmt.Errorf("%s has no failing CI or requested changes on its open pull requests", t.Key)
+		return "", fmt.Errorf("%s has no failing CI, requested changes, unresolved comments or conflicts on its open pull requests", t.Key)
 	}
 	return fmt.Sprintf("Feedback on Jira ticket %s (%s):\n\n%sFix these, run the relevant tests locally, and push to the same branch.", t.Key, t.Summary, b.String()), nil
 }
@@ -115,6 +128,14 @@ func writeReview(b *strings.Builder, pr ticket.PullRequest, r github.ChangeReque
 	b.WriteString("\n")
 	for _, cm := range r.Comments {
 		fmt.Fprintf(b, "- %s:%d: %s\n", cm.Path, cm.Line, strings.ReplaceAll(strings.TrimSpace(cm.Body), "\n", " "))
+	}
+	b.WriteString("\n")
+}
+
+func writeThread(b *strings.Builder, pr ticket.PullRequest, th github.ReviewThread) {
+	fmt.Fprintf(b, "Unresolved comment on %s#%d at %s:%d:\n", pr.Repo, pr.Number, th.Path, th.Line)
+	for _, cm := range th.Comments {
+		fmt.Fprintf(b, "- @%s: %s\n", cm.Author, strings.ReplaceAll(cm.Body, "\n", " "))
 	}
 	b.WriteString("\n")
 }

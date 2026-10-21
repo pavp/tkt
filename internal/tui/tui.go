@@ -267,7 +267,8 @@ func (m Model) tickets() []ticket.Ticket {
 	return m.snap.Tickets
 }
 
-// myPRs lists the open pull requests of the user's tickets, those that need the user first.
+// myPRs lists the open pull requests of the user's tickets by repository, repositories with one that needs
+// the user first, then by name, and within each repository those that need the user first.
 func (m Model) myPRs() []item {
 	var out []item
 	for _, t := range board.Sorted(m.snap.Tickets) {
@@ -278,14 +279,24 @@ func (m Model) myPRs() []item {
 			}
 		}
 	}
+	urgent := map[string]bool{}
+	for _, it := range out {
+		urgent[it.pr.Repo] = urgent[it.pr.Repo] || needsYou(*it.pr)
+	}
 	slices.SortStableFunc(out, func(a, b item) int {
+		if c := boolRank(urgent[b.pr.Repo]) - boolRank(urgent[a.pr.Repo]); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.pr.Repo, b.pr.Repo); c != 0 {
+			return c
+		}
 		return boolRank(needsYou(*b.pr)) - boolRank(needsYou(*a.pr))
 	})
 	return out
 }
 
 func needsYou(pr ticket.PullRequest) bool {
-	return pr.Checks == ticket.ChecksFail || pr.Review == ticket.ReviewChangesRequested
+	return len(pr.Attention()) > 0
 }
 
 func boolRank(b bool) int {
@@ -295,14 +306,22 @@ func boolRank(b bool) int {
 	return 0
 }
 
-// prStatus words where one of the user's pull requests stands: what needs the user first, then the review,
-// as the CI mark beside it already shows a running check.
+// prStatus words where one of the user's pull requests stands: what needs the user first, then whether it
+// can merge, then the review, as the CI mark beside it already shows a running check.
 func prStatus(pr ticket.PullRequest) string {
 	switch {
 	case pr.Checks == ticket.ChecksFail:
 		return string(ticket.ReasonCIFailing)
 	case pr.Review == ticket.ReviewChangesRequested:
 		return string(ticket.ReasonChangesRequested)
+	case pr.Merge == ticket.MergeConflicts:
+		return string(ticket.ReasonConflicts)
+	case pr.Unresolved > 0:
+		return fmt.Sprintf("%d unresolved", pr.Unresolved)
+	case pr.Draft:
+		return "Draft"
+	case pr.Merge == ticket.MergeReady:
+		return "Ready to merge"
 	case pr.Review == ticket.ReviewApproved:
 		return "Approved"
 	case pr.Review == ticket.ReviewRequired:
@@ -1337,16 +1356,12 @@ func coloredPRs(prs []ticket.PullRequest, width int) string {
 	used := 0
 	for _, pr := range open {
 		ref := fmt.Sprintf("#%d", pr.Number)
-		markText, style := checkMark(pr.Checks), dim
-		switch {
-		case pr.State == ticket.PRMerged:
+		markText, style := checkMark(pr.Checks), checkStyle(pr.Checks)
+		switch pr.State {
+		case ticket.PRMerged:
 			markText, style = "merged", ok
-		case pr.State == ticket.PRClosed:
-			markText = "closed"
-		case pr.Checks == ticket.ChecksFail:
-			style = warn
-		case pr.Checks == ticket.ChecksPass:
-			style = ok
+		case ticket.PRClosed:
+			markText, style = "closed", dim
 		}
 		w := lipgloss.Width(ref) + 1 + lipgloss.Width(markText)
 		if used > 0 && used+1+w > width {
@@ -1404,12 +1419,23 @@ func prRefs(prs []ticket.PullRequest) string {
 	return strings.Join(parts, " ")
 }
 
+// checkStyle colors a CI mark: failing like what needs the user, passing like the accent, the rest dimmed.
+func checkStyle(c ticket.CheckState) lipgloss.Style {
+	switch c {
+	case ticket.ChecksFail:
+		return warn
+	case ticket.ChecksPass:
+		return ok
+	}
+	return dim
+}
+
 func checkMark(c ticket.CheckState) string {
 	switch c {
 	case ticket.ChecksFail:
 		return "✕"
 	case ticket.ChecksPending:
-		return "○"
+		return "…"
 	case ticket.ChecksPass:
 		return "✓"
 	}
@@ -1426,7 +1452,7 @@ func prMeta(t ticket.Ticket) string {
 		case pr.Checks == ticket.ChecksFail:
 			mark = "✕"
 		case pr.Checks == ticket.ChecksPending:
-			mark = "○"
+			mark = "…"
 		case pr.Checks == ticket.ChecksPass:
 			mark = "✓"
 		}
@@ -1444,7 +1470,26 @@ const (
 	statusWidth = 18
 	// prWidth caps the PR / CI column, which otherwise fits its widest value.
 	prWidth = 22
+	// statusMaxWidth caps the STATUS column, which grows to fit a pull request's approvals.
+	statusMaxWidth = 32
 )
+
+// statusText is a row's STATUS: a pull request's standing with its approvals, else the ticket's status.
+func statusText(it item) string {
+	var s string
+	switch {
+	case it.review():
+		s = "Review requested"
+	case it.mine():
+		s = prStatus(*it.pr)
+	default:
+		return it.ticket.Status
+	}
+	if a := it.pr.ApprovalsText(); a != "" {
+		s += " · " + a
+	}
+	return s
+}
 
 // pad truncates s to n cells and fills the rest with spaces, so columns line up.
 func pad(s string, n int) string {
@@ -1463,19 +1508,31 @@ func (m Model) listView() string {
 		}
 		return prRefs(it.ticket.PRs)
 	}
-	prW := lipgloss.Width("PR / CI")
+	prW := lipgloss.Width(m.listHeads()[2])
 	for _, it := range items {
 		prW = max(prW, lipgloss.Width(prText(it)))
 	}
 	prW = min(prW, prWidth)
 	statusW := statusWidth
+	for _, it := range items {
+		statusW = max(statusW, lipgloss.Width(statusText(it)))
+	}
+	statusW = min(statusW, statusMaxWidth)
 	agentW := 0
-	if len(m.snap.Agents) > 0 {
+	// The agent belongs to the ticket, so in the PRs filter it would repeat on every pull request of one ticket.
+	if len(m.snap.Agents) > 0 && m.filter != FilterPRs {
 		agentW = agentWidth + 1
 	}
 	// Narrow panes drop AGENT first, then shrink PR / CI, then STATUS, so the title always keeps some room.
 	const minTitle = 12
-	room := func() int { return m.width - 2 - keyWidth - statusW - agentW - prW - 3 }
+	keyW := keyWidth
+	if m.filter == FilterPRs {
+		keyW = lipgloss.Width(m.listHeads()[0])
+		for _, it := range items {
+			keyW = max(keyW, lipgloss.Width(string(it.key)))
+		}
+	}
+	room := func() int { return m.width - 2 - keyW - statusW - agentW - prW - 3 }
 	if minTitle > room() {
 		agentW = 0
 	}
@@ -1486,10 +1543,19 @@ func (m Model) listView() string {
 	}
 	titleWidth := max(minTitle, room())
 	row := func(key, status, agent, pr, title string) string {
-		return pad(key, keyWidth) + " " + pad(status, statusW) + " " + agent + pad(pr, prW) + " " + truncate(title, titleWidth)
+		return pad(key, keyW) + " " + pad(status, statusW) + " " + agent + pad(pr, prW) + " " + truncate(title, titleWidth)
 	}
 	lines, _ := m.listLines(row, prText, agentW)
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// listHeads names the key, status and PR columns; the PRs filter lists pull requests by number with only
+// their CI mark, so its headers say so and the mark's column stays narrow.
+func (m Model) listHeads() [3]string {
+	if m.filter == FilterPRs {
+		return [3]string{"PR", "STATUS", "CI"}
+	}
+	return [3]string{"KEY", "STATUS", "PR / CI"}
 }
 
 // agentWidth fits the longest agent cell, "! needs you".
@@ -1532,7 +1598,8 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 	if agentW > 0 {
 		header = pad("AGENT", agentW)
 	}
-	lines := []string{"  " + dim.Render(row("KEY", "STATUS", header, "PR / CI", "TITLE")), dim.Render(strings.Repeat("─", m.width))}
+	heads := m.listHeads()
+	lines := []string{"  " + dim.Render(row(heads[0], heads[1], header, heads[2], "TITLE")), dim.Render(strings.Repeat("─", m.width))}
 	at := []int{-1, -1}
 	if m.filter == FilterPRs && m.hiddenBots() > 0 {
 		toggle := keyStyle.Render("b") + " " + dim.Render(fmt.Sprintf("show bots · %d hidden", m.hiddenBots()))
@@ -1541,12 +1608,9 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		}
 		lines, at = append(lines, "  "+toggle), append(at, botToggleLine)
 	}
-	nTickets, nMine := 0, 0
+	nTickets := 0
 	for _, it := range items {
-		switch {
-		case it.mine():
-			nMine++
-		case it.ticket != nil:
+		if it.ticket != nil && !it.mine() {
 			nTickets++
 		}
 	}
@@ -1559,8 +1623,18 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 	}
 	for i, it := range items {
 		switch {
-		case i == 0 && it.mine():
-			section("Mine", nMine)
+		case it.mine() && (i == 0 || items[i-1].pr.Repo != it.pr.Repo):
+			n := 0
+			for _, o := range items[i:] {
+				if o.mine() && o.pr.Repo == it.pr.Repo {
+					n++
+				}
+			}
+			title := "Mine"
+			if it.pr.Repo != "" {
+				title += " · " + it.pr.Repo
+			}
+			section(title, n)
 		case i == 0 && it.ticket != nil:
 			section("My tickets", nTickets)
 		}
@@ -1574,16 +1648,19 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			section("Review requested · "+it.pr.Repo, n)
 		}
 		var line string
+		ci := prText(it)
+		if it.pr != nil && i != m.row {
+			ci = checkStyle(it.pr.Checks).Render(ci)
+		}
 		switch {
 		case it.review():
-			line = row(string(it.key), "Review requested", pad("", agentW), prText(it), it.pr.Title)
+			line = row(string(it.key), statusText(it), pad("", agentW), ci, it.pr.Title)
 		case it.mine():
-			status := prStatus(*it.pr)
+			status := statusText(it)
 			if i != m.row && needsYou(*it.pr) {
 				status = warn.Render(status)
 			}
-			title := cmp.Or(it.pr.Title, it.ticket.Summary)
-			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), prText(it), string(it.ticket.Key)+" · "+title)
+			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, cmp.Or(it.pr.Title, it.ticket.Summary))
 		default:
 			line = row(string(it.key), it.ticket.Status, agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), it.ticket.Summary)
 		}
@@ -1619,11 +1696,15 @@ func (m Model) preview() string {
 	}
 	if it.mine() {
 		title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s · %s", it.key, it.ticket.Key, cmp.Or(it.pr.Title, it.ticket.Summary)), m.width))
-		return title + "\n" + dim.Render(truncate(fmt.Sprintf("%s in %s · CI %s · enter for actions", prStatus(*it.pr), it.pr.Repo, ciWord(it.pr.Checks)), m.width))
+		return title + "\n" + dim.Render(truncate(fmt.Sprintf("%s in %s · CI %s · enter for actions", statusText(it), it.pr.Repo, ciWord(it.pr.Checks)), m.width))
 	}
 	if it.pr != nil {
 		title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s", it.key, it.pr.Title), m.width))
-		return title + "\n" + dim.Render(truncate(fmt.Sprintf("review requested by %s in %s · CI %s · enter for actions", orDash(it.pr.Author), it.pr.Repo, ciWord(it.pr.Checks)), m.width))
+		approvals := ""
+		if a := it.pr.ApprovalsText(); a != "" {
+			approvals = " · " + a
+		}
+		return title + "\n" + dim.Render(truncate(fmt.Sprintf("review requested by %s in %s%s · CI %s · enter for actions", orDash(it.pr.Author), it.pr.Repo, approvals, ciWord(it.pr.Checks)), m.width))
 	}
 	t := it.ticket
 	title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s", t.Key, t.Summary), m.width))
@@ -1653,7 +1734,7 @@ func ciWord(c ticket.CheckState) string {
 	case ticket.ChecksFail:
 		return "failing ✕"
 	case ticket.ChecksPending:
-		return "running ○"
+		return "running …"
 	case ticket.ChecksPass:
 		return "passing ✓"
 	}

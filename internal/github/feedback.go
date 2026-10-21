@@ -172,3 +172,73 @@ func (c *Client) ChangeRequests(ctx context.Context, repo string, number int) ([
 	}
 	return out, nil
 }
+
+type ThreadComment struct {
+	Author string `json:"author"`
+	Body   string `json:"body"`
+}
+
+// ReviewThread is one review conversation on a line of a pull request's diff.
+type ReviewThread struct {
+	Path     string          `json:"path"`
+	Line     int             `json:"line"`
+	Comments []ThreadComment `json:"comments"`
+}
+
+// UnresolvedThreads returns a pull request's review threads that nobody has resolved, with their comments.
+func (c *Client) UnresolvedThreads(ctx context.Context, repo string, number int) ([]ReviewThread, error) {
+	owner, name, _ := strings.Cut(repo, "/")
+	q := `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes { isResolved path line comments(first: 20) { nodes { author { login } body } } }
+      }
+    }
+  }
+}`
+	var data struct {
+		Repository struct {
+			PullRequest *struct {
+				ReviewThreads struct {
+					Nodes []struct {
+						IsResolved bool   `json:"isResolved"`
+						Path       string `json:"path"`
+						Line       int    `json:"line"`
+						Comments   struct {
+							Nodes []struct {
+								Author *struct {
+									Login string `json:"login"`
+								} `json:"author"`
+								Body string `json:"body"`
+							} `json:"nodes"`
+						} `json:"comments"`
+					} `json:"nodes"`
+				} `json:"reviewThreads"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	}
+	vars := map[string]any{"owner": owner, "name": name, "number": number}
+	if err := c.query(ctx, owner, q, vars, &data); err != nil {
+		return nil, err
+	}
+	if data.Repository.PullRequest == nil {
+		return nil, fmt.Errorf("pull request %s#%d not found", repo, number)
+	}
+	var out []ReviewThread
+	for _, n := range data.Repository.PullRequest.ReviewThreads.Nodes {
+		if n.IsResolved {
+			continue
+		}
+		th := ReviewThread{Path: n.Path, Line: n.Line}
+		for _, cm := range n.Comments.Nodes {
+			tc := ThreadComment{Body: strings.TrimSpace(cm.Body)}
+			if cm.Author != nil {
+				tc.Author = cm.Author.Login
+			}
+			th.Comments = append(th.Comments, tc)
+		}
+		out = append(out, th)
+	}
+	return out, nil
+}

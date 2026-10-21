@@ -85,7 +85,30 @@ func TestFixErrors(t *testing.T) {
 		t.Errorf("no agent: exit %d, %q", code, h.errOut)
 	}
 	gh.prs = []ticket.PullRequest{{Repo: "example-org/web", Number: 9, Branch: "feature/DEMO-1", State: ticket.PROpen, Checks: ticket.ChecksPass}}
-	if code := h.exec("fix", "DEMO-1", "--print"); code == 0 || !strings.Contains(h.errOut.String(), "DEMO-1 has no failing CI or requested changes") {
+	if code := h.exec("fix", "DEMO-1", "--print"); code == 0 || !strings.Contains(h.errOut.String(), "DEMO-1 has no failing CI, requested changes, unresolved comments or conflicts") {
 		t.Errorf("nothing to fix: exit %d, %q", code, h.errOut)
+	}
+}
+
+func TestFixSendsUnresolvedCommentsAndConflicts(t *testing.T) {
+	h, gh, _ := fixHarness(t)
+	gh.prs = []ticket.PullRequest{
+		{Repo: "example-org/web", Number: 40, Branch: "feature/DEMO-1-form", State: ticket.PROpen, Checks: ticket.ChecksPass, Unresolved: 1},
+		{Repo: "example-org/web", Number: 41, Branch: "feature/DEMO-1-names", State: ticket.PROpen, Checks: ticket.ChecksPass, Merge: ticket.MergeConflicts},
+	}
+	gh.threads = map[int][]github.ReviewThread{40: {{Path: "web/form.go", Line: 7, Comments: []github.ThreadComment{{Author: "sam", Body: "Rename\nthis"}, {Author: "alex", Body: "Why?"}}}}}
+	if code := h.exec("fix", "DEMO-1"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	out := h.out.String()
+	for _, want := range []string{
+		"Unresolved comment on example-org/web#40 at web/form.go:7:",
+		"- @sam: Rename this",
+		"- @alex: Why?",
+		"example-org/web#41 has merge conflicts with its base branch: rebase it onto the base branch, resolve the conflicts",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
 	}
 }

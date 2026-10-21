@@ -93,6 +93,7 @@ type GitHubAPI interface {
 	FailedChecks(ctx context.Context, repo, sha string) ([]github.FailedCheck, error)
 	ChangeRequests(ctx context.Context, repo string, number int) ([]github.ChangeRequest, error)
 	Repos(ctx context.Context, owner string) ([]string, error)
+	UnresolvedThreads(ctx context.Context, repo string, number int) ([]github.ReviewThread, error)
 }
 
 func (a *App) githubFor(c *config.Config) GitHubAPI {

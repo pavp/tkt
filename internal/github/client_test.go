@@ -24,7 +24,8 @@ func pr(repo string, num int, branch, state, review, checks string) string {
 	}
 	return `{"number":` + itoa(num) + `,"title":"PR ` + itoa(num) + `","url":"https://github.com/` + repo + `/pull/` + itoa(num) +
 		`","state":"` + state + `","headRefName":"` + branch + `","headRefOid":"sha` + itoa(num) + `","reviewDecision":` + rv +
-		`,"author":{"login":"alex"},"repository":{"nameWithOwner":"` + repo + `"},"commits":{"nodes":[{"commit":{"statusCheckRollup":` + rollup + `}}]}}`
+		`,"author":{"login":"alex"},"repository":{"nameWithOwner":"` + repo + `"},"commits":{"nodes":[{"commit":{"statusCheckRollup":` + rollup + `}}]},` +
+		`"latestOpinionatedReviews":{"nodes":[]},"reviewThreads":{"nodes":[]}}`
 }
 
 func itoa(n int) string {
@@ -103,6 +104,72 @@ func TestPullRequestsBatchesPerOwner(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("PR %d = %+v\nwant %+v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestPullRequestsCountApprovals(t *testing.T) {
+	reviews := `"latestOpinionatedReviews":{"nodes":[{"state":"APPROVED"},{"state":"CHANGES_REQUESTED"},{"state":"APPROVED"}]}`
+	node := strings.Replace(pr("example-org/web", 9, "feature/DEMO-1-x", "OPEN", "REVIEW_REQUIRED", "SUCCESS"), `"latestOpinionatedReviews":{"nodes":[]}`, reviews, 1)
+	base, h, calls := gqlServer(t, func(string) (int, string) {
+		return 200, `{"data":{"r0":{"open":{"nodes":[` + node + `]},"merged":{"nodes":[]}}}}`
+	})
+	got, err := New(staticTokens(map[string]string{"example-org": "work"})).WithEndpoints(base, h).PullRequests(context.Background(), []string{"example-org/web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Approvals != 2 {
+		t.Errorf("PRs = %+v, want 2 approvals", got)
+	}
+	if !strings.Contains((*calls)[0].query, "latestOpinionatedReviews") {
+		t.Errorf("query does not ask for reviews:\n%s", (*calls)[0].query)
+	}
+}
+
+func TestPullRequestsReadDraftsAndMergeState(t *testing.T) {
+	tests := []struct {
+		state, draft, merge string
+		want                ticket.MergeState
+	}{
+		{"OPEN", "false", "CLEAN", ticket.MergeReady},
+		{"OPEN", "false", "HAS_HOOKS", ticket.MergeReady},
+		{"OPEN", "false", "DIRTY", ticket.MergeConflicts},
+		{"OPEN", "false", "BLOCKED", ""},
+		{"OPEN", "true", "DRAFT", ""},
+		{"MERGED", "false", "DIRTY", ""},
+	}
+	for _, tt := range tests {
+		node := strings.Replace(pr("example-org/web", 9, "feature/DEMO-1-x", tt.state, "", "SUCCESS"), "{", `{"isDraft":`+tt.draft+`,"mergeStateStatus":"`+tt.merge+`",`, 1)
+		base, h, calls := gqlServer(t, func(string) (int, string) {
+			return 200, `{"data":{"r0":{"open":{"nodes":[` + node + `]},"merged":{"nodes":[]}}}}`
+		})
+		got, err := New(staticTokens(map[string]string{"example-org": "work"})).WithEndpoints(base, h).PullRequests(context.Background(), []string{"example-org/web"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0].Merge != tt.want || got[0].Draft != (tt.draft == "true") {
+			t.Errorf("%s/%s/%s: PRs = %+v", tt.state, tt.draft, tt.merge, got)
+		}
+		if !strings.Contains((*calls)[0].query, "mergeStateStatus") {
+			t.Errorf("query does not ask for the merge state:\n%s", (*calls)[0].query)
+		}
+	}
+}
+
+func TestPullRequestsCountUnresolvedThreads(t *testing.T) {
+	threads := `"reviewThreads":{"nodes":[{"isResolved":false},{"isResolved":true},{"isResolved":false}]}`
+	node := strings.Replace(pr("example-org/web", 9, "feature/DEMO-1-x", "OPEN", "", "SUCCESS"), `"reviewThreads":{"nodes":[]}`, threads, 1)
+	base, h, calls := gqlServer(t, func(string) (int, string) {
+		return 200, `{"data":{"r0":{"open":{"nodes":[` + node + `]},"merged":{"nodes":[]}}}}`
+	})
+	got, err := New(staticTokens(map[string]string{"example-org": "work"})).WithEndpoints(base, h).PullRequests(context.Background(), []string{"example-org/web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Unresolved != 2 {
+		t.Errorf("PRs = %+v, want 2 unresolved", got)
+	}
+	if !strings.Contains((*calls)[0].query, "reviewThreads") {
+		t.Errorf("query does not ask for review threads:\n%s", (*calls)[0].query)
 	}
 }
 

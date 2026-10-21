@@ -40,14 +40,12 @@ func (m Model) buildMenu(it item) *menu {
 			{label: "Open the pull request in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }},
 		}}
 	}
-	t := *it.ticket
-	// Start focuses the ticket's agent when one already runs, so the label says where it leads.
-	start := "Start · open the agent"
-	if _, kind := board.AgentLine(m.snap.Agents[string(t.Key)]); kind != board.AgentNone {
-		start = "Go to the agent in Herdr"
+	if it.mine() {
+		return m.prMenu(it)
 	}
+	t := *it.ticket
 	items := []menuItem{
-		{label: start, run: func() tea.Cmd { return a.StartChoices(t.Key) }},
+		{label: m.startLabel(t.Key), run: func() tea.Cmd { return a.StartChoices(t.Key) }},
 		{label: "Show details", key: "i", detail: t.Key},
 		{label: "Open the ticket pane next to its agent", run: func() tea.Cmd { return a.TicketPane(t.Key) }},
 	}
@@ -63,17 +61,54 @@ func (m Model) buildMenu(it item) *menu {
 		items = append(items, menuItem{label: "Open " + prRef(pr) + " in GitHub ↗", key: key, link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }})
 	}
 	for _, r := range t.Attention() {
-		label := "Send the CI failure to the agent"
-		if r == ticket.ReasonChangesRequested {
-			label = "Send the review comments to the agent"
-		}
-		items = append(items, menuItem{label: label, key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
+		items = append(items, menuItem{label: fixLabel(r), key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
 	}
 	items = append(items,
 		menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }},
 		menuItem{label: "Copy the ticket context (.ticket.md)", run: func() tea.Cmd { return a.CopyContext(t.Key) }},
 	)
 	return &menu{title: "Actions for " + string(t.Key), items: items}
+}
+
+// prMenu acts on one of the user's pull requests first, then on its ticket, leaving out the ticket's other
+// pull requests, which have rows of their own in the PRs filter.
+func (m Model) prMenu(it item) *menu {
+	a := m.actions
+	pr, t := *it.pr, *it.ticket
+	items := []menuItem{{label: fmt.Sprintf("Open #%d in GitHub ↗", pr.Number), key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}}
+	if reasons := pr.Attention(); len(reasons) > 0 {
+		items = append(items, menuItem{label: fixLabel(reasons[0]), key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
+	}
+	items = append(items,
+		menuItem{label: m.startLabel(t.Key), run: func() tea.Cmd { return a.StartChoices(t.Key) }},
+		menuItem{label: "Open the ticket pane next to its agent", run: func() tea.Cmd { return a.TicketPane(t.Key) }},
+		menuItem{label: "Show details of " + string(t.Key), key: "i", detail: t.Key},
+	)
+	if t.URL != "" {
+		items = append(items, menuItem{label: "Open " + string(t.Key) + " in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
+	}
+	return &menu{title: fmt.Sprintf("Pull request #%d · %s", pr.Number, t.Key), items: items}
+}
+
+// fixLabel words the fix for a reason; every fix sends all of the ticket's feedback at once.
+func fixLabel(r ticket.Reason) string {
+	switch r {
+	case ticket.ReasonChangesRequested:
+		return "Send the review comments to the agent"
+	case ticket.ReasonUnresolved:
+		return "Send the unresolved comments to the agent"
+	case ticket.ReasonConflicts:
+		return "Ask the agent to resolve the conflicts"
+	}
+	return "Send the CI failure to the agent"
+}
+
+// startLabel says where Start leads: it focuses the ticket's agent when one already runs.
+func (m Model) startLabel(k ticket.Key) string {
+	if _, kind := board.AgentLine(m.snap.Agents[string(k)]); kind != board.AgentNone {
+		return "Go to the agent in Herdr"
+	}
+	return "Start · open the agent"
 }
 
 func (m Model) menuKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
