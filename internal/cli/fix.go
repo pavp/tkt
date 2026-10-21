@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -140,7 +142,7 @@ func writeThread(b *strings.Builder, pr ticket.PullRequest, th github.ReviewThre
 	b.WriteString("\n")
 }
 
-// agentPaneFor finds the Herdr pane of the agent working in the ticket's worktree.
+// agentPaneFor finds the Herdr pane of the agent working in one of the ticket's worktrees.
 func (a *App) agentPaneFor(ctx context.Context, c *config.Config, key ticket.Key) (string, error) {
 	all, err := a.allWork(ctx, c)
 	if err != nil {
@@ -172,6 +174,13 @@ func (a *App) agentPaneFor(ctx context.Context, c *config.Config, key ticket.Key
 	}
 	for _, ag := range agents {
 		if ids[ag.WorkspaceID] && ag.Agent != "" {
+			return ag.PaneID, nil
+		}
+	}
+	// Herdr knows the worktree only of workspaces it created on one, so an agent opened otherwise is found
+	// by its folder, as Start finds it.
+	for _, p := range slices.Sorted(maps.Keys(paths)) {
+		if ag, ok := agentAt(ctx, h, p); ok {
 			return ag.PaneID, nil
 		}
 	}

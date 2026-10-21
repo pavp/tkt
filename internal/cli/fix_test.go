@@ -112,3 +112,23 @@ func TestFixSendsUnresolvedCommentsAndConflicts(t *testing.T) {
 		}
 	}
 }
+
+func TestFixFindsTheAgentInAWorkspaceWithoutAWorktree(t *testing.T) {
+	h, _, f := fixHarness(t)
+	h.env["HERDR_ENV"] = "1"
+	h.clone(t, "web")
+	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1\nHEAD a\nbranch refs/heads/feature/DEMO-1-filter\n"
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w3"}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w3:p1","workspace_id":"w3","agent":"claude","cwd":"/src/web-DEMO-1/app"}]}`
+	if code := h.exec("fix", "DEMO-1"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if got := f.Last("agent.prompt"); got["target"] != "w3:p1" {
+		t.Errorf("prompt = %v", got)
+	}
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w3:p1","workspace_id":"w3","agent":"claude"}]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w3:p1","workspace_id":"w3","cwd":"/src/web-DEMO-1"}]}`
+	if code := h.exec("fix", "DEMO-1"); code != 0 {
+		t.Fatalf("an agent placed by its pane's folder: exit %d: %s", code, h.errOut)
+	}
+}
