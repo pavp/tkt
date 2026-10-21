@@ -17,7 +17,7 @@ Forecast (slice-plan, 2026-10-21): 550–1000 authored changed lines; slice 1 11
 | ID | Specs | Slice | Route | Status | Commit |
 |---|---|---|---|---|---|
 | T1 | S1, S6 | 1 | inline, no Writer reason | done (RED: did not compile → GREEN; live read-only check returned the real assignee) | b6d9932 |
-| T2 | S2, S3, S4 (data side) | 2 | inline, no Writer reason | pending | |
+| T2 | S2, S3, S4 (data side) | 2 | inline, no Writer reason | done (RED: did not compile → GREEN; -race on board and cli) | 5d9f4cb |
 | T3 | S2, S4, S5, S6 (board side) | 3 | inline, no Writer reason | pending | |
 
 Native grouping: never grouped: a stack would merge the draft tracker.
@@ -33,3 +33,4 @@ Native grouping: never grouped: a stack would merge the draft tracker.
 - L4 (2026-10-21, user): "si confirmo con chain" → plan of 3 slices, Chain strategy.
 - L5: findings — a sync is one Jira search (MySprintJQL), one development-panel call per ticket (cached until updated or 10 minutes) and per-repository GitHub listings; the daemon can read board-state.json each sync.
 - L6: slice 1 done (b6d9932): jira Issue.Assignee from assignee.displayName (in ListFields, so search and detail), Ticket.Assignee, cards "type · Ana L. · agent" (type gives way first, then the name, never the agent), list ASSIGNEE column (dropped after AGENT), preview and `tkt show` full name, "unassigned" when empty; card and mockup tests adapted to the assignee. 245 changed lines with this document.
+- L7: slice 2 done (5d9f4cb): jira.TeamSprintJQL (shared quotedSpaces), Ticket.Team with empty Attention, board.FetchWith(Options{Team}) running the team search beside the user's, no development panel or older-PR search for team tickets, PRs attached from the listing, a failed team search is a warning; cli fetchSnapshot passes board-state.json's Team (BoardState.Team); `tkt list` text leaves team tickets out. Next: slice 3, the board toggle (which must also keep BoardState.Team when saving other state).
