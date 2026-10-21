@@ -29,7 +29,7 @@ type JiraAPI interface {
 	ActiveSprints(ctx context.Context, board int) ([]int, error)
 	Boards(ctx context.Context, space string) ([]jira.Board, error)
 	Transitions(ctx context.Context, key string) ([]jira.Transition, error)
-	Transition(ctx context.Context, key, id string) error
+	Transition(ctx context.Context, key, id string, values []jira.Value) error
 }
 
 // jiraClient builds a Jira client from the configuration and the stored token.

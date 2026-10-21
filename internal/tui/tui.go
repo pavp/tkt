@@ -62,9 +62,9 @@ type Actions interface {
 	SaveState(s BoardState) tea.Cmd
 	// Transitions lists the statuses key can move to in Jira; they arrive as a TransitionsMsg.
 	Transitions(key ticket.Key) tea.Cmd
-	// Transition moves key in Jira through transition id to status to; the outcome arrives as a
-	// TransitionedMsg. The board calls it only after the user confirmed.
-	Transition(key ticket.Key, id, to string) tea.Cmd
+	// Transition moves key in Jira through transition id to status to, filling its form with values; the
+	// outcome arrives as a TransitionedMsg. The board calls it only after the user confirmed.
+	Transition(key ticket.Key, id, to string, values []Value) tea.Cmd
 }
 
 // BoardState is what the board remembers between openings.

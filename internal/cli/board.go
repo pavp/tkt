@@ -25,6 +25,7 @@ import (
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/daemon"
 	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
 	"github.com/pavp/tkt/internal/workspace"
@@ -238,18 +239,29 @@ func (b *boardActions) Transitions(key ticket.Key) tea.Cmd {
 		out := make([]tui.Transition, len(trs))
 		for i, t := range trs {
 			out[i] = tui.Transition{ID: t.ID, To: t.To, NeedsForm: t.NeedsForm}
+			for _, f := range t.Fields {
+				field := tui.Field{ID: f.ID, Name: f.Name, Kind: f.Kind, Required: f.Required}
+				for _, o := range f.Options {
+					field.Options = append(field.Options, tui.Option{ID: o.ID, Value: o.Value})
+				}
+				out[i].Fields = append(out[i].Fields, field)
+			}
 		}
 		return tui.TransitionsMsg{Key: key, Transitions: out, Err: err}
 	}
 }
 
-func (b *boardActions) Transition(key ticket.Key, id, to string) tea.Cmd {
+func (b *boardActions) Transition(key ticket.Key, id, to string, values []tui.Value) tea.Cmd {
+	vs := make([]jira.Value, len(values))
+	for i, v := range values {
+		vs[i] = jira.Value{Field: v.Field, Kind: v.Kind, ID: v.ID}
+	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 		defer cancel()
 		js, err := b.a.jiraClient(b.cfg())
 		if err == nil {
-			err = js.Transition(ctx, string(key), id)
+			err = js.Transition(ctx, string(key), id, vs)
 		}
 		return tui.TransitionedMsg{Key: key, To: to, Err: err}
 	}
