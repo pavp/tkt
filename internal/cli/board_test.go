@@ -628,3 +628,17 @@ func TestBoardRefreshPaintsJiraFirst(t *testing.T) {
 		t.Error("a partial board must never be cached")
 	}
 }
+
+func TestBoardActionsListTheSpacesBoards(t *testing.T) {
+	h, _ := listHarness(t)
+	h.jira.boards = map[string][]jira.Board{"DEMO": {{ID: 5205, Name: "Authorization Center"}}}
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	msg, ok := b.JiraBoards("DEMO")().(tui.JiraBoardsListedMsg)
+	if !ok || msg.Err != nil || msg.Space != "DEMO" || !slices.Equal(msg.Boards, []config.TeamBoard{{ID: 5205, Name: "Authorization Center"}}) {
+		t.Errorf("listed = %+v", msg)
+	}
+}

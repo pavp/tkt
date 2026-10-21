@@ -29,6 +29,8 @@ const (
 	rowRoot
 	rowAddRoot
 	rowLabel
+	rowTeamBoard
+	rowAddTeamBoard
 )
 
 type settingsRow struct {
@@ -64,6 +66,11 @@ type settingsForm struct {
 	// holds a Jira field name, completed from the site's fields, and may be left empty.
 	repo      bool
 	jiraField bool
+	// teamBoard forms add a board to space, matched against the space's boards once they are in.
+	teamBoard bool
+	space     int
+	boards    []config.TeamBoard
+	boardsIn  bool
 	found     []string
 	hint      string
 	// cands are the matches the dropdown shows, picked from source as the user types; dropBase is the
@@ -125,6 +132,10 @@ func (s *settingsView) rows() []settingsRow {
 			}
 		}
 		out = append(out, settingsRow{kind: rowAddRepo, space: si})
+		for bi, b := range sp.TeamBoards {
+			out = append(out, settingsRow{kind: rowTeamBoard, space: si, idx: bi, name: b.Name})
+		}
+		out = append(out, settingsRow{kind: rowAddTeamBoard, space: si})
 	}
 	return out
 }
@@ -212,6 +223,18 @@ func (m Model) settingsAction(action string) (tea.Model, tea.Cmd) {
 				c.Spaces[r.space].Repos = slices.Delete(c.Spaces[r.space].Repos, r.idx, r.idx+1)
 			},
 		}
+	case action == "d" && r.kind == rowTeamBoard:
+		s.confirm = &settingsConfirm{
+			question: fmt.Sprintf("Remove the team board %s from %s? (y/n)", r.name, s.cfg.Spaces[r.space].Key),
+			apply: func(c *config.Config) {
+				c.Spaces[r.space].TeamBoards = slices.Delete(c.Spaces[r.space].TeamBoards, r.idx, r.idx+1)
+			},
+		}
+	case r.kind == rowTeamBoard || r.kind == rowAddTeamBoard:
+		if action == "d" {
+			return m, nil
+		}
+		return m.teamBoardForm(r.space)
 	case action == "d" && r.kind == rowRoot:
 		s.confirm = &settingsConfirm{
 			question: fmt.Sprintf("Remove the folder %s? (y/n)", r.name),
@@ -305,6 +328,8 @@ func (m Model) settingsLookup(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case JiraFieldsListedMsg:
 		f.completeJiraFieldFrom(msg)
+	case JiraBoardsListedMsg:
+		f.teamBoardsListed(msg, m.settings.cfg.Spaces[f.space].Key)
 	case ReposListedMsg:
 		if f.completeRepoFrom(msg) && f.values[fieldPath] == "" {
 			return m, m.lookupClones()
@@ -368,11 +393,23 @@ func (m Model) settingsFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.settings.err = f.labels[0] + " is required"
 			return m, nil
 		}
+		if f.teamBoard {
+			b, why := f.pickTeamBoard(m.settings.cfg.Spaces[f.space])
+			if why != "" {
+				m.settings.err = why
+				return m, nil
+			}
+			m.settings.form = nil
+			return m.saveSettings(func(c *config.Config) { c.Spaces[f.space].TeamBoards = append(c.Spaces[f.space].TeamBoards, b) })
+		}
 		m.settings.form = nil
 		return m.saveSettings(func(c *config.Config) { f.apply(c, f.values) })
 	case tea.KeyTab, tea.KeyDown, tea.KeyShiftTab, tea.KeyUp:
 		if k.Type == tea.KeyTab && f.jiraField {
 			return m.completeJiraField()
+		}
+		if k.Type == tea.KeyTab && f.teamBoard {
+			return m.completeTeamBoard()
 		}
 		if k.Type == tea.KeyTab && f.focus == f.pathField() {
 			return m.completePath()
@@ -494,12 +531,19 @@ func (m Model) settingsLines() ([]string, []int) {
 			line = mark + dim.Render(pad(truncate(r.name, repoW), repoW)+" "+pad("—", pathW)) + " " + removeMark + dim.Render(" inferred from your tickets' pull requests · enter to pin")
 		case rowAddRepo:
 			line = mark + keyDim.Render("+ Add repository")
+		case rowTeamBoard:
+			line = mark + pad(truncate(r.name, repoW), repoW) + " " + pad("", pathW) + " " + removeMark
+		case rowAddTeamBoard:
+			line = mark + keyDim.Render("+ Add team board")
 		case rowRoot:
 			line = mark + pad(truncate(r.name, rootW), rootW) + " " + removeMark
 		case rowAddRoot:
 			line = mark + keyDim.Render("+ Add folder")
 		case rowLabel:
 			line = mark + pad("Ticket label", 14) + " " + orDash(r.name)
+		}
+		if (r.kind == rowTeamBoard || r.kind == rowAddTeamBoard) && i > 0 && s.rows()[i-1].kind != rowTeamBoard {
+			lines, at = append(lines, truncate("  "+dim.Render("TEAM BOARDS · their active sprints make the board's Team mode"), m.width)), append(at, -1)
 		}
 		if s.section == sectionRoots && i == 0 {
 			lines, at = append(lines, dim.Render("Folders where tkt looks for your local clones")), append(at, -1)
@@ -525,6 +569,9 @@ func (m Model) settingsColumns() (repoW, pathW int) {
 		}
 		for _, name := range m.settings.inferred[sp.Key] {
 			repoW = max(repoW, lipgloss.Width(name))
+		}
+		for _, b := range sp.TeamBoards {
+			repoW = max(repoW, lipgloss.Width(b.Name))
 		}
 	}
 	repoW = min(repoW, max(24, m.width*2/5))
@@ -613,6 +660,9 @@ func (f *settingsForm) lines() ([]string, int) {
 	if f.jiraField {
 		keys = "enter save · tab complete from your Jira fields · empty shows none · esc cancel"
 	}
+	if f.teamBoard {
+		keys = "enter add · tab complete from the space's scrum boards · esc cancel"
+	}
 	return append(lines, "", dim.Render(keys)), drop
 }
 
@@ -670,7 +720,7 @@ func (m Model) settingsMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	i := start + msg.Y - lineCount(m.header()) - 2
 	if i >= 0 && i < len(at) && at[i] >= 0 {
 		s.row = at[i]
-		if r, ok := s.current(); ok && (r.kind == rowRepo || r.kind == rowInferred || r.kind == rowRoot) && msg.X >= m.removeX() && msg.X < m.removeX()+2 {
+		if r, ok := s.current(); ok && (r.kind == rowRepo || r.kind == rowInferred || r.kind == rowRoot || r.kind == rowTeamBoard) && msg.X >= m.removeX() && msg.X < m.removeX()+2 {
 			return m.settingsAction("d")
 		}
 	}

@@ -280,9 +280,22 @@ func pickProject(projects []jira.Project, choice string) (jira.Project, bool) {
 	return jira.Project{}, false
 }
 
+// teamBoardChoices lists the space's scrum boards as the configuration keeps them.
+func (a *App) teamBoardChoices(ctx context.Context, js JiraAPI, space string) ([]config.TeamBoard, error) {
+	boards, err := js.Boards(ctx, space)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]config.TeamBoard, len(boards))
+	for i, b := range boards {
+		out[i] = config.TeamBoard{ID: b.ID, Name: b.Name}
+	}
+	return out, nil
+}
+
 // askTeamBoards asks which of the space's scrum boards make the board's Team mode, by name, when it has any.
 func (a *App) askTeamBoards(ctx context.Context, js JiraAPI, s *config.Space) error {
-	boards, err := js.Boards(ctx, s.Key)
+	boards, err := a.teamBoardChoices(ctx, js, s.Key)
 	if err != nil {
 		fmt.Fprintf(a.Stderr, "! boards of %s unavailable: %v\n", s.Key, err)
 		return nil
@@ -295,38 +308,18 @@ func (a *App) askTeamBoards(ctx context.Context, js JiraAPI, s *config.Space) er
 		return err
 	}
 	for _, name := range splitList(ans) {
-		b, n := matchBoard(boards, name)
+		b, n := config.MatchBoard(boards, name)
 		switch {
 		case n == 0:
 			fmt.Fprintf(a.Stderr, "! no scrum board of %s is called %q\n", s.Key, name)
 		case n > 1:
 			fmt.Fprintf(a.Stderr, "! %q fits several boards of %s: type more of its name\n", name, s.Key)
 		case !slices.ContainsFunc(s.TeamBoards, func(t config.TeamBoard) bool { return t.ID == b.ID }):
-			s.TeamBoards = append(s.TeamBoards, config.TeamBoard{ID: b.ID, Name: b.Name})
+			s.TeamBoards = append(s.TeamBoards, b)
 			fmt.Fprintf(a.Stderr, "  %s team board: %s\n", s.Key, b.Name)
 		}
 	}
 	return nil
-}
-
-// matchBoard finds the board called name, ignoring case, else the boards whose name contains it; n says
-// how many matched, so a name that fits several is refused rather than guessed.
-func matchBoard(boards []jira.Board, name string) (jira.Board, int) {
-	for _, b := range boards {
-		if strings.EqualFold(b.Name, name) {
-			return b, 1
-		}
-	}
-	var found []jira.Board
-	for _, b := range boards {
-		if strings.Contains(strings.ToLower(b.Name), strings.ToLower(name)) {
-			found = append(found, b)
-		}
-	}
-	if len(found) == 1 {
-		return found[0], 1
-	}
-	return jira.Board{}, len(found)
 }
 
 // suggestRepos lists the repositories holding the pull requests Jira links to the user's sprint tickets
