@@ -150,15 +150,19 @@ func prStateText(pr ticket.PullRequest) string {
 }
 
 func reviewText(pr ticket.PullRequest) string {
+	var text string
 	switch pr.Review {
 	case ticket.ReviewChangesRequested:
-		return " · changes requested"
+		text = " · changes requested"
 	case ticket.ReviewApproved:
-		return " · approved"
+		text = " · approved"
 	case ticket.ReviewRequired:
-		return " · review required"
+		text = " · review required"
 	}
-	return ""
+	if a := pr.ApprovalsText(); a != "" {
+		text += " · " + a
+	}
+	return text
 }
 
 func humanSize(n int64) string {

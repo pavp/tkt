@@ -260,6 +260,22 @@ func TestRunningChecksShowAnEllipsis(t *testing.T) {
 	}
 }
 
+func TestShowCountsApprovals(t *testing.T) {
+	tests := []struct {
+		pr   ticket.PullRequest
+		want string
+	}{
+		{ticket.PullRequest{Review: ticket.ReviewApproved, Approvals: 2}, " · approved · 2 approvals"},
+		{ticket.PullRequest{Review: ticket.ReviewRequired, Approvals: 1}, " · review required · 1 approval"},
+		{ticket.PullRequest{Review: ticket.ReviewRequired}, " · review required"},
+	}
+	for _, tt := range tests {
+		if got := reviewText(tt.pr); got != tt.want {
+			t.Errorf("reviewText(%+v) = %q, want %q", tt.pr, got, tt.want)
+		}
+	}
+}
+
 func TestShowNeverStartsTheDaemon(t *testing.T) {
 	h := showHarness(t)
 	h.app.Executable = func() (string, error) { return "/opt/tkt/bin/tkt", nil }

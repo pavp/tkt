@@ -1435,7 +1435,7 @@ func prsSnapshot() board.Snapshot {
 	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-4", Summary: "Fix login redirect", Status: "In Review", Category: ticket.InReview, URL: "https://example.atlassian.net/browse/DEMO-4",
 		PRs: []ticket.PullRequest{
 			{Repo: "example-org/web", Number: 815, Title: "Redirect after login", URL: "https://github.com/example-org/web/pull/815", State: ticket.PROpen, Checks: ticket.ChecksPass, Review: ticket.ReviewChangesRequested},
-			{Repo: "example-org/api", Number: 816, Title: "Session endpoint", State: ticket.PROpen, Checks: ticket.ChecksPending, Review: ticket.ReviewApproved},
+			{Repo: "example-org/api", Number: 816, Title: "Session endpoint", State: ticket.PROpen, Checks: ticket.ChecksPending, Review: ticket.ReviewApproved, Approvals: 2},
 			{Repo: "example-org/web", Number: 700, Title: "Old attempt", State: ticket.PRMerged},
 		}})
 	return snap
@@ -1454,7 +1454,7 @@ func TestPRsFilterListsMyOpenPRsThenReviews(t *testing.T) {
 		if mine < 0 || reviews < mine {
 			t.Fatalf("%s: sections missing or out of order:\n%s", view, v)
 		}
-		rows := map[string]string{"#812": "CI failing", "#815": "Changes requested", "#816": "Approved", "#806": "Open"}
+		rows := map[string]string{"#812": "CI failing", "#815": "Changes requested", "#816": "Approved · 2 approvals", "#806": "Open"}
 		for pr, status := range rows {
 			line := strings.Split(v, "\n")[lineIndex(v, pr+" ")]
 			if !strings.Contains(line, status) {

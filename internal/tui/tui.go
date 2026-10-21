@@ -1444,7 +1444,26 @@ const (
 	statusWidth = 18
 	// prWidth caps the PR / CI column, which otherwise fits its widest value.
 	prWidth = 22
+	// statusMaxWidth caps the STATUS column, which grows to fit a pull request's approvals.
+	statusMaxWidth = 32
 )
+
+// statusText is a row's STATUS: a pull request's standing with its approvals, else the ticket's status.
+func statusText(it item) string {
+	var s string
+	switch {
+	case it.review():
+		s = "Review requested"
+	case it.mine():
+		s = prStatus(*it.pr)
+	default:
+		return it.ticket.Status
+	}
+	if a := it.pr.ApprovalsText(); a != "" {
+		s += " · " + a
+	}
+	return s
+}
 
 // pad truncates s to n cells and fills the rest with spaces, so columns line up.
 func pad(s string, n int) string {
@@ -1469,6 +1488,10 @@ func (m Model) listView() string {
 	}
 	prW = min(prW, prWidth)
 	statusW := statusWidth
+	for _, it := range items {
+		statusW = max(statusW, lipgloss.Width(statusText(it)))
+	}
+	statusW = min(statusW, statusMaxWidth)
 	agentW := 0
 	if len(m.snap.Agents) > 0 {
 		agentW = agentWidth + 1
@@ -1586,9 +1609,9 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		var line string
 		switch {
 		case it.review():
-			line = row(string(it.key), "Review requested", pad("", agentW), prText(it), it.pr.Title)
+			line = row(string(it.key), statusText(it), pad("", agentW), prText(it), it.pr.Title)
 		case it.mine():
-			status := prStatus(*it.pr)
+			status := statusText(it)
 			if i != m.row && needsYou(*it.pr) {
 				status = warn.Render(status)
 			}
@@ -1629,11 +1652,15 @@ func (m Model) preview() string {
 	}
 	if it.mine() {
 		title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s · %s", it.key, it.ticket.Key, cmp.Or(it.pr.Title, it.ticket.Summary)), m.width))
-		return title + "\n" + dim.Render(truncate(fmt.Sprintf("%s in %s · CI %s · enter for actions", prStatus(*it.pr), it.pr.Repo, ciWord(it.pr.Checks)), m.width))
+		return title + "\n" + dim.Render(truncate(fmt.Sprintf("%s in %s · CI %s · enter for actions", statusText(it), it.pr.Repo, ciWord(it.pr.Checks)), m.width))
 	}
 	if it.pr != nil {
 		title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s", it.key, it.pr.Title), m.width))
-		return title + "\n" + dim.Render(truncate(fmt.Sprintf("review requested by %s in %s · CI %s · enter for actions", orDash(it.pr.Author), it.pr.Repo, ciWord(it.pr.Checks)), m.width))
+		approvals := ""
+		if a := it.pr.ApprovalsText(); a != "" {
+			approvals = " · " + a
+		}
+		return title + "\n" + dim.Render(truncate(fmt.Sprintf("review requested by %s in %s%s · CI %s · enter for actions", orDash(it.pr.Author), it.pr.Repo, approvals, ciWord(it.pr.Checks)), m.width))
 	}
 	t := it.ticket
 	title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s", t.Key, t.Summary), m.width))

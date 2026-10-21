@@ -120,7 +120,8 @@ func (c *Client) query(ctx context.Context, owner, q string, vars map[string]any
 const prFields = `number title url state isDraft headRefName headRefOid reviewDecision
   author { login __typename }
   repository { nameWithOwner }
-  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
+  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+  latestOpinionatedReviews(first: 100) { nodes { state } }`
 
 type prNode struct {
 	Number         int    `json:"number"`
@@ -146,6 +147,11 @@ type prNode struct {
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+	LatestOpinionatedReviews struct {
+		Nodes []struct {
+			State string `json:"state"`
+		} `json:"nodes"`
+	} `json:"latestOpinionatedReviews"`
 }
 
 func (n prNode) toPR() ticket.PullRequest {
@@ -172,6 +178,11 @@ func (n prNode) toPR() ticket.PullRequest {
 		pr.Review = ticket.ReviewChangesRequested
 	case "REVIEW_REQUIRED":
 		pr.Review = ticket.ReviewRequired
+	}
+	for _, r := range n.LatestOpinionatedReviews.Nodes {
+		if r.State == "APPROVED" {
+			pr.Approvals++
+		}
 	}
 	if n.Author != nil {
 		pr.Author = n.Author.Login

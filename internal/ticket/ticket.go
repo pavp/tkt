@@ -174,6 +174,19 @@ type PullRequest struct {
 	// AuthorBot marks pull requests opened by a bot account, such as dependabot.
 	AuthorBot bool   `json:"author_bot,omitempty"`
 	HeadSHA   string `json:"head_sha,omitempty"`
+	// Approvals counts the reviewers whose latest review approves the pull request.
+	Approvals int `json:"approvals,omitempty"`
+}
+
+// ApprovalsText words the approvals, such as "2 approvals"; it is empty without any.
+func (pr PullRequest) ApprovalsText() string {
+	switch pr.Approvals {
+	case 0:
+		return ""
+	case 1:
+		return "1 approval"
+	}
+	return fmt.Sprintf("%d approvals", pr.Approvals)
 }
 
 type Ticket struct {
