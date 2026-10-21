@@ -1450,7 +1450,7 @@ func TestPRsFilterListsMyOpenPRsThenReviews(t *testing.T) {
 		if !strings.Contains(v, "2 PRs 5") || strings.Contains(v, "Reviews 1") || strings.Contains(v, "Needs you") {
 			t.Fatalf("%s: header:\n%s", view, v)
 		}
-		mine, reviews := strings.Index(v, "Mine  4"), strings.Index(v, "Review requested · example-org/web  1")
+		mine, reviews := strings.Index(v, "Mine"), strings.Index(v, "Review requested · example-org/web  1")
 		if mine < 0 || reviews < mine {
 			t.Fatalf("%s: sections missing or out of order:\n%s", view, v)
 		}
@@ -1461,8 +1461,8 @@ func TestPRsFilterListsMyOpenPRsThenReviews(t *testing.T) {
 				t.Errorf("%s: %s row %q lacks %q", view, pr, line, status)
 			}
 		}
-		if line := strings.Split(v, "\n")[lineIndex(v, "#815 ")]; !strings.Contains(line, "DEMO-4 · Redirect after login") {
-			t.Errorf("%s: #815 row %q lacks its ticket and title", view, line)
+		if line := strings.Split(v, "\n")[lineIndex(v, "#815 ")]; !strings.Contains(line, "Redirect after login") || strings.Contains(line, "DEMO-4 ·") {
+			t.Errorf("%s: #815 row %q should show the pull request's own title", view, line)
 		}
 		if strings.Contains(v, "#700") {
 			t.Errorf("%s: merged PR listed:\n%s", view, v)
@@ -1565,6 +1565,31 @@ func TestPRMenuOffersTheFixForItsReason(t *testing.T) {
 	}
 }
 
+func TestPRsListGroupsMyPullRequestsByRepository(t *testing.T) {
+	snap := prsSnapshot()
+	pr := func(repo string, n int, c ticket.CheckState, r ticket.ReviewDecision) ticket.PullRequest {
+		return ticket.PullRequest{Repo: "example-org/" + repo, Number: n, Title: fmt.Sprintf("refactor: DEMO-9 step %d", n), State: ticket.PROpen, Checks: c, Review: r}
+	}
+	snap.Tickets = []ticket.Ticket{{Key: "DEMO-9", Summary: "Split the module", Status: "In Review", Category: ticket.InReview, PRs: []ticket.PullRequest{
+		pr("alpha", 1, ticket.ChecksPass, ""), pr("zeta", 2, ticket.ChecksPass, ""), pr("alpha", 3, ticket.ChecksFail, ""), pr("beta", 4, ticket.ChecksPass, ticket.ReviewChangesRequested),
+	}}}
+	m := tea.Model(New(snap, false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(press(m, "2").View())
+	order := []string{"Mine · example-org/alpha  2", "#3 ", "#1 ", "Mine · example-org/beta  1", "#4 ", "Mine · example-org/zeta  1", "#2 ", "Review requested · example-org/web  1"}
+	last := -1
+	for _, want := range order {
+		at := lineIndex(v, want)
+		if at <= last {
+			t.Fatalf("%q out of order (repositories that need the user first, then by name):\n%s", want, v)
+		}
+		last = at
+	}
+	if line := strings.Split(v, "\n")[lineIndex(v, "#2 ")]; !strings.Contains(line, "refactor: DEMO-9 step 2") || strings.Contains(line, "DEMO-9 · ") {
+		t.Errorf("the title should be the pull request's own: %q", line)
+	}
+}
+
 func TestPRsListLeavesOutTheAgent(t *testing.T) {
 	snap := prsSnapshot()
 	snap.Agents = map[string]string{"DEMO-1": "working", "DEMO-4": "working"}
@@ -1620,7 +1645,7 @@ func TestPRsListHeadsItsColumns(t *testing.T) {
 	for _, pr := range []string{"#812", "#806"} {
 		row := []rune(lines[lineIndex(v, pr+" ")])
 		mark, title := strings.Index(head, "CI TITLE"), strings.Index(head, "TITLE")
-		if mark < 0 || string(row[len([]rune(head[:mark]))]) == " " || string(row[len([]rune(head[:title]))]) != "D" {
+		if mark < 0 || string(row[len([]rune(head[:mark]))]) == " " || string(row[len([]rune(head[:title]))]) == " " {
 			t.Errorf("%s row does not sit under its headers:\n%q\n%q", pr, head, string(row))
 		}
 	}

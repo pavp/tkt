@@ -267,7 +267,8 @@ func (m Model) tickets() []ticket.Ticket {
 	return m.snap.Tickets
 }
 
-// myPRs lists the open pull requests of the user's tickets, those that need the user first.
+// myPRs lists the open pull requests of the user's tickets by repository, repositories with one that needs
+// the user first, then by name, and within each repository those that need the user first.
 func (m Model) myPRs() []item {
 	var out []item
 	for _, t := range board.Sorted(m.snap.Tickets) {
@@ -278,7 +279,17 @@ func (m Model) myPRs() []item {
 			}
 		}
 	}
+	urgent := map[string]bool{}
+	for _, it := range out {
+		urgent[it.pr.Repo] = urgent[it.pr.Repo] || needsYou(*it.pr)
+	}
 	slices.SortStableFunc(out, func(a, b item) int {
+		if c := boolRank(urgent[b.pr.Repo]) - boolRank(urgent[a.pr.Repo]); c != 0 {
+			return c
+		}
+		if c := strings.Compare(a.pr.Repo, b.pr.Repo); c != 0 {
+			return c
+		}
 		return boolRank(needsYou(*b.pr)) - boolRank(needsYou(*a.pr))
 	})
 	return out
@@ -1597,12 +1608,9 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		}
 		lines, at = append(lines, "  "+toggle), append(at, botToggleLine)
 	}
-	nTickets, nMine := 0, 0
+	nTickets := 0
 	for _, it := range items {
-		switch {
-		case it.mine():
-			nMine++
-		case it.ticket != nil:
+		if it.ticket != nil && !it.mine() {
 			nTickets++
 		}
 	}
@@ -1615,8 +1623,18 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 	}
 	for i, it := range items {
 		switch {
-		case i == 0 && it.mine():
-			section("Mine", nMine)
+		case it.mine() && (i == 0 || items[i-1].pr.Repo != it.pr.Repo):
+			n := 0
+			for _, o := range items[i:] {
+				if o.mine() && o.pr.Repo == it.pr.Repo {
+					n++
+				}
+			}
+			title := "Mine"
+			if it.pr.Repo != "" {
+				title += " · " + it.pr.Repo
+			}
+			section(title, n)
 		case i == 0 && it.ticket != nil:
 			section("My tickets", nTickets)
 		}
@@ -1642,8 +1660,7 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			if i != m.row && needsYou(*it.pr) {
 				status = warn.Render(status)
 			}
-			title := cmp.Or(it.pr.Title, it.ticket.Summary)
-			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, string(it.ticket.Key)+" · "+title)
+			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, cmp.Or(it.pr.Title, it.ticket.Summary))
 		default:
 			line = row(string(it.key), it.ticket.Status, agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), it.ticket.Summary)
 		}
