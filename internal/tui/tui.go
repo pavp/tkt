@@ -1657,8 +1657,9 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 		head = selected.Render("▸ " + string(t.Key))
 	}
 	dot, dotW := "", 0
-	if _, kind := board.AgentLine(agent); kind != board.AgentNone {
-		dot, dotW = agentStyle(agent).Render("●"), 2
+	if line, kind := board.AgentLine(agent); kind != board.AgentNone {
+		glyph, _, _ := strings.Cut(line, " ")
+		dot, dotW = agentStyle(agent).Render(glyph), 2
 	}
 	flag := ""
 	if r := t.Attention(); len(r) > 0 {
@@ -2036,7 +2037,7 @@ func shortName(name string) string {
 	return parts[0] + " " + string(last[0]) + "."
 }
 
-// agentWidth fits the longest agent cell, "! needs you".
+// agentWidth fits the longest agent cell, "● needs you".
 const agentWidth = 11
 
 // agentCell words a ticket's agent for the list, padded to agentW (which includes its gap) and colored

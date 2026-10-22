@@ -670,15 +670,18 @@ const (
 	AgentNeedsYou
 )
 
-// AgentLine words a Herdr agent status as the prototype does. Herdr reports "blocked" while an agent waits
-// for the user's confirmation, and "unknown" for panes it cannot read, which tells the user nothing.
+// AgentLine words a Herdr agent status as the prototype does, with the dot Herdr draws for it (hollow only
+// when idle). Herdr reports "blocked" while an agent waits for the user's confirmation, and "unknown" for
+// panes it cannot read, which tells the user nothing.
 func AgentLine(status string) (string, AgentKind) {
 	switch status {
 	case "working":
 		return "● claude working", AgentWorking
 	case "blocked":
-		return "! claude needs you", AgentNeedsYou
-	case "idle", "done":
+		return "● claude needs you", AgentNeedsYou
+	case "done":
+		return "● claude done", AgentIdle
+	case "idle":
 		return "○ claude idle", AgentIdle
 	}
 	return "no agent", AgentNone
@@ -688,7 +691,8 @@ func AgentLine(status string) (string, AgentKind) {
 func MostUrgentAgent(statuses []string) string {
 	best, bestKind := "", AgentNone
 	for _, s := range statuses {
-		if _, k := AgentLine(s); k > bestKind {
+		// A finished agent outranks an idle one: both wait, but it has something to show.
+		if _, k := AgentLine(s); k > bestKind || k == AgentIdle && bestKind == AgentIdle && s == "done" {
 			best, bestKind = s, k
 		}
 	}

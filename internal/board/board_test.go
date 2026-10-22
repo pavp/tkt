@@ -466,9 +466,9 @@ func TestAgentLine(t *testing.T) {
 		kind         AgentKind
 	}{
 		{"working", "● claude working", AgentWorking},
-		{"blocked", "! claude needs you", AgentNeedsYou},
+		{"blocked", "● claude needs you", AgentNeedsYou},
 		{"idle", "○ claude idle", AgentIdle},
-		{"done", "○ claude idle", AgentIdle},
+		{"done", "● claude done", AgentIdle},
 		{"unknown", "no agent", AgentNone},
 		{"", "no agent", AgentNone},
 	}
@@ -487,7 +487,8 @@ func TestMostUrgentAgent(t *testing.T) {
 	}{
 		{[]string{"idle", "working"}, "working"},
 		{[]string{"working", "blocked", "idle"}, "blocked"},
-		{[]string{"done", "idle"}, "idle"},
+		{[]string{"done", "idle"}, "done"},
+		{[]string{"idle", "done"}, "done"},
 		{[]string{"unknown"}, ""},
 		{nil, ""},
 	}
