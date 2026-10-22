@@ -1778,13 +1778,13 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	if tl := strings.Split(stripANSI(tray.View()), "\n"); !strings.Contains(tl[1], "tkt") || !strings.Contains(tl[1], "1 All") {
 		t.Errorf("without the sync state, a 60-column pane keeps the controls on the title row:\n%s\n%s", tl[0], tl[1])
 	}
-	narrow, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 40})
+	narrow, _ := m.Update(tea.WindowSizeMsg{Width: 24, Height: 40})
 	nl := strings.Split(stripANSI(narrow.View()), "\n")
 	if !strings.Contains(nl[0], "tkt") || !strings.Contains(nl[1], "1 All") {
 		t.Errorf("a narrow pane should move the controls to the second row:\n%s\n%s", nl[0], nl[1])
 	}
 	for _, l := range nl[:3] {
-		if lipgloss.Width(l) > 40 {
+		if lipgloss.Width(l) > 24 {
 			t.Errorf("header line wider than the pane: %q", l)
 		}
 	}
@@ -2495,7 +2495,7 @@ func TestReposButtonOpensAndClosesTheFilter(t *testing.T) {
 	}
 	narrow := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
 	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
-	if v := stripANSI(narrow.View()); !strings.Contains(v, "╭") || !strings.Contains(v, "│ List │") {
+	if v := stripANSI(narrow.View()); !strings.Contains(v, "╭") || !strings.Contains(v, "│ Repos │") {
 		t.Errorf("the tray panel keeps its boxed buttons:\n%s", v)
 	}
 }
@@ -2994,6 +2994,21 @@ func TestTeamModeListsEveryOpenPullRequestWithItsAuthor(t *testing.T) {
 	off := press(New(snap, false, r, ViewList), "2")
 	if v := stripANSI(off.View()); !strings.Contains(v, "Review requested · example-org/web") || strings.Contains(v, "Team · ") {
 		t.Errorf("with Team off only the review requests follow the user's pull requests:\n%s", v)
+	}
+}
+
+func TestViewButtonsShowOnlyWhereTheyApply(t *testing.T) {
+	m := tea.Model(New(snapshot(), true, &recorder{}, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(m.View()); !strings.Contains(v, "│ Columns │ │ List │") {
+		t.Errorf("the tickets' view offers both views:\n%s", v)
+	}
+	if head := strings.Join(strings.Split(stripANSI(press(m, "2").View()), "\n")[:4], "\n"); strings.Contains(head, "Columns") || strings.Contains(head, "List") {
+		t.Errorf("the PRs filter is always a list, so it offers no view:\n%s", head)
+	}
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 90, Height: 40})
+	if head := strings.Join(strings.Split(stripANSI(m.View()), "\n")[:4], "\n"); strings.Contains(head, "Columns") {
+		t.Errorf("a pane too narrow for columns offers no view:\n%s", head)
 	}
 }
 

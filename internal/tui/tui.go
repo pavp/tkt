@@ -1458,13 +1458,17 @@ type headerItem struct {
 	repos, team bool
 }
 
+// headerSpec lists the filter buttons and, where the user can choose the view, the view buttons: the PRs
+// filter and a pane too narrow for columns always show the list.
 func (m Model) headerSpec() []headerItem {
-	return []headerItem{
+	spec := []headerItem{
 		{filter: FilterAll, label: fmt.Sprintf(" 1 All %d ", len(m.shownTickets())+len(m.reviews()))},
 		{filter: FilterPRs, label: fmt.Sprintf(" 2 PRs %d ", m.prCount())},
-		{view: ViewColumns, label: " Columns "},
-		{view: ViewList, label: " List "},
 	}
+	if m.filter != FilterPRs && m.width >= narrowWidth {
+		spec = append(spec, headerItem{view: ViewColumns, label: " Columns "}, headerItem{view: ViewList, label: " List "})
+	}
+	return spec
 }
 
 // reposButton opens the repository filter; it says how many repositories show while any is hidden.
