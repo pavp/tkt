@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -50,18 +51,29 @@ func newFixCmd(a *App) *cobra.Command {
 
 // sendFeedback builds the feedback prompt for key and delivers it, returning what happened.
 func (a *App) sendFeedback(ctx context.Context, c *config.Config, key ticket.Key, printOnly bool) (string, error) {
-	msg, _, err := a.deliverFeedback(ctx, c, key, printOnly)
+	msg, _, err := a.deliverFeedback(ctx, c, key, nil, printOnly, nil)
 	return msg, err
 }
 
 // deliverFeedback is sendFeedback also naming the agent's pane it prompted; it is empty when the prompt
-// was only printed.
-func (a *App) deliverFeedback(ctx context.Context, c *config.Config, key ticket.Key, printOnly bool) (msg, pane string, err error) {
-	d, err := a.loadDetail(ctx, c, key, nil)
-	if err != nil {
-		return "", "", err
+// was only printed. known, when set, is the caller's copy of the ticket, whose pull requests need no
+// fetching; progress, when set, hears each step as it starts.
+func (a *App) deliverFeedback(ctx context.Context, c *config.Config, key ticket.Key, known *ticket.Ticket, printOnly bool, progress func(string)) (msg, pane string, err error) {
+	step := func(s string) {
+		if progress != nil {
+			progress(s)
+		}
 	}
-	prompt, err := a.feedbackPrompt(ctx, c, d.Ticket)
+	t := known
+	if t == nil {
+		d, err := a.loadDetail(ctx, c, key, nil)
+		if err != nil {
+			return "", "", err
+		}
+		t = &d.Ticket
+	}
+	step(string(key) + " · collecting its feedback from GitHub…")
+	prompt, err := a.feedbackPrompt(ctx, c, *t)
 	if err != nil {
 		return "", "", err
 	}
@@ -72,6 +84,7 @@ func (a *App) deliverFeedback(ctx context.Context, c *config.Config, key ticket.
 	if err != nil {
 		return "", "", err
 	}
+	step(string(key) + " · sending it to the agent…")
 	if err := a.NewHerdr().Prompt(ctx, pane, prompt); err != nil {
 		return "", "", err
 	}
@@ -80,46 +93,70 @@ func (a *App) deliverFeedback(ctx context.Context, c *config.Config, key ticket.
 
 func (a *App) feedbackPrompt(ctx context.Context, c *config.Config, t ticket.Ticket) (string, error) {
 	gh := a.NewGitHub(c)
-	var b strings.Builder
-	for _, pr := range t.PRs {
+	// Every pull request's checks, reviews and threads are asked at once, each into its own slot, so the
+	// prompt keeps the pull requests' order whichever answer comes first.
+	const parts = 3
+	texts := make([]strings.Builder, len(t.PRs)*parts)
+	errs := make([]error, len(t.PRs)*parts)
+	var wg sync.WaitGroup
+	ask := func(slot int, f func(b *strings.Builder) error) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[slot] = f(&texts[slot])
+		}()
+	}
+	for i, pr := range t.PRs {
 		if pr.State != ticket.PROpen {
 			continue
 		}
 		if pr.Checks == ticket.ChecksFail && pr.HeadSHA != "" {
-			checks, err := gh.FailedChecks(ctx, pr.Repo, pr.HeadSHA)
-			if err != nil {
-				return "", err
-			}
-			for _, fc := range checks {
-				fmt.Fprintf(&b, "CI check %q failed on %s#%d (%s).\n", fc.Name, pr.Repo, pr.Number, fc.URL)
-				if fc.Summary != "" {
-					fmt.Fprintf(&b, "Summary: %s\n", fc.Summary)
+			ask(i*parts, func(b *strings.Builder) error {
+				checks, err := gh.FailedChecks(ctx, pr.Repo, pr.HeadSHA)
+				for _, fc := range checks {
+					fmt.Fprintf(b, "CI check %q failed on %s#%d (%s).\n", fc.Name, pr.Repo, pr.Number, fc.URL)
+					if fc.Summary != "" {
+						fmt.Fprintf(b, "Summary: %s\n", fc.Summary)
+					}
+					if fc.LogTail != "" {
+						fmt.Fprintf(b, "End of the log:\n```\n%s\n```\n", fc.LogTail)
+					}
+					b.WriteString("\n")
 				}
-				if fc.LogTail != "" {
-					fmt.Fprintf(&b, "End of the log:\n```\n%s\n```\n", fc.LogTail)
-				}
-				b.WriteString("\n")
-			}
+				return err
+			})
 		}
 		if pr.Review == ticket.ReviewChangesRequested {
-			reviews, err := gh.ChangeRequests(ctx, pr.Repo, pr.Number)
-			if err != nil {
-				return "", err
-			}
-			for _, r := range reviews {
-				writeReview(&b, pr, r)
-			}
+			ask(i*parts+1, func(b *strings.Builder) error {
+				reviews, err := gh.ChangeRequests(ctx, pr.Repo, pr.Number)
+				for _, r := range reviews {
+					writeReview(b, pr, r)
+				}
+				return err
+			})
 		}
 		if pr.Unresolved > 0 {
-			threads, err := gh.UnresolvedThreads(ctx, pr.Repo, pr.Number)
-			if err != nil {
-				return "", err
-			}
-			for _, th := range threads {
-				writeThread(&b, pr, th)
-			}
+			ask(i*parts+2, func(b *strings.Builder) error {
+				threads, err := gh.UnresolvedThreads(ctx, pr.Repo, pr.Number)
+				for _, th := range threads {
+					writeThread(b, pr, th)
+				}
+				return err
+			})
 		}
-		if pr.Merge == ticket.MergeConflicts {
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return "", err
+		}
+	}
+	var b strings.Builder
+	for i, pr := range t.PRs {
+		for p := range parts {
+			b.WriteString(texts[i*parts+p].String())
+		}
+		if pr.State == ticket.PROpen && pr.Merge == ticket.MergeConflicts {
 			fmt.Fprintf(&b, "%s#%d has merge conflicts with its base branch: rebase it onto the base branch, resolve the conflicts, and push with --force-with-lease.\n\n", pr.Repo, pr.Number)
 		}
 	}

@@ -48,6 +48,9 @@ func TestFixPrintsPromptOutsideHerdr(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
+	if strings.Index(out, "@alex") > strings.Index(out, "unit-tests") {
+		t.Errorf("feedback should follow the pull requests' order:\n%s", out)
+	}
 	if count(f, "agent.prompt") != 0 {
 		t.Error("prompted an agent outside Herdr")
 	}

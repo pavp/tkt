@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -63,18 +64,94 @@ type TransitionedMsg struct {
 	Err error
 }
 
-func (m Model) transitions(msg TransitionsMsg) (tea.Model, tea.Cmd) {
-	if msg.Err != nil {
-		m.status = "could not load the statuses of " + string(msg.Key) + ": " + msg.Err.Error()
-		return m, nil
+// movesFresh is how long the statuses asked when a menu opened stay good for Move to….
+const movesFresh = time.Minute
+
+type knownMoves struct {
+	trs []Transition
+	at  time.Time
+}
+
+// movesFetchedMsg carries the statuses asked ahead, when a ticket's menu opened.
+type movesFetchedMsg TransitionsMsg
+
+// prefetchMoves asks Jira where the item's ticket can move while the user reads its menu.
+func (m Model) prefetchMoves(it item) tea.Cmd {
+	if it.review() || it.ticket == nil || it.ticket.Team {
+		return nil
 	}
-	if mn := m.moveMenu(msg.Key, msg.Transitions); len(mn.items) > 0 {
-		m.status = ""
-		m.menu = mn
-	} else {
-		m.status = "Jira offers no status change for " + string(msg.Key)
+	k := it.ticket.Key
+	if mv, ok := m.moves[k]; ok && m.now().Sub(mv.at) < movesFresh {
+		return nil
+	}
+	ask := m.actions.Transitions(k)
+	return func() tea.Msg {
+		msg, _ := ask().(TransitionsMsg)
+		return movesFetchedMsg(msg)
+	}
+}
+
+func (m Model) movesFetched(msg movesFetchedMsg) (tea.Model, tea.Cmd) {
+	if m.menu != nil && m.menu.loading == msg.Key {
+		return m.transitions(TransitionsMsg(msg))
+	}
+	if msg.Err == nil && msg.Key != "" {
+		m.moves[msg.Key] = knownMoves{msg.Transitions, m.now()}
 	}
 	return m, nil
+}
+
+// openMoves shows where k can move: at once when its statuses are known, otherwise a menu saying they
+// are loading, which they replace when Jira answers.
+func (m Model) openMoves(k ticket.Key, parent *menu) (tea.Model, tea.Cmd) {
+	if mv, ok := m.moves[k]; ok && m.now().Sub(mv.at) < movesFresh {
+		return m.showMoves(k, mv.trs, parent)
+	}
+	m.menu = &menu{title: "Move " + string(k) + " to", items: []menuItem{{label: dim.Render("loading the statuses Jira allows…")}}, back: parent, loading: k}
+	return m, m.actions.Transitions(k)
+}
+
+func (m Model) transitions(msg TransitionsMsg) (tea.Model, tea.Cmd) {
+	waiting := m.menu != nil && m.menu.loading == msg.Key
+	var back *menu
+	if waiting {
+		back = m.menu.back
+	}
+	if msg.Err == nil {
+		m.moves[msg.Key] = knownMoves{msg.Transitions, m.now()}
+	}
+	// Only the menu still waiting opens: one the user closed, or a second answer, stays closed.
+	if !waiting {
+		return m, nil
+	}
+	if msg.Err != nil {
+		m.status = "could not load the statuses of " + string(msg.Key) + ": " + msg.Err.Error()
+		m.menu = back
+		return m, nil
+	}
+	return m.showMoves(msg.Key, msg.Transitions, back)
+}
+
+func (m Model) showMoves(k ticket.Key, trs []Transition, back *menu) (tea.Model, tea.Cmd) {
+	if mn := m.moveMenu(k, trs); len(mn.items) > 0 {
+		m.status = ""
+		mn.back = back
+		m.menu = mn
+	} else {
+		m.status = "Jira offers no status change for " + string(k)
+		m.menu = back
+	}
+	return m, nil
+}
+
+// startFix sends a ticket's feedback to its agent from the board's copy of the ticket, saying so meanwhile.
+func (m Model) startFix(k ticket.Key) (tea.Model, tea.Cmd) {
+	var known *ticket.Ticket
+	if t, ok := m.snap.Find(k); ok {
+		known = &t
+	}
+	m.status = string(k) + " · sending its feedback to the agent…"
+	return m, m.actions.Fix(k, known)
 }
 
 func (m Model) transitioned(msg TransitionedMsg) (tea.Model, tea.Cmd) {
@@ -83,6 +160,7 @@ func (m Model) transitioned(msg TransitionedMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.status = string(msg.Key) + " moved to " + msg.To
+	delete(m.moves, msg.Key)
 	loading := m.beginLoading()
 	return m, tea.Batch(m.actions.Refresh(), loading)
 }

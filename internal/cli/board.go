@@ -505,9 +505,13 @@ func (b *boardActions) Open(url string) tea.Cmd {
 
 // Fix sends the ticket's feedback to its agent; inside Herdr the board then steps aside for the agent, as it
 // does for the ticket pane, focusing the agent's pane and closing.
-func (b *boardActions) Fix(key ticket.Key) tea.Cmd {
+func (b *boardActions) Fix(key ticket.Key, known *ticket.Ticket) tea.Cmd {
 	return func() tea.Msg {
-		msg, pane, err := b.a.deliverFeedback(b.ctx, b.cfg(), key, false)
+		var progress func(string)
+		if b.send != nil {
+			progress = func(s string) { b.send(tui.StatusMsg(s)) }
+		}
+		msg, pane, err := b.a.deliverFeedback(b.ctx, b.cfg(), key, known, false, progress)
 		if err != nil {
 			return tui.StatusMsg(err.Error())
 		}

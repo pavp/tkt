@@ -183,8 +183,13 @@ func (r *recorder) StartChoices(k ticket.Key) tea.Cmd {
 func (r *recorder) TicketPane(k ticket.Key) tea.Cmd {
 	return r.cmd("pane " + string(k))
 }
-func (r *recorder) Open(u string) tea.Cmd    { return r.cmd("open " + u) }
-func (r *recorder) Fix(k ticket.Key) tea.Cmd { return r.cmd("fix " + string(k)) }
+func (r *recorder) Open(u string) tea.Cmd { return r.cmd("open " + u) }
+func (r *recorder) Fix(k ticket.Key, known *ticket.Ticket) tea.Cmd {
+	if known != nil {
+		return r.cmd("fix " + string(k) + " known")
+	}
+	return r.cmd("fix " + string(k))
+}
 func (r *recorder) last() string {
 	if len(r.calls) == 0 {
 		return ""
@@ -399,7 +404,7 @@ func TestActionKeys(t *testing.T) {
 	r := &recorder{}
 	m := press(loaded(r), "l")
 	tests := []struct{ key, want string }{
-		{"f", "fix DEMO-1"},
+		{"f", "fix DEMO-1 known"},
 		{"o", "open https://example.atlassian.net/browse/DEMO-1"},
 		{"p", "open https://github.com/example-org/web/pull/812"},
 		{"O", "copy link https://example.atlassian.net/browse/DEMO-1"},
@@ -1118,7 +1123,7 @@ func TestActionsMenu(t *testing.T) {
 	}
 	m = press(m, "s", "s", "s", "s", "s")
 	_, msg := run(m, "enter")
-	if r.last() != "fix DEMO-1" || msg != StatusMsg("fix DEMO-1") {
+	if r.last() != "fix DEMO-1 known" || msg != StatusMsg("fix DEMO-1 known") {
 		t.Errorf("sixth item ran %v", r.calls)
 	}
 	m = press(loaded(r), "enter", "w")
@@ -1531,7 +1536,7 @@ func TestPRsFilterActsOnTheRowsTicket(t *testing.T) {
 	}
 	press(m, "f")
 	press(m, "p")
-	if !slices.Contains(r.calls, "fix DEMO-4") || !slices.Contains(r.calls, "open https://github.com/example-org/web/pull/815") {
+	if !slices.Contains(r.calls, "fix DEMO-4 known") || !slices.Contains(r.calls, "open https://github.com/example-org/web/pull/815") {
 		t.Errorf("calls = %v", r.calls)
 	}
 }
@@ -2916,19 +2921,86 @@ func TestMoveToListsJiraStatusesAndConfirmsBeforeMoving(t *testing.T) {
 	}
 
 	_, msg = run(selectMenuItem(t, press(loaded(r), "l", "enter"), "Move to…"), "enter")
-	m, _ = loaded(r).Update(msg)
+	m, _ = awaitingMoves(loaded(r)).Update(msg)
 	if _, msg := run(selectMenuItem(t, m, "Blocked"), "enter"); msg != StatusMsg("open https://example.atlassian.net/browse/DEMO-1") {
 		t.Errorf("a status with a required form should open Jira, got %v", msg)
 	}
 }
 
+func TestMoveToOpensAtOnceWhenTheStatusesArrivedWithTheMenu(t *testing.T) {
+	r := &recorder{transitions: []Transition{{ID: "31", To: "In Review"}}}
+	m, cmd := press(loaded(r), "l").Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || r.last() != "transitions DEMO-1" {
+		t.Fatalf("opening the menu should ask Jira for the statuses: %v", r.calls)
+	}
+	m, _ = m.Update(cmd())
+	m, cmd = selectMenuItem(t, m, "Move to…").Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if v := stripANSI(m.View()); cmd != nil || !strings.Contains(v, "Move DEMO-1 to") || !strings.Contains(v, "In Review") {
+		t.Fatalf("Move to… should open at once:\n%s", v)
+	}
+	if n := strings.Count(strings.Join(r.calls, ","), "transitions"); n != 1 {
+		t.Errorf("Jira asked %d times", n)
+	}
+	if v := stripANSI(press(m, "esc").View()); !strings.Contains(v, "Actions for DEMO-1") {
+		t.Errorf("esc should go back to the actions:\n%s", v)
+	}
+}
+
+func TestMoveToSaysItIsLoadingUntilJiraAnswers(t *testing.T) {
+	r := &recorder{transitions: []Transition{{ID: "31", To: "In Review"}}}
+	m, cmd := selectMenuItem(t, press(loaded(r), "l", "enter"), "Move to…").Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if v := stripANSI(m.View()); cmd == nil || !strings.Contains(v, "loading the statuses Jira allows…") {
+		t.Fatalf("the submenu should open at once, loading:\n%s", v)
+	}
+	m, _ = m.Update(cmd())
+	if v := stripANSI(m.View()); !strings.Contains(v, "Move DEMO-1 to") || strings.Contains(v, "loading") {
+		t.Fatalf("the statuses should replace the loading row:\n%s", v)
+	}
+	if v := stripANSI(press(m, "esc").View()); !strings.Contains(v, "Actions for DEMO-1") {
+		t.Errorf("esc should go back to the actions:\n%s", v)
+	}
+}
+
+func TestFixFromTheMenuSaysItIsWorking(t *testing.T) {
+	r := &recorder{}
+	m := selectMenuItem(t, press(loaded(r), "l", "enter"), "Send the CI failure to the agent")
+	m = press(m, "enter")
+	if r.last() != "fix DEMO-1 known" {
+		t.Fatalf("fix should reuse the board's ticket: %v", r.calls)
+	}
+	if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-1 · sending its feedback to the agent…") {
+		t.Errorf("the board should say it is working:\n%s", v)
+	}
+}
+
+// awaitingMoves shows DEMO-1's Move to… menu waiting for its statuses, as choosing it does.
+func awaitingMoves(m tea.Model) tea.Model {
+	mm := m.(Model)
+	mm.menu = &menu{title: "Move DEMO-1 to", loading: "DEMO-1"}
+	return mm
+}
+
+func TestMoveToStaysClosedWhenJiraAnswersLate(t *testing.T) {
+	r := &recorder{transitions: []Transition{{ID: "31", To: "In Review"}}}
+	m, cmd := selectMenuItem(t, press(loaded(r), "l", "enter"), "Move to…").Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = press(m, "esc", "esc")
+	m, _ = m.Update(cmd())
+	if v := stripANSI(m.View()); strings.Contains(v, "Move DEMO-1 to") {
+		t.Errorf("a menu the user closed should not open again:\n%s", v)
+	}
+	m, cmd = selectMenuItem(t, press(m, "enter"), "Move to…").Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if v := stripANSI(m.View()); cmd != nil || !strings.Contains(v, "In Review") {
+		t.Errorf("the late answer should still be kept for the next Move to…:\n%s", v)
+	}
+}
+
 func TestMoveToReportsFailures(t *testing.T) {
 	m := loaded(&recorder{})
-	m, _ = m.Update(TransitionsMsg{Key: "DEMO-1", Err: errors.New("jira down")})
+	m, _ = awaitingMoves(m).Update(TransitionsMsg{Key: "DEMO-1", Err: errors.New("jira down")})
 	if v := stripANSI(m.View()); !strings.Contains(v, "could not load the statuses of DEMO-1: jira down") {
 		t.Errorf("failure to list:\n%s", v)
 	}
-	m, _ = m.Update(TransitionsMsg{Key: "DEMO-1"})
+	m, _ = awaitingMoves(m).Update(TransitionsMsg{Key: "DEMO-1"})
 	if v := stripANSI(m.View()); !strings.Contains(v, "Jira offers no status change for DEMO-1") {
 		t.Errorf("nothing to offer:\n%s", v)
 	}
@@ -2951,7 +3023,7 @@ func TestTeamTicketsCannotBeMoved(t *testing.T) {
 
 func TestMenuKeepsItsSizeWhileMovingOverLinks(t *testing.T) {
 	r := &recorder{transitions: []Transition{{ID: "31", To: "Done"}, {ID: "51", To: "Blocked", NeedsForm: true}}}
-	m, _ := loaded(r).Update(TransitionsMsg{Key: "DEMO-1", Transitions: r.transitions})
+	m, _ := awaitingMoves(loaded(r)).Update(TransitionsMsg{Key: "DEMO-1", Transitions: r.transitions})
 	box := func(m tea.Model) (int, int) { v := m.(Model).menuView(); return lipgloss.Width(v), lipgloss.Height(v) }
 	w, h := box(m)
 	if w2, h2 := box(press(m, "s")); w2 != w || h2 != h {
@@ -2969,7 +3041,7 @@ func blockedTransition() Transition {
 
 func TestMoveFillsTheFormBeforeMoving(t *testing.T) {
 	r := &recorder{transitions: []Transition{blockedTransition()}}
-	m, _ := loaded(r).Update(TransitionsMsg{Key: "DEMO-1", Transitions: r.transitions})
+	m, _ := awaitingMoves(loaded(r)).Update(TransitionsMsg{Key: "DEMO-1", Transitions: r.transitions})
 	m = press(selectMenuItem(t, m, "Blocked"), "enter")
 	v := stripANSI(m.View())
 	for _, want := range []string{"Move DEMO-1 to Blocked", "Reason *: —", "Source: —", "Move DEMO-1 to Blocked now", "Cancel"} {
@@ -3009,7 +3081,7 @@ func TestMoveFillsTheFormBeforeMoving(t *testing.T) {
 func TestMoveLeavesToJiraAFormItCannotFill(t *testing.T) {
 	tr := blockedTransition()
 	tr.Fields = append(tr.Fields, Field{ID: "issuelinks", Name: "Linked issues", Kind: "array", Required: true})
-	m, _ := loaded(&recorder{}).Update(TransitionsMsg{Key: "DEMO-1", Transitions: []Transition{tr}})
+	m, _ := awaitingMoves(loaded(&recorder{})).Update(TransitionsMsg{Key: "DEMO-1", Transitions: []Transition{tr}})
 	if v := stripANSI(m.View()); !strings.Contains(v, "Blocked · in Jira ↗") {
 		t.Errorf("a required field the board cannot fill should leave the move to Jira:\n%s", v)
 	}
@@ -3020,7 +3092,7 @@ func TestMoveFormFitsANarrowPane(t *testing.T) {
 	tr.Fields[0].Options[0].Value = "Pending delivery from another product of the company"
 	m := tea.Model(New(snapshot(), false, &recorder{}, ViewList))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
-	m, _ = m.Update(TransitionsMsg{Key: "DEMO-1", Transitions: []Transition{tr}})
+	m, _ = awaitingMoves(m).Update(TransitionsMsg{Key: "DEMO-1", Transitions: []Transition{tr}})
 	m = press(selectMenuItem(t, m, "Blocked"), "enter")
 	m = press(selectMenuItem(t, m, "Reason"), "enter")
 	m, msg := run(selectMenuItem(t, m, "Pending"), "enter")
@@ -3048,7 +3120,7 @@ func typeKeys(m tea.Model, text string) tea.Model {
 
 func TestMoveFormPicksAUserAndWritesAComment(t *testing.T) {
 	r := &recorder{transitions: []Transition{blockedTransition()}, users: map[string][]User{"an": {{ID: "acc-7", Name: "Ana López"}, {ID: "acc-8", Name: "Andrés Gil"}}}}
-	m, _ := loaded(r).Update(TransitionsMsg{Key: "DEMO-1", Transitions: r.transitions})
+	m, _ := awaitingMoves(loaded(r)).Update(TransitionsMsg{Key: "DEMO-1", Transitions: r.transitions})
 	m = press(selectMenuItem(t, m, "Blocked"), "enter")
 	if v := stripANSI(m.View()); !strings.Contains(v, "Owner: —") || !strings.Contains(v, "Comment: —") {
 		t.Fatalf("the form should offer the user field and a comment:\n%s", v)
@@ -3093,7 +3165,7 @@ func TestUserSearchScrollsToTheSelection(t *testing.T) {
 		many = append(many, User{ID: strconv.Itoa(i), Name: fmt.Sprintf("Person %02d", i)})
 	}
 	r := &recorder{users: map[string][]User{"pe": many}}
-	m, _ := loaded(r).Update(TransitionsMsg{Key: "DEMO-1", Transitions: []Transition{blockedTransition()}})
+	m, _ := awaitingMoves(loaded(r)).Update(TransitionsMsg{Key: "DEMO-1", Transitions: []Transition{blockedTransition()}})
 	m = typeKeys(press(selectMenuItem(t, press(selectMenuItem(t, m, "Blocked"), "enter"), "Owner"), "enter"), "pe")
 	for i := 0; i < 11; i++ {
 		m = send(m, tea.KeyMsg{Type: tea.KeyDown})
