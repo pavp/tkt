@@ -1778,13 +1778,13 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	if tl := strings.Split(stripANSI(tray.View()), "\n"); !strings.Contains(tl[1], "tkt") || !strings.Contains(tl[1], "1 All") {
 		t.Errorf("without the sync state, a 60-column pane keeps the controls on the title row:\n%s\n%s", tl[0], tl[1])
 	}
-	narrow, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 40})
+	narrow, _ := m.Update(tea.WindowSizeMsg{Width: 24, Height: 40})
 	nl := strings.Split(stripANSI(narrow.View()), "\n")
 	if !strings.Contains(nl[0], "tkt") || !strings.Contains(nl[1], "1 All") {
 		t.Errorf("a narrow pane should move the controls to the second row:\n%s\n%s", nl[0], nl[1])
 	}
 	for _, l := range nl[:3] {
-		if lipgloss.Width(l) > 40 {
+		if lipgloss.Width(l) > 24 {
 			t.Errorf("header line wider than the pane: %q", l)
 		}
 	}
@@ -2495,7 +2495,7 @@ func TestReposButtonOpensAndClosesTheFilter(t *testing.T) {
 	}
 	narrow := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
 	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
-	if v := stripANSI(narrow.View()); !strings.Contains(v, "╭") || !strings.Contains(v, "│ List │") {
+	if v := stripANSI(narrow.View()); !strings.Contains(v, "╭") || !strings.Contains(v, "│ Repos │") {
 		t.Errorf("the tray panel keeps its boxed buttons:\n%s", v)
 	}
 }
@@ -2997,6 +2997,21 @@ func TestTeamModeListsEveryOpenPullRequestWithItsAuthor(t *testing.T) {
 	}
 }
 
+func TestViewButtonsShowOnlyWhereTheyApply(t *testing.T) {
+	m := tea.Model(New(snapshot(), true, &recorder{}, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(m.View()); !strings.Contains(v, "│ Columns │ │ List │") {
+		t.Errorf("the tickets' view offers both views:\n%s", v)
+	}
+	if head := strings.Join(strings.Split(stripANSI(press(m, "2").View()), "\n")[:4], "\n"); strings.Contains(head, "Columns") || strings.Contains(head, "List") {
+		t.Errorf("the PRs filter is always a list, so it offers no view:\n%s", head)
+	}
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 90, Height: 40})
+	if head := strings.Join(strings.Split(stripANSI(m.View()), "\n")[:4], "\n"); strings.Contains(head, "Columns") {
+		t.Errorf("a pane too narrow for columns offers no view:\n%s", head)
+	}
+}
+
 func TestTeamToggleIsPerView(t *testing.T) {
 	snap := prsSnapshot()
 	snap.Others = []ticket.PullRequest{{Repo: "example-org/api", Number: 901, Title: "Rename the export", Author: "sam", State: ticket.PROpen}}
@@ -3007,7 +3022,11 @@ func TestTeamToggleIsPerView(t *testing.T) {
 	if strings.Contains(stripANSI(m.View()), "Team · ") {
 		t.Fatalf("team pull requests start hidden:\n%s", stripANSI(m.View()))
 	}
+	before := stripANSI(m.View())
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	if !strings.Contains(before, "2 PRs 5") || !strings.Contains(stripANSI(m.View()), "2 PRs 6") {
+		t.Errorf("the PRs counter should count the team's pull requests while they show:\n%s", stripANSI(m.View()))
+	}
 	if v := stripANSI(m.View()); !strings.Contains(v, "Team · example-org/api") || !strings.Contains(v, "showing the team's pull requests too · t hides them") {
 		t.Fatalf("t in the PRs filter shows the team's pull requests at once:\n%s", v)
 	}

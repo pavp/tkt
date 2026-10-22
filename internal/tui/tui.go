@@ -341,6 +341,15 @@ func (m Model) reviews() []ticket.PullRequest {
 	return slices.DeleteFunc(slices.Clone(reviews), func(pr ticket.PullRequest) bool { return m.repoHidden(pr.Repo) })
 }
 
+// prCount counts the PRs filter's pull requests: the user's, the review requests and, while shown, the team's.
+func (m Model) prCount() int {
+	n := len(m.myPRs()) + len(m.reviews())
+	if m.teamPRs {
+		n += len(m.others())
+	}
+	return n
+}
+
 // others are the open pull requests of everyone else, listed while Team is on, filtered as reviews are.
 func (m Model) others() []ticket.PullRequest {
 	others := m.snap.Others
@@ -1449,13 +1458,17 @@ type headerItem struct {
 	repos, team bool
 }
 
+// headerSpec lists the filter buttons and, where the user can choose the view, the view buttons: the PRs
+// filter and a pane too narrow for columns always show the list.
 func (m Model) headerSpec() []headerItem {
-	return []headerItem{
+	spec := []headerItem{
 		{filter: FilterAll, label: fmt.Sprintf(" 1 All %d ", len(m.shownTickets())+len(m.reviews()))},
-		{filter: FilterPRs, label: fmt.Sprintf(" 2 PRs %d ", len(m.myPRs())+len(m.reviews()))},
-		{view: ViewColumns, label: " Columns "},
-		{view: ViewList, label: " List "},
+		{filter: FilterPRs, label: fmt.Sprintf(" 2 PRs %d ", m.prCount())},
 	}
+	if m.filter != FilterPRs && m.width >= narrowWidth {
+		spec = append(spec, headerItem{view: ViewColumns, label: " Columns "}, headerItem{view: ViewList, label: " List "})
+	}
+	return spec
 }
 
 // reposButton opens the repository filter; it says how many repositories show while any is hidden.
