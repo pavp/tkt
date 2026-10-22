@@ -7,16 +7,16 @@ Objective: map each space's Jira statuses to the board's four columns and choose
 - S1 Settings gets a section "para agrupar en las 4 columnas segun los estados disponible de los tickets de jira? asi queda agnostico a la empresa": one block per space listing every Jira status of the space with its column; the user changes a status's column, statuses left alone follow the automatic rule (shown as `auto`); only changes are saved, in `status_overrides`.
 - S2 "no solo en settings si no que lo debera preguntar en el init tambien": `tkt init` asks each space's column mapping.
 - S3 Tickets in a status the user moved out of its automatic column show "un identificativo para saber que estan en pending test": the card header shows `◇ <status name>` ("va el nombre, perfecto"), or `◇` alone when it does not fit.
-- S4 Marks are configurable per status ("las marcas tambien deberian poder configurarse? o setearse de manera automatica? para los casos por ejemplo de blocked y pending test"): automatic by default (`⊘` for names with "block"/"bloque", `◇` for moved statuses), changed in the Settings section with `m` (none, `◇`, `⊘`); only changes are saved, in `status_marks`. Assumption: init does not ask marks.
+- S4 Marks are configurable per status ("las marcas tambien deberian poder configurarse? o setearse de manera automatica? para los casos por ejemplo de blocked y pending test"; "siendo para el automatico blocked el que ya tiene y para el resto el que propusiste pero con la posibilidad de entre las 5 o 6 opciones asignarle otro icono a los estados?"): a mark is an icon shown with the status name; automatic `⊘` for "block"/"bloque" names and `◇` for moved statuses; in the Settings section `m` cycles none, ◇ diamond (blue), ⊘ blocked (orange), ◷ clock (teal), ⚑ flag (mauve), ★ star (yellow), ▲ triangle (green); only changes are saved, in `status_marks`. Assumption: init does not ask marks.
 - S5 Automatic column rule, unchanged: override wins; a "block"/"bloque" status waits in To Do; Jira "done" → Done; "indeterminate" with "review"/"revisi" → In Review; other "indeterminate" → In Progress; the rest → To Do.
 
 ## Tasks
 
 | ID | Specs | Slice / branch | Route | Status | Commit |
 |---|---|---|---|---|---|
-| T1 | S3, S4 (data), S5 | 1 `feat/status-columns-1-marker` (base `main`) | inline, no Writer reason | done (199 lines) | 21f4e0a |
-| T2 | S2 | 2 `feat/status-columns-2-init` (base slice 1) | inline, no Writer reason | done (138 lines) | (this slice) |
-| T3 | S1, S4 (Settings) | 3 `feat/status-columns-3-settings` (base slice 2) | inline, no Writer reason | pending | |
+| T1 | S3, S4 (data), S5 | 1 `feat/status-columns-1-marker` (base `main`) | inline, no Writer reason | done (299 lines) | 21f4e0a, 4023b4a |
+| T2 | S2 | 2 `feat/status-columns-2-init` (base slice 1) | inline, no Writer reason | done (138 lines) | 64713e9 |
+| T3 | S1, S4 (Settings) | 3 `feat/status-columns-3-settings` (base slice 2) | inline, no Writer reason | in progress | |
 
 Forecast: slice 1 80–140, slice 2 80–135, slice 3 250–390 (total 410–665). Native grouping: once the last slice's PR is open, group with `gh stack link <pr1> <pr2> <pr3>`; merging any PR then takes every unmerged PR below it. Every branch lives in one repository; read back each PR's base and diff after linking (`gh stack unstack <stack>` before correcting a base).
 
@@ -31,3 +31,5 @@ Slice bases: 1 → `main`, 2 → `feat/status-columns-1-marker`, 3 → `feat/sta
 - L4 "igual tengo una pregunta, las marcas tambien deberian poder configurarse? o setearse de manera automatica? para los casos por ejemplo de blocked y pending test?" → configurable marks proposed.
 - L5 "oh ok va el nombre, perfecto. vamos con stacked." Strategy Stacked.
 - L6 Discovery: `ToTicket` (internal/board/board.go:522) sends "block"/"bloque" statuses to To Do unless overridden; kept as part of the automatic rule (S5). `CategoryFor` stays as is because `tkt start` uses it.
+- L7 "si no que se te ocurre para hacer agnostico el icono de blocked? quizas mantener el automatico pero dar opcion de cambiar el icono entre esas dos opciones? incluso podriamos agregar otras opciones -> siendo para el automatico blocked el que ya tiene y para el resto el que propusiste pero con la posibilidad de entre las 5 o 6 opciones asignarle otro icono a los estados?" → S4 under revision: marks become a choice among a fixed set of icons; awaiting the user's confirmation of the set. T1 (21f4e0a) reopens for it; T2 committed 66293c3 (138 lines).
+- L8 "si, me gustan" → six icons confirmed. T1 reworked in 4023b4a (Ticket.Blocked removed; the list shows any mark's icon); slice 2 rebased (64713e9).
