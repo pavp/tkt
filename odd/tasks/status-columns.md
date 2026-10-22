@@ -14,8 +14,8 @@ Objective: map each space's Jira statuses to the board's four columns and choose
 
 | ID | Specs | Slice / branch | Route | Status | Commit |
 |---|---|---|---|---|---|
-| T1 | S3, S4 (data), S5 | 1 `feat/status-columns-1-marker` (base `main`) | inline, no Writer reason | in progress | |
-| T2 | S2 | 2 `feat/status-columns-2-init` (base slice 1) | inline, no Writer reason | pending | |
+| T1 | S3, S4 (data), S5 | 1 `feat/status-columns-1-marker` (base `main`) | inline, no Writer reason | done (199 lines) | 21f4e0a |
+| T2 | S2 | 2 `feat/status-columns-2-init` (base slice 1) | inline, no Writer reason | done (138 lines) | (this slice) |
 | T3 | S1, S4 (Settings) | 3 `feat/status-columns-3-settings` (base slice 2) | inline, no Writer reason | pending | |
 
 Forecast: slice 1 80–140, slice 2 80–135, slice 3 250–390 (total 410–665). Native grouping: once the last slice's PR is open, group with `gh stack link <pr1> <pr2> <pr3>`; merging any PR then takes every unmerged PR below it. Every branch lives in one repository; read back each PR's base and diff after linking (`gh stack unstack <stack>` before correcting a base).

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -178,7 +179,7 @@ func (a *App) runInit(cmd *cobra.Command) error {
 		return errors.New("pick at least one space")
 	}
 
-	fmt.Fprintln(a.Stderr, "\n3/4 Repositories and team boards")
+	fmt.Fprintln(a.Stderr, "\n3/4 Repositories, team boards and columns")
 	owners := map[string]bool{}
 	var ownerOrder []string
 	for i := range spaces {
@@ -214,6 +215,9 @@ func (a *App) runInit(cmd *cobra.Command) error {
 				s.StatusOverrides[st.Name] = "review"
 				fmt.Fprintf(a.Stderr, "  %s: %q → In Review column\n", s.Key, st.Name)
 			}
+		}
+		if err := a.askColumns(s, statuses); err != nil {
+			return err
 		}
 	}
 	roots, err := a.ask("Folders with your local clones (comma separated)", "~/dev")
@@ -321,6 +325,80 @@ func (a *App) askTeamBoards(ctx context.Context, js JiraAPI, s *config.Space) er
 		}
 	}
 	return nil
+}
+
+// askColumns shows which column each of the space's statuses lands in and lets the user move some.
+func (a *App) askColumns(s *config.Space, statuses []jira.Status) error {
+	if len(statuses) == 0 {
+		return nil
+	}
+	fmt.Fprintf(a.Stderr, "  Columns of %s:\n", s.Key)
+	titles := make([]string, len(ticket.Columns))
+	for i, col := range ticket.Columns {
+		titles[i] = col.Title()
+		var names []string
+		for _, st := range statuses {
+			if ticket.Column(st.Name, st.Category, s.Categories()) == col {
+				names = append(names, st.Name)
+			}
+		}
+		fmt.Fprintf(a.Stderr, "    %-12s %s\n", col.Title(), cmp.Or(strings.Join(names, ", "), "—"))
+	}
+	ans, err := a.ask("Move statuses to another column (status=column, comma separated; columns: "+strings.Join(titles, ", ")+")", "")
+	if err != nil {
+		return err
+	}
+	for _, item := range splitList(ans) {
+		name, colName, _ := strings.Cut(item, "=")
+		name, colName = strings.TrimSpace(name), strings.TrimSpace(colName)
+		col, ok := parseColumn(colName)
+		if !ok {
+			fmt.Fprintf(a.Stderr, "! %q is not a column\n", colName)
+			continue
+		}
+		st, n := matchStatus(statuses, name)
+		switch {
+		case n == 0:
+			fmt.Fprintf(a.Stderr, "! %s has no status called %q\n", s.Key, name)
+		case n > 1:
+			fmt.Fprintf(a.Stderr, "! %q fits several statuses of %s: type more of its name\n", name, s.Key)
+		default:
+			if s.StatusOverrides == nil {
+				s.StatusOverrides = map[string]string{}
+			}
+			s.StatusOverrides[st.Name] = string(col)
+			fmt.Fprintf(a.Stderr, "  %s: %q → %s column\n", s.Key, st.Name, col.Title())
+		}
+	}
+	return nil
+}
+
+// parseColumn reads a column by its title ("In Review") or its configuration name ("review").
+func parseColumn(s string) (ticket.Category, bool) {
+	for _, col := range ticket.Columns {
+		if strings.EqualFold(s, col.Title()) || strings.EqualFold(s, string(col)) {
+			return col, true
+		}
+	}
+	return "", false
+}
+
+// matchStatus finds the status named name, ignoring case, or else the only one whose name starts with it;
+// n counts the candidates.
+func matchStatus(statuses []jira.Status, name string) (jira.Status, int) {
+	var prefixed []jira.Status
+	for _, st := range statuses {
+		if strings.EqualFold(st.Name, name) {
+			return st, 1
+		}
+		if name != "" && strings.HasPrefix(strings.ToLower(st.Name), strings.ToLower(name)) {
+			prefixed = append(prefixed, st)
+		}
+	}
+	if len(prefixed) == 1 {
+		return prefixed[0], 1
+	}
+	return jira.Status{}, len(prefixed)
 }
 
 // suggestRepos lists the repositories holding the pull requests Jira links to the user's sprint tickets

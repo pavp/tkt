@@ -33,6 +33,7 @@ func TestInitWritesConfig(t *testing.T) {
 		"1, ops",
 		"example-org/web, example-org/api",
 		"",
+		"",
 		"~/src",
 		"n",
 		"dev-work",
@@ -109,7 +110,7 @@ func TestInitKeepsExistingConfigUnlessConfirmed(t *testing.T) {
 }
 
 func TestInitReusesStoredTokenAndDefaults(t *testing.T) {
-	h := initHarness(t, "y\nDEMO\n\n\nn\n")
+	h := initHarness(t, "y\nDEMO\n\n\n\nn\n")
 	if err := os.MkdirAll(filepath.Dir(h.app.configPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +157,7 @@ func TestInitNamesTheEnvironmentToken(t *testing.T) {
 }
 
 func TestInitSkipsJiraQuestionsAfterAuth(t *testing.T) {
-	h := initHarness(t, "DEMO\nexample-org/web\n~/src\nn\n\n")
+	h := initHarness(t, "DEMO\nexample-org/web\n\n~/src\nn\n\n")
 	h.creds["jira:example.atlassian.net:dev@example.com"] = "stored"
 	h.env["XDG_DATA_HOME"] = filepath.Join(h.home, "data")
 	h.app.saveState(state{JiraSite: "https://example.atlassian.net", JiraEmail: "dev@example.com"})
@@ -176,7 +177,7 @@ func TestInitSkipsJiraQuestionsAfterAuth(t *testing.T) {
 }
 
 func TestInitInHerdrPausesThenOpensBoard(t *testing.T) {
-	h := initHarness(t, "DEMO\n\n\nn\n\n")
+	h := initHarness(t, "DEMO\n\n\n\nn\n\n")
 	h.creds["jira:example.atlassian.net:dev@example.com"] = "stored"
 	h.env["XDG_DATA_HOME"] = filepath.Join(h.home, "data")
 	h.env["HERDR_PLUGIN_ID"] = "tkt"
@@ -205,7 +206,7 @@ func TestInitPipedDoesNotSuggestTheGitEmail(t *testing.T) {
 }
 
 func TestInitSuggestsReposAndDetectsTheGitHubAccount(t *testing.T) {
-	h := initHarness(t, "example.atlassian.net\ndev@example.com\ntok-1\n1\n\n~/src\n")
+	h := initHarness(t, "example.atlassian.net\ndev@example.com\ntok-1\n1\n\n\n~/src\n")
 	h.jira.issues = []jira.Issue{{ID: "101", Key: "DEMO-1"}, {ID: "102", Key: "DEMO-2"}}
 	h.jira.devPRs = map[string][]jira.DevPullRequest{
 		"101": {{Repo: "Example-Org/Web", Number: 9}},
@@ -235,7 +236,7 @@ func TestInitSuggestsReposAndDetectsTheGitHubAccount(t *testing.T) {
 }
 
 func TestInitOffersGhLoginWithoutAnAccount(t *testing.T) {
-	h := initHarness(t, "example.atlassian.net\ndev@example.com\ntok-1\n1\nexample-org/web\n~/src\ny\n")
+	h := initHarness(t, "example.atlassian.net\ndev@example.com\ntok-1\n1\nexample-org/web\n\n~/src\ny\n")
 	h.app.OrgMember = func(context.Context, string, string) (bool, error) { return true, nil }
 	var launched []string
 	h.app.Launch = func(_ string, name string, args []string) error {
@@ -254,6 +255,46 @@ func TestInitOffersGhLoginWithoutAnAccount(t *testing.T) {
 	}
 }
 
+func TestInitAsksForColumns(t *testing.T) {
+	answers := strings.Join([]string{
+		"example.atlassian.net",
+		"dev@example.com",
+		"tok-1",
+		"1",
+		"example-org/web",
+		"pending test=In Review, Nope=done, Finalizada=qa, Fin=in_progress",
+		"~/src",
+		"n",
+		"dev-work",
+	}, "\n") + "\n"
+	h := initHarness(t, answers)
+	h.jira.statuses = map[string][]jira.Status{"DEMO": {
+		{Name: "To Do", Category: "new"}, {Name: "Code Review", Category: "indeterminate"},
+		{Name: "Pending test", Category: "indeterminate"}, {Name: "Finalizada", Category: "done"}, {Name: "Final QA", Category: "done"},
+	}}
+	if code := h.exec("init"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	c, err := config.Load(h.app.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"Code Review": "review", "Pending test": "review"}
+	if !reflect.DeepEqual(c.Spaces[0].StatusOverrides, want) {
+		t.Errorf("overrides = %v, want %v", c.Spaces[0].StatusOverrides, want)
+	}
+	errOut := h.errOut.String()
+	for _, w := range []string{
+		"Columns of DEMO:", "    To Do        To Do", "    In Progress  Pending test", "    In Review    Code Review", "    Done         Finalizada, Final QA",
+		"Move statuses to another column (status=column, comma separated; columns: To Do, In Progress, In Review, Done)",
+		`  DEMO: "Pending test" → In Review column`, `! DEMO has no status called "Nope"`, `! "qa" is not a column`, `! "Fin" fits several statuses of DEMO`,
+	} {
+		if !strings.Contains(errOut, w) {
+			t.Errorf("stderr missing %q:\n%s", w, errOut)
+		}
+	}
+}
+
 func TestInitAsksForTeamBoards(t *testing.T) {
 	answers := strings.Join([]string{
 		"example.atlassian.net",
@@ -262,6 +303,7 @@ func TestInitAsksForTeamBoards(t *testing.T) {
 		"1",
 		"example-org/web",
 		"authorization center, access, nope, Center",
+		"",
 		"~/src",
 		"n",
 		"dev-work",
