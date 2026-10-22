@@ -187,7 +187,8 @@ type Model struct {
 	collapsed map[string]bool
 	// team shows the team's tickets beside the user's.
 	team bool
-	// teamPRs shows the team's pull requests in the PRs filter, apart from team, which asks for its tickets.
+	// teamPRs shows every open pull request in the PRs filter, which its Requested toggle (lit while off)
+	// narrows to the review requests; apart from team, which asks for the team's tickets.
 	teamPRs  bool
 	menu     *menu
 	prompt   *formPrompt
@@ -513,8 +514,8 @@ func (m Model) prLayout(every bool) []item {
 		add("mine:"+repo, title, mine[i:j])
 		i = j
 	}
-	// With Team on, review requests join the team's pull requests in each repository's group, first and still
-	// marked; otherwise they have groups of their own.
+	// Showing every pull request, review requests join the others in their repository's group, first and still
+	// marked; with Requested on they have groups of their own.
 	var rest []item
 	for _, pr := range m.reviews() {
 		rest = append(rest, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr})
@@ -524,7 +525,7 @@ func (m Model) prLayout(every bool) []item {
 		for _, pr := range m.others() {
 			rest = append(rest, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr, other: true})
 		}
-		group, title = "team:", "Team · "
+		group, title = "team:", ""
 	}
 	slices.SortStableFunc(rest, func(a, b item) int { return strings.Compare(a.pr.Repo, b.pr.Repo) })
 	for i := 0; i < len(rest); {
@@ -561,22 +562,31 @@ func (m Model) hasTeamBoards() bool {
 
 // toggleTeam shows or hides the team's tickets; turning them on saves the choice before the refresh, since
 // the sync reads it to know whether to fetch them.
-// teamOn reports the Team toggle of the filter in view: the PRs filter has its own.
-func (m Model) teamOn() bool {
+// teamButton names the toggle of the filter in view: Team for the team's tickets, Requested in the PRs
+// filter, which narrows the pull requests to those asking for the user's review.
+func (m Model) teamButton() string {
 	if m.filter == FilterPRs {
-		return m.teamPRs
+		return "Requested"
+	}
+	return "Team"
+}
+
+// teamButtonOn reports whether the toggle in view is lit; Requested is lit while it narrows the list.
+func (m Model) teamButtonOn() bool {
+	if m.filter == FilterPRs {
+		return !m.teamPRs
 	}
 	return m.team
 }
 
 func (m *Model) toggleTeam() tea.Cmd {
 	if m.filter == FilterPRs {
-		// The team's pull requests come with every sync, so showing them needs no refresh.
+		// Every open pull request comes with each sync, so showing them needs no refresh.
 		m.teamPRs = !m.teamPRs
 		m.reselect()
-		m.status = "showing only your pull requests and review requests"
+		m.status = "showing only your pull requests and review requests · t shows all"
 		if m.teamPRs {
-			m.status = "showing the team's pull requests too · t hides them"
+			m.status = "showing every open pull request in your repositories · t shows only requests"
 		}
 		return m.actions.SaveState(m.state())
 	}
@@ -1395,7 +1405,7 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 	if len(m.boardRepos()) > 0 {
 		specs[0] = append(specs[0], m.reposButton())
 	}
-	specs[0] = append(specs[0], headerItem{team: true, label: " Team "})
+	specs[0] = append(specs[0], headerItem{team: true, label: " " + m.teamButton() + " "})
 	for pass := 0; pass < 2; pass++ {
 		for _, spec := range specs {
 			var row []string
@@ -1409,7 +1419,7 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 				row = append(row, strings.Repeat(" ", gap))
 				pos += gap
 				st := filterOff
-				if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.repos && m.repoNotice() != "") || (it.team && m.teamOn()) {
+				if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.repos && m.repoNotice() != "") || (it.team && m.teamButtonOn()) {
 					st = filterOn
 				}
 				chip := st.Render(strings.TrimSpace(it.label))
@@ -2453,7 +2463,10 @@ func (m Model) footer() string {
 	}
 	legend := [][2]string{
 		{move, moveHint}, {"click", clickHint}, {"double-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
-		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-2", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"R", "repos"}, {"t", "team"}, {"g", "refresh"}, {"q", "close"},
+		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-2", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"R", "repos"}, {"t", strings.ToLower(m.teamButton())}, {"g", "refresh"}, {"q", "close"},
+	}
+	if m.filter == FilterPRs {
+		legend = slices.DeleteFunc(legend, func(k [2]string) bool { return k[0] == "v" })
 	}
 	if m.filter == FilterPRs && m.hiddenBots() > 0 {
 		legend = append(legend[:1], append([][2]string{{"b", "bots"}}, legend[1:]...)...)

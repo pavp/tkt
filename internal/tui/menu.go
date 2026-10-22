@@ -48,18 +48,17 @@ var menuBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForegro
 // or changes were requested.
 func (m Model) buildMenu(it item) *menu {
 	a := m.actions
-	if it.review() {
-		pr := *it.pr
-		return &menu{title: fmt.Sprintf("Review request #%d", pr.Number), items: []menuItem{
-			{label: "Open the pull request in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }},
-		}}
-	}
 	if it.mine() {
 		return m.prMenu(it)
 	}
-	if it.other {
+	if it.pr != nil {
+		// Someone else's pull request, a review request or not, is titled the same; a request says so last.
 		pr := *it.pr
-		return &menu{title: fmt.Sprintf("Pull request #%d · %s · %s", pr.Number, pr.Repo, cmp.Or(pr.Author, "unknown author")), items: []menuItem{
+		title := fmt.Sprintf("Pull request #%d · %s · %s", pr.Number, pr.Repo, cmp.Or(pr.Author, "unknown author"))
+		if it.review() {
+			title += " · review requested"
+		}
+		return &menu{title: title, items: []menuItem{
 			{label: "Open the pull request in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }},
 		}}
 	}
