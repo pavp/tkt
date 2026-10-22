@@ -553,13 +553,13 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 All 4", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3 · Export CSV\n To Do · unassigned · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 All 4", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
 	}
 	next = press(next, "l")
-	if !strings.Contains(stripANSI(next.View()), "DEMO-1 · Filter accounts\n In Progress · unassigned · CI failing · #812 · f sends the failure to the agent") {
+	if !strings.Contains(stripANSI(next.View()), "DEMO-1  In Progress  · Filter accounts\n unassigned · CI failing · #812 · f sends the failure to the agent") {
 		t.Errorf("preview hint missing:\n%s", stripANSI(next.View()))
 	}
 }
@@ -626,7 +626,7 @@ func TestPreviewStartsWithTheTicketsLabel(t *testing.T) {
 	snap.Tickets[0].Label = "User Access Center"
 	m := tea.Model(New(snap, true, &recorder{}, ViewColumns))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	if v := stripANSI(m.View()); !strings.Contains(v, "\n User Access Center · To Do · ") {
+	if v := stripANSI(m.View()); !strings.Contains(v, "\n User Access Center · unassigned · ") {
 		t.Errorf("preview lacks the label first:\n%s", v)
 	}
 }
@@ -649,7 +649,7 @@ func TestDaemonSyncsDriveTheSpinner(t *testing.T) {
 func TestRefreshKeepsTheSelectedTicketsPreview(t *testing.T) {
 	m := press(loaded(&recorder{}), "g")
 	lines := strings.Split(strings.TrimRight(stripANSI(m.View()), "\n"), "\n")
-	if lineIndex(m.View(), "DEMO-3 · Export CSV") < 0 {
+	if lineIndex(m.View(), "DEMO-3  To Do  · Export CSV") < 0 {
 		t.Errorf("g replaced the selected ticket's preview:\n%s", strings.Join(lines, "\n"))
 	}
 	if n := strings.Count(stripANSI(m.View()), "refreshing…"); n != 1 || !strings.HasSuffix(strings.TrimRight(lines[len(lines)-1], " "), "refreshing…") {
@@ -1110,7 +1110,7 @@ func TestActionsMenu(t *testing.T) {
 	r := &recorder{}
 	m := press(loaded(r), "l", "enter")
 	v := stripANSI(m.View())
-	for _, want := range []string{"Actions for DEMO-1", "Start · open the agent", "Show details", "Open the ticket pane next to its agent", "Open in Jira ↗", "Open #812 ✕ in GitHub ↗", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
+	for _, want := range []string{"Actions for DEMO-1 · In Progress", "Start · open the agent", "Show details", "Open the ticket pane next to its agent", "Open in Jira ↗", "Open #812 ✕ in GitHub ↗", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("menu missing %q:\n%s", want, v)
 		}
@@ -2701,7 +2701,7 @@ func TestTeamTicketsOfferOnlyWhatIsHarmless(t *testing.T) {
 		t.Errorf("f on a team ticket does nothing but say why: %v\n%s", r.calls, stripANSI(m.View()))
 	}
 	v := stripANSI(press(m, "enter").View())
-	for _, want := range []string{"Actions for DEMO-9 · Bea Ruiz", "Show details", "Open in Jira ↗", "Copy the key DEMO-9"} {
+	for _, want := range []string{"Actions for DEMO-9 · To Do · Bea Ruiz", "Show details", "Open in Jira ↗", "Copy the key DEMO-9"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("menu lacks %q:\n%s", want, v)
 		}
@@ -2924,6 +2924,43 @@ func TestMoveToListsJiraStatusesAndConfirmsBeforeMoving(t *testing.T) {
 	m, _ = awaitingMoves(loaded(r)).Update(msg)
 	if _, msg := run(selectMenuItem(t, m, "Blocked"), "enter"); msg != StatusMsg("open https://example.atlassian.net/browse/DEMO-1") {
 		t.Errorf("a status with a required form should open Jira, got %v", msg)
+	}
+}
+
+func TestStatusBadgeUsesItsColumnsColorAndMark(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	cases := []struct {
+		t    ticket.Ticket
+		text string
+		hex  string
+	}{
+		{ticket.Ticket{Status: "Tareas por hacer", Category: ticket.ToDo}, " Tareas por hacer ", "#9399b2"},
+		{ticket.Ticket{Status: "En curso", Category: ticket.InProgress}, " En curso ", "#89b4fa"},
+		{ticket.Ticket{Status: "Pending test", Category: ticket.InReview, Mark: ticket.MarkDiamond}, " ◇ Pending test ", "#cba6f7"},
+		{ticket.Ticket{Status: "Finalizada", Category: ticket.Done}, " Finalizada ", "#a6e3a1"},
+	}
+	for _, c := range cases {
+		got := statusBadge(c.t)
+		want := lipgloss.NewStyle().Background(lipgloss.Color(c.hex)).Foreground(lipgloss.Color("#1e1e2e")).Render(c.text)
+		if got != want {
+			t.Errorf("%s: badge %q, want %q", c.t.Status, got, want)
+		}
+	}
+}
+
+func TestPRMenuNamesTheTicketsStatus(t *testing.T) {
+	snap := prsSnapshot()
+	tk, _ := snap.Find("DEMO-4")
+	m := tea.Model(New(snap, false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#815"); i++ {
+		m = press(m, "s")
+	}
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #815 · DEMO-4 · "+tk.Status) {
+		t.Errorf("the PR menu should name its ticket's status %q:\n%s", tk.Status, v)
 	}
 }
 

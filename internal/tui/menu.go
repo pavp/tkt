@@ -85,7 +85,7 @@ func (m Model) buildMenu(it item) *menu {
 		menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }},
 		menuItem{label: "Copy the ticket context (.ticket.md)", run: func() tea.Cmd { return a.CopyContext(t.Key) }},
 	)
-	return &menu{title: "Actions for " + string(t.Key), items: items}
+	return &menu{title: "Actions for " + string(t.Key) + " · " + t.Status, items: items}
 }
 
 // prMenu acts on one of the user's pull requests first, then on its ticket, leaving out the ticket's other
@@ -113,7 +113,7 @@ func (m Model) prMenu(it item) *menu {
 		items = append(items, menuItem{label: "Copy the Jira link", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
 	}
 	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
-	return &menu{title: fmt.Sprintf("Pull request #%d · %s", pr.Number, t.Key), items: items}
+	return &menu{title: fmt.Sprintf("Pull request #%d · %s · %s", pr.Number, t.Key, t.Status), items: items}
 }
 
 // moveItem opens where the ticket can move from its current status.
@@ -142,7 +142,7 @@ func (m Model) teamMenu(t ticket.Ticket) *menu {
 		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
 	}
 	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
-	return &menu{title: "Actions for " + string(t.Key) + " · " + cmp.Or(t.Assignee, "unassigned"), items: items}
+	return &menu{title: "Actions for " + string(t.Key) + " · " + t.Status + " · " + cmp.Or(t.Assignee, "unassigned"), items: items}
 }
 
 // prsMenu lists a ticket's pull requests to open one, those that need the user first and finished ones last.
