@@ -3130,6 +3130,26 @@ func TestScrolledListKeepsItsHeaderAndAGapAbove(t *testing.T) {
 	}
 }
 
+func TestPRsListScrollsToTheSelectionPastACollapsedGroup(t *testing.T) {
+	snap := prsSnapshot()
+	for i := 0; i < 25; i++ {
+		snap.Others = append(snap.Others, ticket.PullRequest{Repo: "example-org/api", Number: 900 + i, Title: "other", Author: "sam", State: ticket.PROpen})
+	}
+	m := tea.Model(New(snap, true, &recorder{}, ViewList).WithState(BoardState{Team: true, Collapsed: []string{"mine:"}}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 110, Height: 24})
+	m = press(m, "2")
+	for i := 0; i < 28; i++ {
+		m = press(m, "s")
+	}
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "▸ #92") || strings.Contains(v, "▸ Mine  2") {
+		t.Errorf("the list should follow the selection, not a collapsed group's mark:\n%s", v)
+	}
+	if !strings.Contains(v, "opened by sam in example-org/api") || strings.Contains(v, "review requested by sam") {
+		t.Errorf("someone else's pull request is not a review request:\n%s", v)
+	}
+}
+
 func TestLegendFitsEachScreen(t *testing.T) {
 	open := func(snap board.Snapshot, view string, keys ...string) string {
 		m := tea.Model(New(snap, true, &recorder{}, view))
