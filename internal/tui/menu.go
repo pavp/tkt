@@ -34,8 +34,10 @@ type menuItem struct {
 // menu lists what can be done with the selected ticket or review request.
 type menu struct {
 	title string
-	items []menuItem
-	sel   int
+	// subtitle, when set, is a dimmed second line under the title, so long details do not widen the box.
+	subtitle string
+	items    []menuItem
+	sel      int
 	// back is the menu esc returns to; nil closes.
 	back *menu
 	// loading names the ticket whose statuses this menu waits for.
@@ -54,11 +56,11 @@ func (m Model) buildMenu(it item) *menu {
 	if it.pr != nil {
 		// Someone else's pull request, a review request or not, is titled the same; a request says so last.
 		pr := *it.pr
-		title := fmt.Sprintf("Pull request #%d · %s · %s", pr.Number, pr.Repo, cmp.Or(pr.Author, "unknown author"))
+		subtitle := cmp.Or(pr.Author, "unknown author")
 		if it.review() {
-			title += " · review requested"
+			subtitle += " · review requested"
 		}
-		return &menu{title: title, items: []menuItem{
+		return &menu{title: fmt.Sprintf("Pull request #%d · %s", pr.Number, pr.Repo), subtitle: subtitle, items: []menuItem{
 			{label: "Open the pull request in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }},
 		}}
 	}
@@ -118,7 +120,7 @@ func (m Model) prMenu(it item) *menu {
 		items = append(items, menuItem{label: "Copy the Jira link", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
 	}
 	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
-	return &menu{title: fmt.Sprintf("Pull request #%d · %s · %s", pr.Number, t.Key, t.Status), items: items}
+	return &menu{title: fmt.Sprintf("Pull request #%d · %s", pr.Number, t.Key), subtitle: t.Status, items: items}
 }
 
 // moveItem opens where the ticket can move from its current status.
@@ -245,7 +247,7 @@ func (m Model) runMenuItem(i int) (tea.Model, tea.Cmd) {
 func (m Model) menuView() string {
 	mn := m.menu
 	const linkKeys = "enter run · c copy link · esc close"
-	width := lipgloss.Width(mn.title) + 6
+	width := max(lipgloss.Width(mn.title), lipgloss.Width(mn.subtitle)) + 6
 	for _, it := range mn.items {
 		width = max(width, lipgloss.Width(it.label)+8)
 		// The footer grows on an item with a link; sizing for it up front keeps the box still.
@@ -257,7 +259,11 @@ func (m Model) menuView() string {
 	if m.width > 0 {
 		width = min(width, m.width-2)
 	}
-	lines := []string{bold.Render(ansi.Truncate(mn.title, width-4, "…")), ""}
+	lines := []string{bold.Render(ansi.Truncate(mn.title, width-4, "…"))}
+	if mn.subtitle != "" {
+		lines = append(lines, dim.Render(ansi.Truncate(mn.subtitle, width-4, "…")))
+	}
+	lines = append(lines, "")
 	for i, it := range mn.items {
 		hint := ""
 		if it.key != "" {
@@ -285,8 +291,11 @@ func (m Model) menuItemAt(x, y, top, height int) int {
 	bw, bh := lipgloss.Width(box), lipgloss.Height(box)
 	left := (m.width - bw) / 2
 	boxTop := top + (height-bh)/2
-	// Border, title and a blank line come before the first item.
+	// Border, title (and its subtitle) and a blank line come before the first item.
 	i := y - boxTop - 3
+	if m.menu.subtitle != "" {
+		i--
+	}
 	if x < left || x >= left+bw || i < 0 || i >= len(m.menu.items) {
 		return -1
 	}

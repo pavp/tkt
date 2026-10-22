@@ -2453,24 +2453,39 @@ var keyStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
 
 // footer is the key legend: each key highlighted, its meaning dimmed, with room between commands.
 func (m Model) footer() string {
-	move := "↑↓ ws"
-	if m.effectiveView() == ViewColumns {
+	// Each screen lists only the keys that do something there: the review strip only exists in columns,
+	// density only changes cards, the view only toggles where columns can show.
+	columns := m.effectiveView() == ViewColumns
+	strip := columns && len(m.reviews()) > 0
+	move, moveHint, clickHint, enterHint := "↑↓ ws", "move", "select", "actions"
+	if columns {
 		move = "←↑↓→ wasd"
 	}
-	moveHint, clickHint := "move · ↑ to reviews", "select · open review"
-	if m.filter == FilterPRs {
-		moveHint, clickHint = "move", "select · open review"
-	}
-	legend := [][2]string{
-		{move, moveHint}, {"click", clickHint}, {"double-click", "actions"}, {"enter", "actions"}, {"f", "fix CI"}, {"i", "ticket pane"},
-		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-2", "filter"}, {"v", "view"}, {",", "settings"}, {"z", "density"}, {"R", "repos"}, {"t", strings.ToLower(m.teamButton())}, {"g", "refresh"}, {"q", "close"},
+	if strip {
+		moveHint, clickHint = "move · ↑ to reviews", "select · open review"
 	}
 	if m.filter == FilterPRs {
-		legend = slices.DeleteFunc(legend, func(k [2]string) bool { return k[0] == "v" })
+		enterHint = "actions · fold group"
 	}
+	legend := [][2]string{{move, moveHint}}
 	if m.filter == FilterPRs && m.hiddenBots() > 0 {
-		legend = append(legend[:1], append([][2]string{{"b", "bots"}}, legend[1:]...)...)
+		legend = append(legend, [2]string{"b", "bots"})
 	}
+	legend = append(legend, [][2]string{
+		{"click", clickHint}, {"double-click", "actions"}, {"enter", enterHint}, {"f", "send feedback"}, {"i", "details"},
+		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-2", "filter"},
+	}...)
+	if m.filter != FilterPRs && m.width >= narrowWidth {
+		legend = append(legend, [2]string{"v", "view"})
+	}
+	if columns {
+		legend = append(legend, [2]string{"z", "density"})
+	}
+	legend = append(legend, [2]string{"t", strings.ToLower(m.teamButton())})
+	if len(m.boardRepos()) > 0 {
+		legend = append(legend, [2]string{"R", "repos"})
+	}
+	legend = append(legend, [][2]string{{",", "settings"}, {"g", "refresh"}, {"q", "close"}}...)
 	items := make([]string, len(legend))
 	for i, k := range legend {
 		items[i] = keyStyle.Render(k[0]) + " " + dim.Render(k[1])
