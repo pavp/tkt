@@ -341,6 +341,15 @@ func (m Model) reviews() []ticket.PullRequest {
 	return slices.DeleteFunc(slices.Clone(reviews), func(pr ticket.PullRequest) bool { return m.repoHidden(pr.Repo) })
 }
 
+// prCount counts the PRs filter's pull requests: the user's, the review requests and, while shown, the team's.
+func (m Model) prCount() int {
+	n := len(m.myPRs()) + len(m.reviews())
+	if m.teamPRs {
+		n += len(m.others())
+	}
+	return n
+}
+
 // others are the open pull requests of everyone else, listed while Team is on, filtered as reviews are.
 func (m Model) others() []ticket.PullRequest {
 	others := m.snap.Others
@@ -1452,7 +1461,7 @@ type headerItem struct {
 func (m Model) headerSpec() []headerItem {
 	return []headerItem{
 		{filter: FilterAll, label: fmt.Sprintf(" 1 All %d ", len(m.shownTickets())+len(m.reviews()))},
-		{filter: FilterPRs, label: fmt.Sprintf(" 2 PRs %d ", len(m.myPRs())+len(m.reviews()))},
+		{filter: FilterPRs, label: fmt.Sprintf(" 2 PRs %d ", m.prCount())},
 		{view: ViewColumns, label: " Columns "},
 		{view: ViewList, label: " List "},
 	}

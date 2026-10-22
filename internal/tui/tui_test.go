@@ -3007,7 +3007,11 @@ func TestTeamToggleIsPerView(t *testing.T) {
 	if strings.Contains(stripANSI(m.View()), "Team · ") {
 		t.Fatalf("team pull requests start hidden:\n%s", stripANSI(m.View()))
 	}
+	before := stripANSI(m.View())
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	if !strings.Contains(before, "2 PRs 5") || !strings.Contains(stripANSI(m.View()), "2 PRs 6") {
+		t.Errorf("the PRs counter should count the team's pull requests while they show:\n%s", stripANSI(m.View()))
+	}
 	if v := stripANSI(m.View()); !strings.Contains(v, "Team · example-org/api") || !strings.Contains(v, "showing the team's pull requests too · t hides them") {
 		t.Fatalf("t in the PRs filter shows the team's pull requests at once:\n%s", v)
 	}
