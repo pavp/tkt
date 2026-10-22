@@ -563,7 +563,7 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 All 4", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 All 3", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
@@ -804,7 +804,8 @@ func TestBoardScrollsToKeepSelectionVisible(t *testing.T) {
 	}
 	view := stripANSI(next.View())
 	lines := strings.Split(view, "\n")
-	if len(lines) != 15 || !strings.Contains(view, "▸ ") || !strings.Contains(lines[len(lines)-1], "close") || !strings.HasPrefix(lines[1], " tkt") {
+	bottom := strings.Join(lines[len(lines)-2:], "\n")
+	if len(lines) != 15 || !strings.Contains(view, "▸ ") || !strings.Contains(bottom, "close") || !strings.Contains(bottom, "synced") || !strings.HasPrefix(lines[1], " tkt") {
 		t.Errorf("scrolled view lost the header, selection or legend:\n%s", view)
 	}
 }
@@ -1266,7 +1267,7 @@ func TestKeyboardReachesReviewChips(t *testing.T) {
 		t.Fatalf("right should move to the next chip:\n%s", stripANSI(next.View()))
 	}
 	next = press(next, "enter")
-	if !strings.Contains(stripANSI(next.View()), "Pull request #821 · example-org/api · ") || !strings.Contains(stripANSI(next.View()), " · review requested") {
+	if v := stripANSI(next.View()); !strings.Contains(v, "Pull request #821 · example-org/api  ") || !strings.Contains(v, "unknown author · review requested") {
 		t.Fatalf("enter on a chip should open its menu:\n%s", stripANSI(next.View()))
 	}
 	next, _ = run(next, "enter")
@@ -1375,7 +1376,7 @@ func TestPRsFilterTogglesBots(t *testing.T) {
 	snap.Reviews = append(snap.Reviews, ticket.PullRequest{Repo: "example-org/web", Number: 830, Title: "Bump vite", Author: "dependabot", AuthorBot: true})
 	m := tea.Model(New(snap, false, &recorder{}, ViewColumns))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	if v := stripANSI(m.View()); strings.Contains(v, "#830") || !strings.Contains(v, "2 PRs 3") || !strings.Contains(v, "1 All 4") {
+	if v := stripANSI(m.View()); strings.Contains(v, "#830") || !strings.Contains(v, "2 PRs 3") || !strings.Contains(v, "1 All 3") {
 		t.Fatalf("bot review shown by default:\n%s", v)
 	}
 	if v := stripANSI(press(m, "b").View()); strings.Contains(v, "#830") {
@@ -1759,7 +1760,7 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	m := loaded(&recorder{})
 	lines := strings.Split(stripANSI(m.View()), "\n")
 	first := lines[1]
-	for _, want := range []string{"tkt", "│ 1 All 4 │", "│ 2 PRs 3 │", "│ Columns │", "│ List │"} {
+	for _, want := range []string{"tkt", "│ 1 All 3 │", "│ 2 PRs 3 │", "│ Columns │", "│ List │"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("title row lacks %q: %q", want, first)
 		}
@@ -2988,7 +2989,7 @@ func TestTeamModeListsEveryOpenPullRequestWithItsAuthor(t *testing.T) {
 	for i := 0; i < 20 && !strings.Contains(selectedLine(m.View()), "#901"); i++ {
 		m = press(m, "s")
 	}
-	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #901 · example-org/api · sam") || !strings.Contains(v, "Open the pull request in GitHub ↗") {
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #901 · example-org/api  ") || !strings.Contains(v, "  sam  ") || !strings.Contains(v, "Open the pull request in GitHub ↗") {
 		t.Errorf("its menu opens it in GitHub:\n%s", v)
 	}
 	off := press(New(snap, false, r, ViewList), "2")
@@ -3009,6 +3010,60 @@ func TestViewButtonsShowOnlyWhereTheyApply(t *testing.T) {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 90, Height: 40})
 	if head := strings.Join(strings.Split(stripANSI(m.View()), "\n")[:4], "\n"); strings.Contains(head, "Columns") {
 		t.Errorf("a pane too narrow for columns offers no view:\n%s", head)
+	}
+}
+
+func TestPRMenusPutTheirDetailsOnASecondLine(t *testing.T) {
+	r := &recorder{}
+	pr := ticket.PullRequest{Repo: "example-org/web", Number: 820, Author: "alex", URL: "https://github.com/example-org/web/pull/820"}
+	m := loaded(r).(Model)
+	m.menu = m.buildMenu(item{key: "#820", pr: &pr})
+	lines := strings.Split(stripANSI(m.menuView()), "\n")
+	if !strings.Contains(lines[1], "Pull request #820 · example-org/web") || !strings.Contains(lines[2], "alex · review requested") {
+		t.Fatalf("title then details:\n%s", strings.Join(lines, "\n"))
+	}
+	if w := lipgloss.Width(m.menuView()); w > lipgloss.Width("Pull request #820 · example-org/web")+12 {
+		t.Errorf("the menu should be as wide as its first line needs, got %d", w)
+	}
+	y := lineIndex(m.View(), "Open the pull request in GitHub")
+	_, cmd := m.Update(tea.MouseMsg{X: m.width / 2, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if cmd == nil || cmd() != StatusMsg("open https://github.com/example-org/web/pull/820") {
+		t.Errorf("a click on the first item should still run it")
+	}
+}
+
+func TestLegendFitsEachScreen(t *testing.T) {
+	open := func(snap board.Snapshot, view string, keys ...string) string {
+		m := tea.Model(New(snap, true, &recorder{}, view))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 220, Height: 40})
+		return stripANSI(press(m, keys...).View())
+	}
+	noReviews := snapshot()
+	noReviews.Reviews = nil
+	noRepos := board.Snapshot{FetchedAt: snapshot().FetchedAt, Tickets: []ticket.Ticket{{Key: "DEMO-3", Summary: "Export CSV", Status: "To Do", Category: ticket.ToDo}}}
+	cases := []struct {
+		name       string
+		v          string
+		want, dont []string
+	}{
+		{"columns", open(snapshot(), ViewColumns), []string{"←↑↓→ wasd move · ↑ to reviews", "click select · open review", "enter actions", "f send feedback", "i details", "v view", "z density", "t team", "R repos"},
+			[]string{"ticket pane", "fix CI", "fold group"}},
+		{"columns without reviews", open(noReviews, ViewColumns), []string{"←↑↓→ wasd move", "click select"}, []string{"↑ to reviews", "open review"}},
+		{"list", open(snapshot(), ViewList), []string{"↑↓ ws move", "click select", "v view", "t team"}, []string{"z density", "↑ to reviews", "open review"}},
+		{"PRs", open(snapshot(), ViewColumns, "2"), []string{"↑↓ ws move", "click select", "enter actions · fold group", "f send feedback", "t requested", "R repos"}, []string{"v view", "z density", "open review"}},
+		{"no repositories", open(noRepos, ViewColumns), []string{"t team"}, []string{"R repos"}},
+	}
+	for _, c := range cases {
+		for _, w := range c.want {
+			if !strings.Contains(c.v, w) {
+				t.Errorf("%s: legend lacks %q:\n%s", c.name, w, c.v)
+			}
+		}
+		for _, d := range c.dont {
+			if strings.Contains(c.v, d) {
+				t.Errorf("%s: legend should not offer %q:\n%s", c.name, d, c.v)
+			}
+		}
 	}
 }
 
@@ -3070,7 +3125,7 @@ func TestPRMenuNamesTheTicketsStatus(t *testing.T) {
 	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#815"); i++ {
 		m = press(m, "s")
 	}
-	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #815 · DEMO-4 · "+tk.Status) {
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #815 · DEMO-4  ") || !strings.Contains(v, "  "+tk.Status+"  ") {
 		t.Errorf("the PR menu should name its ticket's status %q:\n%s", tk.Status, v)
 	}
 }
