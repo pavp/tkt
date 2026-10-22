@@ -837,7 +837,7 @@ func TestCardsShowDetailsAndDensityToggles(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	v := stripANSI(next.View())
-	for _, want := range []string{"#812 ✕", "0/1 subtasks · Story"} {
+	for _, want := range []string{"#812 ✕", "■ 0/1 subtasks · unassigned"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("detailed card missing %q:\n%s", want, v)
 		}
@@ -1722,7 +1722,7 @@ func TestCardLinesStartAtTheSameColumn(t *testing.T) {
 		return -1
 	}
 	plain := card(tk, 30, false, false, "")
-	if k, ti, ty := col(plain, "DEMO-1"), col(plain, "Filter"), col(plain, "Story"); k != ti || ti != ty {
+	if k, ti, ty := col(plain, "DEMO-1"), col(plain, "Filter"), col(plain, "■ Story"); k != ti || ti != ty {
 		t.Errorf("unselected card columns key=%d title=%d type=%d:\n%s", k, ti, ty, stripANSI(plain))
 	}
 	sel := card(tk, 30, true, false, "")
@@ -1999,10 +1999,15 @@ func TestCardsShowTheAgentState(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	v := stripANSI(next.View())
-	if !strings.Contains(v, "● working") || !strings.Contains(v, "! needs you") || strings.Contains(v, "claude") {
-		t.Errorf("cards should show their agent in short form:\n%s", v)
+	for key, dot := range map[string]bool{"DEMO-1": true, "DEMO-2": true, "DEMO-3": false} {
+		y := lineIndex(next.View(), key)
+		row := strings.Split(v, "\n")[y]
+		row = row[strings.Index(row, key):]
+		if strings.Contains(row[:strings.Index(row, "│")], "●") != dot {
+			t.Errorf("%s: agent dot %v expected:\n%s", key, dot, v)
+		}
 	}
-	if strings.Contains(v, "no agent") {
+	if strings.Contains(v, "no agent") || strings.Contains(v, "claude") {
 		t.Errorf("cards without an agent say nothing about it:\n%s", v)
 	}
 }
@@ -2132,19 +2137,8 @@ func TestCardFitsPullRequestsBesideTheAgentWithoutBreakingColors(t *testing.T) {
 		if brokenEscape.MatchString(out) || strings.ContainsRune(plain, utf8.RuneError) || !utf8.ValidString(out) {
 			t.Errorf("%s: a cut escape code leaks into the card: %q", status, out)
 		}
-		short, _ := board.AgentLine(status)
-		short = strings.Replace(short, "claude ", "", 1)
-		if !strings.Contains(plain, "#731 ✓ #732 ✓ #733 ✓") || !strings.Contains(plain, short) {
-			t.Errorf("%s: the card should keep its pull requests and show %q:\n%s", status, short, plain)
-		}
-		var last string
-		for _, l := range strings.Split(plain, "\n") {
-			if strings.Contains(l, short) {
-				last = l
-			}
-		}
-		if !strings.Contains(last, "Ana L.") {
-			t.Errorf("%s: the agent belongs on the type and assignee line: %q", status, last)
+		if !strings.Contains(plain, "#731 ✓ #732 ✓ #733 ✓") || !strings.Contains(strings.Split(plain, "\n")[1], "●") {
+			t.Errorf("%s: the card should keep its pull requests and show the agent's dot:\n%s", status, plain)
 		}
 		for _, l := range strings.Split(out, "\n") {
 			if lipgloss.Width(l) > 30 {
@@ -2176,19 +2170,78 @@ func TestTruncateKeepsColorCodesWhole(t *testing.T) {
 	}
 }
 
-func TestCardCutsTheTypeBeforeTheAgent(t *testing.T) {
-	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Type: "A very long issue type name", Status: "In Progress", Assignee: "Ana López"}
-	plain := ansi.Strip(card(tk, 40, false, false, "blocked"))
-	if !strings.Contains(plain, "! needs you") || !strings.Contains(plain, "Ana L.") || !strings.Contains(plain, "A very long") || strings.Contains(plain, "type name") {
-		t.Errorf("the type should shrink first, never the assignee or the agent:\n%s", plain)
+func TestCardShowsTheTypeWholeOrOnlyItsIcon(t *testing.T) {
+	tk := ticket.Ticket{Key: "DEMO-1", Summary: "Homogenize the organizations module", Type: "Historia", Status: "In Progress", Assignee: "Pedro Pérez",
+		PRs: []ticket.PullRequest{{Number: 731, State: ticket.PRMerged}}}
+	cases := []struct {
+		outer int
+		want  string
+	}{
+		{40, "■ Historia · Pedro P."},
+		{24, "■ Pedro P."},
 	}
-	plain = ansi.Strip(card(tk, 30, false, false, "blocked"))
-	if !strings.Contains(plain, "Ana L. · ! needs you") {
-		t.Errorf("without room the type goes, the assignee and agent stay:\n%s", plain)
+	for _, c := range cases {
+		lines := strings.Split(ansi.Strip(card(tk, c.outer, true, false, "idle")), "\n")
+		meta := lines[len(lines)-2]
+		if !strings.Contains(meta, c.want) || strings.Contains(meta, "…") {
+			t.Errorf("width %d: meta line %q, want %q uncut", c.outer, meta, c.want)
+		}
 	}
 	tk.Assignee = ""
 	if plain := ansi.Strip(card(tk, 40, false, false, "")); !strings.Contains(plain, "unassigned") {
 		t.Errorf("an unassigned ticket says so:\n%s", plain)
+	}
+}
+
+func TestTypeIconsUseJiraColors(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	cases := []struct{ typ, glyph, hex string }{
+		{"Story", "■", "#a6e3a1"},
+		{"Historia", "■", "#a6e3a1"},
+		{"Bug QA", "●", "#f38ba8"},
+		{"Error", "●", "#f38ba8"},
+		{"Task (unplanned)", "■", "#89b4fa"},
+		{"Subtarea", "■", "#94e2d5"},
+		{"Epic", "◆", "#cba6f7"},
+	}
+	for _, c := range cases {
+		want := lipgloss.NewStyle().Foreground(lipgloss.Color(c.hex)).Render(c.glyph)
+		if got := typeGlyph(c.typ); got != want {
+			t.Errorf("typeGlyph(%q) = %q, want %q", c.typ, got, want)
+		}
+	}
+	if got := ansi.Strip(typeGlyph("Postmortem")); got != "■" {
+		t.Errorf("an unknown type still gets an icon, got %q", got)
+	}
+	if typeGlyph("") != "" {
+		t.Error("no type, no icon")
+	}
+}
+
+func TestCardShowsTheAgentAsHerdrsDot(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Type: "Story", Assignee: "Ana López"}
+	for status, hex := range map[string]string{"working": "#f9e2af", "blocked": "#f38ba8", "done": "#94e2d5", "idle": "#a6e3a1"} {
+		out := card(tk, 30, false, false, status)
+		head := strings.Split(out, "\n")[1]
+		if dot := lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Render("●"); !strings.Contains(head, dot) {
+			t.Errorf("%s: header should end with a dot in %s: %q", status, hex, head)
+		}
+		if plain := ansi.Strip(out); strings.Contains(plain, status) || strings.Contains(plain, "needs you") {
+			t.Errorf("%s: the card shows the dot, not the word:\n%s", status, plain)
+		}
+	}
+	if head := ansi.Strip(strings.Split(card(tk, 30, false, false, "unknown"), "\n")[1]); strings.Contains(head, "●") {
+		t.Errorf("an unknown agent shows no dot: %q", head)
+	}
+	tk.Status = "Blocked"
+	head := strings.Split(card(tk, 24, false, false, "blocked"), "\n")[1]
+	if icon := lipgloss.NewStyle().Foreground(lipgloss.Color("#fab387")).Render("⊘ blocked"); !strings.Contains(head, icon) {
+		t.Errorf("a blocked ticket's icon is orange, apart from the agent's red dot: %q", head)
 	}
 }
 
@@ -2714,7 +2767,7 @@ func TestCardsShowSubtaskProgress(t *testing.T) {
 	snap := subtaskSnapshot()
 	tk := snap.Tickets[slices.IndexFunc(snap.Tickets, func(t ticket.Ticket) bool { return t.Key == "DEMO-1" })]
 	tk.Type = "Story"
-	plain := ansi.Strip(card(tk, 40, false, false, ""))
+	plain := ansi.Strip(card(tk, 42, false, false, ""))
 	if !strings.Contains(plain, "1/3 subtasks · 1 to do") {
 		t.Errorf("the parent should show its progress and what is still to do:\n%s", plain)
 	}

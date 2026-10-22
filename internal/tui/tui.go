@@ -1600,7 +1600,7 @@ var (
 // card renders one ticket in its own bordered box of the given outer width.
 var (
 	cardBoxWarn = cardBox.BorderForeground(lipgloss.Color("130"))
-	blocked     = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	blocked     = lipgloss.NewStyle().Foreground(herdrPeach)
 	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255"))
 	keyDim      = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 )
@@ -1643,6 +1643,10 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 	if sel {
 		head = selected.Render("▸ " + string(t.Key))
 	}
+	dot, dotW := "", 0
+	if _, kind := board.AgentLine(agent); kind != board.AgentNone {
+		dot, dotW = agentStyle(agent).Render("●"), 2
+	}
 	flag := ""
 	if r := t.Attention(); len(r) > 0 {
 		flag = warn.Render("! " + string(r[0]))
@@ -1652,11 +1656,14 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 		switch word := blocked.Render("⊘ blocked"); {
 		case flag != "":
 			flag += " " + blocked.Render("⊘")
-		case lipgloss.Width(head)+1+lipgloss.Width(word) <= inner:
+		case lipgloss.Width(head)+1+lipgloss.Width(word)+dotW <= inner:
 			flag = word
 		default:
 			flag = blocked.Render("⊘")
 		}
+	}
+	if dot != "" {
+		flag = strings.TrimPrefix(flag+" "+dot, " ")
 	}
 	gap := max(1, inner-lipgloss.Width(head)-lipgloss.Width(flag))
 	lines := []string{head + strings.Repeat(" ", gap) + flag}
@@ -1673,30 +1680,32 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 	}
 	if !compact {
 		lines = append(lines, coloredPRs(t.PRs, inner))
-		info := t.Type
+		icon := typeGlyph(t.Type)
+		if icon != "" {
+			icon += " "
+		}
+		progress, name := "", t.Type
 		if len(t.Subtasks) > 0 {
-			// Progress leads the type, so a narrow card cuts the type before what is left to do.
-			info = strings.TrimSuffix(subtaskProgress(t)+" · "+info, " · ")
+			progress = subtaskProgress(t)
 		}
-		if info == "" {
-			info = t.Status
+		if name == "" && progress == "" {
+			name = t.Status
 		}
-		// The type shares its line with the assignee and the agent, so the pull requests keep theirs; when they
-		// do not all fit, the type gives way first, then the assignee, never the agent.
-		who := " · " + shortName(t.Assignee)
-		text, kind := agentShort(agent)
-		agentW := 0
-		if kind != board.AgentNone {
-			agentW = lipgloss.Width(text) + 3
+		// The type's name shows whole or not at all, as its icon already tells it; the subtask progress
+		// may be cut, and the assignee always stays.
+		who := shortName(t.Assignee)
+		room := inner - lipgloss.Width(icon) - lipgloss.Width(who) - 3
+		info := strings.Trim(progress+" · "+name, " ·")
+		if lipgloss.Width(info) > room {
+			info = ""
+			if progress != "" && room >= 4 {
+				info = truncate(progress, room)
+			}
 		}
-		line := dim.Render(truncate(strings.TrimPrefix(who, " · "), max(1, inner-agentW)))
-		if room := inner - agentW - lipgloss.Width(who); room >= 4 {
-			line = dim.Render(truncate(info, room) + who)
+		if info != "" {
+			who = info + " · " + who
 		}
-		if kind != board.AgentNone {
-			line += dim.Render(" · ") + agentStyle(kind).Render(text)
-		}
-		lines = append(lines, line)
+		lines = append(lines, icon+dim.Render(truncate(who, inner-lipgloss.Width(icon))))
 	}
 	for i, l := range lines {
 		lines[i] = " " + l
@@ -2028,7 +2037,7 @@ func agentCell(status string, agentW int, plain bool) string {
 	if plain || kind == board.AgentNone {
 		return cell
 	}
-	return agentStyle(kind).Render(cell)
+	return agentStyle(status).Render(cell)
 }
 
 // agentShort words an agent status without the agent's name, as the list and cards have little room;
@@ -2041,8 +2050,49 @@ func agentShort(status string) (string, board.AgentKind) {
 	return strings.Replace(line, "claude ", "", 1), kind
 }
 
-func agentStyle(kind board.AgentKind) lipgloss.Style {
-	return map[board.AgentKind]lipgloss.Style{board.AgentWorking: keyStyle, board.AgentNeedsYou: warn, board.AgentIdle: dim}[kind]
+// Herdr's catppuccin palette, so an agent's dot reads the same on the board as in Herdr's sidebar.
+const (
+	herdrGreen  = lipgloss.Color("#a6e3a1")
+	herdrYellow = lipgloss.Color("#f9e2af")
+	herdrRed    = lipgloss.Color("#f38ba8")
+	herdrTeal   = lipgloss.Color("#94e2d5")
+	herdrBlue   = lipgloss.Color("#89b4fa")
+	herdrMauve  = lipgloss.Color("#cba6f7")
+	herdrPeach  = lipgloss.Color("#fab387")
+)
+
+// agentStyle colors an agent status as Herdr does: working yellow, blocked red, done teal, idle green.
+func agentStyle(status string) lipgloss.Style {
+	colors := map[string]lipgloss.Color{"working": herdrYellow, "blocked": herdrRed, "done": herdrTeal, "idle": herdrGreen}
+	return lipgloss.NewStyle().Foreground(colors[status])
+}
+
+// typeIcons are matched in order against the lowercased Jira type name, in English or Spanish, so
+// "Subtarea" is a subtask before it is a task.
+var typeIcons = []struct {
+	words []string
+	glyph string
+	color lipgloss.Color
+}{
+	{[]string{"bug", "error", "defect"}, "●", herdrRed},
+	{[]string{"epic", "épica"}, "◆", herdrMauve},
+	{[]string{"sub"}, "■", herdrTeal},
+	{[]string{"story", "historia"}, "■", herdrGreen},
+	{[]string{"task", "tarea"}, "■", herdrBlue},
+}
+
+// typeGlyph is a one-cell colored icon for a Jira issue type, like Jira's own; empty when there is no type.
+func typeGlyph(typ string) string {
+	if typ == "" {
+		return ""
+	}
+	l := strings.ToLower(typ)
+	for _, ic := range typeIcons {
+		if slices.ContainsFunc(ic.words, func(w string) bool { return strings.Contains(l, w) }) {
+			return lipgloss.NewStyle().Foreground(ic.color).Render(ic.glyph)
+		}
+	}
+	return dim.Render("■")
 }
 
 // listLines lays the list out in sections, the user's tickets and review requests per repo, and returns for
