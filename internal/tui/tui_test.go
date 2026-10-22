@@ -1266,7 +1266,7 @@ func TestKeyboardReachesReviewChips(t *testing.T) {
 		t.Fatalf("right should move to the next chip:\n%s", stripANSI(next.View()))
 	}
 	next = press(next, "enter")
-	if !strings.Contains(stripANSI(next.View()), "Review request #821") {
+	if !strings.Contains(stripANSI(next.View()), "Pull request #821 · example-org/api · ") || !strings.Contains(stripANSI(next.View()), " · review requested") {
 		t.Fatalf("enter on a chip should open its menu:\n%s", stripANSI(next.View()))
 	}
 	next, _ = run(next, "enter")
