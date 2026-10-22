@@ -2073,7 +2073,20 @@ const (
 	herdrBlue   = lipgloss.Color("#89b4fa")
 	herdrMauve  = lipgloss.Color("#cba6f7")
 	herdrPeach  = lipgloss.Color("#fab387")
+	herdrGray   = lipgloss.Color("#9399b2")
+	herdrBase   = lipgloss.Color("#1e1e2e")
 )
+
+var columnColors = map[ticket.Category]lipgloss.Color{ticket.ToDo: herdrGray, ticket.InProgress: herdrBlue, ticket.InReview: herdrMauve, ticket.Done: herdrGreen}
+
+// statusBadge is a ticket's Jira status, with its mark's icon, on its column's color.
+func statusBadge(t ticket.Ticket) string {
+	text := t.Status
+	if icon, _, _ := statusMark(t); icon != "" {
+		text = icon + " " + text
+	}
+	return lipgloss.NewStyle().Background(columnColors[t.Category]).Foreground(herdrBase).Render(" " + text + " ")
+}
 
 // agentStyle colors an agent status as Herdr does: working yellow, blocked red, done teal, idle green.
 func agentStyle(status string) lipgloss.Style {
@@ -2279,8 +2292,8 @@ func (m Model) preview() string {
 		return title + "\n" + dim.Render(truncate(fmt.Sprintf("review requested by %s in %s%s · CI %s · enter for actions", orDash(it.pr.Author), it.pr.Repo, approvals, ciWord(it.pr.Checks)), m.width))
 	}
 	t := it.ticket
-	title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s", t.Key, t.Summary), m.width))
-	parts := []string{t.Status, cmp.Or(t.Assignee, "unassigned")}
+	title := truncate(titleStyle.Render(string(t.Key))+" "+statusBadge(*t)+titleStyle.Render(" · "+t.Summary), m.width)
+	parts := []string{cmp.Or(t.Assignee, "unassigned")}
 	if t.Label != "" {
 		parts = append([]string{t.Label}, parts...)
 	}
