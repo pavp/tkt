@@ -1472,7 +1472,7 @@ type headerItem struct {
 // filter and a pane too narrow for columns always show the list.
 func (m Model) headerSpec() []headerItem {
 	spec := []headerItem{
-		{filter: FilterAll, label: fmt.Sprintf(" 1 All %d ", len(m.shownTickets())+len(m.reviews()))},
+		{filter: FilterAll, label: fmt.Sprintf(" 1 All %d ", len(m.shownTickets()))},
 		{filter: FilterPRs, label: fmt.Sprintf(" 2 PRs %d ", m.prCount())},
 	}
 	if m.filter != FilterPRs && m.width >= narrowWidth {
