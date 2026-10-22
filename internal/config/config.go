@@ -52,7 +52,10 @@ type Space struct {
 	Name            string            `toml:"name,omitempty"`
 	AcceptanceField string            `toml:"acceptance_field,omitempty"`
 	StatusOverrides map[string]string `toml:"status_overrides,omitempty"`
-	Repos           []Repo            `toml:"repos,omitempty"`
+	// StatusMarks sets the icon cards show with a status ("none", "diamond", "blocked", "clock", "flag",
+	// "star" or "triangle") where the automatic one does not suit.
+	StatusMarks map[string]string `toml:"status_marks,omitempty"`
+	Repos       []Repo            `toml:"repos,omitempty"`
 	// Ignored lists repositories inferred from Jira that tkt must not use; a configured one still counts.
 	Ignored []string `toml:"ignored,omitempty"`
 	// TeamBoards are the Jira boards whose active sprints make the board's Team mode.
@@ -198,6 +201,11 @@ func (c *Config) Validate() error {
 				errs = append(errs, fmt.Errorf("space %s: status %q maps to unknown column %q (use todo, in_progress, review or done)", s.Key, status, cat))
 			}
 		}
+		for status, mark := range s.StatusMarks {
+			if _, ok := ticket.ParseMark(mark); !ok {
+				errs = append(errs, fmt.Errorf("space %s: status %q has unknown mark %q (use none, diamond, blocked, clock, flag, star or triangle)", s.Key, status, mark))
+			}
+		}
 		for _, r := range s.Repos {
 			if !repoPattern.MatchString(r.Name) {
 				errs = append(errs, fmt.Errorf("space %s: repo %q must look like owner/name", s.Key, r.Name))
@@ -276,6 +284,7 @@ func (c Config) Clone() Config {
 	out.Spaces = make([]Space, len(c.Spaces))
 	for i, s := range c.Spaces {
 		s.StatusOverrides = maps.Clone(s.StatusOverrides)
+		s.StatusMarks = maps.Clone(s.StatusMarks)
 		s.Repos = slices.Clone(s.Repos)
 		s.Ignored = slices.Clone(s.Ignored)
 		s.TeamBoards = slices.Clone(s.TeamBoards)
@@ -295,6 +304,17 @@ func (s Space) Categories() map[string]ticket.Category {
 	for status, cat := range s.StatusOverrides {
 		if c, ok := ticket.ParseCategory(cat); ok {
 			out[status] = c
+		}
+	}
+	return out
+}
+
+// Marks returns the configured mark of each status of a space.
+func (s Space) Marks() map[string]ticket.Mark {
+	out := make(map[string]ticket.Mark, len(s.StatusMarks))
+	for status, mark := range s.StatusMarks {
+		if m, ok := ticket.ParseMark(mark); ok {
+			out[status] = m
 		}
 	}
 	return out

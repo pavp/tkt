@@ -75,7 +75,7 @@ func TestCategoryFor(t *testing.T) {
 	}
 }
 
-func TestBlocked(t *testing.T) {
+func TestBlockedName(t *testing.T) {
 	tests := []struct {
 		status string
 		want   bool
@@ -87,8 +87,34 @@ func TestBlocked(t *testing.T) {
 		{"", false},
 	}
 	for _, tt := range tests {
-		if got := (Ticket{Status: tt.status}).Blocked(); got != tt.want {
-			t.Errorf("Blocked() for %q = %v, want %v", tt.status, got, tt.want)
+		if got := BlockedName(tt.status); got != tt.want {
+			t.Errorf("BlockedName(%q) = %v, want %v", tt.status, got, tt.want)
+		}
+	}
+}
+
+func TestColumnAndMark(t *testing.T) {
+	overrides := map[string]Category{"Pending test": InReview, "En revisión": InReview, "Blocked": InProgress}
+	marks := map[string]Mark{"On hold": MarkBlocked, "Bloqueado": MarkNone, "En curso": MarkClock}
+	tests := []struct {
+		status, jiraCategory string
+		col                  Category
+		mark                 Mark
+	}{
+		{"Pending test", "indeterminate", InReview, MarkDiamond},
+		{"En revisión", "indeterminate", InReview, MarkNone},
+		{"En curso", "indeterminate", InProgress, MarkClock},
+		{"Blocked", "indeterminate", InProgress, MarkBlocked},
+		{"Bloqueado", "indeterminate", ToDo, MarkNone},
+		{"On hold", "indeterminate", InProgress, MarkBlocked},
+		{"Finalizada", "done", Done, MarkNone},
+	}
+	for _, tt := range tests {
+		if got := Column(tt.status, tt.jiraCategory, overrides); got != tt.col {
+			t.Errorf("Column(%q) = %q, want %q", tt.status, got, tt.col)
+		}
+		if got := MarkFor(tt.status, tt.jiraCategory, overrides, marks); got != tt.mark {
+			t.Errorf("MarkFor(%q) = %q, want %q", tt.status, got, tt.mark)
 		}
 	}
 }

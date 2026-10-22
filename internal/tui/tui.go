@@ -1600,7 +1600,6 @@ var (
 // card renders one ticket in its own bordered box of the given outer width.
 var (
 	cardBoxWarn = cardBox.BorderForeground(lipgloss.Color("130"))
-	blocked     = lipgloss.NewStyle().Foreground(herdrPeach)
 	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255"))
 	keyDim      = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 )
@@ -1651,15 +1650,15 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 	if r := t.Attention(); len(r) > 0 {
 		flag = warn.Render("! " + string(r[0]))
 	}
-	if t.Blocked() {
+	if icon, word, style := statusMark(t); icon != "" {
 		// The word gives way to the icon alone when another flag is there or the card is too narrow for it.
-		switch word := blocked.Render("⊘ blocked"); {
+		switch {
 		case flag != "":
-			flag += " " + blocked.Render("⊘")
+			flag += " " + style.Render(icon)
 		case lipgloss.Width(head)+1+lipgloss.Width(word)+dotW <= inner:
-			flag = word
+			flag = style.Render(word)
 		default:
-			flag = blocked.Render("⊘")
+			flag = style.Render(icon)
 		}
 	}
 	if dot != "" {
@@ -2067,6 +2066,29 @@ func agentStyle(status string) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(colors[status])
 }
 
+// markIcons draws each status mark; red is left out so a mark never reads as an agent that needs the user.
+var markIcons = map[ticket.Mark]struct {
+	glyph string
+	color lipgloss.Color
+}{
+	ticket.MarkDiamond:  {"◇", herdrBlue},
+	ticket.MarkBlocked:  {"⊘", herdrPeach},
+	ticket.MarkClock:    {"◷", herdrTeal},
+	ticket.MarkFlag:     {"⚑", herdrMauve},
+	ticket.MarkStar:     {"★", herdrYellow},
+	ticket.MarkTriangle: {"▲", herdrGreen},
+}
+
+// statusMark is the icon of a ticket's status mark, its wider wording with the status name, and its style;
+// empty when unmarked.
+func statusMark(t ticket.Ticket) (icon, word string, style lipgloss.Style) {
+	ic, ok := markIcons[t.Mark]
+	if !ok {
+		return "", "", style
+	}
+	return ic.glyph, ic.glyph + " " + t.Status, lipgloss.NewStyle().Foreground(ic.color)
+}
+
 // typeIcons are matched in order against the lowercased Jira type name, in English or Spanish, so
 // "Subtarea" is a subtask before it is a task.
 var typeIcons = []struct {
@@ -2187,6 +2209,11 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			}
 			line = row(key, it.ticket.Status, assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
 		}
+		var mark string
+		var markStyle lipgloss.Style
+		if it.ticket != nil {
+			mark, _, markStyle = statusMark(*it.ticket)
+		}
 		switch {
 		case i == m.row:
 			line = "▸ " + selected.Render(line)
@@ -2194,13 +2221,13 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			line = warn.Render("!") + " " + line
 		case it.mine():
 			line = "  " + line
-		case len(it.ticket.Attention()) > 0 && it.ticket.Blocked():
+		case len(it.ticket.Attention()) > 0 && mark != "":
 			// The wider mark takes one cell of the key's padding, so the columns stay aligned.
-			line = warn.Render("!") + blocked.Render("⊘") + " " + strings.Replace(line, string(it.key)+" ", string(it.key), 1)
+			line = warn.Render("!") + markStyle.Render(mark) + " " + strings.Replace(line, string(it.key)+" ", string(it.key), 1)
 		case len(it.ticket.Attention()) > 0:
 			line = warn.Render("!") + " " + line
-		case it.ticket.Blocked():
-			line = blocked.Render("⊘") + " " + line
+		case mark != "":
+			line = markStyle.Render(mark) + " " + line
 		default:
 			line = "  " + line
 		}
