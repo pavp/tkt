@@ -24,7 +24,7 @@ type Snapshot struct {
 	Tickets   []ticket.Ticket      `json:"tickets"`
 	Reviews   []ticket.PullRequest `json:"reviews"`
 	// Others are the open pull requests of the known repositories that are neither the user's nor review
-	// requests, listed while the Team toggle is on.
+	// requests; they come from the listing every sync makes, and the board shows them on request.
 	Others  []ticket.PullRequest `json:"others,omitempty"`
 	Sprints []jira.Sprint        `json:"sprints"`
 	// Agents holds the Herdr agent status of each ticket's workspace, when the board runs inside Herdr.
@@ -298,7 +298,7 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		}
 		slices.SortStableFunc(snap.Reviews, byRepoNumber)
 	}
-	if opts.Team && prErr == nil {
+	if prErr == nil {
 		snap.Others = others(prs, tickets, snap.Reviews)
 	}
 	return DropIgnored(c, snap), nil
