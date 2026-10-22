@@ -146,8 +146,10 @@ func (a *App) feedbackPrompt(ctx context.Context, c *config.Config, t ticket.Tic
 		}
 	}
 	wg.Wait()
-	if err := errors.Join(errs...); err != nil {
-		return "", err
+	for _, err := range errs {
+		if err != nil {
+			return "", err
+		}
 	}
 	var b strings.Builder
 	for i, pr := range t.PRs {

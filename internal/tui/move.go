@@ -117,15 +117,16 @@ func (m Model) transitions(msg TransitionsMsg) (tea.Model, tea.Cmd) {
 	if waiting {
 		back = m.menu.back
 	}
-	if msg.Err != nil {
-		m.status = "could not load the statuses of " + string(msg.Key) + ": " + msg.Err.Error()
-		if waiting {
-			m.menu = back
-		}
+	if msg.Err == nil {
+		m.moves[msg.Key] = knownMoves{msg.Transitions, m.now()}
+	}
+	// Only the menu still waiting opens: one the user closed, or a second answer, stays closed.
+	if !waiting {
 		return m, nil
 	}
-	m.moves[msg.Key] = knownMoves{msg.Transitions, m.now()}
-	if m.menu != nil && !waiting {
+	if msg.Err != nil {
+		m.status = "could not load the statuses of " + string(msg.Key) + ": " + msg.Err.Error()
+		m.menu = back
 		return m, nil
 	}
 	return m.showMoves(msg.Key, msg.Transitions, back)
