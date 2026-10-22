@@ -36,6 +36,9 @@ type Jira struct {
 	Email string `toml:"email"`
 	// LabelField names a Jira field, such as "Product", whose value the board shows for each ticket.
 	LabelField string `toml:"label_field,omitempty"`
+	// PointsField names the Jira field holding story points; empty detects "Story Points" or, failing
+	// that, "Story point estimate".
+	PointsField string `toml:"points_field,omitempty"`
 }
 
 type GitHub struct {

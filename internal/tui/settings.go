@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -34,6 +35,7 @@ const (
 	rowRoot
 	rowAddRoot
 	rowLabel
+	rowPoints
 	rowTeamBoard
 	rowAddTeamBoard
 	rowStatus
@@ -78,6 +80,8 @@ type settingsForm struct {
 	// holds a Jira field name, completed from the site's fields, and may be left empty.
 	repo      bool
 	jiraField bool
+	// empty says what leaving a jiraField form empty does; unset, it shows no value.
+	empty string
 	// teamBoard forms add a board to space, matched against the space's boards once they are in.
 	teamBoard bool
 	space     int
@@ -125,7 +129,7 @@ func (m Model) openSettings() (tea.Model, tea.Cmd) {
 func (s *settingsView) rows() []settingsRow {
 	var out []settingsRow
 	if s.section == sectionBoard {
-		return []settingsRow{{kind: rowLabel, name: s.cfg.Jira.LabelField}}
+		return []settingsRow{{kind: rowLabel, name: s.cfg.Jira.LabelField}, {kind: rowPoints, name: s.cfg.Jira.PointsField}}
 	}
 	if s.section == sectionColumns {
 		return s.columnRows()
@@ -286,6 +290,18 @@ func (m Model) settingsAction(action string) (tea.Model, tea.Cmd) {
 	case r.kind == rowLabel:
 		s.form = &settingsForm{title: "Ticket label", labels: []string{"Jira field (for example Product)"}, values: []string{r.name}, jiraField: true,
 			apply: func(c *config.Config, v []string) { c.Jira.LabelField = v[0] }}
+	case action == "d" && r.kind == rowPoints:
+		if r.name == "" {
+			return m, nil
+		}
+		s.confirm = &settingsConfirm{
+			question: "Detect the story points field again? (y/n)",
+			verb:     "detect",
+			apply:    func(c *config.Config) { c.Jira.PointsField = "" },
+		}
+	case r.kind == rowPoints:
+		s.form = &settingsForm{title: "Story points field", labels: []string{"Jira field (for example Story Points)"}, values: []string{r.name}, jiraField: true,
+			empty: "empty detects it", apply: func(c *config.Config, v []string) { c.Jira.PointsField = v[0] }}
 	case action == "d" && r.kind == rowInferred:
 		s.confirm = &settingsConfirm{
 			question: fmt.Sprintf("Ignore %s in %s? tkt stops using it for CI and reviews (y/n)", r.name, s.cfg.Spaces[r.space].Key),
@@ -598,12 +614,14 @@ func (m Model) settingsLines() ([]string, []int) {
 			line = mark + keyDim.Render("+ Add folder")
 		case rowLabel:
 			line = mark + pad("Ticket label", 14) + " " + orDash(r.name)
+		case rowPoints:
+			line = mark + pad("Story points", 14) + " " + cmp.Or(r.name, dim.Render("auto (Story Points or Story point estimate)"))
 		}
 		if s.section == sectionRoots && i == 0 {
 			lines, at = append(lines, dim.Render("Folders where tkt looks for your local clones")), append(at, -1)
 		}
 		if s.section == sectionBoard && i == 0 {
-			lines, at = append(lines, dim.Render("A Jira field whose value is shown first on the selected ticket's detail line")), append(at, -1)
+			lines, at = append(lines, truncate(dim.Render("Jira fields: a label shown first on the selected ticket's detail line, and the story points"), m.width)), append(at, -1)
 		}
 		lines, at = append(lines, truncate(line, m.width)), append(at, i)
 	}
@@ -723,7 +741,7 @@ func (f *settingsForm) lines() ([]string, int) {
 	}
 	keys := "enter save · tab complete · ↑↓ fields · ctrl+o browse folders · esc cancel"
 	if f.jiraField {
-		keys = "enter save · tab complete from your Jira fields · empty shows none · esc cancel"
+		keys = "enter save · tab complete from your Jira fields · " + cmp.Or(f.empty, "empty shows none") + " · esc cancel"
 	}
 	if f.teamBoard {
 		keys = "enter add · tab complete from the space's scrum boards · esc cancel"

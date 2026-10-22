@@ -369,6 +369,15 @@ func FieldText(raw json.RawMessage) string {
 	return strings.Join(parts, ", ")
 }
 
+// FieldNumber reads a numeric field, such as story points; null, missing or not a number reads as 0.
+func FieldNumber(raw json.RawMessage) float64 {
+	var n float64
+	if json.Unmarshal(raw, &n) != nil {
+		return 0
+	}
+	return n
+}
+
 // ListFields are the fields the board needs; Issue() asks for more.
 var ListFields = []string{"summary", "issuetype", "status", "parent", "updated", "assignee", SprintFieldName}
 

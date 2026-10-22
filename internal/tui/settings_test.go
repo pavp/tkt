@@ -316,6 +316,29 @@ func TestSettingsSetsTheTicketLabelFromJiraFields(t *testing.T) {
 	}
 }
 
+func TestSettingsSetsTheStoryPointsField(t *testing.T) {
+	m, r := settingsBoard(t)
+	r.jiraFields = []string{"Story Points", "Story point estimate", "Summary"}
+	m = send(send(send(send(m, keyTab), keyTab), keyTab), keyTab)
+	if v := stripANSI(m.View()); !strings.Contains(v, "Story points") || !strings.Contains(v, "auto (Story Points or Story point estimate)") {
+		t.Fatalf("board section:\n%s", v)
+	}
+	m = press(selectSettingsRow(t, m, "Story points"), "enter")
+	m = send(typeText(m, "story point e"), keyTab)
+	m = send(m, keyEnter)
+	if len(r.saved) != 1 || r.saved[0].Jira.PointsField != "Story point estimate" {
+		t.Fatalf("saved = %+v", r.saved)
+	}
+	m = press(m, "d")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Detect the story points field again? (y/n)") {
+		t.Fatalf("no confirmation:\n%s", v)
+	}
+	send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	if len(r.saved) != 2 || r.saved[1].Jira.PointsField != "" {
+		t.Errorf("clear = %+v", r.saved)
+	}
+}
+
 func TestSettingsTicketLabelHintsAnUnknownField(t *testing.T) {
 	m, r := settingsBoard(t)
 	r.jiraFields = []string{"Product"}
