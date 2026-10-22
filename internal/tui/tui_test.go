@@ -3032,6 +3032,56 @@ func TestPRMenusPutTheirDetailsOnASecondLine(t *testing.T) {
 	}
 }
 
+func TestStoryPointsShowOnCardsColumnsListAndPreview(t *testing.T) {
+	tk := ticket.Ticket{Key: "ACTO-170450", Summary: "Homogenize", Status: "En curso", Category: ticket.InProgress, Points: 3, Mark: ticket.MarkDiamond}
+	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, "idle"), "\n")[1]); !strings.Contains(head, "ACTO-170450 3pt") || !strings.Contains(head, "○") {
+		t.Errorf("points sit beside the key, before the marks: %q", head)
+	}
+	if head := ansi.Strip(strings.Split(card(tk, 26, true, false, "idle"), "\n")[1]); !strings.Contains(head, "▸ ACTO-170450 3pt") || !strings.Contains(head, "◇ ○") || strings.Contains(head, "En curso") {
+		t.Errorf("on a narrow card the mark shrinks to its icon first: %q", head)
+	}
+	if head := ansi.Strip(strings.Split(card(tk, 24, true, false, "idle"), "\n")[1]); strings.Contains(head, "3pt") || !strings.Contains(head, "◇ ○") || lipgloss.Width(head) > 24 {
+		t.Errorf("without room for both, the points give way: %q", head)
+	}
+	tk.Points = 0.5
+	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, ""), "\n")[1]); !strings.Contains(head, "0.5pt") {
+		t.Errorf("half points: %q", head)
+	}
+	tk.Points = 0
+	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, ""), "\n")[1]); strings.Contains(head, "pt") {
+		t.Errorf("an unestimated ticket shows no points: %q", head)
+	}
+
+	snap := snapshot()
+	for i := range snap.Tickets {
+		if snap.Tickets[i].Key == "DEMO-1" {
+			snap.Tickets[i].Points = 3
+		}
+		if snap.Tickets[i].Key == "DEMO-3" {
+			snap.Tickets[i].Points = 2
+		}
+	}
+	m := tea.Model(New(snap, true, &recorder{}, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "In Progress           1 · 3 pts") && !strings.Contains(v, "1 · 3 pts") {
+		t.Errorf("a column's title adds up its points:\n%s", v)
+	}
+	if strings.Contains(v, "In Review") && strings.Contains(v, "1 · 0 pts") {
+		t.Errorf("a column without points shows only its count:\n%s", v)
+	}
+	if !strings.Contains(v, "DEMO-3  To Do  · Export CSV\n 2 points · unassigned") {
+		t.Errorf("the preview names the selected ticket's points:\n%s", v)
+	}
+	list := stripANSI(press(m, "v").View())
+	if !strings.Contains(list, " SP ") || !strings.Contains(strings.Split(list, "\n")[lineIndex(list, "DEMO-1 ")], " 3 ") {
+		t.Errorf("the list has a points column:\n%s", list)
+	}
+	if prs := stripANSI(press(m, "2").View()); strings.Contains(prs, " SP ") {
+		t.Errorf("the PRs filter has no points column:\n%s", prs)
+	}
+}
+
 func TestLegendFitsEachScreen(t *testing.T) {
 	open := func(snap board.Snapshot, view string, keys ...string) string {
 		m := tea.Model(New(snap, true, &recorder{}, view))

@@ -946,7 +946,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.effectiveView() == ViewList {
 		lines := strings.Split(strings.TrimRight(m.listView(), "\n"), "\n")
-		_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, 0, 0)
+		_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, 0, 0, 0)
 		avail := m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer())
 		start := 0
 		if avail > 0 && len(lines) > avail {
@@ -1639,7 +1639,13 @@ func (m Model) columnsView(height int) string {
 	inner := m.columnWidth()
 	rendered := make([]string, len(cols))
 	for ci, c := range ticket.Columns {
-		parts := columnHead(c.Title(), len(cols[ci]), inner)
+		points := 0.0
+		for _, it := range cols[ci] {
+			if it.ticket != nil {
+				points += it.ticket.Points
+			}
+		}
+		parts := columnHead(c.Title(), len(cols[ci]), points, inner)
 		if len(cols[ci]) == 0 {
 			parts = append(parts, " "+dim.Render("— nothing here"))
 		}
@@ -1680,8 +1686,20 @@ func moreLine(arrow string, n int) string {
 
 // columnHead is a column's header: name left, count right, a rule below. Every column looks the same;
 // the box border alone shows where the selection is.
-func columnHead(name string, count, width int) []string {
+// pointsText words story points for a card, "3pt" or "0.5pt"; empty when unestimated.
+func pointsText(p float64) string {
+	if p == 0 {
+		return ""
+	}
+	return strconv.FormatFloat(p, 'f', -1, 64) + "pt"
+}
+
+// columnHead titles a column with its count and, when any of its tickets is estimated, their points.
+func columnHead(name string, count int, points float64, width int) []string {
 	n := strconv.Itoa(count)
+	if points > 0 {
+		n += " · " + strconv.FormatFloat(points, 'f', -1, 64) + " pts"
+	}
 	line := " " + name + strings.Repeat(" ", max(1, width-2-lipgloss.Width(name)-len(n))) + n + " "
 	return []string{bold.Render(line), dim.Render(strings.Repeat("─", width))}
 }
@@ -1741,23 +1759,34 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 		glyph, _, _ := strings.Cut(line, " ")
 		dot, dotW = agentStyle(agent).Render(glyph), 2
 	}
-	flag := ""
-	if r := t.Attention(); len(r) > 0 {
-		flag = warn.Render("! " + string(r[0]))
-	}
-	if icon, word, style := statusMark(t); icon != "" {
-		// The word gives way to the icon alone when another flag is there or the card is too narrow for it.
-		switch {
-		case flag != "":
-			flag += " " + style.Render(icon)
-		case lipgloss.Width(head)+1+lipgloss.Width(word)+dotW <= inner:
-			flag = style.Render(word)
-		default:
-			flag = style.Render(icon)
+	flagFor := func(head string) string {
+		flag := ""
+		if r := t.Attention(); len(r) > 0 {
+			flag = warn.Render("! " + string(r[0]))
 		}
+		if icon, word, style := statusMark(t); icon != "" {
+			// The word gives way to the icon alone when another flag is there or the card is too narrow for it.
+			switch {
+			case flag != "":
+				flag += " " + style.Render(icon)
+			case lipgloss.Width(head)+1+lipgloss.Width(word)+dotW <= inner:
+				flag = style.Render(word)
+			default:
+				flag = style.Render(icon)
+			}
+		}
+		if dot != "" {
+			flag = strings.TrimPrefix(flag+" "+dot, " ")
+		}
+		return flag
 	}
-	if dot != "" {
-		flag = strings.TrimPrefix(flag+" "+dot, " ")
+	// The points follow the key; when they and the flags do not both fit, the points give way.
+	flag := flagFor(head)
+	if pts := pointsText(t.Points); pts != "" {
+		withPts := head + dim.Render(" "+pts)
+		if f := flagFor(withPts); lipgloss.Width(withPts)+1+lipgloss.Width(f) <= inner {
+			head, flag = withPts, f
+		}
 	}
 	gap := max(1, inner-lipgloss.Width(head)-lipgloss.Width(flag))
 	lines := []string{head + strings.Repeat(" ", gap) + flag}
@@ -2061,6 +2090,17 @@ func (m Model) listView() string {
 			assigneeW = min(assigneeW, assigneeMaxWidth) + 1
 		}
 	}
+	pointsW := 0
+	if m.filter != FilterPRs {
+		for _, it := range measured {
+			if it.ticket != nil && it.ticket.Points != 0 {
+				pointsW = max(pointsW, lipgloss.Width("SP"), lipgloss.Width(pointsCell(it.ticket.Points, 1)))
+			}
+		}
+		if pointsW > 0 {
+			pointsW++
+		}
+	}
 	// Narrow panes drop AGENT first, then shrink PR / CI, then STATUS, so the title always keeps some room.
 	const minTitle = 12
 	keyW := keyWidth
@@ -2072,12 +2112,15 @@ func (m Model) listView() string {
 			}
 		}
 	}
-	room := func() int { return m.width - 2 - keyW - statusW - agentW - assigneeW - prW - 3 }
+	room := func() int { return m.width - 2 - keyW - statusW - agentW - assigneeW - pointsW - prW - 3 }
 	if minTitle > room() {
 		agentW = 0
 	}
 	if minTitle > room() {
 		assigneeW = 0
+	}
+	if minTitle > room() {
+		pointsW = 0
 	}
 	if short := minTitle - room(); short > 0 {
 		cut := max(0, min(short, prW-8))
@@ -2088,7 +2131,7 @@ func (m Model) listView() string {
 	row := func(key, status, agent, pr, title string) string {
 		return pad(key, keyW) + " " + pad(status, statusW) + " " + agent + pad(pr, prW) + " " + truncate(title, titleWidth)
 	}
-	lines, _ := m.listLines(row, prText, agentW, assigneeW)
+	lines, _ := m.listLines(row, prText, agentW, assigneeW, pointsW)
 	return strings.Join(lines, "\n") + "\n"
 }
 
@@ -2115,6 +2158,18 @@ const (
 	assigneeMaxWidth = 14
 	authorMaxWidth   = 20
 )
+
+// pointsCell is a list row's story points, padded to pointsW (which includes its gap); blank when unestimated.
+func pointsCell(p float64, pointsW int) string {
+	if pointsW == 0 {
+		return ""
+	}
+	n := ""
+	if p != 0 {
+		n = strconv.FormatFloat(p, 'f', -1, 64)
+	}
+	return pad(n, pointsW)
+}
 
 // authorCell is a pull request row's author, padded to authorW (which includes its gap).
 func authorCell(login string, authorW int) string {
@@ -2249,7 +2304,7 @@ func typeGlyph(typ string) string {
 // listLines lays the list out in sections, the user's tickets and review requests per repo, and returns for
 // every line the index of the item on it (-1 for titles and spacing, botToggleLine for the bots toggle), so
 // clicks map back to items.
-func (m Model) listLines(row func(key, status, agent, pr, title string) string, prText func(item) string, agentW, assigneeW int) ([]string, []int) {
+func (m Model) listLines(row func(key, status, agent, pr, title string) string, prText func(item) string, agentW, assigneeW, pointsW int) ([]string, []int) {
 	items := m.listItems()
 	header := pad("", agentW)
 	if agentW > 0 {
@@ -2261,6 +2316,9 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			label = "AUTHOR"
 		}
 		header = pad(label, assigneeW) + header
+	}
+	if pointsW > 0 {
+		header = pad("SP", pointsW) + header
 	}
 	heads := m.listHeads()
 	lines := []string{"  " + dim.Render(row(heads[0], heads[1], header, heads[2], "TITLE")), dim.Render(strings.Repeat("─", m.width))}
@@ -2325,7 +2383,7 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		}
 		switch {
 		case it.review(), it.other:
-			line = row(string(it.key), statusText(it), authorCell(it.pr.Author, assigneeW)+pad("", agentW), ci, it.pr.Title)
+			line = row(string(it.key), statusText(it), pad("", pointsW)+authorCell(it.pr.Author, assigneeW)+pad("", agentW), ci, it.pr.Title)
 		case it.mine():
 			status := statusText(it)
 			if i != m.row && needsYou(*it.pr) {
@@ -2340,7 +2398,7 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			if it.parent != "" {
 				key = "↳ " + key
 			}
-			line = row(key, it.ticket.Status, assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
+			line = row(key, it.ticket.Status, pointsCell(it.ticket.Points, pointsW)+assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
 		}
 		var mark string
 		var markStyle lipgloss.Style
@@ -2399,6 +2457,12 @@ func (m Model) preview() string {
 	t := it.ticket
 	title := truncate(titleStyle.Render(string(t.Key))+" "+statusBadge(*t)+titleStyle.Render(" · "+t.Summary), m.width)
 	parts := []string{cmp.Or(t.Assignee, "unassigned")}
+	switch {
+	case t.Points == 1:
+		parts = append([]string{"1 point"}, parts...)
+	case t.Points != 0:
+		parts = append([]string{strconv.FormatFloat(t.Points, 'f', -1, 64) + " points"}, parts...)
+	}
 	if t.Label != "" {
 		parts = append([]string{t.Label}, parts...)
 	}

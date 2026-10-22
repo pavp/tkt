@@ -105,6 +105,29 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 			snap.Warnings = append(snap.Warnings, "ticket labels unavailable: "+err.Error())
 		}
 	}
+	pointsID := ""
+	if name := c.Jira.PointsField; name != "" {
+		id, err := js.FieldID(ctx, name)
+		switch {
+		case err == nil:
+			pointsID = id
+		case errors.Is(err, jira.ErrFieldNotFound):
+			snap.Warnings = append(snap.Warnings, fmt.Sprintf("Jira has no field %q: check points_field in the config", name))
+		default:
+			snap.Warnings = append(snap.Warnings, "story points unavailable: "+err.Error())
+		}
+	} else {
+		// Company-managed spaces call the field "Story Points", team-managed ones "Story point estimate".
+		for _, name := range []string{"Story Points", "Story point estimate"} {
+			if id, err := js.FieldID(ctx, name); err == nil {
+				pointsID = id
+				break
+			}
+		}
+	}
+	if pointsID != "" {
+		fields = append(slices.Clone(fields), pointsID)
+	}
 	// The team is the active sprints of the boards the user picked; its search runs beside everything
 	// else and is joined last.
 	type teamResult struct {
@@ -142,6 +165,9 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		t := ToTicket(c, is, js.BrowseURL(is.Key))
 		if labelID != "" {
 			t.Label = jira.FieldText(is.Fields[labelID])
+		}
+		if pointsID != "" {
+			t.Points = jira.FieldNumber(is.Fields[pointsID])
 		}
 		return t
 	}

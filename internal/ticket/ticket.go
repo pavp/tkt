@@ -281,6 +281,8 @@ type Ticket struct {
 	Mark     Mark     `json:"mark,omitempty"`
 	// Label is the value of the Jira field the configuration names, such as the ticket's product.
 	Label string `json:"label,omitempty"`
+	// Points are the ticket's story points; 0 when unestimated.
+	Points float64 `json:"points,omitempty"`
 	// Assignee is the display name of the person the ticket is assigned to; empty when unassigned.
 	Assignee string `json:"assignee,omitempty"`
 	// Team marks a teammate's or unassigned ticket, shown on request; it never needs the user.

@@ -39,9 +39,10 @@ type stubJira struct {
 	// linked maps issue ids to their development-panel PRs; nil means the panel is unavailable.
 	linked map[string][]jira.DevPullRequest
 	// fieldIDs answers FieldID; fields records what Search asked for.
-	fieldIDs   map[string]string
-	fields     []string
-	fieldCalls int
+	fieldIDs    map[string]string
+	fields      []string
+	fieldCalls  int
+	fieldsAsked []string
 }
 
 func (s *stubJira) Search(_ context.Context, jql string, fields []string) ([]jira.Issue, error) {
@@ -75,6 +76,7 @@ func (s *stubJira) ActiveSprints(_ context.Context, board int) ([]int, error) {
 
 func (s *stubJira) FieldID(_ context.Context, name string) (string, error) {
 	s.fieldCalls++
+	s.fieldsAsked = append(s.fieldsAsked, name)
 	if id, ok := s.fieldIDs[name]; ok {
 		return id, nil
 	}
@@ -319,8 +321,47 @@ func TestFetchLabelsTicketsWithTheConfiguredField(t *testing.T) {
 			if tt.wantWarning != "" && !slices.Contains(snap.Warnings, tt.wantWarning) {
 				t.Errorf("warnings = %v", snap.Warnings)
 			}
-			if tt.field == "" && js.fieldCalls != 0 {
-				t.Errorf("looked up a field nobody configured")
+			if tt.field == "" && slices.ContainsFunc(js.fieldsAsked, func(n string) bool { return !strings.Contains(strings.ToLower(n), "point") }) {
+				t.Errorf("looked up a label field nobody configured: %v", js.fieldsAsked)
+			}
+		})
+	}
+}
+
+func TestFetchReadsStoryPoints(t *testing.T) {
+	issues := []jira.Issue{
+		{Key: "DEMO-1", StatusCategory: "new", Fields: map[string]json.RawMessage{"customfield_10028": json.RawMessage(`3.0`), "customfield_10016": json.RawMessage(`5`)}},
+		{Key: "DEMO-2", StatusCategory: "new", Fields: map[string]json.RawMessage{"customfield_10028": json.RawMessage(`null`), "customfield_10016": json.RawMessage(`0.5`)}},
+	}
+	tests := []struct {
+		name, field string
+		ids         map[string]string
+		want        [2]float64
+		warning     string
+	}{
+		{"detected by its usual name", "", map[string]string{"Story Points": "customfield_10028", "Story point estimate": "customfield_10016"}, [2]float64{3, 0}, ""},
+		{"team-managed name", "", map[string]string{"Story point estimate": "customfield_10016"}, [2]float64{5, 0.5}, ""},
+		{"configured", "Story point estimate", map[string]string{"Story Points": "customfield_10028", "Story point estimate": "customfield_10016"}, [2]float64{5, 0.5}, ""},
+		{"configured but missing", "Effort", map[string]string{"Story Points": "customfield_10028"}, [2]float64{0, 0}, `Jira has no field "Effort": check points_field in the config`},
+		{"no such field", "", map[string]string{}, [2]float64{0, 0}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			js := &stubJira{issues: issues, fieldIDs: tt.ids}
+			c := cfg()
+			c.Jira.PointsField = tt.field
+			snap, err := Fetch(context.Background(), c, js, &stubGitHub{}, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := [2]float64{snap.Tickets[0].Points, snap.Tickets[1].Points}; got != tt.want {
+				t.Errorf("points = %v, want %v", got, tt.want)
+			}
+			if tt.warning != "" && !slices.Contains(snap.Warnings, tt.warning) {
+				t.Errorf("warnings = %v", snap.Warnings)
+			}
+			if tt.warning == "" && len(snap.Warnings) > 0 && strings.Contains(strings.Join(snap.Warnings, " "), "field") {
+				t.Errorf("no warning expected: %v", snap.Warnings)
 			}
 		})
 	}
