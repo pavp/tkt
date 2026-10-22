@@ -703,24 +703,21 @@ func (m Model) listItems() []item {
 			out = append(out, item{key: st.Key, ticket: &st, parent: t.Key})
 		}
 	}
-	for _, pr := range m.reviews() {
-		out = append(out, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr})
-	}
 	return out
 }
 
 func (m Model) current() (item, bool) {
-	if m.effectiveView() == ViewList {
-		items := m.listItems()
-		if m.row >= 0 && m.row < len(items) {
-			return items[m.row], true
-		}
-		return item{}, false
-	}
 	if m.inStrip {
 		if _, spans := m.reviewChips(); m.stripSel < len(spans) {
 			pr := spans[m.stripSel].pr
 			return item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr}, true
+		}
+		return item{}, false
+	}
+	if m.effectiveView() == ViewList {
+		items := m.listItems()
+		if m.row >= 0 && m.row < len(items) {
+			return items[m.row], true
 		}
 		return item{}, false
 	}
@@ -733,7 +730,7 @@ func (m Model) current() (item, bool) {
 
 // reselect moves the cursor back onto the previously selected item after the data or view changed.
 func (m *Model) reselect() {
-	if m.inStrip && m.effectiveView() == ViewColumns {
+	if m.inStrip {
 		if _, spans := m.reviewChips(); m.stripSel < len(spans) {
 			return
 		}
@@ -944,10 +941,23 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if body < 0 {
 		return m, nil
 	}
+	strip, spans := m.reviewChips()
+	if strip != "" {
+		if body < lineCount(strip) {
+			// A click on a review chip opens that pull request: following a link is harmless, unlike starting an agent.
+			for _, sp := range spans {
+				if msg.X >= sp.start && msg.X < sp.start+sp.width {
+					return m, m.actions.Open(sp.pr.URL)
+				}
+			}
+			return m, nil
+		}
+		body -= lineCount(strip)
+	}
 	if m.effectiveView() == ViewList {
 		lines := strings.Split(strings.TrimRight(m.listView(), "\n"), "\n")
 		_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, 0, 0, 0)
-		avail := m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer())
+		avail := m.listHeight()
 		start := 0
 		if avail > 0 && len(lines) > avail {
 			start = windowStart(lines, avail)
@@ -963,18 +973,6 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, m.selectedByClick()
 		}
 		return m, nil
-	}
-	if strip, spans := m.reviewChips(); strip != "" {
-		if body < lineCount(strip) {
-			// A click on a review chip opens that pull request: following a link is harmless, unlike starting an agent.
-			for _, sp := range spans {
-				if msg.X >= sp.start && msg.X < sp.start+sp.width {
-					return m, m.actions.Open(sp.pr.URL)
-				}
-			}
-			return m, nil
-		}
-		body -= lineCount(strip)
 	}
 	cols := m.columns()
 	colWidth := m.columnWidth() + 2
@@ -1201,9 +1199,15 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) move(dc, dr int) {
-	if m.effectiveView() == ViewList {
-		n := len(m.listItems())
-		m.row = clamp(m.row+dr, 0, n-1)
+	if m.effectiveView() == ViewList && !m.inStrip {
+		items := m.listItems()
+		first := max(0, slices.IndexFunc(items, func(it item) bool { return !it.heading() }))
+		if _, spans := m.reviewChips(); dr < 0 && m.row <= first && len(spans) > 0 {
+			m.inStrip, m.stripSel = true, 0
+			m.remember()
+			return
+		}
+		m.row = clamp(m.row+dr, 0, len(items)-1)
 		m.remember()
 		return
 	}
@@ -1322,9 +1326,21 @@ func (m Model) board() string {
 	bottom := m.preview() + "\n" + m.footer()
 	avail := m.height - lineCount(top) - lineCount(bottom)
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
-	if avail > 0 && len(lines) > avail {
-		lines = window(lines, avail)
+	// The list scrolls under the review strip, which stays put as it does above the columns.
+	var fixed []string
+	if strip := m.reviewStrip(); strip != "" && m.effectiveView() == ViewList && m.menu == nil && m.picker == nil && m.prompt == nil {
+		fixed = strings.Split(strip, "\n")
+		avail -= len(fixed)
 	}
+	if avail > 0 && len(lines) > avail {
+		if m.inStrip {
+			lines = lines[:avail]
+		} else {
+			lines = window(lines, avail)
+		}
+	}
+	lines = append(fixed, lines...)
+	avail += len(fixed)
 	for avail > 0 && len(lines) < avail {
 		lines = append(lines, "")
 	}
@@ -1472,7 +1488,7 @@ type headerItem struct {
 // filter and a pane too narrow for columns always show the list.
 func (m Model) headerSpec() []headerItem {
 	spec := []headerItem{
-		{filter: FilterAll, label: fmt.Sprintf(" 1 All %d ", len(m.shownTickets()))},
+		{filter: FilterAll, label: fmt.Sprintf(" 1 Sprint %d ", len(m.shownTickets()))},
 		{filter: FilterPRs, label: fmt.Sprintf(" 2 PRs %d ", m.prCount())},
 	}
 	if m.filter != FilterPRs && m.width >= narrowWidth {
@@ -1598,6 +1614,15 @@ func (m Model) cardLines() int {
 		return 4
 	}
 	return 7
+}
+
+// listHeight is how many list lines show between the header, the review strip and the legend.
+func (m Model) listHeight() int {
+	h := m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer())
+	if strip := m.reviewStrip(); strip != "" {
+		h -= lineCount(strip)
+	}
+	return h
 }
 
 // columnsView draws the four columns as boxes reaching height lines, each ticket in its own card.
@@ -2367,15 +2392,6 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		case i == 0 && it.ticket != nil:
 			section("My tickets", nTickets)
 		}
-		if it.review() && m.filter != FilterPRs && (i == 0 || !items[i-1].review() || items[i-1].pr.Repo != it.pr.Repo) {
-			n := 0
-			for _, o := range items[i:] {
-				if o.review() && o.pr.Repo == it.pr.Repo {
-					n++
-				}
-			}
-			section("Review requested · "+it.pr.Repo, n)
-		}
 		var line string
 		ci := prText(it)
 		if it.pr != nil && i != m.row {
@@ -2520,7 +2536,7 @@ func (m Model) footer() string {
 	// Each screen lists only the keys that do something there: the review strip only exists in columns,
 	// density only changes cards, the view only toggles where columns can show.
 	columns := m.effectiveView() == ViewColumns
-	strip := columns && len(m.reviews()) > 0
+	strip := m.filter != FilterPRs && len(m.reviews()) > 0
 	move, moveHint, clickHint, enterHint := "↑↓ ws", "move", "select", "actions"
 	if columns {
 		move = "←↑↓→ wasd"

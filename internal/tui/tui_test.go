@@ -520,7 +520,7 @@ func TestListColumnsLineUp(t *testing.T) {
 			t.Errorf("line wider than the terminal (%d): %q", lipgloss.Width(l), l)
 		}
 	}
-	if len(titleCols) != 5 {
+	if len(titleCols) != 4 {
 		t.Fatalf("found %d title columns: %v\n%s", len(titleCols), titleCols, stripANSI(next.View()))
 	}
 	for _, c := range titleCols {
@@ -563,7 +563,7 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 All 3", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 Sprint 3", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
@@ -1328,24 +1328,31 @@ func TestMenuShowDetailsOpensTheDetail(t *testing.T) {
 	}
 }
 
-func TestListSeparatesMyTicketsFromReviews(t *testing.T) {
-	m := press(loaded(&recorder{}), "v")
+func TestListShowsReviewRequestsInTheStrip(t *testing.T) {
+	r := &recorder{}
+	m := press(loaded(r), "v")
 	v := stripANSI(m.View())
-	mine, reviews := strings.Index(v, "My tickets  3"), strings.Index(v, "Review requested · example-org/web  1")
-	if mine < 0 || reviews < 0 || mine > reviews {
-		t.Fatalf("sections missing or out of order:\n%s", v)
+	strip, head := lineIndex(v, "│ ! #820 │"), lineIndex(v, "KEY")
+	if strip < 0 || head < 0 || strip > head || strings.Contains(v, "#820          Review requested") || strings.Contains(v, "Review requested · ") {
+		t.Fatalf("the list holds only tickets, under the review strip:\n%s", v)
 	}
-	if i := strings.Index(v, "#820"); i < reviews {
-		t.Errorf("review listed before its section:\n%s", v)
+	for i := 0; i < 5 && !strings.Contains(stripANSI(m.View()), "▸ #820"); i++ {
+		m = press(m, "w")
 	}
-	y := lineIndex(m.View(), "#820          Review requested")
-	m = click(m, 6, y)
-	if line := selectedLine(m.View()); !strings.Contains(line, "#820") {
-		t.Errorf("click on the review row selected %q", line)
+	if !strings.Contains(stripANSI(m.View()), "▸ #820") {
+		t.Fatalf("up from the first ticket should reach the strip:\n%s", stripANSI(m.View()))
 	}
-	m = press(m, "1")
-	if !strings.Contains(stripANSI(m.View()), "▸ ") {
-		t.Error("lost the selection")
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #820") {
+		t.Errorf("enter on a chip opens its menu:\n%s", v)
+	}
+	if line := selectedLine(press(m, "s").View()); !strings.Contains(line, "DEMO-") {
+		t.Errorf("down from the strip goes back to the tickets: %q", line)
+	}
+	y := lineIndex(m.View(), "#820 │")
+	x := strings.Index(strings.Split(stripANSI(m.View()), "\n")[y], "#820")
+	_, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if cmd == nil || cmd() != StatusMsg("open https://github.com/example-org/web/pull/820") {
+		t.Errorf("a click on a chip opens its pull request")
 	}
 }
 
@@ -1358,7 +1365,7 @@ func TestListGroupsReviewsByRepo(t *testing.T) {
 	}
 	m := tea.Model(New(snap, false, &recorder{}, ViewList))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
-	v := stripANSI(m.View())
+	v := stripANSI(press(m, "2").View())
 	api, web := strings.Index(v, "Review requested · example-org/api  1"), strings.Index(v, "Review requested · example-org/web  2")
 	if api < 0 || web < 0 || api > web {
 		t.Fatalf("repo sections missing or out of order:\n%s", v)
@@ -1376,7 +1383,7 @@ func TestPRsFilterTogglesBots(t *testing.T) {
 	snap.Reviews = append(snap.Reviews, ticket.PullRequest{Repo: "example-org/web", Number: 830, Title: "Bump vite", Author: "dependabot", AuthorBot: true})
 	m := tea.Model(New(snap, false, &recorder{}, ViewColumns))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	if v := stripANSI(m.View()); strings.Contains(v, "#830") || !strings.Contains(v, "2 PRs 3") || !strings.Contains(v, "1 All 3") {
+	if v := stripANSI(m.View()); strings.Contains(v, "#830") || !strings.Contains(v, "2 PRs 3") || !strings.Contains(v, "1 Sprint 3") {
 		t.Fatalf("bot review shown by default:\n%s", v)
 	}
 	if v := stripANSI(press(m, "b").View()); strings.Contains(v, "#830") {
@@ -1760,7 +1767,7 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	m := loaded(&recorder{})
 	lines := strings.Split(stripANSI(m.View()), "\n")
 	first := lines[1]
-	for _, want := range []string{"tkt", "│ 1 All 3 │", "│ 2 PRs 3 │", "│ Columns │", "│ List │"} {
+	for _, want := range []string{"tkt", "│ 1 Sprint 3 │", "│ 2 PRs 3 │", "│ Columns │", "│ List │"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("title row lacks %q: %q", want, first)
 		}
@@ -1768,7 +1775,7 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	if !strings.Contains(lines[0], "╭") || !strings.Contains(lines[2], "╰") {
 		t.Errorf("filters should be boxed:\n%s\n%s\n%s", lines[0], first, lines[2])
 	}
-	if strings.Index(first, "1 All") < strings.Index(first, "tkt") || strings.Contains(first, "synced") || strings.Contains(first, "refreshing") {
+	if strings.Index(first, "1 Sprint") < strings.Index(first, "tkt") || strings.Contains(first, "synced") || strings.Contains(first, "refreshing") {
 		t.Errorf("controls should sit right of the title, the sync state at the bottom: %q", first)
 	}
 	if !strings.HasPrefix(strings.TrimSpace(lines[3]), "──────") {
@@ -1776,12 +1783,12 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	}
 
 	tray, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 40})
-	if tl := strings.Split(stripANSI(tray.View()), "\n"); !strings.Contains(tl[1], "tkt") || !strings.Contains(tl[1], "1 All") {
+	if tl := strings.Split(stripANSI(tray.View()), "\n"); !strings.Contains(tl[1], "tkt") || !strings.Contains(tl[1], "1 Sprint") {
 		t.Errorf("without the sync state, a 60-column pane keeps the controls on the title row:\n%s\n%s", tl[0], tl[1])
 	}
 	narrow, _ := m.Update(tea.WindowSizeMsg{Width: 24, Height: 40})
 	nl := strings.Split(stripANSI(narrow.View()), "\n")
-	if !strings.Contains(nl[0], "tkt") || !strings.Contains(nl[1], "1 All") {
+	if !strings.Contains(nl[0], "tkt") || !strings.Contains(nl[1], "1 Sprint") {
 		t.Errorf("a narrow pane should move the controls to the second row:\n%s\n%s", nl[0], nl[1])
 	}
 	for _, l := range nl[:3] {
@@ -1821,7 +1828,7 @@ func TestListHeaderHasARuleAndNeutralSections(t *testing.T) {
 	if lipgloss.Width(lines[y+1]) > 120 {
 		t.Errorf("rule wider than the pane: %d", lipgloss.Width(lines[y+1]))
 	}
-	for _, want := range []string{" My tickets  ", " Review requested · example-org/web  1"} {
+	for _, want := range []string{" My tickets  "} {
 		if !strings.Contains(strings.Join(lines, "\n"), want) {
 			t.Errorf("missing section title %q:\n%s", want, strings.Join(lines, "\n"))
 		}
@@ -2357,7 +2364,7 @@ func TestRepoFilterAppliesToAll(t *testing.T) {
 	if strings.Contains(v, "DEMO-4") || !strings.Contains(v, "DEMO-1") || !strings.Contains(v, "DEMO-3") {
 		t.Errorf("a ticket hides only when all its pull requests are in hidden repositories:\n%s", v)
 	}
-	if !strings.Contains(v, "1 All 3") {
+	if !strings.Contains(v, "1 Sprint 3") {
 		t.Errorf("All counts what it shows:\n%s", v)
 	}
 	for _, view := range []string{ViewColumns} {
@@ -3099,7 +3106,7 @@ func TestLegendFitsEachScreen(t *testing.T) {
 		{"columns", open(snapshot(), ViewColumns), []string{"←↑↓→ wasd move · ↑ to reviews", "click select · open review", "enter actions", "f send feedback", "i details", "v view", "z density", "t team", "R repos"},
 			[]string{"ticket pane", "fix CI", "fold group"}},
 		{"columns without reviews", open(noReviews, ViewColumns), []string{"←↑↓→ wasd move", "click select"}, []string{"↑ to reviews", "open review"}},
-		{"list", open(snapshot(), ViewList), []string{"↑↓ ws move", "click select", "v view", "t team"}, []string{"z density", "↑ to reviews", "open review"}},
+		{"list", open(snapshot(), ViewList), []string{"↑↓ ws move · ↑ to reviews", "click select · open review", "v view", "t team"}, []string{"z density"}},
 		{"PRs", open(snapshot(), ViewColumns, "2"), []string{"↑↓ ws move", "click select", "enter actions · fold group", "f send feedback", "t requested", "R repos"}, []string{"v view", "z density", "open review"}},
 		{"no repositories", open(noRepos, ViewColumns), []string{"t team"}, []string{"R repos"}},
 	}
