@@ -2118,7 +2118,7 @@ func TestListShowsAgentStates(t *testing.T) {
 			if !c.wantAgent {
 				return
 			}
-			for key, want := range map[string]string{"DEMO-1": "● working", "DEMO-2": "! needs you"} {
+			for key, want := range map[string]string{"DEMO-1": "● working", "DEMO-2": "● needs you"} {
 				y := lineIndex(next.View(), key+" ")
 				if y < 0 || !strings.Contains(strings.Split(v, "\n")[y], want) {
 					t.Errorf("%s row lacks %q:\n%s", key, want, v)
@@ -2151,7 +2151,7 @@ func TestCardFitsPullRequestsBesideTheAgentWithoutBreakingColors(t *testing.T) {
 		if brokenEscape.MatchString(out) || strings.ContainsRune(plain, utf8.RuneError) || !utf8.ValidString(out) {
 			t.Errorf("%s: a cut escape code leaks into the card: %q", status, out)
 		}
-		if !strings.Contains(plain, "#731 ✓ #732 ✓ #733 ✓") || !strings.Contains(strings.Split(plain, "\n")[1], "●") {
+		if !strings.Contains(plain, "#731 ✓ #732 ✓ #733 ✓") || !strings.ContainsAny(strings.Split(plain, "\n")[1], "●○") {
 			t.Errorf("%s: the card should keep its pull requests and show the agent's dot:\n%s", status, plain)
 		}
 		for _, l := range strings.Split(out, "\n") {
@@ -2209,10 +2209,10 @@ func TestCardShowsTheTypeWholeOrOnlyItsIcon(t *testing.T) {
 
 func TestCardShowsAStatusMovedToItsColumn(t *testing.T) {
 	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Status: "Pending test", Mark: ticket.MarkDiamond, Assignee: "Ana López"}
-	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, "idle"), "\n")[1]); !strings.Contains(head, "◇ Pending test ●") {
+	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, "working"), "\n")[1]); !strings.Contains(head, "◇ Pending test ●") {
 		t.Errorf("a moved status shows its name before the agent: %q", head)
 	}
-	if head := ansi.Strip(strings.Split(card(tk, 24, true, false, "idle"), "\n")[1]); !strings.Contains(head, "◇ ●") || strings.Contains(head, "Pending") {
+	if head := ansi.Strip(strings.Split(card(tk, 24, true, false, "working"), "\n")[1]); !strings.Contains(head, "◇ ●") || strings.Contains(head, "Pending") {
 		t.Errorf("without room only the mark stays: %q", head)
 	}
 	tk.Mark = ticket.MarkNone
@@ -2284,11 +2284,11 @@ func TestCardShowsTheAgentAsHerdrsDot(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Type: "Story", Assignee: "Ana López"}
-	for status, hex := range map[string]string{"working": "#f9e2af", "blocked": "#f38ba8", "done": "#94e2d5", "idle": "#a6e3a1"} {
+	for status, want := range map[string][2]string{"working": {"●", "#f9e2af"}, "blocked": {"●", "#f38ba8"}, "done": {"●", "#94e2d5"}, "idle": {"○", "#a6e3a1"}} {
 		out := card(tk, 30, false, false, status)
 		head := strings.Split(out, "\n")[1]
-		if dot := lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Render("●"); !strings.Contains(head, dot) {
-			t.Errorf("%s: header should end with a dot in %s: %q", status, hex, head)
+		if dot := lipgloss.NewStyle().Foreground(lipgloss.Color(want[1])).Render(want[0]); !strings.Contains(head, dot) {
+			t.Errorf("%s: header should end with %s in %s, as Herdr draws it: %q", status, want[0], want[1], head)
 		}
 		if plain := ansi.Strip(out); strings.Contains(plain, status) || strings.Contains(plain, "needs you") {
 			t.Errorf("%s: the card shows the dot, not the word:\n%s", status, plain)
