@@ -2970,12 +2970,12 @@ func TestTeamModeListsEveryOpenPullRequestWithItsAuthor(t *testing.T) {
 	mm.teamPRs = true
 	m = press(mm, "2")
 	v := stripANSI(m.View())
-	for _, want := range []string{"AUTHOR", "Team · example-org/api", "Team · example-org/web"} {
+	for _, want := range []string{"AUTHOR", "▾ example-org/api  1", "▾ example-org/web  1"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("missing %q:\n%s", want, v)
 		}
 	}
-	if strings.Contains(v, "Review requested · ") || lineIndex(m.View(), "Team · ") < lineIndex(m.View(), "Mine") {
+	if strings.Contains(v, "Review requested · ") || lineIndex(m.View(), "▾ example-org/api") < lineIndex(m.View(), "Mine") {
 		t.Errorf("with Team on the user's pull requests come first, then the team's by repository, requests among them:\n%s", v)
 	}
 	if requested := strings.Split(v, "\n")[lineIndex(m.View(), "#820")]; !strings.Contains(requested, "! #820 Review requested") {
@@ -2992,7 +2992,7 @@ func TestTeamModeListsEveryOpenPullRequestWithItsAuthor(t *testing.T) {
 		t.Errorf("its menu opens it in GitHub:\n%s", v)
 	}
 	off := press(New(snap, false, r, ViewList), "2")
-	if v := stripANSI(off.View()); !strings.Contains(v, "Review requested · example-org/web") || strings.Contains(v, "Team · ") {
+	if v := stripANSI(off.View()); !strings.Contains(v, "Review requested · example-org/web") || strings.Contains(v, "▾ example-org/api") {
 		t.Errorf("with Team off only the review requests follow the user's pull requests:\n%s", v)
 	}
 }
@@ -3019,16 +3019,16 @@ func TestTeamToggleIsPerView(t *testing.T) {
 	m := tea.Model(New(snap, true, r, ViewList).WithState(BoardState{}))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = press(m, "2")
-	if strings.Contains(stripANSI(m.View()), "Team · ") {
-		t.Fatalf("team pull requests start hidden:\n%s", stripANSI(m.View()))
+	if v := stripANSI(m.View()); strings.Contains(v, "▾ example-org/api") || !strings.Contains(v, "│ Requested │") || !strings.Contains(v, "t requested") {
+		t.Fatalf("the PRs filter starts with only the review requests, under a Requested toggle:\n%s", v)
 	}
 	before := stripANSI(m.View())
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
 	if !strings.Contains(before, "2 PRs 5") || !strings.Contains(stripANSI(m.View()), "2 PRs 6") {
 		t.Errorf("the PRs counter should count the team's pull requests while they show:\n%s", stripANSI(m.View()))
 	}
-	if v := stripANSI(m.View()); !strings.Contains(v, "Team · example-org/api") || !strings.Contains(v, "showing the team's pull requests too · t hides them") {
-		t.Fatalf("t in the PRs filter shows the team's pull requests at once:\n%s", v)
+	if v := stripANSI(m.View()); !strings.Contains(v, "▾ example-org/api") || !strings.Contains(v, "showing every open pull request in your repositories · t shows only requests") {
+		t.Fatalf("t in the PRs filter shows every open pull request at once:\n%s", v)
 	}
 	if cmd != nil {
 		cmd()
