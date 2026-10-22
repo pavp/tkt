@@ -264,6 +264,27 @@ func TestToTicketPutsBlockedTicketsInToDo(t *testing.T) {
 	}
 }
 
+func TestToTicketMarksStatusesAsConfigured(t *testing.T) {
+	c := cfg()
+	c.Spaces[0].StatusOverrides = map[string]string{"Pending test": "review"}
+	c.Spaces[0].StatusMarks = map[string]string{"On hold": "blocked"}
+	tests := []struct {
+		status string
+		want   ticket.Mark
+	}{
+		{"Pending test", ticket.MarkStatus},
+		{"On hold", ticket.MarkBlocked},
+		{"Blocked", ticket.MarkBlocked},
+		{"In Progress", ticket.MarkNone},
+	}
+	for _, tt := range tests {
+		got := ToTicket(c, jira.Issue{Key: "DEMO-1", Status: tt.status, StatusCategory: "indeterminate"}, "")
+		if got.Mark != tt.want || got.Blocked() != (tt.want == ticket.MarkBlocked) {
+			t.Errorf("%q marked %q (blocked %v), want %q", tt.status, got.Mark, got.Blocked(), tt.want)
+		}
+	}
+}
+
 func TestFetchLabelsTicketsWithTheConfiguredField(t *testing.T) {
 	issues := []jira.Issue{
 		{Key: "DEMO-1", StatusCategory: "new", Fields: map[string]json.RawMessage{"customfield_10136": json.RawMessage(`{"value":"User Access Center"}`)}},

@@ -1387,7 +1387,7 @@ func TestBotToggleHidesWithoutBotReviews(t *testing.T) {
 
 func TestBlockedTicketsAreMarked(t *testing.T) {
 	snap := snapshot()
-	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-7", Summary: "Wait for client", Status: "Blocked", Category: ticket.ToDo})
+	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-7", Summary: "Wait for client", Status: "Blocked", Mark: ticket.MarkBlocked, Category: ticket.ToDo})
 	for _, view := range []string{ViewColumns, ViewList} {
 		m := tea.Model(New(snap, false, &recorder{}, view))
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
@@ -1417,9 +1417,9 @@ func TestBlockedMarkShrinksToItsIcon(t *testing.T) {
 		want     []string
 		dontWant string
 	}{
-		{"room for the word", ticket.Ticket{Key: "DEMO-7", Status: "Blocked"}, 40, []string{"⊘ blocked"}, ""},
-		{"too narrow", ticket.Ticket{Key: "DEMO-7", Status: "Blocked"}, 18, []string{"DEMO-7", "⊘"}, "blocked"},
-		{"another flag", ticket.Ticket{Key: "DEMO-7", Status: "Blocked", PRs: failing}, 40, []string{"! CI failing", "⊘"}, "⊘ blocked"},
+		{"room for the word", ticket.Ticket{Key: "DEMO-7", Status: "Blocked", Mark: ticket.MarkBlocked}, 40, []string{"⊘ blocked"}, ""},
+		{"too narrow", ticket.Ticket{Key: "DEMO-7", Status: "Blocked", Mark: ticket.MarkBlocked}, 18, []string{"DEMO-7", "⊘"}, "blocked"},
+		{"another flag", ticket.Ticket{Key: "DEMO-7", Status: "Blocked", Mark: ticket.MarkBlocked, PRs: failing}, 40, []string{"! CI failing", "⊘"}, "⊘ blocked"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1447,7 +1447,7 @@ func TestBlockedMarkShrinksToItsIcon(t *testing.T) {
 
 func TestListMarksBlockedTicketsThatNeedYou(t *testing.T) {
 	snap := snapshot()
-	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-7", Summary: "Wait for client", Status: "Blocked", Category: ticket.ToDo,
+	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-7", Summary: "Wait for client", Status: "Blocked", Mark: ticket.MarkBlocked, Category: ticket.ToDo,
 		PRs: []ticket.PullRequest{{State: ticket.PROpen, Checks: ticket.ChecksFail}}})
 	m := tea.Model(New(snap, false, &recorder{}, ViewList))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
@@ -2193,6 +2193,20 @@ func TestCardShowsTheTypeWholeOrOnlyItsIcon(t *testing.T) {
 	}
 }
 
+func TestCardShowsAStatusMovedToItsColumn(t *testing.T) {
+	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Status: "Pending test", Mark: ticket.MarkStatus, Assignee: "Ana López"}
+	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, "idle"), "\n")[1]); !strings.Contains(head, "◇ Pending test ●") {
+		t.Errorf("a moved status shows its name before the agent: %q", head)
+	}
+	if head := ansi.Strip(strings.Split(card(tk, 24, true, false, "idle"), "\n")[1]); !strings.Contains(head, "◇ ●") || strings.Contains(head, "Pending") {
+		t.Errorf("without room only the mark stays: %q", head)
+	}
+	tk.Mark = ticket.MarkNone
+	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, ""), "\n")[1]); strings.Contains(head, "◇") || strings.Contains(head, "Pending") {
+		t.Errorf("an unmarked status shows nothing: %q", head)
+	}
+}
+
 func TestTypeIconsUseJiraColors(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -2238,7 +2252,7 @@ func TestCardShowsTheAgentAsHerdrsDot(t *testing.T) {
 	if head := ansi.Strip(strings.Split(card(tk, 30, false, false, "unknown"), "\n")[1]); strings.Contains(head, "●") {
 		t.Errorf("an unknown agent shows no dot: %q", head)
 	}
-	tk.Status = "Blocked"
+	tk.Status, tk.Mark = "Blocked", ticket.MarkBlocked
 	head := strings.Split(card(tk, 24, false, false, "blocked"), "\n")[1]
 	if icon := lipgloss.NewStyle().Foreground(lipgloss.Color("#fab387")).Render("⊘ blocked"); !strings.Contains(head, icon) {
 		t.Errorf("a blocked ticket's icon is orange, apart from the agent's red dot: %q", head)

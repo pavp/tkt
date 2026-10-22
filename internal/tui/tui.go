@@ -1651,15 +1651,15 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 	if r := t.Attention(); len(r) > 0 {
 		flag = warn.Render("! " + string(r[0]))
 	}
-	if t.Blocked() {
+	if icon, word, style := statusMark(t); icon != "" {
 		// The word gives way to the icon alone when another flag is there or the card is too narrow for it.
-		switch word := blocked.Render("⊘ blocked"); {
+		switch {
 		case flag != "":
-			flag += " " + blocked.Render("⊘")
+			flag += " " + style.Render(icon)
 		case lipgloss.Width(head)+1+lipgloss.Width(word)+dotW <= inner:
-			flag = word
+			flag = style.Render(word)
 		default:
-			flag = blocked.Render("⊘")
+			flag = style.Render(icon)
 		}
 	}
 	if dot != "" {
@@ -2065,6 +2065,19 @@ const (
 func agentStyle(status string) lipgloss.Style {
 	colors := map[string]lipgloss.Color{"working": herdrYellow, "blocked": herdrRed, "done": herdrTeal, "idle": herdrGreen}
 	return lipgloss.NewStyle().Foreground(colors[status])
+}
+
+var movedStatus = lipgloss.NewStyle().Foreground(herdrBlue)
+
+// statusMark is the icon, its wider wording and its style for a ticket's status mark; empty when unmarked.
+func statusMark(t ticket.Ticket) (icon, word string, style lipgloss.Style) {
+	switch t.Mark {
+	case ticket.MarkBlocked:
+		return "⊘", "⊘ blocked", blocked
+	case ticket.MarkStatus:
+		return "◇", "◇ " + t.Status, movedStatus
+	}
+	return "", "", style
 }
 
 // typeIcons are matched in order against the lowercased Jira type name, in English or Spanish, so

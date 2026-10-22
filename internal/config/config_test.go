@@ -98,6 +98,7 @@ func TestLoadRejectsInvalid(t *testing.T) {
 		{"bad space key", "[jira]\nsite='example.atlassian.net'\nemail='a@b.c'\n[[spaces]]\nkey='demo'\n", `space key "demo"`},
 		{"bad repo", "[jira]\nsite='example.atlassian.net'\nemail='a@b.c'\n[[spaces]]\nkey='DEMO'\n[[spaces.repos]]\nrepo='web'\n", "must look like owner/name"},
 		{"bad override", "[jira]\nsite='example.atlassian.net'\nemail='a@b.c'\n[[spaces]]\nkey='DEMO'\n[spaces.status_overrides]\nX='qa'\n", "unknown column"},
+		{"bad mark", "[jira]\nsite='example.atlassian.net'\nemail='a@b.c'\n[[spaces]]\nkey='DEMO'\n[spaces.status_marks]\nX='star'\n", "unknown mark"},
 		{"duplicate space", "[jira]\nsite='example.atlassian.net'\nemail='a@b.c'\n[[spaces]]\nkey='DEMO'\n[[spaces]]\nkey='DEMO'\n", "listed twice"},
 	}
 	for _, tt := range tests {

@@ -504,8 +504,8 @@ func byRepoNumber(a, b ticket.PullRequest) int {
 	return a.Number - b.Number
 }
 
-// ToTicket converts a Jira issue into a board ticket using its space's status overrides; a blocked ticket
-// waits in To Do unless its status is overridden.
+// ToTicket converts a Jira issue into a board ticket using its space's status overrides and marks; a
+// blocked ticket waits in To Do unless its status is overridden.
 func ToTicket(c *config.Config, is jira.Issue, url string) ticket.Ticket {
 	t := ticket.Ticket{
 		Assignee: is.Assignee,
@@ -518,10 +518,8 @@ func ToTicket(c *config.Config, is jira.Issue, url string) ticket.Ticket {
 	}
 	space, _ := c.Space(t.Space())
 	overrides := space.Categories()
-	t.Category = ticket.CategoryFor(is.Status, is.StatusCategory, overrides)
-	if _, ok := overrides[is.Status]; !ok && t.Blocked() {
-		t.Category = ticket.ToDo
-	}
+	t.Category = ticket.Column(is.Status, is.StatusCategory, overrides)
+	t.Mark = ticket.MarkFor(is.Status, is.StatusCategory, overrides, space.Marks())
 	return t
 }
 

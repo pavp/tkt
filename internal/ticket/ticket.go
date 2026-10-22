@@ -121,6 +121,59 @@ func Reviewing(status string) bool {
 	return strings.Contains(s, "review") || strings.Contains(s, "revisi")
 }
 
+// Column places a status on the board as ToTicket does: an override wins, a blocked status waits in
+// To Do, otherwise Jira's category decides.
+func Column(status, statusCategory string, overrides map[string]Category) Category {
+	if c, ok := overrides[status]; ok {
+		return c
+	}
+	if BlockedName(status) {
+		return ToDo
+	}
+	return CategoryFor(status, statusCategory, nil)
+}
+
+// BlockedName reports whether a status name says the work is blocked, as "Blocked" or "Bloqueado" do.
+func BlockedName(status string) bool {
+	s := strings.ToLower(status)
+	return strings.Contains(s, "block") || strings.Contains(s, "bloque")
+}
+
+// Mark is what a card shows beside its key about the ticket's status.
+type Mark string
+
+const (
+	MarkNone    Mark = ""
+	MarkStatus  Mark = "status"
+	MarkBlocked Mark = "blocked"
+)
+
+// ParseMark reads a mark as the configuration writes it: "none", "status" or "blocked".
+func ParseMark(s string) (Mark, bool) {
+	switch s {
+	case "none":
+		return MarkNone, true
+	case string(MarkStatus), string(MarkBlocked):
+		return Mark(s), true
+	}
+	return "", false
+}
+
+// MarkFor picks a status's mark: the configured one, otherwise blocked for a blocked name and the status
+// itself when overrides moved it out of the column Jira's category gives it.
+func MarkFor(status, statusCategory string, overrides map[string]Category, marks map[string]Mark) Mark {
+	if m, ok := marks[status]; ok {
+		return m
+	}
+	switch {
+	case BlockedName(status):
+		return MarkBlocked
+	case Column(status, statusCategory, overrides) != Column(status, statusCategory, nil):
+		return MarkStatus
+	}
+	return MarkNone
+}
+
 type CheckState string
 
 const (
@@ -217,6 +270,7 @@ type Ticket struct {
 	Summary  string   `json:"summary"`
 	Status   string   `json:"status"`
 	Category Category `json:"category"`
+	Mark     Mark     `json:"mark,omitempty"`
 	// Label is the value of the Jira field the configuration names, such as the ticket's product.
 	Label string `json:"label,omitempty"`
 	// Assignee is the display name of the person the ticket is assigned to; empty when unassigned.
@@ -242,13 +296,10 @@ const (
 	ReasonConflicts        Reason = "Conflicts"
 )
 
-// Attention lists why an open ticket needs the user: failing CI or requested changes on any open PR.
-// Blocked reports whether the ticket's status says it is blocked, as "Blocked" or "Bloqueado" do.
-func (t Ticket) Blocked() bool {
-	s := strings.ToLower(t.Status)
-	return strings.Contains(s, "block") || strings.Contains(s, "bloque")
-}
+// Blocked reports whether the ticket's status is marked blocked.
+func (t Ticket) Blocked() bool { return t.Mark == MarkBlocked }
 
+// Attention lists why an open ticket needs the user: failing CI or requested changes on any open PR.
 func (t Ticket) Attention() []Reason {
 	if t.Category == Done || t.Team {
 		return nil
