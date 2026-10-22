@@ -25,6 +25,9 @@ type fakeJira struct {
 	values      []jira.Value
 	comment     string
 	moveErr     error
+	// assigned records each Assign as "KEY accountID"; assignErr fails them.
+	assigned  []string
+	assignErr error
 	// users answers AssignableUsers.
 	users []jira.User
 
@@ -50,7 +53,7 @@ func (f *fakeJira) Myself(context.Context) (jira.User, error) {
 	if f.myselfErr != nil {
 		return jira.User{}, f.myselfErr
 	}
-	return jira.User{DisplayName: "Dev Example"}, nil
+	return jira.User{AccountID: "acc-me", DisplayName: "Dev Example"}, nil
 }
 
 func (f *fakeJira) Search(_ context.Context, jql string, _ []string) ([]jira.Issue, error) {
@@ -76,6 +79,11 @@ func (f *fakeJira) Transition(_ context.Context, key, id string, values []jira.V
 	f.moved = append(f.moved, key+" "+id)
 	f.values, f.comment = values, comment
 	return f.moveErr
+}
+
+func (f *fakeJira) Assign(_ context.Context, key, accountID string) error {
+	f.assigned = append(f.assigned, key+" "+accountID)
+	return f.assignErr
 }
 
 func (f *fakeJira) AssignableUsers(context.Context, string, string) ([]jira.User, error) {

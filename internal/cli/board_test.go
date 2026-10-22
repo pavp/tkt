@@ -686,6 +686,33 @@ func TestBoardActionsListTheSpacesStatuses(t *testing.T) {
 	}
 }
 
+func TestBoardActionsAssignTickets(t *testing.T) {
+	h, _ := listHarness(t)
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	tests := []struct {
+		who  tui.Assignee
+		call string
+	}{
+		{tui.Assignee{ID: "acc-7", Name: "Bea Ruiz"}, "DEMO-1 acc-7"},
+		{tui.Assignee{Me: true}, "DEMO-1 acc-me"},
+		{tui.Assignee{}, "DEMO-1 "},
+	}
+	for _, tt := range tests {
+		got, ok := b.Assign("DEMO-1", tt.who)().(tui.AssignedMsg)
+		if !ok || got != (tui.AssignedMsg{Key: "DEMO-1", Who: tt.who}) || h.jira.assigned[len(h.jira.assigned)-1] != tt.call {
+			t.Errorf("%+v: msg %+v, calls %v", tt.who, got, h.jira.assigned)
+		}
+	}
+	h.jira.assignErr = errors.New("403 Forbidden")
+	if got, _ := b.Assign("DEMO-1", tui.Assignee{ID: "acc-7"})().(tui.AssignedMsg); got.Err == nil {
+		t.Error("a rejected assignment should say so")
+	}
+}
+
 func TestBoardActionsMoveTicketsInJira(t *testing.T) {
 	h, _ := listHarness(t)
 	h.jira.transitions = map[string][]jira.Transition{"DEMO-1": {

@@ -199,7 +199,15 @@ type formPrompt struct {
 	text  string
 	users []User
 	sel   int
+	// assign, when set, searches someone to give that ticket to instead of filling a form.
+	assign ticket.Key
 }
+
+// key is the ticket the prompt belongs to.
+func (p *formPrompt) key() ticket.Key { return cmp.Or(p.assign, p.form.key) }
+
+// searching reports whether the prompt looks users up as the user types.
+func (p *formPrompt) searching() bool { return p.field != nil || p.assign != "" }
 
 // formMsg shows form, with status in the footer.
 type formMsg struct {
@@ -327,8 +335,21 @@ func (m Model) promptKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
 	case tea.KeyEsc:
+		if p.assign != "" {
+			m.prompt, m.menu = nil, m.assignMenu(p.assign)
+			return m, nil
+		}
 		m.prompt, m.menu = nil, m.formMenu(p.form)
 	case tea.KeyEnter:
+		if p.assign != "" {
+			if len(p.users) == 0 {
+				m.status = "type part of a name to find who to assign " + string(p.assign) + " to"
+				return m, nil
+			}
+			u := p.users[p.sel]
+			m.prompt, m.menu, m.status = nil, m.confirmAssign(p.assign, Assignee{ID: u.ID, Name: u.Name}), ""
+			return m, nil
+		}
 		f := p.form
 		switch {
 		case p.field == nil:
@@ -363,19 +384,19 @@ func (m Model) promptKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 // searchUsers asks for the users matching a user field's text once it has two letters.
 func (m Model) searchUsers() tea.Cmd {
 	p := m.prompt
-	if p.field == nil {
+	if !p.searching() {
 		return nil
 	}
 	if len([]rune(strings.TrimSpace(p.text))) < 2 {
 		p.users, p.sel = nil, 0
 		return nil
 	}
-	return m.actions.Users(p.form.key, p.text)
+	return m.actions.Users(p.key(), p.text)
 }
 
 func (m Model) usersListed(msg UsersListedMsg) (tea.Model, tea.Cmd) {
 	p := m.prompt
-	if p == nil || p.field == nil || p.form.key != msg.Key || p.text != msg.Query {
+	if p == nil || !p.searching() || p.key() != msg.Key || p.text != msg.Query {
 		return m, nil
 	}
 	if msg.Err != nil {
@@ -394,7 +415,10 @@ func (m Model) promptView() string {
 	}
 	inner := width - 6
 	title, hint := "Comment", "enter keep · esc back"
-	if p.field != nil {
+	switch {
+	case p.assign != "":
+		title, hint = "Assign "+string(p.assign)+" to", "type to search · ↑↓ choose · enter pick · esc back"
+	case p.field != nil:
 		title, hint = p.field.Name, "type to search · ↑↓ choose · enter pick · esc back"
 	}
 	text := []rune(p.text)
@@ -402,7 +426,7 @@ func (m Model) promptView() string {
 		text = text[len(text)-(inner-3):]
 	}
 	lines := []string{bold.Render(ansi.Truncate(title, inner, "…")), "", "> " + string(text) + "█"}
-	if p.field != nil {
+	if p.searching() {
 		lines = append(lines, "")
 		if len(p.users) == 0 {
 			lines = append(lines, dim.Render("no matches yet"))

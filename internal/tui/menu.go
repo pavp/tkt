@@ -80,7 +80,7 @@ func (m Model) buildMenu(it item) *menu {
 	for _, r := range t.Attention() {
 		items = append(items, menuItem{label: fixLabel(r), key: "f", fix: t.Key})
 	}
-	items = append(items, m.moveItem(t.Key))
+	items = append(items, m.moveItem(t.Key), m.assignItem(t.Key))
 	items = append(items,
 		menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }},
 		menuItem{label: "Copy the ticket context (.ticket.md)", run: func() tea.Cmd { return a.CopyContext(t.Key) }},
@@ -105,7 +105,7 @@ func (m Model) prMenu(it item) *menu {
 	if t.URL != "" {
 		items = append(items, menuItem{label: "Open " + string(t.Key) + " in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
 	}
-	items = append(items, m.moveItem(t.Key))
+	items = append(items, m.moveItem(t.Key), m.assignItem(t.Key))
 	if pr.URL != "" {
 		items = append(items, menuItem{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
 	}
@@ -141,7 +141,7 @@ func (m Model) teamMenu(t ticket.Ticket) *menu {
 	if t.URL != "" {
 		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
 	}
-	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
+	items = append(items, m.assignItem(t.Key), menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
 	return &menu{title: "Actions for " + string(t.Key) + " · " + t.Status + " · " + cmp.Or(t.Assignee, "unassigned"), items: items}
 }
 
