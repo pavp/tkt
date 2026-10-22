@@ -2967,7 +2967,7 @@ func TestTeamModeListsEveryOpenPullRequestWithItsAuthor(t *testing.T) {
 	m := tea.Model(New(snap, false, r, ViewList))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	mm := m.(Model)
-	mm.team = true
+	mm.teamPRs = true
 	m = press(mm, "2")
 	v := stripANSI(m.View())
 	for _, want := range []string{"AUTHOR", "Team · example-org/api", "Team · example-org/web"} {
@@ -2994,6 +2994,51 @@ func TestTeamModeListsEveryOpenPullRequestWithItsAuthor(t *testing.T) {
 	off := press(New(snap, false, r, ViewList), "2")
 	if v := stripANSI(off.View()); !strings.Contains(v, "Review requested · example-org/web") || strings.Contains(v, "Team · ") {
 		t.Errorf("with Team off only the review requests follow the user's pull requests:\n%s", v)
+	}
+}
+
+func TestTeamToggleIsPerView(t *testing.T) {
+	snap := prsSnapshot()
+	snap.Others = []ticket.PullRequest{{Repo: "example-org/api", Number: 901, Title: "Rename the export", Author: "sam", State: ticket.PROpen}}
+	r := &recorder{}
+	m := tea.Model(New(snap, true, r, ViewList).WithState(BoardState{}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	if strings.Contains(stripANSI(m.View()), "Team · ") {
+		t.Fatalf("team pull requests start hidden:\n%s", stripANSI(m.View()))
+	}
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	if v := stripANSI(m.View()); !strings.Contains(v, "Team · example-org/api") || !strings.Contains(v, "showing the team's pull requests too · t hides them") {
+		t.Fatalf("t in the PRs filter shows the team's pull requests at once:\n%s", v)
+	}
+	if cmd != nil {
+		cmd()
+	}
+	if slices.Contains(r.calls, "refresh") {
+		t.Errorf("the team's pull requests need no refresh: %v", r.calls)
+	}
+	if last := r.states[len(r.states)-1]; last.Team || last.TeamPRs == nil || !*last.TeamPRs {
+		t.Errorf("only the PRs filter's toggle should be saved on: %+v", last)
+	}
+	m = press(m, "1")
+	if m.(Model).team {
+		t.Error("the tickets' toggle stays as it was")
+	}
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")}); cmd == nil {
+		t.Error("t in the tickets' view refreshes, since the team's tickets come from Jira")
+	}
+}
+
+func TestTeamPRsFollowTheTeamToggleUntilChosen(t *testing.T) {
+	on := true
+	if !New(board.Snapshot{}, false, &recorder{}, ViewList).WithState(BoardState{Team: true}).teamPRs {
+		t.Error("a board saved before the PRs toggle existed keeps showing the team's pull requests")
+	}
+	if New(board.Snapshot{}, false, &recorder{}, ViewList).WithState(BoardState{Team: true, TeamPRs: new(bool)}).teamPRs {
+		t.Error("a saved choice wins")
+	}
+	if !New(board.Snapshot{}, false, &recorder{}, ViewList).WithState(BoardState{TeamPRs: &on}).teamPRs {
+		t.Error("a saved choice wins")
 	}
 }
 

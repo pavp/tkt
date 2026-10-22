@@ -326,7 +326,7 @@ func TestFetchLabelsTicketsWithTheConfiguredField(t *testing.T) {
 	}
 }
 
-func TestFetchListsEveryOpenPullRequestWithTeam(t *testing.T) {
+func TestFetchListsEveryOtherOpenPullRequest(t *testing.T) {
 	js := &stubJira{issues: []jira.Issue{{Key: "DEMO-1", StatusCategory: "indeterminate"}}}
 	requested := ticket.PullRequest{Repo: "example-org/web", Number: 90, Branch: "feature/OPS-2-docs", State: ticket.PROpen, Author: "sam"}
 	other := ticket.PullRequest{Repo: "example-org/api", Number: 91, Branch: "fix/no-ticket", State: ticket.PROpen, Author: "ana"}
@@ -337,15 +337,11 @@ func TestFetchListsEveryOpenPullRequestWithTeam(t *testing.T) {
 		{Repo: "example-org/api", Number: 50, Branch: "feature/OPS-3", State: ticket.PRMerged},
 	}, reviews: []ticket.PullRequest{requested}}
 	snap, err := FetchWith(context.Background(), cfg(), js, gh, now, Snapshot{}, Options{})
-	if err != nil || len(snap.Others) != 0 {
-		t.Fatalf("without Team only the user's and requested pull requests: %v %+v", err, snap.Others)
-	}
-	snap, err = FetchWith(context.Background(), cfg(), js, gh, now, Snapshot{}, Options{Team: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(snap.Others) != 1 || snap.Others[0].Number != 91 {
-		t.Errorf("with Team the other open pull requests, not the user's, the requested or the merged: %+v", snap.Others)
+		t.Errorf("the other open pull requests, not the user's, the requested or the merged, whatever the Team toggle: %+v", snap.Others)
 	}
 }
 

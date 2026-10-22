@@ -87,6 +87,9 @@ type BoardState struct {
 	View string `json:"view,omitempty"`
 	// Team asks the sync for the team's tickets too, those assigned to others or to nobody.
 	Team bool `json:"team,omitempty"`
+	// TeamPRs shows everyone else's open pull requests in the PRs filter; unset, it follows Team, as
+	// one toggle did both before.
+	TeamPRs *bool `json:"team_prs,omitempty"`
 }
 
 type ClonesFoundMsg struct {
@@ -183,7 +186,9 @@ type Model struct {
 	// collapsed holds the PRs filter's collapsed groups.
 	collapsed map[string]bool
 	// team shows the team's tickets beside the user's.
-	team     bool
+	team bool
+	// teamPRs shows the team's pull requests in the PRs filter, apart from team, which asks for its tickets.
+	teamPRs  bool
 	menu     *menu
 	prompt   *formPrompt
 	detail   *detailView
@@ -278,13 +283,17 @@ func (m Model) WithState(s BoardState) Model {
 	for _, g := range s.Collapsed {
 		m.collapsed[g] = true
 	}
-	m.team = s.Team
+	m.team, m.teamPRs = s.Team, s.Team
+	if s.TeamPRs != nil {
+		m.teamPRs = *s.TeamPRs
+	}
 	return m
 }
 
 // state is what the board remembers for its next opening.
 func (m Model) state() BoardState {
-	return BoardState{HiddenRepos: trueKeys(m.hiddenRepos), Collapsed: trueKeys(m.collapsed), View: m.view, Team: m.team}
+	teamPRs := m.teamPRs
+	return BoardState{HiddenRepos: trueKeys(m.hiddenRepos), Collapsed: trueKeys(m.collapsed), View: m.view, Team: m.team, TeamPRs: &teamPRs}
 }
 
 func trueKeys(set map[string]bool) []string {
@@ -502,7 +511,7 @@ func (m Model) prLayout(every bool) []item {
 		rest = append(rest, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr})
 	}
 	group, title := "review:", "Review requested · "
-	if m.team {
+	if m.teamPRs {
 		for _, pr := range m.others() {
 			rest = append(rest, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr, other: true})
 		}
@@ -543,7 +552,25 @@ func (m Model) hasTeamBoards() bool {
 
 // toggleTeam shows or hides the team's tickets; turning them on saves the choice before the refresh, since
 // the sync reads it to know whether to fetch them.
+// teamOn reports the Team toggle of the filter in view: the PRs filter has its own.
+func (m Model) teamOn() bool {
+	if m.filter == FilterPRs {
+		return m.teamPRs
+	}
+	return m.team
+}
+
 func (m *Model) toggleTeam() tea.Cmd {
+	if m.filter == FilterPRs {
+		// The team's pull requests come with every sync, so showing them needs no refresh.
+		m.teamPRs = !m.teamPRs
+		m.reselect()
+		m.status = "showing only your pull requests and review requests"
+		if m.teamPRs {
+			m.status = "showing the team's pull requests too · t hides them"
+		}
+		return m.actions.SaveState(m.state())
+	}
 	m.team = !m.team
 	m.reselect()
 	save := m.actions.SaveState(m.state())
@@ -1373,7 +1400,7 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 				row = append(row, strings.Repeat(" ", gap))
 				pos += gap
 				st := filterOff
-				if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.repos && m.repoNotice() != "") || (it.team && m.team) {
+				if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.repos && m.repoNotice() != "") || (it.team && m.teamOn()) {
 					st = filterOn
 				}
 				chip := st.Render(strings.TrimSpace(it.label))
