@@ -3,6 +3,7 @@ package ticket
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -139,28 +140,35 @@ func BlockedName(status string) bool {
 	return strings.Contains(s, "block") || strings.Contains(s, "bloque")
 }
 
-// Mark is what a card shows beside its key about the ticket's status.
+// Mark is the icon a card shows with the ticket's status name, beside its key.
 type Mark string
 
 const (
-	MarkNone    Mark = ""
-	MarkStatus  Mark = "status"
-	MarkBlocked Mark = "blocked"
+	MarkNone     Mark = ""
+	MarkDiamond  Mark = "diamond"
+	MarkBlocked  Mark = "blocked"
+	MarkClock    Mark = "clock"
+	MarkFlag     Mark = "flag"
+	MarkStar     Mark = "star"
+	MarkTriangle Mark = "triangle"
 )
 
-// ParseMark reads a mark as the configuration writes it: "none", "status" or "blocked".
+// Marks lists every mark, none first, in the order a user cycles through them.
+var Marks = []Mark{MarkNone, MarkDiamond, MarkBlocked, MarkClock, MarkFlag, MarkStar, MarkTriangle}
+
+// ParseMark reads a mark as the configuration writes it, "none" standing for no mark.
 func ParseMark(s string) (Mark, bool) {
-	switch s {
-	case "none":
+	if s == "none" {
 		return MarkNone, true
-	case string(MarkStatus), string(MarkBlocked):
-		return Mark(s), true
+	}
+	if m := Mark(s); m != MarkNone && slices.Contains(Marks, m) {
+		return m, true
 	}
 	return "", false
 }
 
-// MarkFor picks a status's mark: the configured one, otherwise blocked for a blocked name and the status
-// itself when overrides moved it out of the column Jira's category gives it.
+// MarkFor picks a status's mark: the configured one, otherwise blocked for a blocked name and a diamond
+// when overrides moved it out of its automatic column.
 func MarkFor(status, statusCategory string, overrides map[string]Category, marks map[string]Mark) Mark {
 	if m, ok := marks[status]; ok {
 		return m
@@ -169,7 +177,7 @@ func MarkFor(status, statusCategory string, overrides map[string]Category, marks
 	case BlockedName(status):
 		return MarkBlocked
 	case Column(status, statusCategory, overrides) != Column(status, statusCategory, nil):
-		return MarkStatus
+		return MarkDiamond
 	}
 	return MarkNone
 }
@@ -295,9 +303,6 @@ const (
 	ReasonUnresolved       Reason = "Unresolved comments"
 	ReasonConflicts        Reason = "Conflicts"
 )
-
-// Blocked reports whether the ticket's status is marked blocked.
-func (t Ticket) Blocked() bool { return t.Mark == MarkBlocked }
 
 // Attention lists why an open ticket needs the user: failing CI or requested changes on any open PR.
 func (t Ticket) Attention() []Reason {

@@ -1417,9 +1417,9 @@ func TestBlockedMarkShrinksToItsIcon(t *testing.T) {
 		want     []string
 		dontWant string
 	}{
-		{"room for the word", ticket.Ticket{Key: "DEMO-7", Status: "Blocked", Mark: ticket.MarkBlocked}, 40, []string{"⊘ blocked"}, ""},
-		{"too narrow", ticket.Ticket{Key: "DEMO-7", Status: "Blocked", Mark: ticket.MarkBlocked}, 18, []string{"DEMO-7", "⊘"}, "blocked"},
-		{"another flag", ticket.Ticket{Key: "DEMO-7", Status: "Blocked", Mark: ticket.MarkBlocked, PRs: failing}, 40, []string{"! CI failing", "⊘"}, "⊘ blocked"},
+		{"room for the word", ticket.Ticket{Key: "DEMO-7", Status: "Blocked", Mark: ticket.MarkBlocked}, 40, []string{"⊘ Blocked"}, ""},
+		{"too narrow", ticket.Ticket{Key: "DEMO-7", Status: "Blocked", Mark: ticket.MarkBlocked}, 18, []string{"DEMO-7", "⊘"}, "Blocked"},
+		{"another flag", ticket.Ticket{Key: "DEMO-7", Status: "Blocked", Mark: ticket.MarkBlocked, PRs: failing}, 40, []string{"! CI failing", "⊘"}, "⊘ Blocked"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2194,7 +2194,7 @@ func TestCardShowsTheTypeWholeOrOnlyItsIcon(t *testing.T) {
 }
 
 func TestCardShowsAStatusMovedToItsColumn(t *testing.T) {
-	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Status: "Pending test", Mark: ticket.MarkStatus, Assignee: "Ana López"}
+	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Status: "Pending test", Mark: ticket.MarkDiamond, Assignee: "Ana López"}
 	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, "idle"), "\n")[1]); !strings.Contains(head, "◇ Pending test ●") {
 		t.Errorf("a moved status shows its name before the agent: %q", head)
 	}
@@ -2204,6 +2204,37 @@ func TestCardShowsAStatusMovedToItsColumn(t *testing.T) {
 	tk.Mark = ticket.MarkNone
 	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, ""), "\n")[1]); strings.Contains(head, "◇") || strings.Contains(head, "Pending") {
 		t.Errorf("an unmarked status shows nothing: %q", head)
+	}
+}
+
+func TestStatusMarksShowTheirIconAndColor(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	cases := []struct {
+		mark      ticket.Mark
+		icon, hex string
+	}{
+		{ticket.MarkDiamond, "◇", "#89b4fa"},
+		{ticket.MarkBlocked, "⊘", "#fab387"},
+		{ticket.MarkClock, "◷", "#94e2d5"},
+		{ticket.MarkFlag, "⚑", "#cba6f7"},
+		{ticket.MarkStar, "★", "#f9e2af"},
+		{ticket.MarkTriangle, "▲", "#a6e3a1"},
+	}
+	for _, c := range cases {
+		tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Status: "On hold", Mark: c.mark}
+		head := strings.Split(card(tk, 40, false, false, ""), "\n")[1]
+		if want := lipgloss.NewStyle().Foreground(lipgloss.Color(c.hex)).Render(c.icon + " On hold"); !strings.Contains(head, want) {
+			t.Errorf("%s: header %q lacks %q", c.mark, head, want)
+		}
+	}
+	snap := snapshot()
+	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-7", Summary: "Wait for client", Status: "On hold", Mark: ticket.MarkClock, Category: ticket.ToDo})
+	m := tea.Model(New(snap, false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if row := strings.Split(stripANSI(m.View()), "\n")[lineIndex(m.View(), "DEMO-7")]; !strings.Contains(row, "◷ DEMO-7") {
+		t.Errorf("the list shows any mark's icon: %q", row)
 	}
 }
 
@@ -2254,7 +2285,7 @@ func TestCardShowsTheAgentAsHerdrsDot(t *testing.T) {
 	}
 	tk.Status, tk.Mark = "Blocked", ticket.MarkBlocked
 	head := strings.Split(card(tk, 24, false, false, "blocked"), "\n")[1]
-	if icon := lipgloss.NewStyle().Foreground(lipgloss.Color("#fab387")).Render("⊘ blocked"); !strings.Contains(head, icon) {
+	if icon := lipgloss.NewStyle().Foreground(lipgloss.Color("#fab387")).Render("⊘ Blocked"); !strings.Contains(head, icon) {
 		t.Errorf("a blocked ticket's icon is orange, apart from the agent's red dot: %q", head)
 	}
 }

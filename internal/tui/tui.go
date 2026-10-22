@@ -1600,7 +1600,6 @@ var (
 // card renders one ticket in its own bordered box of the given outer width.
 var (
 	cardBoxWarn = cardBox.BorderForeground(lipgloss.Color("130"))
-	blocked     = lipgloss.NewStyle().Foreground(herdrPeach)
 	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255"))
 	keyDim      = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
 )
@@ -2067,17 +2066,27 @@ func agentStyle(status string) lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(colors[status])
 }
 
-var movedStatus = lipgloss.NewStyle().Foreground(herdrBlue)
+// markIcons draws each status mark; red is left out so a mark never reads as an agent that needs the user.
+var markIcons = map[ticket.Mark]struct {
+	glyph string
+	color lipgloss.Color
+}{
+	ticket.MarkDiamond:  {"◇", herdrBlue},
+	ticket.MarkBlocked:  {"⊘", herdrPeach},
+	ticket.MarkClock:    {"◷", herdrTeal},
+	ticket.MarkFlag:     {"⚑", herdrMauve},
+	ticket.MarkStar:     {"★", herdrYellow},
+	ticket.MarkTriangle: {"▲", herdrGreen},
+}
 
-// statusMark is the icon, its wider wording and its style for a ticket's status mark; empty when unmarked.
+// statusMark is the icon of a ticket's status mark, its wider wording with the status name, and its style;
+// empty when unmarked.
 func statusMark(t ticket.Ticket) (icon, word string, style lipgloss.Style) {
-	switch t.Mark {
-	case ticket.MarkBlocked:
-		return "⊘", "⊘ blocked", blocked
-	case ticket.MarkStatus:
-		return "◇", "◇ " + t.Status, movedStatus
+	ic, ok := markIcons[t.Mark]
+	if !ok {
+		return "", "", style
 	}
-	return "", "", style
+	return ic.glyph, ic.glyph + " " + t.Status, lipgloss.NewStyle().Foreground(ic.color)
 }
 
 // typeIcons are matched in order against the lowercased Jira type name, in English or Spanish, so
@@ -2200,6 +2209,11 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			}
 			line = row(key, it.ticket.Status, assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
 		}
+		var mark string
+		var markStyle lipgloss.Style
+		if it.ticket != nil {
+			mark, _, markStyle = statusMark(*it.ticket)
+		}
 		switch {
 		case i == m.row:
 			line = "▸ " + selected.Render(line)
@@ -2207,13 +2221,13 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			line = warn.Render("!") + " " + line
 		case it.mine():
 			line = "  " + line
-		case len(it.ticket.Attention()) > 0 && it.ticket.Blocked():
+		case len(it.ticket.Attention()) > 0 && mark != "":
 			// The wider mark takes one cell of the key's padding, so the columns stay aligned.
-			line = warn.Render("!") + blocked.Render("⊘") + " " + strings.Replace(line, string(it.key)+" ", string(it.key), 1)
+			line = warn.Render("!") + markStyle.Render(mark) + " " + strings.Replace(line, string(it.key)+" ", string(it.key), 1)
 		case len(it.ticket.Attention()) > 0:
 			line = warn.Render("!") + " " + line
-		case it.ticket.Blocked():
-			line = blocked.Render("⊘") + " " + line
+		case mark != "":
+			line = markStyle.Render(mark) + " " + line
 		default:
 			line = "  " + line
 		}

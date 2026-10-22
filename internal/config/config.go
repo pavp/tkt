@@ -52,8 +52,8 @@ type Space struct {
 	Name            string            `toml:"name,omitempty"`
 	AcceptanceField string            `toml:"acceptance_field,omitempty"`
 	StatusOverrides map[string]string `toml:"status_overrides,omitempty"`
-	// StatusMarks sets what cards show about a status ("none", "status" or "blocked") where the
-	// automatic mark does not suit.
+	// StatusMarks sets the icon cards show with a status ("none", "diamond", "blocked", "clock", "flag",
+	// "star" or "triangle") where the automatic one does not suit.
 	StatusMarks map[string]string `toml:"status_marks,omitempty"`
 	Repos       []Repo            `toml:"repos,omitempty"`
 	// Ignored lists repositories inferred from Jira that tkt must not use; a configured one still counts.
@@ -203,7 +203,7 @@ func (c *Config) Validate() error {
 		}
 		for status, mark := range s.StatusMarks {
 			if _, ok := ticket.ParseMark(mark); !ok {
-				errs = append(errs, fmt.Errorf("space %s: status %q has unknown mark %q (use none, status or blocked)", s.Key, status, mark))
+				errs = append(errs, fmt.Errorf("space %s: status %q has unknown mark %q (use none, diamond, blocked, clock, flag, star or triangle)", s.Key, status, mark))
 			}
 		}
 		for _, r := range s.Repos {

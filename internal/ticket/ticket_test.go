@@ -95,15 +95,15 @@ func TestBlockedName(t *testing.T) {
 
 func TestColumnAndMark(t *testing.T) {
 	overrides := map[string]Category{"Pending test": InReview, "En revisión": InReview, "Blocked": InProgress}
-	marks := map[string]Mark{"On hold": MarkBlocked, "Bloqueado": MarkNone, "En curso": MarkStatus}
+	marks := map[string]Mark{"On hold": MarkBlocked, "Bloqueado": MarkNone, "En curso": MarkClock}
 	tests := []struct {
 		status, jiraCategory string
 		col                  Category
 		mark                 Mark
 	}{
-		{"Pending test", "indeterminate", InReview, MarkStatus},
+		{"Pending test", "indeterminate", InReview, MarkDiamond},
 		{"En revisión", "indeterminate", InReview, MarkNone},
-		{"En curso", "indeterminate", InProgress, MarkStatus},
+		{"En curso", "indeterminate", InProgress, MarkClock},
 		{"Blocked", "indeterminate", InProgress, MarkBlocked},
 		{"Bloqueado", "indeterminate", ToDo, MarkNone},
 		{"On hold", "indeterminate", InProgress, MarkBlocked},
