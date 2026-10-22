@@ -952,20 +952,19 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		body -= lineCount(strip)
-		if m.effectiveView() == ViewList {
-			body--
+		if m.effectiveView() == ViewColumns {
+			body -= lineCount(strip)
 		}
 	}
 	if m.effectiveView() == ViewList {
-		lines := strings.Split(strings.TrimRight(m.listView(), "\n"), "\n")
+		fixed, _, _, start := m.listLayout()
 		_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, 0, 0, 0)
-		avail := m.listHeight()
-		start := 0
-		if avail > 0 && len(lines) > avail {
-			start = windowStart(lines, avail)
+		// at counts the table's header and rule, which listLayout keeps among the fixed lines.
+		i := 2 + start + body - len(fixed)
+		if body < len(fixed) {
+			i = -1
 		}
-		if i := start + body; i >= 0 && i < len(at) && at[i] == botToggleLine {
+		if i >= 0 && i < len(at) && at[i] == botToggleLine {
 			m.toggleBots()
 		} else if i >= 0 && i < len(at) && at[i] >= 0 {
 			m.row = at[i]
@@ -1324,26 +1323,14 @@ func (m Model) board() string {
 		}
 		body += m.columnsView(height)
 	} else {
-		body = m.listView()
+		body = strings.Join(m.listWindow(), "\n")
 	}
 	bottom := m.preview() + "\n" + m.footer()
 	avail := m.height - lineCount(top) - lineCount(bottom)
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
-	// The list scrolls under the review strip, which stays put as it does above the columns.
-	var fixed []string
-	if strip := m.reviewStrip(); strip != "" && m.effectiveView() == ViewList && m.menu == nil && m.picker == nil && m.prompt == nil {
-		fixed = append(strings.Split(strip, "\n"), "")
-		avail -= len(fixed)
-	}
 	if avail > 0 && len(lines) > avail {
-		if m.inStrip {
-			lines = lines[:avail]
-		} else {
-			lines = window(lines, avail)
-		}
+		lines = window(lines, avail)
 	}
-	lines = append(fixed, lines...)
-	avail += len(fixed)
 	for avail > 0 && len(lines) < avail {
 		lines = append(lines, "")
 	}
@@ -1619,14 +1606,32 @@ func (m Model) cardLines() int {
 	return 7
 }
 
-// listHeight is how many list lines show between the header, the review strip (with the blank line that
-// parts it from the list) and the legend.
-func (m Model) listHeight() int {
-	h := m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer())
+// listLayout splits the list view into what stays put — the review strip with the blank line under it, and
+// the table's header and rule — and the rows that scroll, which get rows lines, keeping one blank line
+// between the table and the bottom. start is the first row shown.
+func (m Model) listLayout() (fixed, rows []string, height, start int) {
 	if strip := m.reviewStrip(); strip != "" {
-		h -= lineCount(strip) + 1
+		fixed = append(strings.Split(strip, "\n"), "")
 	}
-	return h
+	all := strings.Split(strings.TrimRight(m.listView(), "\n"), "\n")
+	if len(all) >= 2 {
+		fixed, all = append(fixed, all[:2]...), all[2:]
+	}
+	height = m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer()) - len(fixed) - 1
+	if height > 0 && len(all) > height {
+		start = windowStart(all, height)
+		all = all[start : start+height]
+	}
+	return fixed, all, height, start
+}
+
+// listWindow is the list view as drawn: the fixed lines, then the rows in view.
+func (m Model) listWindow() []string {
+	fixed, rows, height, _ := m.listLayout()
+	for len(rows) < height {
+		rows = append(rows, "")
+	}
+	return append(append(fixed, rows...), "")
 }
 
 // columnsView draws the four columns as boxes reaching height lines, each ticket in its own card.

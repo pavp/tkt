@@ -3095,6 +3095,41 @@ func TestStoryPointsShowOnCardsColumnsListAndPreview(t *testing.T) {
 	}
 }
 
+func TestScrolledListKeepsItsHeaderAndAGapAbove(t *testing.T) {
+	snap := snapshot()
+	for i := 10; i < 40; i++ {
+		snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: ticket.Key(fmt.Sprintf("DEMO-%d", i)), Summary: "filler", Status: "To Do", Category: ticket.ToDo})
+	}
+	for _, filter := range []string{"1", "2"} {
+		m := tea.Model(New(snap, true, &recorder{}, ViewList))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+		m = press(m, filter)
+		for i := 0; i < 25; i++ {
+			m = press(m, "s")
+		}
+		lines := strings.Split(stripANSI(m.View()), "\n")
+		head := lineIndex(m.View(), "STATUS")
+		if head < 0 || !strings.HasPrefix(strings.TrimSpace(lines[head+1]), "────") {
+			t.Fatalf("filter %s: the list's header should stay while it scrolls:\n%s", filter, strings.Join(lines, "\n"))
+		}
+		sel := lineIndex(m.View(), "▸ ")
+		if sel <= head+1 {
+			t.Errorf("filter %s: the selection should show under the header:\n%s", filter, strings.Join(lines, "\n"))
+		}
+		preview := len(lines) - lineCount(m.(Model).preview()+"\n"+m.(Model).footer())
+		if strings.TrimSpace(lines[preview-1]) != "" || filter == "1" && strings.TrimSpace(lines[preview-2]) == "" {
+			t.Errorf("filter %s: one blank line should part the full list from the bottom:\n%s", filter, strings.Join(lines, "\n"))
+		}
+		row := lineIndex(m.View(), "DEMO-")
+		if row > 0 {
+			key := strings.Fields(strings.TrimLeft(lines[row], " ▸!"))[0]
+			if got := click(m, 6, row); !strings.Contains(selectedLine(got.View()), key) {
+				t.Errorf("filter %s: a click on %s selected %q", filter, key, selectedLine(got.View()))
+			}
+		}
+	}
+}
+
 func TestLegendFitsEachScreen(t *testing.T) {
 	open := func(snap board.Snapshot, view string, keys ...string) string {
 		m := tea.Model(New(snap, true, &recorder{}, view))
