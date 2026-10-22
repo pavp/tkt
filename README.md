@@ -20,11 +20,22 @@ Or with Go 1.27+:
 go install github.com/pavp/tkt/cmd/tkt@latest
 ```
 
-Then, inside Herdr, `tkt herdr install` adds the board and ticket panes, offers the `prefix+t` / `prefix+i` shortcuts, and offers sidebar rows that show each workspace's ticket (`ACTO-123 · ✕ CI · #812`) and agent (`● claude working`, `○ claude idle`, `! claude needs you`, `no agent`). The board shows the same agent state on its cards and in an AGENT column of the list view. Herdr only shows those lines when its config lists them; `tkt herdr uninstall` removes both blocks.
+Then, inside Herdr, `tkt herdr install` adds the board and ticket panes, offers the `prefix+t` / `prefix+i` shortcuts, and offers sidebar rows that show each workspace's ticket (`ACTO-123 · ✕ CI · #812`). Herdr only shows those lines when its config lists them; `tkt herdr uninstall` removes both blocks. The board shows each ticket's agent with Herdr's own dots and colors: a dot on its card, and `● working`, `● needs you`, `● done` or `○ idle` in the AGENT column of the list view.
 
 ### Releasing
 
 Push a `vX.Y.Z` tag: the release workflow runs GoReleaser, publishes the archives on GitHub Releases and updates the formula in `pavp/homebrew-tap`. It needs a `TKT_HOMEBREW_TAP_TOKEN` secret with write access to that tap. Validate locally with `goreleaser release --snapshot --clean --skip=publish`.
+
+Versions follow [Semantic Versioning](https://semver.org), read from the Conventional Commits since the last tag:
+
+| Commits since the last tag | Bump | Example |
+|---|---|---|
+| a breaking change (`!` or `BREAKING CHANGE:`) | minor while the version is `0.y.z`, major from `1.0.0` | `v0.4.2` → `v0.5.0` |
+| at least one `feat` | minor | `v0.4.2` → `v0.5.0` |
+| only `fix` or `perf` | patch | `v0.4.2` → `v0.4.3` |
+| only `docs`, `test`, `ci`, `chore`, `refactor` | no release | — |
+
+Tag `main` after the merge with an annotated tag, which keeps who released it and when: `git tag -a v0.5.0 -m v0.5.0 && git push origin v0.5.0`. Releases up to `v0.1.44` only bumped the patch.
 
 ## Set up
 

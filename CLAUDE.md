@@ -27,6 +27,7 @@ UI (phase 3 onward) lives in `web/` and is embedded with `go:embed`; its command
 - Tests: table-driven, through public interfaces. Jira and GitHub are faked with `httptest` servers or recorded fixtures; tests never call real services.
 - Organization-agnostic: no Jira space key, GitHub org, site URL, or real company data in code or tests; those live only in the user's configuration. Ticket keys are detected with a generic pattern (`[A-Z][A-Z0-9]+-[0-9]+`). Fixtures use fictitious data (`DEMO-123`, `example-org`, `example.atlassian.net`); never commit recorded responses from a real Jira or GitHub without anonymizing them.
 - Commits: Conventional Commits, no AI attribution.
+- Releases: Semantic Versioning from the commits since the last tag (`feat` → minor, only `fix`/`perf` → patch, breaking → minor while `0.y.z`), always an annotated tag on `main` after the merge; see README › Releasing.
 - Comments: none by default; only a non-obvious why.
 
 ## Security rules
