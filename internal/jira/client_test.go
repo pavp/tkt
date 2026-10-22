@@ -516,6 +516,22 @@ func TestTransitionPostsTheTransitionID(t *testing.T) {
 	}
 }
 
+func TestAssignPutsTheAccountOrNobody(t *testing.T) {
+	c, calls := server(t, map[string]string{"PUT /rest/api/3/issue/DEMO-12/assignee": ""})
+	if err := c.Assign(context.Background(), "DEMO-12", "acc-7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Assign(context.Background(), "DEMO-12", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := (*calls)[0]; got.method != "PUT" || !reflect.DeepEqual(got.body, map[string]any{"accountId": "acc-7"}) {
+		t.Errorf("assign = %s %v", got.method, got.body)
+	}
+	if got := (*calls)[1].body; !reflect.DeepEqual(got, map[string]any{"accountId": nil}) {
+		t.Errorf("unassign body = %v, want a null accountId", got)
+	}
+}
+
 func TestAssignableUsersLeavesOutApps(t *testing.T) {
 	c, calls := server(t, map[string]string{
 		"GET /rest/api/3/user/assignable/search": `[{"accountId":"acc-7","displayName":"Ana López","accountType":"atlassian"},{"accountId":"bot-1","displayName":"Automation","accountType":"app"}]`,

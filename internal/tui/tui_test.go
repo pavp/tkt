@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"reflect"
@@ -72,6 +73,15 @@ func (r *recorder) Transitions(k ticket.Key) tea.Cmd {
 	r.calls = append(r.calls, "transitions "+string(k))
 	tr := r.transitions
 	return func() tea.Msg { return TransitionsMsg{Key: k, Transitions: tr} }
+}
+
+func (r *recorder) Assign(k ticket.Key, who Assignee) tea.Cmd {
+	to := cmp.Or(who.ID, "nobody")
+	if who.Me {
+		to = "me"
+	}
+	r.calls = append(r.calls, "assign "+string(k)+" "+to)
+	return func() tea.Msg { return AssignedMsg{Key: k, Who: who} }
 }
 
 func (r *recorder) Transition(k ticket.Key, id, to string, values []Value, comment string) tea.Cmd {
@@ -2688,7 +2698,7 @@ func TestTeamToggleShowsTheTeamsTickets(t *testing.T) {
 	}
 }
 
-func TestTeamTicketsOfferOnlyWhatIsHarmless(t *testing.T) {
+func TestTeamTicketsOfferNoAgentActions(t *testing.T) {
 	r := &recorder{}
 	m := tea.Model(New(teamSnapshot(), true, r, ViewList).WithState(BoardState{Team: true}))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
@@ -2701,7 +2711,7 @@ func TestTeamTicketsOfferOnlyWhatIsHarmless(t *testing.T) {
 		t.Errorf("f on a team ticket does nothing but say why: %v\n%s", r.calls, stripANSI(m.View()))
 	}
 	v := stripANSI(press(m, "enter").View())
-	for _, want := range []string{"Actions for DEMO-9 · To Do · Bea Ruiz", "Show details", "Open in Jira ↗", "Copy the key DEMO-9"} {
+	for _, want := range []string{"Actions for DEMO-9 · To Do · Bea Ruiz", "Show details", "Open in Jira ↗", "Assign to…", "Copy the key DEMO-9"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("menu lacks %q:\n%s", want, v)
 		}
@@ -2961,6 +2971,86 @@ func TestPRMenuNamesTheTicketsStatus(t *testing.T) {
 	}
 	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #815 · DEMO-4 · "+tk.Status) {
 		t.Errorf("the PR menu should name its ticket's status %q:\n%s", tk.Status, v)
+	}
+}
+
+func TestAssignToMeAfterConfirming(t *testing.T) {
+	r := &recorder{}
+	m := press(selectMenuItem(t, press(loaded(r), "l", "enter"), "Assign to…"), "enter")
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "Assign DEMO-1 · now unassigned") || !strings.Contains(v, "Me") || !strings.Contains(v, "Search someone…") || strings.Contains(v, "Unassign") {
+		t.Fatalf("assign menu:\n%s", v)
+	}
+	m = press(selectMenuItem(t, m, "Me"), "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Assign DEMO-1 to you?") || slices.ContainsFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, "assign") }) {
+		t.Fatalf("assigning should ask first:\n%s\n%v", v, r.calls)
+	}
+	m, msg := run(selectMenuItem(t, m, "Yes, assign it"), "enter")
+	if r.last() != "assign DEMO-1 me" {
+		t.Fatalf("calls %v", r.calls)
+	}
+	m, cmd := m.Update(msg)
+	if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-1 assigned to you") || cmd == nil {
+		t.Fatalf("an assignment should say so and refresh:\n%s", v)
+	}
+	cmd()
+	if !slices.Contains(r.calls, "refresh") {
+		t.Errorf("no refresh after assigning: %v", r.calls)
+	}
+}
+
+func TestAssignToSomeoneSearchedByName(t *testing.T) {
+	r := &recorder{users: map[string][]User{"be": {{ID: "acc-7", Name: "Bea Ruiz"}}}}
+	m := press(selectMenuItem(t, press(loaded(r), "l", "enter"), "Assign to…"), "enter")
+	m = press(selectMenuItem(t, m, "Search someone…"), "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Assign DEMO-1 to") || !strings.Contains(v, "type to search") {
+		t.Fatalf("no search box:\n%s", v)
+	}
+	m, msg := run(press(m, "b"), "e")
+	if r.last() != "users be" {
+		t.Fatalf("calls %v", r.calls)
+	}
+	m, _ = m.Update(msg)
+	m = press(m, "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Assign DEMO-1 to Bea Ruiz?") {
+		t.Fatalf("picking someone should ask first:\n%s", v)
+	}
+	run(selectMenuItem(t, m, "Yes, assign it"), "enter")
+	if r.last() != "assign DEMO-1 acc-7" {
+		t.Errorf("calls %v", r.calls)
+	}
+}
+
+func TestTeamTicketsCanBeAssignedOrUnassigned(t *testing.T) {
+	snap := teamSnapshot()
+	i := slices.IndexFunc(snap.Tickets, func(t ticket.Ticket) bool { return t.Team })
+	r := &recorder{}
+	m := tea.Model(New(snap, true, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	mm := m.(Model)
+	mm.menu = mm.buildMenu(item{key: snap.Tickets[i].Key, ticket: &snap.Tickets[i]})
+	m = press(selectMenuItem(t, mm, "Assign to…"), "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Assign DEMO-9 · now Bea Ruiz") || !strings.Contains(v, "Unassign") {
+		t.Fatalf("a teammate's ticket can be taken or left unassigned:\n%s", v)
+	}
+	m = press(selectMenuItem(t, m, "Unassign"), "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Leave DEMO-9 unassigned?") {
+		t.Fatalf("unassigning should ask first:\n%s", v)
+	}
+	run(selectMenuItem(t, m, "Yes, unassign it"), "enter")
+	if r.last() != "assign DEMO-9 nobody" {
+		t.Errorf("calls %v", r.calls)
+	}
+}
+
+func TestAssignReportsFailures(t *testing.T) {
+	m, cmd := loaded(&recorder{}).Update(AssignedMsg{Key: "DEMO-1", Who: Assignee{ID: "acc-7", Name: "Bea Ruiz"}, Err: errors.New("403 Forbidden")})
+	if v := stripANSI(m.View()); !strings.Contains(v, "could not assign DEMO-1 to Bea Ruiz: 403 Forbidden") || cmd != nil {
+		t.Errorf("failed assignment:\n%s", v)
+	}
+	m, _ = m.Update(AssignedMsg{Key: "DEMO-1"})
+	if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-1 is now unassigned") {
+		t.Errorf("unassigned:\n%s", v)
 	}
 }
 

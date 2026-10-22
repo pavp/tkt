@@ -283,6 +283,26 @@ func (b *boardActions) Users(key ticket.Key, query string) tea.Cmd {
 	}
 }
 
+func (b *boardActions) Assign(key ticket.Key, who tui.Assignee) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+		defer cancel()
+		js, err := b.a.jiraClient(b.cfg())
+		if err != nil {
+			return tui.AssignedMsg{Key: key, Who: who, Err: err}
+		}
+		id := who.ID
+		if who.Me {
+			me, err := js.Myself(ctx)
+			if err != nil {
+				return tui.AssignedMsg{Key: key, Who: who, Err: err}
+			}
+			id = me.AccountID
+		}
+		return tui.AssignedMsg{Key: key, Who: who, Err: js.Assign(ctx, string(key), id)}
+	}
+}
+
 func (b *boardActions) Transition(key ticket.Key, id, to string, values []tui.Value, comment string) tea.Cmd {
 	vs := make([]jira.Value, len(values))
 	for i, v := range values {

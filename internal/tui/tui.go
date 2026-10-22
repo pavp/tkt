@@ -70,6 +70,9 @@ type Actions interface {
 	// adding comment when given; the outcome arrives as a TransitionedMsg. The board calls it only after the
 	// user confirmed.
 	Transition(key ticket.Key, id, to string, values []Value, comment string) tea.Cmd
+	// Assign gives key to who in Jira; the outcome arrives as an AssignedMsg. The board calls it only after
+	// the user confirmed.
+	Assign(key ticket.Key, who Assignee) tea.Cmd
 	// Users lists the users assignable to key that match query; they arrive as a UsersListedMsg.
 	Users(key ticket.Key, query string) tea.Cmd
 }
@@ -745,6 +748,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.transitions(msg)
 	case movesFetchedMsg:
 		return m.movesFetched(msg)
+	case AssignedMsg:
+		return m.assigned(msg)
 	case TransitionedMsg:
 		return m.transitioned(msg)
 	case UsersListedMsg:

@@ -710,6 +710,15 @@ func (c *Client) Transition(ctx context.Context, key, id string, values []Value,
 
 // AssignableUsers lists the people who can be assigned key whose name or email matches query, leaving out
 // apps.
+// Assign gives key to the user with accountID, or to nobody when it is empty.
+func (c *Client) Assign(ctx context.Context, key, accountID string) error {
+	var id any
+	if accountID != "" {
+		id = accountID
+	}
+	return c.do(ctx, http.MethodPut, "/rest/api/3/issue/"+url.PathEscape(key)+"/assignee", map[string]any{"accountId": id}, nil)
+}
+
 func (c *Client) AssignableUsers(ctx context.Context, key, query string) ([]User, error) {
 	var found []struct {
 		User

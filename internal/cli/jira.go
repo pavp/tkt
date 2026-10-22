@@ -13,7 +13,7 @@ import (
 	"github.com/pavp/tkt/internal/ticket"
 )
 
-// JiraAPI is the Jira surface commands use. Its only write, Transition, runs after the board's confirmation.
+// JiraAPI is the Jira surface commands use. Its writes, Transition and Assign, run after the board's confirmation.
 type JiraAPI interface {
 	Myself(ctx context.Context) (jira.User, error)
 	Search(ctx context.Context, jql string, fields []string) ([]jira.Issue, error)
@@ -31,6 +31,7 @@ type JiraAPI interface {
 	Transitions(ctx context.Context, key string) ([]jira.Transition, error)
 	Transition(ctx context.Context, key, id string, values []jira.Value, comment string) error
 	AssignableUsers(ctx context.Context, key, query string) ([]jira.User, error)
+	Assign(ctx context.Context, key, accountID string) error
 }
 
 // jiraClient builds a Jira client from the configuration and the stored token.
