@@ -1336,6 +1336,12 @@ func TestListShowsReviewRequestsInTheStrip(t *testing.T) {
 	if strip < 0 || head < 0 || strip > head || strings.Contains(v, "#820          Review requested") || strings.Contains(v, "Review requested · ") {
 		t.Fatalf("the list holds only tickets, under the review strip:\n%s", v)
 	}
+	if lines := strings.Split(v, "\n"); head != strip+3 || strings.TrimSpace(lines[head-1]) != "" {
+		t.Errorf("a blank line should part the strip from the list's header:\n%s", v)
+	}
+	if row := click(m, 6, lineIndex(m.View(), "DEMO-2 ")); !strings.Contains(selectedLine(row.View()), "DEMO-2") {
+		t.Errorf("a click on a ticket under the strip selects it: %q", selectedLine(row.View()))
+	}
 	for i := 0; i < 5 && !strings.Contains(stripANSI(m.View()), "▸ #820"); i++ {
 		m = press(m, "w")
 	}

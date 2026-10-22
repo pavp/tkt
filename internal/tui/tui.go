@@ -953,6 +953,9 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		body -= lineCount(strip)
+		if m.effectiveView() == ViewList {
+			body--
+		}
 	}
 	if m.effectiveView() == ViewList {
 		lines := strings.Split(strings.TrimRight(m.listView(), "\n"), "\n")
@@ -1329,7 +1332,7 @@ func (m Model) board() string {
 	// The list scrolls under the review strip, which stays put as it does above the columns.
 	var fixed []string
 	if strip := m.reviewStrip(); strip != "" && m.effectiveView() == ViewList && m.menu == nil && m.picker == nil && m.prompt == nil {
-		fixed = strings.Split(strip, "\n")
+		fixed = append(strings.Split(strip, "\n"), "")
 		avail -= len(fixed)
 	}
 	if avail > 0 && len(lines) > avail {
@@ -1616,11 +1619,12 @@ func (m Model) cardLines() int {
 	return 7
 }
 
-// listHeight is how many list lines show between the header, the review strip and the legend.
+// listHeight is how many list lines show between the header, the review strip (with the blank line that
+// parts it from the list) and the legend.
 func (m Model) listHeight() int {
 	h := m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer())
 	if strip := m.reviewStrip(); strip != "" {
-		h -= lineCount(strip)
+		h -= lineCount(strip) + 1
 	}
 	return h
 }
