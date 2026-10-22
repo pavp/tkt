@@ -27,6 +27,9 @@ type recorder struct {
 	calls []string
 	// boards answers JiraBoards per space.
 	boards map[string][]config.TeamBoard
+	// statuses answers JiraStatuses per space, or statusesErr.
+	statuses    map[string][]JiraStatus
+	statusesErr error
 	// states records every SaveState.
 	states []BoardState
 	// choices is what StartChoices reports.
@@ -81,6 +84,12 @@ func (r *recorder) JiraBoards(space string) tea.Cmd {
 	r.listed = append(r.listed, "boards "+space)
 	boards := r.boards[space]
 	return func() tea.Msg { return JiraBoardsListedMsg{Space: space, Boards: boards} }
+}
+
+func (r *recorder) JiraStatuses(space string) tea.Cmd {
+	r.listed = append(r.listed, "statuses "+space)
+	statuses, err := r.statuses[space], r.statusesErr
+	return func() tea.Msg { return JiraStatusesListedMsg{Space: space, Statuses: statuses, Err: err} }
 }
 
 func (r *recorder) JiraFields() tea.Cmd {

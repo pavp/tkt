@@ -14,14 +14,15 @@ import (
 const (
 	sectionRepos = iota
 	sectionTeamBoards
+	sectionColumns
 	sectionRoots
 	sectionBoard
 )
 
-var sectionNames = []string{"Spaces & repositories", "Team boards", "Local clones", "Board"}
+var sectionNames = []string{"Spaces & repositories", "Team boards", "Statuses", "Local clones", "Board"}
 
 // shortSectionNames stand in when the full names do not fit, as in the tray panel.
-var shortSectionNames = []string{"Repos", "Team boards", "Clones", "Board"}
+var shortSectionNames = []string{"Repos", "Team boards", "Statuses", "Clones", "Board"}
 
 type rowKind int
 
@@ -35,6 +36,8 @@ const (
 	rowLabel
 	rowTeamBoard
 	rowAddTeamBoard
+	rowStatus
+	rowStatusInfo
 )
 
 type settingsRow struct {
@@ -44,20 +47,25 @@ type settingsRow struct {
 	name  string
 }
 
-func (r settingsRow) selectable() bool { return r.kind != rowSpace }
+func (r settingsRow) selectable() bool { return r.kind != rowSpace && r.kind != rowStatusInfo }
 
 // settingsView edits the repositories of each space and the folders holding local clones. Every
 // confirmed change is saved at once; the view keeps showing the configuration as last written.
 type settingsView struct {
 	cfg      config.Config
 	inferred map[string][]string
-	section  int
-	row      int
-	form     *settingsForm
-	confirm  *settingsConfirm
-	saving   bool
-	msg      string
-	err      string
+	// statuses holds each space's Jira statuses once listed, for the columns section; asked marks the
+	// spaces whose listing was requested and statusErrs why one failed.
+	statuses   map[string][]JiraStatus
+	asked      map[string]bool
+	statusErrs map[string]string
+	section    int
+	row        int
+	form       *settingsForm
+	confirm    *settingsConfirm
+	saving     bool
+	msg        string
+	err        string
 }
 
 type settingsForm struct {
@@ -108,7 +116,7 @@ type settingsConfirm struct {
 }
 
 func (m Model) openSettings() (tea.Model, tea.Cmd) {
-	s := &settingsView{cfg: m.actions.Config(), inferred: m.snap.Repos}
+	s := &settingsView{cfg: m.actions.Config(), inferred: m.snap.Repos, statuses: map[string][]JiraStatus{}, asked: map[string]bool{}, statusErrs: map[string]string{}}
 	s.row = s.firstSelectable()
 	m.settings = s
 	return m, nil
@@ -118,6 +126,9 @@ func (s *settingsView) rows() []settingsRow {
 	var out []settingsRow
 	if s.section == sectionBoard {
 		return []settingsRow{{kind: rowLabel, name: s.cfg.Jira.LabelField}}
+	}
+	if s.section == sectionColumns {
+		return s.columnRows()
 	}
 	if s.section == sectionTeamBoards {
 		for si, sp := range s.cfg.Spaces {
@@ -204,27 +215,40 @@ func (m Model) settingsKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab", "right", "l":
 		s.section = (s.section + 1) % len(sectionNames)
 		s.row = s.firstSelectable()
+		return m, m.loadStatuses()
 	case "shift+tab", "left", "h":
 		s.section = (s.section + len(sectionNames) - 1) % len(sectionNames)
 		s.row = s.firstSelectable()
+		return m, m.loadStatuses()
 	case "enter", " ", "e":
 		return m.settingsAction("enter")
 	case "a":
 		return m.settingsAction("a")
+	case "m":
+		return m.settingsAction("m")
 	case "d", "x", "delete":
 		return m.settingsAction("d")
 	}
 	return m, nil
 }
 
-// settingsAction runs enter (edit, pin or add), a (add) or d (remove) on the selected row.
+// settingsAction runs enter (edit, pin, add or, on a status, next column), a (add), m (a status's next
+// mark) or d (remove, or a status back to automatic) on the selected row.
 func (m Model) settingsAction(action string) (tea.Model, tea.Cmd) {
 	s := m.settings
 	r, ok := s.current()
-	if !ok {
+	if !ok || !r.selectable() {
 		return m, nil
 	}
 	switch {
+	case r.kind == rowStatus && action == "d":
+		return m.resetStatus(r)
+	case r.kind == rowStatus && action == "m":
+		return m.cycleMark(r)
+	case r.kind == rowStatus && action == "enter":
+		return m.cycleColumn(r)
+	case r.kind == rowStatus, action == "m":
+		return m, nil
 	case action == "d" && r.kind == rowRepo:
 		sp := s.cfg.Spaces[r.space]
 		s.confirm = &settingsConfirm{
@@ -522,6 +546,9 @@ func (m Model) settingsLines() ([]string, []int) {
 	if s.section == sectionTeamBoards {
 		lines, at = append(lines, truncate(dim.Render("Jira boards whose active sprints make the board's Team mode"), m.width)), append(at, -1)
 	}
+	if s.section == sectionColumns {
+		lines, at = append(lines, truncate(dim.Render("The column each Jira status lands in, and the icon its cards show"), m.width)), append(at, -1)
+	}
 	repoW, pathW := m.settingsColumns()
 	rootW := m.rootsWidth()
 	boardW := m.boardsWidth()
@@ -546,7 +573,14 @@ func (m Model) settingsLines() ([]string, []int) {
 				line = "  " + dim.Render(pad("REPOSITORY", repoW)+" "+pad("LOCAL PATH", pathW))
 				lines, at = append(lines, line), append(at, -1)
 			}
+			if s.section == sectionColumns && s.statuses[sp.Key] != nil {
+				lines, at = append(lines, truncate(m.statusHeader(), m.width)), append(at, -1)
+			}
 			continue
+		case rowStatus:
+			line = m.statusLine(r, mark)
+		case rowStatusInfo:
+			line = "  " + dim.Render(r.name)
 		case rowRepo:
 			repo := s.cfg.Spaces[r.space].Repos[r.idx]
 			line = mark + pad(truncate(repo.Name, repoW), repoW) + " " + pad(truncate(orDash(repo.Path), pathW), pathW) + " " + removeMark
@@ -709,6 +743,9 @@ func (m Model) settingsFooter() string {
 		status = keyDim.Render(s.msg)
 	}
 	legend := [][2]string{{"↑↓ ws", "move"}, {"tab", "section"}, {"enter", "edit · pin"}, {"a", "add"}, {"d", "remove"}, {"esc ,", "back to the board"}}
+	if s.section == sectionColumns {
+		legend = [][2]string{{"↑↓ ws", "move"}, {"tab", "section"}, {"enter", "next column"}, {"m", "next mark"}, {"d", "automatic"}, {"esc ,", "back to the board"}}
+	}
 	items := make([]string, len(legend))
 	for i, k := range legend {
 		items[i] = keyStyle.Render(k[0]) + " " + dim.Render(k[1])

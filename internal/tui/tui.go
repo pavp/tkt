@@ -55,6 +55,8 @@ type Actions interface {
 	JiraFields() tea.Cmd
 	// JiraBoards lists a space's scrum boards; they arrive as a JiraBoardsListedMsg.
 	JiraBoards(space string) tea.Cmd
+	// JiraStatuses lists a space's statuses; they arrive as a JiraStatusesListedMsg.
+	JiraStatuses(space string) tea.Cmd
 	// NativePicker reports whether PickFolder can show a folder chooser the user will see; without one,
 	// ctrl+o browses folders inside the terminal.
 	NativePicker() bool
@@ -702,6 +704,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.settingsSaved(msg)
 	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg, ReposListedMsg, JiraFieldsListedMsg, JiraBoardsListedMsg:
 		return m.settingsLookup(msg)
+	case JiraStatusesListedMsg:
+		return m.statusesListed(msg)
 	case SnapshotMsg:
 		if msg.Snap.Partial && msg.Err == nil {
 			// Jira's board while GitHub answers: shown at once, the refresh still running, agents as they were.
