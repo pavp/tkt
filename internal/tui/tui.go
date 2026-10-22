@@ -30,7 +30,9 @@ type Actions interface {
 	StartChoices(key ticket.Key) tea.Cmd
 	TicketPane(key ticket.Key) tea.Cmd
 	Open(url string) tea.Cmd
-	Fix(key ticket.Key) tea.Cmd
+	// Fix sends a ticket's feedback to its agent; known, when set, is the board's copy of the ticket, whose
+	// pull requests need no fetching. Steps arrive as StatusMsgs while it works.
+	Fix(key ticket.Key, known *ticket.Ticket) tea.Cmd
 	// Copy puts text on the clipboard; what names it in the confirmation, such as "key".
 	Copy(text, what string) tea.Cmd
 	CopyContext(key ticket.Key) tea.Cmd
@@ -193,6 +195,9 @@ type Model struct {
 	loadingSince time.Time
 	// showBots also lists review requests on pull requests opened by bots.
 	showBots bool
+	// moves keeps the statuses each ticket could move to, asked when its menu opened, so Move to… opens
+	// at once; shared by the model's copies and only touched in Update.
+	moves map[ticket.Key]knownMoves
 }
 
 // tickMsg drives the "synced … ago" label and the periodic refresh.
@@ -242,7 +247,8 @@ func New(snap board.Snapshot, haveSnap bool, actions Actions, view string) Model
 	if view != ViewList {
 		view = ViewColumns
 	}
-	m := Model{snap: snap, loading: true, spinning: true, loadingSince: time.Now(), actions: actions, view: view, filter: FilterAll, width: 160, height: 40, now: time.Now}
+	m := Model{snap: snap, loading: true, spinning: true, loadingSince: time.Now(), actions: actions, view: view, filter: FilterAll, width: 160, height: 40, now: time.Now,
+		moves: map[ticket.Key]knownMoves{}}
 	if !haveSnap {
 		m.status = "loading…"
 	}
@@ -737,6 +743,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.startChoices(msg)
 	case TransitionsMsg:
 		return m.transitions(msg)
+	case movesFetchedMsg:
+		return m.movesFetched(msg)
 	case TransitionedMsg:
 		return m.transitioned(msg)
 	case UsersListedMsg:
@@ -876,7 +884,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if it, ok := m.current(); ok && it.heading() {
 				return m, m.toggleGroup(it.group)
 			}
-			m.selectedByClick()
+			return m, m.selectedByClick()
 		}
 		return m, nil
 	}
@@ -915,7 +923,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.col, m.row = c, r
 		m.inStrip = false
 		m.remember()
-		m.selectedByClick()
+		return m, m.selectedByClick()
 	}
 	return m, nil
 }
@@ -924,24 +932,27 @@ const doubleClickWindow = 400 * time.Millisecond
 
 // selectedByClick opens the actions menu when this click lands on the item the previous one selected,
 // soon enough to be a double click.
-func (m *Model) selectedByClick() {
+func (m *Model) selectedByClick() tea.Cmd {
 	it, ok := m.current()
 	if !ok || it.heading() {
-		return
+		return nil
 	}
 	now := m.now()
 	if it.key == m.lastClick && now.Sub(m.lastClickAt) <= doubleClickWindow {
 		m.lastClick = ""
 		m.menu = m.buildMenu(it)
-		return
+		return m.prefetchMoves(it)
 	}
 	m.lastClick, m.lastClickAt = it.key, now
+	return nil
 }
 
-func (m *Model) openMenu() {
+func (m *Model) openMenu() tea.Cmd {
 	if it, ok := m.current(); ok && !it.heading() {
 		m.menu = m.buildMenu(it)
+		return m.prefetchMoves(it)
 	}
+	return nil
 }
 
 // clickHeader switches filter or view when x, relative to where the controls start, falls on a button.
@@ -1063,7 +1074,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if it, ok := m.current(); ok && it.heading() {
 			return m, m.toggleGroup(it.group)
 		}
-		m.openMenu()
+		return m, m.openMenu()
 	case ",":
 		return m.openSettings()
 	case "i":
@@ -1107,8 +1118,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if it, ok := m.current(); ok && it.ticket != nil {
-			m.status = "sending feedback for " + string(it.ticket.Key) + "…"
-			return m, m.actions.Fix(it.ticket.Key)
+			return m.startFix(it.ticket.Key)
 		}
 	}
 	return m, nil

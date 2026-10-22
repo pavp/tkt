@@ -26,6 +26,9 @@ type menuItem struct {
 	sub func() *menu
 	// prompt, when set, opens a form's text box.
 	prompt *formPrompt
+	// move and fix, when set, open that ticket's Move to… menu or send its feedback to its agent.
+	move ticket.Key
+	fix  ticket.Key
 }
 
 // menu lists what can be done with the selected ticket or review request.
@@ -35,6 +38,8 @@ type menu struct {
 	sel   int
 	// back is the menu esc returns to; nil closes.
 	back *menu
+	// loading names the ticket whose statuses this menu waits for.
+	loading ticket.Key
 }
 
 var menuBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("111")).Padding(0, 2)
@@ -73,7 +78,7 @@ func (m Model) buildMenu(it item) *menu {
 		items = append(items, menuItem{label: fmt.Sprintf("Pull requests (%d) ▸", len(t.PRs)), key: "p", sub: func() *menu { return m.prsMenu(t) }})
 	}
 	for _, r := range t.Attention() {
-		items = append(items, menuItem{label: fixLabel(r), key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
+		items = append(items, menuItem{label: fixLabel(r), key: "f", fix: t.Key})
 	}
 	items = append(items, m.moveItem(t.Key))
 	items = append(items,
@@ -90,7 +95,7 @@ func (m Model) prMenu(it item) *menu {
 	pr, t := *it.pr, *it.ticket
 	items := []menuItem{{label: fmt.Sprintf("Open #%d in GitHub ↗", pr.Number), key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}}
 	if reasons := pr.Attention(); len(reasons) > 0 {
-		items = append(items, menuItem{label: fixLabel(reasons[0]), key: "f", run: func() tea.Cmd { return a.Fix(t.Key) }})
+		items = append(items, menuItem{label: fixLabel(reasons[0]), key: "f", fix: t.Key})
 	}
 	items = append(items,
 		menuItem{label: m.startLabel(t.Key), run: func() tea.Cmd { return a.StartChoices(t.Key) }},
@@ -111,9 +116,9 @@ func (m Model) prMenu(it item) *menu {
 	return &menu{title: fmt.Sprintf("Pull request #%d · %s", pr.Number, t.Key), items: items}
 }
 
-// moveItem asks Jira where the ticket can move from its current status; the choices open as a menu.
+// moveItem opens where the ticket can move from its current status.
 func (m Model) moveItem(k ticket.Key) menuItem {
-	return menuItem{label: "Move to… ▸", run: func() tea.Cmd { return m.actions.Transitions(k) }}
+	return menuItem{label: "Move to… ▸", move: k}
 }
 
 // fixLabel words the fix for a reason; every fix sends all of the ticket's feedback at once.
@@ -217,6 +222,16 @@ func (m Model) runMenuItem(i int) (tea.Model, tea.Cmd) {
 	if it.prompt != nil {
 		p := *it.prompt
 		m.prompt = &p
+		return m, nil
+	}
+	if it.move != "" {
+		return m.openMoves(it.move, parent)
+	}
+	if it.fix != "" {
+		return m.startFix(it.fix)
+	}
+	if it.run == nil {
+		m.menu = parent
 		return m, nil
 	}
 	return m, it.run()

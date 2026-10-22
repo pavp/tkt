@@ -17,6 +17,7 @@ import (
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
+	"github.com/pavp/tkt/internal/github"
 	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
@@ -56,7 +57,7 @@ func TestBoardActionsRefreshAndFix(t *testing.T) {
 	if msg.Err != nil || len(msg.Snap.Tickets) == 0 {
 		t.Fatalf("refresh = %+v", msg)
 	}
-	if got := b.Fix("DEMO-1")(); got != tui.StatusMsg("outside Herdr: run `tkt fix DEMO-1` to print the prompt") {
+	if got := b.Fix("DEMO-1", nil)(); got != tui.StatusMsg("outside Herdr: run `tkt fix DEMO-1` to print the prompt") {
 		t.Errorf("fix outside Herdr = %v", got)
 	}
 }
@@ -562,7 +563,7 @@ func TestBoardFixGoesToTheAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
-	if _, ok := b.Fix("DEMO-1")().(tea.QuitMsg); !ok {
+	if _, ok := b.Fix("DEMO-1", nil)().(tea.QuitMsg); !ok {
 		t.Error("after sending the feedback the board should close")
 	}
 	if got := f.Last("agent.prompt"); got["target"] != "w1:p2" {
@@ -572,8 +573,36 @@ func TestBoardFixGoesToTheAgent(t *testing.T) {
 		t.Errorf("the agent's pane should get the focus: %v", got)
 	}
 	f.Results["agent.list"] = `{"type":"agent_list","agents":[]}`
-	if got, ok := b.Fix("DEMO-1")().(tui.StatusMsg); !ok || !strings.Contains(string(got), "no agent is running") {
+	if got, ok := b.Fix("DEMO-1", nil)().(tui.StatusMsg); !ok || !strings.Contains(string(got), "no agent is running") {
 		t.Errorf("a failure keeps the board open and says why: %v", got)
+	}
+}
+
+func TestBoardFixUsesTheBoardsTicketAndSaysWhatItIsDoing(t *testing.T) {
+	h, gh, f := fixHarness(t)
+	h.env["HERDR_ENV"] = "1"
+	h.clone(t, "web")
+	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1\nHEAD a\nbranch refs/heads/feature/DEMO-1-filter\n"
+	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w1","worktree":{"checkout_path":"/src/web-DEMO-1"}}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p2","workspace_id":"w1","agent":"claude"}]}`
+	gh.threads = map[int][]github.ReviewThread{40: {{Path: "web/form.go", Line: 7, Comments: []github.ThreadComment{{Author: "sam", Body: "Rename"}}}}}
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent []tea.Msg
+	b := &boardActions{a: h.app, c: c, ctx: context.Background(), send: func(m tea.Msg) { sent = append(sent, m) }}
+	known := ticket.Ticket{Key: "DEMO-1", Summary: "Filter accounts", PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 40, State: ticket.PROpen, Unresolved: 1}}}
+	if _, ok := b.Fix("DEMO-1", &known)().(tea.QuitMsg); !ok {
+		t.Fatal("after sending the feedback the board should close")
+	}
+	text, _ := f.Last("agent.prompt")["text"].(string)
+	if !strings.Contains(text, "Unresolved comment on example-org/web#40") || strings.Contains(text, "unit-tests") {
+		t.Errorf("the prompt should come from the board's ticket, not a new fetch:\n%s", text)
+	}
+	want := []tea.Msg{tui.StatusMsg("DEMO-1 · collecting its feedback from GitHub…"), tui.StatusMsg("DEMO-1 · sending it to the agent…")}
+	if !slices.Equal(sent, want) {
+		t.Errorf("progress = %v, want %v", sent, want)
 	}
 }
 
