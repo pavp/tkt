@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"syscall"
 	"time"
 
@@ -97,6 +98,19 @@ func (a *App) daemonDetail(ctx context.Context, key ticket.Key, known *ticket.Ti
 	return a.loadDetail(ctx, c, key, known)
 }
 
+// logNewWarnings writes each sync warning the previous sync did not have to the daemon's log, so a failure
+// that empties part of the board leaves a trace without repeating itself every sync.
+func (a *App) logNewWarnings(warnings []string) {
+	a.warnMu.Lock()
+	defer a.warnMu.Unlock()
+	for _, w := range warnings {
+		if !slices.Contains(a.syncWarnings, w) {
+			fmt.Fprintf(a.Stderr, "%s sync: %s\n", a.Now().UTC().Format(time.RFC3339), w)
+		}
+	}
+	a.syncWarnings = slices.Clone(warnings)
+}
+
 // daemonSync reads the configuration afresh, so changes made in the board's settings apply without a
 // restart, fails when the fetch does, so the daemon keeps its last good board, and rewrites the Herdr
 // sidebar with the new board when Herdr runs.
@@ -112,6 +126,7 @@ func (a *App) daemonSync(ctx context.Context, partial func(board.Snapshot)) (boa
 	if stale != nil {
 		return board.Snapshot{}, stale
 	}
+	a.logNewWarnings(snap.Warnings)
 	if a.NewHerdr != nil {
 		hctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()

@@ -40,6 +40,23 @@ func TestDaemonSyncFetchesAndCachesTheBoard(t *testing.T) {
 	}
 }
 
+func TestDaemonSyncLogsEachNewWarningOnce(t *testing.T) {
+	h := daemonHarness(t)
+	h.app.NewGitHub = func(*config.Config) GitHubAPI { return &fakeGitHub{err: errors.New("secondary rate limit")} }
+	for range 2 {
+		if _, err := h.app.daemonSync(context.Background(), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	log := h.errOut.String()
+	if n := strings.Count(log, "sync: pull requests unavailable: secondary rate limit"); n != 1 {
+		t.Errorf("a warning should reach the daemon's log once while it lasts, got %d:\n%s", n, log)
+	}
+	if !strings.Contains(log, "2026-10-20T12:00:00Z sync: ") {
+		t.Errorf("each line says when:\n%s", log)
+	}
+}
+
 func TestDaemonSyncReportsAFailedFetch(t *testing.T) {
 	h := daemonHarness(t)
 	if _, err := h.app.daemonSync(context.Background(), nil); err != nil {

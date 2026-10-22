@@ -273,8 +273,9 @@ func (c *Client) PullRequests(ctx context.Context, repos []string) ([]ticket.Pul
 	return out, nil
 }
 
-// ReviewRequests returns open PRs in repos ("owner/name") that request the token user's review. direct
-// keeps only requests addressed to the user; otherwise requests to the user's teams count too.
+// ReviewRequests returns open PRs that request the token user's review anywhere in the organizations of
+// repos ("owner/name"), so a request in a repository tkt does not know yet still shows. direct keeps only
+// requests addressed to the user; otherwise requests to the user's teams count too.
 func (c *Client) ReviewRequests(ctx context.Context, repos []string, direct bool) ([]ticket.PullRequest, error) {
 	byOwner := map[string][]string{}
 	for _, r := range repos {
@@ -293,10 +294,7 @@ func (c *Client) ReviewRequests(ctx context.Context, repos []string, direct bool
 	q := `query($q: String!) { search(query: $q, type: ISSUE, first: 50) { nodes { ... on PullRequest { ` + prFields + ` } } } }`
 	var out []ticket.PullRequest
 	for _, owner := range owners {
-		terms := []string{"is:pr", "is:open", "archived:false", qualifier}
-		for _, r := range byOwner[owner] {
-			terms = append(terms, "repo:"+r)
-		}
+		terms := []string{"is:pr", "is:open", "archived:false", qualifier, "org:" + owner}
 		var data struct {
 			Search struct {
 				Nodes []prNode `json:"nodes"`

@@ -57,6 +57,12 @@ func (m Model) buildMenu(it item) *menu {
 	if it.mine() {
 		return m.prMenu(it)
 	}
+	if it.other {
+		pr := *it.pr
+		return &menu{title: fmt.Sprintf("Pull request #%d · %s · %s", pr.Number, pr.Repo, cmp.Or(pr.Author, "unknown author")), items: []menuItem{
+			{label: "Open the pull request in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }},
+		}}
+	}
 	t := *it.ticket
 	if t.Team {
 		return m.teamMenu(t)

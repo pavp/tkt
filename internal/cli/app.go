@@ -62,6 +62,10 @@ type App struct {
 	// jiraClients keeps one Jira client per site, email and token; tokenMu guards it too.
 	jiraClients map[string]JiraAPI
 
+	// syncWarnings are the last sync's warnings, so the daemon logs only the new ones.
+	warnMu       sync.Mutex
+	syncWarnings []string
+
 	in *bufio.Reader
 
 	configPath string

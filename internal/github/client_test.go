@@ -223,13 +223,13 @@ func TestReviewRequests(t *testing.T) {
 	if !got[1].AuthorBot || got[1].Author != "dependabot" {
 		t.Errorf("bot author not marked: %+v", got[1])
 	}
-	if q := (*calls)[0].vars["q"]; q != "is:pr is:open archived:false user-review-requested:@me repo:example-org/web repo:example-org/api" {
+	if q := (*calls)[0].vars["q"]; q != "is:pr is:open archived:false user-review-requested:@me org:example-org" {
 		t.Errorf("direct search = %v", q)
 	}
 	if _, err := c.ReviewRequests(context.Background(), []string{"example-org/web"}, false); err != nil {
 		t.Fatal(err)
 	}
-	if q := (*calls)[1].vars["q"]; q != "is:pr is:open archived:false review-requested:@me repo:example-org/web" {
+	if q := (*calls)[1].vars["q"]; q != "is:pr is:open archived:false review-requested:@me org:example-org" {
 		t.Errorf("team search = %v", q)
 	}
 }
