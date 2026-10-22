@@ -1614,12 +1614,18 @@ func (m Model) listLayout() (fixed, rows []string, height, start int) {
 		fixed = append(strings.Split(strip, "\n"), "")
 	}
 	all := strings.Split(strings.TrimRight(m.listView(), "\n"), "\n")
+	_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, 0, 0, 0)
 	if len(all) >= 2 {
-		fixed, all = append(fixed, all[:2]...), all[2:]
+		fixed, all, at = append(fixed, all[:2]...), all[2:], at[min(2, len(at)):]
 	}
 	height = m.height - lineCount(m.header()) - lineCount(m.preview()+"\n"+m.footer()) - len(fixed) - 1
 	if height > 0 && len(all) > height {
-		start = windowStart(all, height)
+		// The window follows the selected row; a collapsed group's ▸ must not pass for it.
+		sel := 0
+		if !m.inStrip {
+			sel = max(0, slices.Index(at, m.row))
+		}
+		start = min(max(0, sel-height/2), len(all)-height)
 		all = all[start : start+height]
 	}
 	return fixed, all, height, start
@@ -2477,7 +2483,11 @@ func (m Model) preview() string {
 		if a := it.pr.ApprovalsText(); a != "" {
 			approvals = " · " + a
 		}
-		return title + "\n" + dim.Render(truncate(fmt.Sprintf("review requested by %s in %s%s · CI %s · enter for actions", orDash(it.pr.Author), it.pr.Repo, approvals, ciWord(it.pr.Checks)), m.width))
+		how := "review requested by"
+		if it.other {
+			how = "opened by"
+		}
+		return title + "\n" + dim.Render(truncate(fmt.Sprintf("%s %s in %s%s · CI %s · enter for actions", how, orDash(it.pr.Author), it.pr.Repo, approvals, ciWord(it.pr.Checks)), m.width))
 	}
 	t := it.ticket
 	title := truncate(titleStyle.Render(string(t.Key))+" "+statusBadge(*t)+titleStyle.Render(" · "+t.Summary), m.width)
