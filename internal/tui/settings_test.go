@@ -124,7 +124,7 @@ func TestSettingsRemovesOnlyAfterConfirming(t *testing.T) {
 
 func TestSettingsEditsLocalCloneFolders(t *testing.T) {
 	m, r := settingsBoard(t)
-	m = send(send(m, keyTab), keyTab)
+	m = send(send(send(m, keyTab), keyTab), keyTab)
 	if v := stripANSI(m.View()); !strings.Contains(v, "Folders where tkt looks for your local clones") || !strings.Contains(v, "▸ ~/src") {
 		t.Fatalf("roots section:\n%s", v)
 	}
@@ -240,7 +240,7 @@ func TestSettingsFillsTheRepositoryFromThePickedFolder(t *testing.T) {
 func TestSettingsPicksACloneFolder(t *testing.T) {
 	m, r := settingsBoard(t)
 	r.picked = "~/projects"
-	m = send(send(m, keyTab), keyTab)
+	m = send(send(send(m, keyTab), keyTab), keyTab)
 	m = press(m, "a")
 	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlO})
 	send(m, keyEnter)
@@ -286,7 +286,7 @@ func TestSettingsKeepsAnInferredRepositoryWhenNotConfirmed(t *testing.T) {
 func TestSettingsSetsTheTicketLabelFromJiraFields(t *testing.T) {
 	m, r := settingsBoard(t)
 	r.jiraFields = []string{"Priority", "Product", "Product(s)", "Summary"}
-	m = send(send(send(m, keyTab), keyTab), keyTab)
+	m = send(send(send(send(m, keyTab), keyTab), keyTab), keyTab)
 	v := stripANSI(m.View())
 	if !strings.Contains(v, "▸ Ticket label") || !strings.Contains(v, "—") || !strings.Contains(v, "shown first on the selected ticket's detail line") {
 		t.Fatalf("board section:\n%s", v)
@@ -319,7 +319,7 @@ func TestSettingsSetsTheTicketLabelFromJiraFields(t *testing.T) {
 func TestSettingsTicketLabelHintsAnUnknownField(t *testing.T) {
 	m, r := settingsBoard(t)
 	r.jiraFields = []string{"Product"}
-	m = press(send(send(send(m, keyTab), keyTab), keyTab), "enter")
+	m = press(send(send(send(send(m, keyTab), keyTab), keyTab), keyTab), "enter")
 	m = send(typeText(m, "Team"), keyTab)
 	if v := stripANSI(m.View()); !strings.Contains(v, "no Jira field starts with Team") {
 		t.Errorf("hint:\n%s", v)
@@ -331,7 +331,7 @@ func TestSettingsTicketLabelHintsAnUnknownField(t *testing.T) {
 
 func TestSettingsSectionsCycle(t *testing.T) {
 	m, _ := settingsBoard(t)
-	for i, want := range []string{"Jira boards whose active sprints", "Folders where tkt looks", "Ticket label", "example-org/web"} {
+	for i, want := range []string{"Jira boards whose active sprints", "The column each Jira status lands in", "Folders where tkt looks", "Ticket label", "example-org/web"} {
 		m = send(m, keyTab)
 		if v := stripANSI(m.View()); !strings.Contains(v, want) {
 			t.Errorf("tab %d: missing %q:\n%s", i+1, want, v)
@@ -422,5 +422,93 @@ func TestTeamBoardSettingsFitTheTrayPanel(t *testing.T) {
 		if lipgloss.Width(l) > 56 {
 			t.Errorf("wider than the tray panel: %q", l)
 		}
+	}
+}
+
+func columnSettings(t *testing.T) (tea.Model, *recorder) {
+	t.Helper()
+	m, r := settingsBoard(t)
+	r.statuses = map[string][]JiraStatus{"DEMO": {
+		{Name: "To Do", Category: "new"}, {Name: "En curso", Category: "indeterminate"}, {Name: "Pending test", Category: "indeterminate"},
+		{Name: "En revisión", Category: "indeterminate"}, {Name: "Blocked", Category: "indeterminate"}, {Name: "Finalizada", Category: "done"},
+	}}
+	return send(send(m, keyTab), keyTab), r
+}
+
+func TestSettingsMapsStatusesToColumns(t *testing.T) {
+	m, r := columnSettings(t)
+	v := stripANSI(m.View())
+	for _, want := range []string{"The column each Jira status lands in", "STATUS", "COLUMN", "MARK", "Pending test", "In Progress · auto", "In Review · auto", "⊘ · auto"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("missing %q:\n%s", want, v)
+		}
+	}
+	if !slices.Contains(r.listed, "statuses DEMO") {
+		t.Errorf("the section should ask Jira for the space's statuses: %v", r.listed)
+	}
+	m = send(selectSettingsRow(t, m, "Pending test"), keyEnter)
+	if len(r.saved) != 1 || r.saved[0].Spaces[0].StatusOverrides["Pending test"] != "review" {
+		t.Fatalf("enter should move the status to the next column: %+v", r.saved)
+	}
+	if row := rowShowing(m, "Pending test"); !strings.Contains(row, "In Review") || strings.Contains(row, "In Review · auto") || !strings.Contains(row, "◇ · auto") {
+		t.Errorf("a moved status shows its column and the automatic ◇: %q", row)
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	if got := r.saved[len(r.saved)-1].Spaces[0].StatusMarks; got["Pending test"] != "blocked" {
+		t.Fatalf("m should pick the next icon: %v", got)
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if sp := r.saved[len(r.saved)-1].Spaces[0]; len(sp.StatusOverrides) != 0 || len(sp.StatusMarks) != 0 {
+		t.Fatalf("d should bring the status back to its automatic column and mark: %+v", sp)
+	}
+	m = selectSettingsRow(t, press(m, "w", "w", "w", "w", "w", "w"), "En curso")
+	for range 4 {
+		m = send(m, keyEnter)
+	}
+	if sp := r.saved[len(r.saved)-1].Spaces[0]; len(sp.StatusOverrides) != 0 {
+		t.Errorf("back in its automatic column, a status is not saved: %v", sp.StatusOverrides)
+	}
+	m = selectSettingsRow(t, m, "Blocked")
+	for range 5 {
+		m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+	}
+	if got := r.saved[len(r.saved)-1].Spaces[0].StatusMarks["Blocked"]; got != "none" {
+		t.Errorf("after the last icon comes no mark, saved as none: %q", got)
+	}
+	if row := rowShowing(m, "Blocked"); !strings.Contains(row, "—") {
+		t.Errorf("an unmarked status shows a dash: %q", row)
+	}
+}
+
+// rowShowing is the settings line showing text.
+func rowShowing(m tea.Model, text string) string {
+	for _, l := range strings.Split(stripANSI(m.View()), "\n") {
+		if strings.Contains(l, text) {
+			return l
+		}
+	}
+	return ""
+}
+
+func TestSettingsColumnsSayWhenStatusesCannotLoad(t *testing.T) {
+	m, r := settingsBoard(t)
+	r.statusesErr = errors.New("boom")
+	m = send(send(m, keyTab), keyTab)
+	if v := stripANSI(m.View()); !strings.Contains(v, "cannot list the statuses of DEMO: boom") {
+		t.Errorf("no error:\n%s", v)
+	}
+}
+
+func TestColumnSettingsFitTheTrayPanel(t *testing.T) {
+	m, _ := columnSettings(t)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 56, Height: 40})
+	v := stripANSI(m.View())
+	for _, l := range strings.Split(v, "\n") {
+		if lipgloss.Width(l) > 56 {
+			t.Errorf("wider than the tray panel: %q", l)
+		}
+	}
+	if !strings.Contains(v, "Statuses") || !strings.Contains(v, "Pending test") {
+		t.Errorf("the tray panel shows the section:\n%s", v)
 	}
 }

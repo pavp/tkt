@@ -643,6 +643,20 @@ func TestBoardActionsListTheSpacesBoards(t *testing.T) {
 	}
 }
 
+func TestBoardActionsListTheSpacesStatuses(t *testing.T) {
+	h, _ := listHarness(t)
+	h.jira.statuses = map[string][]jira.Status{"DEMO": {{Name: "Pending test", Category: "indeterminate"}}}
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	msg, ok := b.JiraStatuses("DEMO")().(tui.JiraStatusesListedMsg)
+	if !ok || msg.Err != nil || msg.Space != "DEMO" || !slices.Equal(msg.Statuses, []tui.JiraStatus{{Name: "Pending test", Category: "indeterminate"}}) {
+		t.Errorf("listed = %+v", msg)
+	}
+}
+
 func TestBoardActionsMoveTicketsInJira(t *testing.T) {
 	h, _ := listHarness(t)
 	h.jira.transitions = map[string][]jira.Transition{"DEMO-1": {

@@ -227,6 +227,21 @@ func (b *boardActions) JiraBoards(space string) tea.Cmd {
 	}
 }
 
+func (b *boardActions) JiraStatuses(space string) tea.Cmd {
+	return func() tea.Msg {
+		js, err := b.a.jiraClient(b.cfg())
+		if err != nil {
+			return tui.JiraStatusesListedMsg{Space: space, Err: err}
+		}
+		statuses, err := js.Statuses(b.ctx, space)
+		out := make([]tui.JiraStatus, len(statuses))
+		for i, st := range statuses {
+			out[i] = tui.JiraStatus{Name: st.Name, Category: st.Category}
+		}
+		return tui.JiraStatusesListedMsg{Space: space, Statuses: out, Err: err}
+	}
+}
+
 func (b *boardActions) Transitions(key ticket.Key) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)

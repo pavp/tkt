@@ -16,7 +16,7 @@ Objective: map each space's Jira statuses to the board's four columns and choose
 |---|---|---|---|---|---|
 | T1 | S3, S4 (data), S5 | 1 `feat/status-columns-1-marker` (base `main`) | inline, no Writer reason | done (299 lines) | 21f4e0a, 4023b4a |
 | T2 | S2 | 2 `feat/status-columns-2-init` (base slice 1) | inline, no Writer reason | done (138 lines) | 64713e9 |
-| T3 | S1, S4 (Settings) | 3 `feat/status-columns-3-settings` (base slice 2) | inline, no Writer reason | in progress | |
+| T3 | S1, S4 (Settings) | 3 `feat/status-columns-3-settings` (base slice 2) | inline, no Writer reason | done (381 lines) | (slice 3 commit) |
 
 Forecast: slice 1 80–140, slice 2 80–135, slice 3 250–390 (total 410–665). Native grouping: once the last slice's PR is open, group with `gh stack link <pr1> <pr2> <pr3>`; merging any PR then takes every unmerged PR below it. Every branch lives in one repository; read back each PR's base and diff after linking (`gh stack unstack <stack>` before correcting a base).
 
@@ -33,3 +33,4 @@ Slice bases: 1 → `main`, 2 → `feat/status-columns-1-marker`, 3 → `feat/sta
 - L6 Discovery: `ToTicket` (internal/board/board.go:522) sends "block"/"bloque" statuses to To Do unless overridden; kept as part of the automatic rule (S5). `CategoryFor` stays as is because `tkt start` uses it.
 - L7 "si no que se te ocurre para hacer agnostico el icono de blocked? quizas mantener el automatico pero dar opcion de cambiar el icono entre esas dos opciones? incluso podriamos agregar otras opciones -> siendo para el automatico blocked el que ya tiene y para el resto el que propusiste pero con la posibilidad de entre las 5 o 6 opciones asignarle otro icono a los estados?" → S4 under revision: marks become a choice among a fixed set of icons; awaiting the user's confirmation of the set. T1 (21f4e0a) reopens for it; T2 committed 66293c3 (138 lines).
 - L8 "si, me gustan" → six icons confirmed. T1 reworked in 4023b4a (Ticket.Blocked removed; the list shows any mark's icon); slice 2 rebased (64713e9).
+- L9 T3 done: Settings section named "Statuses" (not "Columns", which the board header already uses for its view); enter next column, m next icon, d automatic; statuses asked once per space when the section opens. go test ./..., go vet, gofmt clean; checked by eye at 140 and 56 columns. RDD disabled on this clone. Next: push and open the three stacked PRs when the user asks.
