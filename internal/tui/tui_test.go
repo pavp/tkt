@@ -827,8 +827,8 @@ func TestReviewsRenderLikeTheMockup(t *testing.T) {
 			line = l
 		}
 	}
-	if !strings.Contains(line, "Review requested   ✓") || strings.Contains(line, "example-org") {
-		t.Errorf("review row should show only the CI mark, as in the mockup: %q", line)
+	if !strings.Contains(line, "Review requested   alex   ✓") || strings.Contains(line, "example-org") {
+		t.Errorf("review row should show its author and the CI mark: %q", line)
 	}
 	for i := 0; i < 10 && !strings.Contains(selectedLine(next.View()), "#820"); i++ {
 		next = press(next, "s")
@@ -2957,6 +2957,43 @@ func TestStatusBadgeUsesItsColumnsColorAndMark(t *testing.T) {
 		if got != want {
 			t.Errorf("%s: badge %q, want %q", c.t.Status, got, want)
 		}
+	}
+}
+
+func TestTeamModeListsEveryOpenPullRequestWithItsAuthor(t *testing.T) {
+	snap := prsSnapshot()
+	snap.Others = []ticket.PullRequest{{Repo: "example-org/api", Number: 901, Title: "Rename the export", Author: "sam", URL: "https://github.com/example-org/api/pull/901", State: ticket.PROpen, Checks: ticket.ChecksPass}}
+	r := &recorder{}
+	m := tea.Model(New(snap, false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	mm := m.(Model)
+	mm.team = true
+	m = press(mm, "2")
+	v := stripANSI(m.View())
+	for _, want := range []string{"AUTHOR", "Team · example-org/api", "Team · example-org/web"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("missing %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "Review requested · ") || lineIndex(m.View(), "Team · ") < lineIndex(m.View(), "Mine") {
+		t.Errorf("with Team on the user's pull requests come first, then the team's by repository, requests among them:\n%s", v)
+	}
+	if requested := strings.Split(v, "\n")[lineIndex(m.View(), "#820")]; !strings.Contains(requested, "! #820 Review requested") {
+		t.Errorf("a requested review keeps its mark and wording inside its repository's group: %q", requested)
+	}
+	row := strings.Split(v, "\n")[lineIndex(m.View(), "#901")]
+	if !strings.Contains(row, "sam") || !strings.Contains(row, "Rename the export") || strings.Contains(row, "Review requested") || strings.HasPrefix(strings.TrimSpace(row), "!") {
+		t.Errorf("another person's pull request shows its author, without the review mark: %q", row)
+	}
+	for i := 0; i < 20 && !strings.Contains(selectedLine(m.View()), "#901"); i++ {
+		m = press(m, "s")
+	}
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #901 · example-org/api · sam") || !strings.Contains(v, "Open the pull request in GitHub ↗") {
+		t.Errorf("its menu opens it in GitHub:\n%s", v)
+	}
+	off := press(New(snap, false, r, ViewList), "2")
+	if v := stripANSI(off.View()); !strings.Contains(v, "Review requested · example-org/web") || strings.Contains(v, "Team · ") {
+		t.Errorf("with Team off only the review requests follow the user's pull requests:\n%s", v)
 	}
 }
 

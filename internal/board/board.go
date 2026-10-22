@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +23,10 @@ type Snapshot struct {
 	FetchedAt time.Time            `json:"fetched_at"`
 	Tickets   []ticket.Ticket      `json:"tickets"`
 	Reviews   []ticket.PullRequest `json:"reviews"`
-	Sprints   []jira.Sprint        `json:"sprints"`
+	// Others are the open pull requests of the known repositories that are neither the user's nor review
+	// requests, listed while the Team toggle is on.
+	Others  []ticket.PullRequest `json:"others,omitempty"`
+	Sprints []jira.Sprint        `json:"sprints"`
 	// Agents holds the Herdr agent status of each ticket's workspace, when the board runs inside Herdr.
 	Agents map[string]string `json:"agents,omitempty"`
 	// Repos lists each space's repositories, configured or inferred from Jira-linked pull requests.
@@ -280,7 +284,9 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		r := <-reviewsDone
 		reviews, err := r.prs, r.err
 		if err != nil {
-			snap.Warnings = append(snap.Warnings, "review requests unavailable: "+err.Error())
+			// An empty list would read as no request at all; the last ones found stay until a search works.
+			snap.Warnings = append(snap.Warnings, "review requests unavailable, showing the last ones found: "+err.Error())
+			reviews = prev.Reviews
 		}
 		seen := map[string]bool{}
 		for _, pr := range reviews {
@@ -292,7 +298,33 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		}
 		slices.SortStableFunc(snap.Reviews, byRepoNumber)
 	}
-	return snap, nil
+	if opts.Team && prErr == nil {
+		snap.Others = others(prs, tickets, snap.Reviews)
+	}
+	return DropIgnored(c, snap), nil
+}
+
+// others keeps the open pull requests of the listing that belong to none of tickets and are not reviews.
+func others(listed []ticket.PullRequest, tickets []ticket.Ticket, reviews []ticket.PullRequest) []ticket.PullRequest {
+	id := func(p ticket.PullRequest) string { return strings.ToLower(p.Repo) + "#" + strconv.Itoa(p.Number) }
+	taken := map[string]bool{}
+	for _, t := range tickets {
+		for _, p := range t.PRs {
+			taken[id(p)] = true
+		}
+	}
+	for _, p := range reviews {
+		taken[id(p)] = true
+	}
+	var out []ticket.PullRequest
+	for _, p := range listed {
+		if p.State == ticket.PROpen && !taken[id(p)] {
+			taken[id(p)] = true
+			out = append(out, p)
+		}
+	}
+	slices.SortStableFunc(out, byRepoNumber)
+	return out
 }
 
 // activeSprints asks each team board for its active sprints, all at once, and maps each sprint to its
@@ -339,7 +371,7 @@ func partialBoard(snap Snapshot, mine, team []ticket.Ticket, linked map[ticket.K
 		}
 		return out
 	}
-	p := Snapshot{FetchedAt: snap.FetchedAt, Sprints: slices.Clone(snap.Sprints), Reviews: slices.Clone(prev.Reviews), Partial: true, Repos: map[string][]string{}}
+	p := Snapshot{FetchedAt: snap.FetchedAt, Sprints: slices.Clone(snap.Sprints), Reviews: slices.Clone(prev.Reviews), Others: slices.Clone(prev.Others), Partial: true, Repos: map[string][]string{}}
 	for k, v := range snap.Repos {
 		p.Repos[k] = slices.Clone(v)
 	}
@@ -435,14 +467,16 @@ func DropIgnored(c *config.Config, snap Snapshot) Snapshot {
 		tickets[i].Subtasks = subs
 	}
 	snap.Tickets = tickets
-	snap.Reviews = slices.DeleteFunc(slices.Clone(snap.Reviews), func(p ticket.PullRequest) bool {
+	anyIgnores := func(p ticket.PullRequest) bool {
 		for _, s := range c.Spaces {
 			if ignored(c, s.Key, p.Repo) {
 				return true
 			}
 		}
 		return false
-	})
+	}
+	snap.Reviews = slices.DeleteFunc(slices.Clone(snap.Reviews), anyIgnores)
+	snap.Others = slices.DeleteFunc(slices.Clone(snap.Others), anyIgnores)
 	return snap
 }
 
@@ -576,6 +610,7 @@ func (s Snapshot) Column(c ticket.Category) []ticket.Ticket {
 // WithoutBots drops review requests on pull requests opened by bots, such as dependabot.
 func (s Snapshot) WithoutBots() Snapshot {
 	s.Reviews = slices.DeleteFunc(slices.Clone(s.Reviews), func(p ticket.PullRequest) bool { return p.AuthorBot })
+	s.Others = slices.DeleteFunc(slices.Clone(s.Others), func(p ticket.PullRequest) bool { return p.AuthorBot })
 	return s
 }
 

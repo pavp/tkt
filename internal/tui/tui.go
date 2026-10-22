@@ -152,9 +152,11 @@ type item struct {
 	count, needs int
 	// parent, set on a subtask's own row or card, names the ticket it belongs to.
 	parent ticket.Key
+	// other marks someone else's pull request that asks nothing of the user, listed while Team is on.
+	other bool
 }
 
-func (it item) review() bool  { return it.pr != nil && it.ticket == nil }
+func (it item) review() bool  { return it.pr != nil && it.ticket == nil && !it.other }
 func (it item) heading() bool { return it.group != "" }
 func (it item) mine() bool    { return it.pr != nil && it.ticket != nil }
 
@@ -330,6 +332,15 @@ func (m Model) reviews() []ticket.PullRequest {
 	return slices.DeleteFunc(slices.Clone(reviews), func(pr ticket.PullRequest) bool { return m.repoHidden(pr.Repo) })
 }
 
+// others are the open pull requests of everyone else, listed while Team is on, filtered as reviews are.
+func (m Model) others() []ticket.PullRequest {
+	others := m.snap.Others
+	if !m.showBots {
+		others = m.snap.WithoutBots().Others
+	}
+	return slices.DeleteFunc(slices.Clone(others), func(pr ticket.PullRequest) bool { return m.repoHidden(pr.Repo) })
+}
+
 // repoHidden reports whether the user hid repo; a pull request whose repository is unknown always shows.
 func (m Model) repoHidden(repo string) bool { return repo != "" && m.hiddenRepos[repo] }
 
@@ -400,7 +411,10 @@ func (m Model) repoNotice() string {
 	return dim.Render(fmt.Sprintf("Showing %d of %d repositories · ", len(repos)-hidden, len(repos))) + keyStyle.Render("R") + dim.Render(" change")
 }
 
-func (m Model) hiddenBots() int { return len(m.snap.Reviews) - len(m.snap.WithoutBots().Reviews) }
+func (m Model) hiddenBots() int {
+	shown := m.snap.WithoutBots()
+	return len(m.snap.Reviews) + len(m.snap.Others) - len(shown.Reviews) - len(shown.Others)
+}
 
 // botToggleLine is listLines' marker for the reviews filter's "show bots" line, which a click toggles.
 const botToggleLine = -2
@@ -459,7 +473,7 @@ func (m Model) prLayout(every bool) []item {
 	add := func(group, title string, rows []item) {
 		needs := 0
 		for _, it := range rows {
-			if it.review() || needsYou(*it.pr) {
+			if it.review() || it.mine() && needsYou(*it.pr) {
 				needs++
 			}
 		}
@@ -481,15 +495,26 @@ func (m Model) prLayout(every bool) []item {
 		add("mine:"+repo, title, mine[i:j])
 		i = j
 	}
-	reviews := m.reviews()
-	for i := 0; i < len(reviews); {
-		j, repo := i, reviews[i].Repo
-		var rows []item
-		for ; j < len(reviews) && reviews[j].Repo == repo; j++ {
-			pr := reviews[j]
-			rows = append(rows, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr})
+	// With Team on, review requests join the team's pull requests in each repository's group, first and still
+	// marked; otherwise they have groups of their own.
+	var rest []item
+	for _, pr := range m.reviews() {
+		rest = append(rest, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr})
+	}
+	group, title := "review:", "Review requested · "
+	if m.team {
+		for _, pr := range m.others() {
+			rest = append(rest, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr, other: true})
 		}
-		add("review:"+repo, "Review requested · "+repo, rows)
+		group, title = "team:", "Team · "
+	}
+	slices.SortStableFunc(rest, func(a, b item) int { return strings.Compare(a.pr.Repo, b.pr.Repo) })
+	for i := 0; i < len(rest); {
+		j, repo := i, rest[i].pr.Repo
+		for j < len(rest) && rest[j].pr.Repo == repo {
+			j++
+		}
+		add(group+repo, title+repo, rest[i:j])
 		i = j
 	}
 	return out
@@ -1916,7 +1941,7 @@ func statusText(it item) string {
 		return ""
 	case it.review():
 		s = "Review requested"
-	case it.mine():
+	case it.mine(), it.other:
 		s = prStatus(*it.pr)
 	default:
 		return it.ticket.Status
@@ -1967,7 +1992,16 @@ func (m Model) listView() string {
 		agentW = agentWidth + 1
 	}
 	assigneeW := 0
-	if m.filter != FilterPRs {
+	if m.filter == FilterPRs {
+		for _, it := range measured {
+			if it.pr != nil {
+				assigneeW = max(assigneeW, lipgloss.Width("AUTHOR"), lipgloss.Width(it.pr.Author))
+			}
+		}
+		if assigneeW > 0 {
+			assigneeW = min(assigneeW, authorMaxWidth) + 1
+		}
+	} else {
 		for _, it := range measured {
 			if it.ticket != nil && !it.mine() {
 				assigneeW = max(assigneeW, lipgloss.Width("ASSIGNEE"), lipgloss.Width(shortName(it.ticket.Assignee)))
@@ -2025,8 +2059,20 @@ func assigneeCell(name string, assigneeW int) string {
 	return pad(truncate(shortName(name), assigneeW-1), assigneeW)
 }
 
-// assigneeMaxWidth caps the ASSIGNEE column, which shows short names such as "Ana L.".
-const assigneeMaxWidth = 14
+// assigneeMaxWidth caps the ASSIGNEE column, which shows short names such as "Ana L."; authorMaxWidth caps
+// the PRs filter's AUTHOR column, which shows GitHub logins.
+const (
+	assigneeMaxWidth = 14
+	authorMaxWidth   = 20
+)
+
+// authorCell is a pull request row's author, padded to authorW (which includes its gap).
+func authorCell(login string, authorW int) string {
+	if authorW == 0 {
+		return ""
+	}
+	return pad(truncate(login, authorW-1), authorW)
+}
 
 // shortName shortens a person's name to the first name and the last name's initial, "Ana L.", for the
 // board's narrow cells; an empty name means the ticket is unassigned.
@@ -2160,7 +2206,11 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		header = pad("AGENT", agentW)
 	}
 	if assigneeW > 0 {
-		header = pad("ASSIGNEE", assigneeW) + header
+		label := "ASSIGNEE"
+		if m.filter == FilterPRs {
+			label = "AUTHOR"
+		}
+		header = pad(label, assigneeW) + header
 	}
 	heads := m.listHeads()
 	lines := []string{"  " + dim.Render(row(heads[0], heads[1], header, heads[2], "TITLE")), dim.Render(strings.Repeat("─", m.width))}
@@ -2224,14 +2274,14 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			ci = checkStyle(it.pr.Checks).Render(ci)
 		}
 		switch {
-		case it.review():
-			line = row(string(it.key), statusText(it), pad("", assigneeW+agentW), ci, it.pr.Title)
+		case it.review(), it.other:
+			line = row(string(it.key), statusText(it), authorCell(it.pr.Author, assigneeW)+pad("", agentW), ci, it.pr.Title)
 		case it.mine():
 			status := statusText(it)
 			if i != m.row && needsYou(*it.pr) {
 				status = warn.Render(status)
 			}
-			line = row(string(it.key), status, agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, cmp.Or(it.pr.Title, it.ticket.Summary))
+			line = row(string(it.key), status, authorCell(it.pr.Author, assigneeW)+agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, cmp.Or(it.pr.Title, it.ticket.Summary))
 		default:
 			title, key := it.ticket.Summary, string(it.key)
 			if (it.ticket.Team || it.ticket.Category == ticket.Done && it.parent != "") && i != m.row {
@@ -2252,7 +2302,7 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			line = "▸ " + selected.Render(line)
 		case it.review(), it.mine() && needsYou(*it.pr):
 			line = warn.Render("!") + " " + line
-		case it.mine():
+		case it.mine(), it.other:
 			line = "  " + line
 		case len(it.ticket.Attention()) > 0 && mark != "":
 			// The wider mark takes one cell of the key's padding, so the columns stay aligned.
