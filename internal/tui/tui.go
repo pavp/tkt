@@ -2426,7 +2426,11 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		}
 		status := statusText(it)
 		if i != m.row && !it.heading() {
-			status = statusStyle(it).Render(status)
+			approvals := ""
+			if it.pr != nil && it.pr.ApprovalsText() != "" {
+				approvals = " · " + it.pr.ApprovalsText()
+			}
+			status = statusStyle(it).Render(strings.TrimSuffix(status, approvals)) + approvals
 		}
 		switch {
 		case it.review(), it.other:
