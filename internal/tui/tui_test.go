@@ -1134,7 +1134,7 @@ func TestActionsMenu(t *testing.T) {
 	r := &recorder{}
 	m := press(loaded(r), "l", "enter")
 	v := stripANSI(m.View())
-	for _, want := range []string{"Actions for DEMO-1 · In Progress", "Start · open the agent", "Show details", "Open the ticket pane next to its agent", "Open in Jira ↗", "Open #812 ✕ in GitHub ↗", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
+	for _, want := range []string{"Actions for DEMO-1", "In Progress", "Start · open the agent", "Show details", "Open the ticket pane next to its agent", "Open in Jira ↗", "Open #812 ✕ in GitHub ↗", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("menu missing %q:\n%s", want, v)
 		}
@@ -2899,7 +2899,7 @@ func TestTeamTicketsOfferNoAgentActions(t *testing.T) {
 		t.Errorf("f on a team ticket does nothing but say why: %v\n%s", r.calls, stripANSI(m.View()))
 	}
 	v := stripANSI(press(m, "enter").View())
-	for _, want := range []string{"Actions for DEMO-9 · To Do · Bea Ruiz", "Show details", "Open in Jira ↗", "Assign to…", "Copy the key DEMO-9"} {
+	for _, want := range []string{"Actions for DEMO-9", "To Do · Bea Ruiz", "Show details", "Open in Jira ↗", "Assign to…", "Copy the key DEMO-9"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("menu lacks %q:\n%s", want, v)
 		}
@@ -4453,5 +4453,23 @@ func TestHeaderControlsSitAgainstTheRightEdge(t *testing.T) {
 				t.Errorf("width %d, tab %s: the controls end at %d, not at the edge %d:\n%s", width, tab, end, w, strings.Join(rows, "\n"))
 			}
 		}
+	}
+}
+
+func TestSprintMenuShowsALongStatusWhole(t *testing.T) {
+	snap := snapshot()
+	snap.Tickets[0].Status = "Ready to be Released by the release train"
+	snap.Tickets[0].Key = "DEMO-170446"
+	m := tea.Model(New(snap, true, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	for i := 0; i < 5; i++ {
+		if it, _ := m.(Model).current(); it.key == "DEMO-170446" {
+			break
+		}
+		m = press(m, "s")
+	}
+	lines := strings.Split(stripANSI(press(m, "enter").(Model).menuView()), "\n")
+	if !strings.Contains(lines[1], "Actions for DEMO-170446") || !strings.Contains(lines[2]+" "+lines[3], "Ready to be Released by the release train") || strings.Contains(lines[2], "…") {
+		t.Errorf("the status goes whole under the title:\n%s", strings.Join(lines, "\n"))
 	}
 }

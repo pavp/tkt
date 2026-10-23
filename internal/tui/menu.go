@@ -100,7 +100,7 @@ func (m Model) buildMenu(it item) *menu {
 		menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }},
 		menuItem{label: "Copy the ticket context (.ticket.md)", run: func() tea.Cmd { return a.CopyContext(t.Key) }},
 	)
-	return &menu{title: "Actions for " + string(t.Key) + " · " + t.Status, items: items}
+	return &menu{title: "Actions for " + string(t.Key), subtitle: t.Status, items: items}
 }
 
 // prMenu acts on one of the user's pull requests first, then on its ticket, leaving out the ticket's other
@@ -157,7 +157,7 @@ func (m Model) teamMenu(t ticket.Ticket) *menu {
 		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
 	}
 	items = append(items, m.assignItem(t.Key), menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
-	return &menu{title: "Actions for " + string(t.Key) + " · " + t.Status + " · " + cmp.Or(t.Assignee, "unassigned"), items: items}
+	return &menu{title: "Actions for " + string(t.Key), subtitle: t.Status + " · " + cmp.Or(t.Assignee, "unassigned"), items: items}
 }
 
 // backlogMenu offers starting work on a backlog ticket, after offering to take it when it is someone else's or
