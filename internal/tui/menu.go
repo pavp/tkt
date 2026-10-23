@@ -62,6 +62,7 @@ func (m Model) buildMenu(it item) *menu {
 		}
 		return &menu{title: fmt.Sprintf("Pull request #%d · %s", pr.Number, pr.Repo), subtitle: subtitle, items: []menuItem{
 			{label: "Open the pull request in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }},
+			{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }},
 		}}
 	}
 	t := *it.ticket
@@ -88,6 +89,10 @@ func (m Model) buildMenu(it item) *menu {
 		items = append(items, menuItem{label: fixLabel(r), key: "f", fix: t.Key})
 	}
 	items = append(items, m.moveItem(t.Key), m.assignItem(t.Key))
+	if len(t.PRs) == 1 && t.PRs[0].URL != "" {
+		pr := t.PRs[0]
+		items = append(items, menuItem{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
+	}
 	items = append(items,
 		menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }},
 		menuItem{label: "Copy the ticket context (.ticket.md)", run: func() tea.Cmd { return a.CopyContext(t.Key) }},
@@ -178,6 +183,11 @@ func (m Model) prsMenu(t ticket.Ticket) *menu {
 			label += " · " + repo
 		}
 		items = append(items, menuItem{label: label, link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }})
+	}
+	for _, pr := range prs {
+		if pr.URL != "" {
+			items = append(items, menuItem{label: fmt.Sprintf("Copy the link of #%d", pr.Number), run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
+		}
 	}
 	return &menu{title: "Pull requests of " + string(t.Key), items: items}
 }
