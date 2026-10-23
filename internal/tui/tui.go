@@ -696,7 +696,11 @@ func (m Model) folded(group string) bool { return m.collapsed[group] != (group =
 // backlogItems lists the backlog's active sprints, then its future sprints soonest first, one group per
 // sprint and board, or per sprint name while merged, then its tickets in no sprint; each group's title row
 // folds and shows its story points by stage. Hidden boards' sprints and tickets are left out.
-func (m Model) backlogItems() []item {
+func (m Model) backlogItems() []item { return m.backlogLayout(false) }
+
+// backlogLayout builds backlogItems; with every true it keeps folded groups' rows, which column widths measure
+// so that folding a group never changes the columns.
+func (m Model) backlogLayout(every bool) []item {
 	if m.backlog == nil {
 		return nil
 	}
@@ -708,7 +712,7 @@ func (m Model) backlogItems() []item {
 			head.badges, head.shortBadges = pointBadges(ts)
 		}
 		out = append(out, head)
-		if !m.folded(group) {
+		if every || !m.folded(group) {
 			for _, t := range ts {
 				out = append(out, item{key: t.Key, ticket: &t})
 			}
@@ -1785,9 +1789,9 @@ func (m Model) chip(it headerItem) string {
 }
 
 // headerLayout lays out "tkt", the tabs and the tab's controls, boxed as in the prototype. The tabs stay left and
-// the controls sit in slots as wide as any tab's, so switching tabs moves nothing; the pane's width alone decides
-// whether they share one row, the controls take a second row, "tkt" a line of its own too, or, too narrow for
-// boxes, the tabs go plain on one line.
+// the controls against the right edge; the widest tab's controls decide whether they share one row, the controls
+// take a second row, "tkt" a line of its own too, or, too narrow for boxes, the tabs go plain, so switching tabs
+// never changes the header's height.
 func (m Model) headerLayout() (rows []string, spans []headerSpan) {
 	title := bold.Render("tkt")
 	var tabs []string
@@ -1816,23 +1820,28 @@ func (m Model) headerLayout() (rows []string, spans []headerSpan) {
 			}
 		}
 	}
+	// The widest tab's controls decide the rows, so the header keeps its height; the tab's own controls are
+	// packed against the right edge.
+	widest := 0
+	for _, w := range widths {
+		if w > 0 {
+			widest += w + 1
+		}
+	}
+	widest = max(0, widest-1)
 	var ctrl []string
 	var ctrlSpans []headerSpan
 	x = 0
-	for i, it := range m.slotItems() {
-		if widths[i] == 0 {
+	for _, it := range m.slotItems() {
+		if it.label == "" {
 			continue
 		}
 		if x > 0 {
 			ctrl, x = append(ctrl, " "), x+1
 		}
-		cell := strings.TrimRight(strings.Repeat(strings.Repeat(" ", widths[i])+"\n", 3), "\n")
-		if it.label != "" {
-			chip := m.chip(it)
-			cell = lipgloss.NewStyle().Width(widths[i]).Render(chip)
-			ctrlSpans = append(ctrlSpans, headerSpan{x: x, width: lipgloss.Width(chip), height: 3, view: it.view, scope: it.scope, team: it.team, grouping: it.grouping})
-		}
-		ctrl, x = append(ctrl, cell), x+widths[i]
+		chip := m.chip(it)
+		ctrlSpans = append(ctrlSpans, headerSpan{x: x, width: lipgloss.Width(chip), height: 3, view: it.view, scope: it.scope, team: it.team, grouping: it.grouping})
+		ctrl, x = append(ctrl, chip), x+lipgloss.Width(chip)
 	}
 	ctrlW := x
 	place := func(ss []headerSpan, dx, dy int) []headerSpan {
@@ -1848,20 +1857,20 @@ func (m Model) headerLayout() (rows []string, spans []headerSpan) {
 	lead := lipgloss.Width("tkt") + 2
 	tabRow := block(append([]string{lipgloss.NewStyle().PaddingTop(1).Render(title), "  "}, tabs...))
 	switch {
-	case lead+tabsW+2+ctrlW <= m.width:
+	case lead+tabsW+2+widest <= m.width:
 		gap := m.width - lead - tabsW - ctrlW
 		rows = block(append(append([]string{lipgloss.NewStyle().PaddingTop(1).Render(title), "  "}, tabs...), append([]string{strings.Repeat(" ", gap)}, ctrl...)...))
 		place(tabSpans, lead, 0)
 		place(ctrlSpans, m.width-ctrlW, 0)
-	case lead+tabsW <= m.width && ctrlW <= m.width:
-		at := min(lead, m.width-ctrlW)
+	case lead+tabsW <= m.width && widest <= m.width:
+		at := m.width - ctrlW
 		rows = append(tabRow, block(append([]string{strings.Repeat(" ", at)}, ctrl...))...)
 		place(tabSpans, lead, 0)
 		place(ctrlSpans, at, 3)
-	case tabsW <= m.width && ctrlW <= m.width:
-		rows = append(append([]string{title}, block(tabs)...), block(ctrl)...)
+	case tabsW <= m.width && widest <= m.width:
+		rows = append(append([]string{title}, block(tabs)...), block(append([]string{strings.Repeat(" ", m.width-ctrlW)}, ctrl...))...)
 		place(tabSpans, 0, 1)
-		place(ctrlSpans, 0, 4)
+		place(ctrlSpans, m.width-ctrlW, 4)
 	default:
 		rows = []string{title, ""}
 		x := 0
@@ -2586,8 +2595,11 @@ func (m Model) listView() string {
 		return prRefs(it.ticket.PRs)
 	}
 	measured := items
-	if m.filter == FilterPRs {
+	switch m.filter {
+	case FilterPRs:
 		measured = m.prLayout(true)
+	case FilterBacklog:
+		measured = m.backlogLayout(true)
 	}
 	prW := lipgloss.Width(m.listHeads()[2])
 	for _, it := range measured {

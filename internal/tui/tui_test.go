@@ -4419,3 +4419,39 @@ func pick(t *testing.T, m tea.Model, label string) tea.Model {
 	t.Fatalf("menu has no %q", label)
 	return m
 }
+
+func TestBacklogColumnsStayWhenEveryGroupIsFolded(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 180, BoardState{})
+	head := func(m tea.Model) string {
+		v := stripANSI(m.View())
+		return strings.Split(v, "\n")[lineIndex(v, "KEY")]
+	}
+	open := head(m)
+	for i := 0; i < 30; i++ {
+		if it, ok := m.(Model).current(); ok && it.heading() && !m.(Model).folded(it.group) {
+			m = press(m, "enter")
+		}
+		m = press(m, "s")
+	}
+	if got := head(m); got != open || !strings.Contains(got, "SP") {
+		t.Errorf("folding every group keeps the columns:\n%q\n%q", open, got)
+	}
+}
+
+func TestHeaderControlsSitAgainstTheRightEdge(t *testing.T) {
+	for _, width := range []int{180, 56} {
+		m := openBacklog(backlogRecorder(), width, BoardState{})
+		for _, tab := range []string{"1", "2", "3"} {
+			rows, spans := press(m, tab).(Model).headerLayout()
+			end := 0
+			for _, sp := range spans {
+				if sp.filter == "" {
+					end = max(end, sp.x+sp.width)
+				}
+			}
+			if w := press(m, tab).(Model).width; end != w {
+				t.Errorf("width %d, tab %s: the controls end at %d, not at the edge %d:\n%s", width, tab, end, w, strings.Join(rows, "\n"))
+			}
+		}
+	}
+}
