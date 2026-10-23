@@ -63,8 +63,8 @@ func (m Model) buildMenu(it item) *menu {
 		if it.review() {
 			subtitle += " · review requested"
 		}
-		return &menu{title: fmt.Sprintf("Pull request #%d · %s", pr.Number, pr.Repo), subtitle: subtitle, items: []menuItem{
-			{label: "Open the pull request in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }},
+		return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: cmp.Or(pr.Repo, "unknown repository") + " · " + subtitle, items: []menuItem{
+			{label: "Open in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }},
 			{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }},
 		}}
 	}
@@ -128,7 +128,7 @@ func (m Model) prMenu(it item) *menu {
 		items = append(items, menuItem{label: "Copy the Jira link", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
 	}
 	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
-	return &menu{title: fmt.Sprintf("Pull request #%d · %s", pr.Number, t.Key), subtitle: t.Status, items: items}
+	return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: string(t.Key) + " · " + t.Status, items: items}
 }
 
 // moveItem opens where the ticket can move from its current status.
@@ -219,9 +219,9 @@ func (m Model) sprintMoveItem(t ticket.Ticket) (menuItem, bool) {
 		return menuItem{}, false
 	case 1:
 		sp := active[0]
-		return menuItem{label: "Move to the current sprint · " + sp.Name, sub: func() *menu { return confirm(sp) }}, true
+		return menuItem{label: "Move to current sprint", sub: func() *menu { return confirm(sp) }}, true
 	}
-	return menuItem{label: "Move to the current sprint ▸", sub: func() *menu {
+	return menuItem{label: "Move to current sprint ▸", sub: func() *menu {
 		var items []menuItem
 		for _, sp := range active {
 			items = append(items, menuItem{label: sp.Name, sub: func() *menu { return confirm(sp) }})
@@ -328,25 +328,39 @@ func (m Model) runMenuItem(i int) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) menuView() string {
+	lines, _ := m.menuLines()
+	return menuBox.Render(strings.Join(lines, "\n"))
+}
+
+// menuMaxWidth bounds how wide a menu's title can make its box; the items' labels set the width, and the subtitle
+// and footer wrap at their " · " to it rather than stretch the box.
+const menuMaxWidth = 44
+
+// menuMinWidth keeps a short menu wide enough that its subtitle wraps into a line or two, not a column of words.
+const menuMinWidth = 34
+
+// menuLines are the menu box's lines inside its border and padding, and the line its first item is on.
+func (m Model) menuLines() (lines []string, firstItem int) {
 	mn := m.menu
-	const linkKeys = "enter run · c copy link · esc close"
-	width := max(lipgloss.Width(mn.title), lipgloss.Width(mn.subtitle)) + 6
+	const keys, linkKeys = "enter run · esc close", "enter run · c copy link · esc close"
+	width := max(menuMinWidth, min(lipgloss.Width(mn.title)+6, menuMaxWidth))
 	for _, it := range mn.items {
 		width = max(width, lipgloss.Width(it.label)+8)
-		// The footer grows on an item with a link; sizing for it up front keeps the box still.
-		if it.link != "" {
-			width = max(width, lipgloss.Width(linkKeys)+4)
-		}
 	}
-	// Border and padding take 6 cells around the content, which is width-4 wide.
 	if m.width > 0 {
 		width = min(width, m.width-2)
 	}
-	lines := []string{bold.Render(ansi.Truncate(mn.title, width-4, "…"))}
+	wrapped := func(s string) []string {
+		return strings.Split(wrapSep(strings.Split(s, " · "), width-4, " · "), "\n")
+	}
+	lines = []string{bold.Render(ansi.Truncate(mn.title, width-4, "…"))}
 	if mn.subtitle != "" {
-		lines = append(lines, dim.Render(ansi.Truncate(mn.subtitle, width-4, "…")))
+		for _, l := range wrapped(mn.subtitle) {
+			lines = append(lines, dim.Render(ansi.Truncate(l, width-4, "…")))
+		}
 	}
 	lines = append(lines, "")
+	firstItem = len(lines)
 	for i, it := range mn.items {
 		hint := ""
 		if it.key != "" {
@@ -360,12 +374,19 @@ func (m Model) menuView() string {
 		}
 		lines = append(lines, line)
 	}
-	keys := "enter run · esc close"
+	// The footer grows on an item with a link; it keeps the height of its longer wording so the box stays still.
+	foot := wrapped(keys)
 	if mn.items[mn.sel].link != "" {
-		keys = linkKeys
+		foot = wrapped(linkKeys)
 	}
-	lines = append(lines, "", dim.Render(keys))
-	return menuBox.Render(strings.Join(lines, "\n"))
+	lines = append(lines, "")
+	for _, l := range foot {
+		lines = append(lines, dim.Render(l))
+	}
+	for range len(wrapped(linkKeys)) - len(foot) {
+		lines = append(lines, "")
+	}
+	return lines, firstItem
 }
 
 // menuItemAt maps a click to a menu item, given where View centered the menu box.
@@ -374,11 +395,9 @@ func (m Model) menuItemAt(x, y, top, height int) int {
 	bw, bh := lipgloss.Width(box), lipgloss.Height(box)
 	left := (m.width - bw) / 2
 	boxTop := top + (height-bh)/2
-	// Border, title (and its subtitle) and a blank line come before the first item.
-	i := y - boxTop - 3
-	if m.menu.subtitle != "" {
-		i--
-	}
+	// The border, then the title, its subtitle lines and a blank line come before the first item.
+	_, first := m.menuLines()
+	i := y - boxTop - 1 - first
 	if x < left || x >= left+bw || i < 0 || i >= len(m.menu.items) {
 		return -1
 	}

@@ -1250,7 +1250,7 @@ func TestClickOnReviewChipOpensItsMenu(t *testing.T) {
 	x := lipgloss.Width(line[:strings.Index(line, "#820")])
 	m, _ = m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	v = stripANSI(m.View())
-	for _, want := range []string{"Pull request #820 · example-org/web", "alex · review requested", "Open the pull request in GitHub ↗", "Copy the PR link"} {
+	for _, want := range []string{"Pull request #820", "example-org/web · alex", "review requested", "Open in GitHub ↗", "Copy the PR link"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("a click on a chip opens the menu the PRs filter gives it, lacking %q:\n%s", want, v)
 		}
@@ -1283,7 +1283,7 @@ func TestKeyboardReachesReviewChips(t *testing.T) {
 		t.Fatalf("right should move to the next chip:\n%s", stripANSI(next.View()))
 	}
 	next = press(next, "enter")
-	if v := stripANSI(next.View()); !strings.Contains(v, "Pull request #821 · example-org/api  ") || !strings.Contains(v, "unknown author · review requested") {
+	if v := stripANSI(next.View()); !strings.Contains(v, "Pull request #821") || !strings.Contains(v, "example-org/api") || !strings.Contains(v, "review requested") {
 		t.Fatalf("enter on a chip should open its menu:\n%s", stripANSI(next.View()))
 	}
 	next, _ = run(next, "enter")
@@ -1591,7 +1591,7 @@ func TestPRMenuLeadsWithThePullRequest(t *testing.T) {
 	}
 	m = press(m, "enter")
 	v := stripANSI(m.View())
-	for _, want := range []string{"Pull request #815 · DEMO-4", "Open #815 in GitHub ↗", "Send the review comments to the agent", "Start · open the agent", "Open the ticket pane next to its agent", "Show details of DEMO-4", "Open DEMO-4 in Jira ↗"} {
+	for _, want := range []string{"Pull request #815", "DEMO-4 · In Review", "Open #815 in GitHub ↗", "Send the review comments to the agent", "Start · open the agent", "Open the ticket pane next to its agent", "Show details of DEMO-4", "Open DEMO-4 in Jira ↗"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("PR menu missing %q:\n%s", want, v)
 		}
@@ -3325,7 +3325,7 @@ func TestTeamModeListsEveryOpenPullRequestWithItsAuthor(t *testing.T) {
 	for i := 0; i < 20 && !strings.Contains(selectedLine(m.View()), "#901"); i++ {
 		m = press(m, "s")
 	}
-	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #901 · example-org/api  ") || !strings.Contains(v, "  sam  ") || !strings.Contains(v, "Open the pull request in GitHub ↗") {
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #901") || !strings.Contains(v, "example-org/api · sam") || !strings.Contains(v, "Open in GitHub ↗") {
 		t.Errorf("its menu opens it in GitHub:\n%s", v)
 	}
 	off := press(New(snap, false, r, ViewList), "2")
@@ -3368,13 +3368,13 @@ func TestPRMenusPutTheirDetailsOnASecondLine(t *testing.T) {
 	m := loaded(r).(Model)
 	m.menu = m.buildMenu(item{key: "#820", pr: &pr})
 	lines := strings.Split(stripANSI(m.menuView()), "\n")
-	if !strings.Contains(lines[1], "Pull request #820 · example-org/web") || !strings.Contains(lines[2], "alex · review requested") {
-		t.Fatalf("title then details:\n%s", strings.Join(lines, "\n"))
+	if !strings.Contains(lines[1], "Pull request #820") || !strings.Contains(lines[2], "example-org/web · alex") || !strings.Contains(lines[3], "review requested") {
+		t.Fatalf("title then details, wrapped at their dots:\n%s", strings.Join(lines, "\n"))
 	}
-	if w := lipgloss.Width(m.menuView()); w > lipgloss.Width("Pull request #820 · example-org/web")+12 {
-		t.Errorf("the menu should be as wide as its first line needs, got %d", w)
+	if w := lipgloss.Width(m.menuView()); w > menuMinWidth+2 {
+		t.Errorf("the details wrap rather than widen the menu, got %d", w)
 	}
-	y := lineIndex(m.View(), "Open the pull request in GitHub")
+	y := lineIndex(m.View(), "Open in GitHub")
 	_, cmd := m.Update(tea.MouseMsg{X: m.width / 2, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	if cmd == nil || cmd() != StatusMsg("open https://github.com/example-org/web/pull/820") {
 		t.Errorf("a click on the first item should still run it")
@@ -3585,7 +3585,7 @@ func TestPRMenuNamesTheTicketsStatus(t *testing.T) {
 	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#815"); i++ {
 		m = press(m, "s")
 	}
-	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #815 · DEMO-4  ") || !strings.Contains(v, "  "+tk.Status+"  ") {
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #815") || !strings.Contains(v, "DEMO-4 · "+tk.Status) {
 		t.Errorf("the PR menu should name its ticket's status %q:\n%s", tk.Status, v)
 	}
 }
@@ -4314,9 +4314,9 @@ func backlogMenu(t *testing.T, m tea.Model, key ticket.Key) tea.Model {
 func TestBacklogMenuTitleTakesTwoLines(t *testing.T) {
 	m := backlogMenu(t, openBacklog(backlogRecorder(), 180, BoardState{}), "DEMO-214")
 	v := stripANSI(m.View())
-	title, sub := lineIndex(v, "Actions for DEMO-214"), lineIndex(v, "In Progress · Pablo Vera · User Access Center")
-	if title < 0 || sub != title+1 || strings.Contains(strings.Split(v, "\n")[title], "Pablo") {
-		t.Errorf("the details go on a second line:\n%s", v)
+	title, sub, board := lineIndex(v, "Actions for DEMO-214"), lineIndex(v, "In Progress · Pablo Vera"), lineIndex(v, "│  User Access Center")
+	if title < 0 || sub != title+1 || board != title+2 || lipgloss.Width(m.(Model).menuView()) > 40 {
+		t.Errorf("the details go under the title, wrapped to a narrow box:\n%s", v)
 	}
 }
 
@@ -4359,10 +4359,10 @@ func TestBacklogMovesATicketToItsBoardsCurrentSprint(t *testing.T) {
 	r := backlogRecorder()
 	m := backlogMenu(t, openBacklog(r, 180, BoardState{}), "DEMO-210")
 	v := stripANSI(m.View())
-	if !strings.Contains(v, "Move to the current sprint · UAC S42") {
+	if !strings.Contains(v, "Move to current sprint") {
 		t.Fatalf("a future sprint's ticket can move to the board's active sprint:\n%s", v)
 	}
-	m = pick(t, m, "Move to the current sprint")
+	m = pick(t, m, "Move to current sprint")
 	if v := stripANSI(m.View()); !strings.Contains(v, "Move DEMO-210 to UAC S42?") {
 		t.Fatalf("moving asks first:\n%s", v)
 	}
@@ -4382,7 +4382,7 @@ func TestBacklogMovesATicketToItsBoardsCurrentSprint(t *testing.T) {
 	}
 	for _, key := range []ticket.Key{"DEMO-200", "DEMO-301"} {
 		m := backlogMenu(t, openBacklog(backlogRecorder(), 180, BoardState{}), key)
-		if v := stripANSI(m.View()); strings.Contains(v, "Move to the current sprint") {
+		if v := stripANSI(m.View()); strings.Contains(v, "Move to current sprint") {
 			t.Errorf("%s: already in it, or its board has none:\n%s", key, v)
 		}
 	}
@@ -4397,7 +4397,7 @@ func TestBacklogAsksWhichSprintWhenItsBoardRunsSeveral(t *testing.T) {
 	m = press(m, "3")
 	m, _ = m.Update(BacklogMsg{Backlog: data})
 	m = backlogMenu(t, m, "DEMO-210")
-	v := stripANSI(pick(t, m, "Move to the current sprint").View())
+	v := stripANSI(pick(t, m, "Move to current sprint").View())
 	if !strings.Contains(v, "UAC S42b") || !strings.Contains(v, "UAC S42") || !strings.Contains(v, "Move DEMO-210 to which sprint?") {
 		t.Errorf("several active sprints ask which:\n%s", v)
 	}
