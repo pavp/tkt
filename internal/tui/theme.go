@@ -10,6 +10,7 @@ const (
 	ctpSurface2 = lipgloss.Color("#585b70")
 	ctpSurface1 = lipgloss.Color("#45475a")
 	ctpBase     = lipgloss.Color("#1e1e2e")
+	ctpCrust    = lipgloss.Color("#11111b")
 	ctpLavender = lipgloss.Color("#b4befe")
 	ctpBlue     = lipgloss.Color("#89b4fa")
 	ctpTeal     = lipgloss.Color("#94e2d5")
@@ -38,7 +39,7 @@ const (
 	colorReview    = ctpMauve
 	colorSubtask   = ctpTeal
 	colorFinished  = ctpLavender
-	colorBadge     = ctpSurface1
+	colorBadge     = ctpCrust
 	colorOnBadge   = ctpBase
 )
 

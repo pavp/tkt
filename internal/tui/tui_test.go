@@ -3020,6 +3020,9 @@ func TestCardsShowTheLabelFieldOnItsOwnLine(t *testing.T) {
 	if raw := m.View(); !strings.Contains(raw, labelBadge.Render(" User Access Center ")) || labelBadge.GetBackground() == (lipgloss.NoColor{}) {
 		t.Errorf("the label shows as a badge, on a background of its own")
 	}
+	if labelBadge.GetBackground() == selected.GetBackground() {
+		t.Errorf("the label's badge must not look like the selection")
+	}
 	if c := press(m, "z").(Model); c.cardLines() != 4 || strings.Contains(stripANSI(c.View()), "User Access Center") {
 		t.Errorf("compact cards leave the label out")
 	}
