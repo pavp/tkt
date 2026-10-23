@@ -3438,8 +3438,8 @@ func TestScrolledListKeepsItsHeaderAndAGapAbove(t *testing.T) {
 			t.Errorf("filter %s: the selection should show under the header:\n%s", filter, strings.Join(lines, "\n"))
 		}
 		preview := len(lines) - lineCount(m.(Model).preview()+"\n"+m.(Model).footer())
-		if strings.TrimSpace(lines[preview-1]) != "" || filter == "1" && strings.TrimSpace(lines[preview-2]) == "" {
-			t.Errorf("filter %s: one blank line should part the full list from the bottom:\n%s", filter, strings.Join(lines, "\n"))
+		if gap := strings.TrimSpace(lines[preview-1]); gap != "" && !strings.HasPrefix(gap, "↓ ") || filter == "1" && strings.TrimSpace(lines[preview-2]) == "" {
+			t.Errorf("filter %s: one line, blank or saying what is below, should part the full list from the bottom:\n%s", filter, strings.Join(lines, "\n"))
 		}
 		row := lineIndex(m.View(), "DEMO-")
 		if row > 0 {
@@ -4200,5 +4200,31 @@ func TestListKeepsTheSectionTitleOnTopWhileScrolling(t *testing.T) {
 	m = click(m, 4, first)
 	if v := stripANSI(m.View()); !strings.Contains(v, "▸ UAC S42") {
 		t.Errorf("a click on the kept title folds its group:\n%s", v)
+	}
+}
+
+func TestListSaysWhatIsAboveAndBelow(t *testing.T) {
+	r := backlogRecorder()
+	m := tea.Model(New(snapshot(), true, r, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 22})
+	m = press(m, "3")
+	m, _ = m.Update(BacklogMsg{Backlog: backlogData()})
+	v := stripANSI(m.View())
+	if strings.Contains(v, "↑ 1 more") || !strings.Contains(v, "↓ 2 more") {
+		t.Fatalf("at the top, only what is below:\n%s", v)
+	}
+	for i := 0; i < 30; i++ {
+		if it, _ := m.(Model).current(); it.key == "DEMO-219" {
+			break
+		}
+		m = press(m, "s")
+	}
+	v = stripANSI(m.View())
+	if !strings.Contains(v, "↑ 1 more") || !strings.Contains(v, "↓ 2 more") {
+		t.Errorf("scrolled, both ways:\n%s", v)
+	}
+	full := openBacklog(backlogRecorder(), 160, BoardState{})
+	if v := stripANSI(full.View()); strings.Contains(v, " more") {
+		t.Errorf("a list that fits says nothing:\n%s", v)
 	}
 }

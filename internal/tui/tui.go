@@ -1203,7 +1203,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if m.effectiveView() == ViewList {
-		fixed, _, _, start, sticky := m.listLayout()
+		fixed, _, _, start, sticky, _, _ := m.listLayout()
 		_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, listWidths{})
 		// at counts the table's header and rule, which listLayout keeps among the fixed lines.
 		i := 2 + start + body - len(fixed)
@@ -1910,8 +1910,9 @@ func (m Model) cardLines() int {
 // listLayout splits the list view into what stays put — the review strip with the blank line under it, and
 // the table's header and rule — and the rows that scroll, which get rows lines, keeping one blank line
 // between the table and the bottom. start is the first row shown; once the rows scroll past a section's or
-// group's title, that title takes the first row's place, and sticky is its row (else -1).
-func (m Model) listLayout() (fixed, rows []string, height, start, sticky int) {
+// group's title, that title takes the first row's place, and sticky is its row (else -1). above and below
+// count the tickets or pull requests out of view on each side.
+func (m Model) listLayout() (fixed, rows []string, height, start, sticky, above, below int) {
 	sticky = -1
 	if strip := m.reviewStrip(); strip != "" {
 		fixed = append(strings.Split(strip, "\n"), "")
@@ -1941,22 +1942,41 @@ func (m Model) listLayout() (fixed, rows []string, height, start, sticky int) {
 				}
 			}
 		}
+		hidden := func(from, to int) (n int) {
+			for j := from; j < to; j++ {
+				if at[j] >= 0 && at[j] < len(items) && !items[at[j]].heading() {
+					n++
+				}
+			}
+			return n
+		}
 		window := slices.Clone(all[start : start+height])
+		above, below = hidden(0, start), hidden(start+height, len(all))
 		if sticky >= 0 {
 			window[0] = all[sticky]
+			above += hidden(start, start+1)
 		}
 		all = window
 	}
-	return fixed, all, height, start, sticky
+	return fixed, all, height, start, sticky, above, below
 }
 
 // listWindow is the list view as drawn: the fixed lines, then the rows in view.
 func (m Model) listWindow() []string {
-	fixed, rows, height, _, _ := m.listLayout()
+	fixed, rows, height, _, _, above, below := m.listLayout()
 	for len(rows) < height {
 		rows = append(rows, "")
 	}
-	return append(append(fixed, rows...), "")
+	// The table's rule and the blank line under the rows say what is out of view, so nothing shifts.
+	if above > 0 && len(fixed) > 0 {
+		label := fmt.Sprintf(" ↑ %d more ", above)
+		fixed[len(fixed)-1] = dim.Render(strings.Repeat("─", max(0, m.width-lipgloss.Width(label)-2)) + label + "──")
+	}
+	last := ""
+	if below > 0 {
+		last = moreLine("↓", below)
+	}
+	return append(append(fixed, rows...), last)
 }
 
 // columnsView draws the four columns as boxes reaching height lines, each ticket in its own card.
