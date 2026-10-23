@@ -227,15 +227,28 @@ func (b *boardActions) JiraBoards(space string) tea.Cmd {
 	}
 }
 
-func (b *boardActions) Backlog() tea.Cmd {
+// Backlog opens from the copy the daemon keeps while it is fresh, asking Jira only for an older copy or when
+// forced; an older copy shows at once while Jira answers, and every fetch is kept for the next opening.
+func (b *boardActions) Backlog(force bool) tea.Cmd {
 	return func() tea.Msg {
+		cache := b.a.backlogCache()
+		cached, ok, _ := cache.Load()
+		if ok && !force && b.a.Now().Sub(cached.FetchedAt) < board.BacklogEvery {
+			return tui.BacklogMsg{Backlog: cached}
+		}
+		if ok && b.send != nil {
+			b.send(tui.BacklogMsg{Backlog: cached, Cached: true})
+		}
 		ctx, cancel := context.WithTimeout(b.ctx, time.Minute)
 		defer cancel()
 		js, err := b.a.jiraClient(b.cfg())
 		if err != nil {
 			return tui.BacklogMsg{Err: err}
 		}
-		bl, err := board.FetchBacklog(ctx, b.cfg(), js, time.Now())
+		bl, err := board.FetchBacklog(ctx, b.cfg(), js, b.a.Now())
+		if err == nil {
+			_ = cache.Save(bl)
+		}
 		return tui.BacklogMsg{Backlog: bl, Err: err}
 	}
 }

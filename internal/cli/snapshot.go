@@ -13,6 +13,10 @@ func (a *App) cache() board.Cache {
 	return board.NewCache(a.Env.DataDir())
 }
 
+func (a *App) backlogCache() board.BacklogCache {
+	return board.NewBacklogCache(a.Env.DataDir())
+}
+
 // loadSnapshot fetches a fresh board and caches it. When fetching fails and a cached board exists, it
 // returns the cached one with the failure as stale reason, so an outage or an expired token never
 // leaves the user without a board. cachedOnly skips the network.

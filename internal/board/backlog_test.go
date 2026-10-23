@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -159,5 +160,23 @@ func TestPointsByStage(t *testing.T) {
 	todo, doing, done, unestimated := PointsByStage(ts)
 	if todo != 5 || doing != 5 || done != 1 || unestimated != 2 {
 		t.Errorf("got %v %v %v %v", todo, doing, done, unestimated)
+	}
+}
+
+func TestBacklogCacheRoundTrips(t *testing.T) {
+	c := NewBacklogCache(t.TempDir())
+	if _, ok, err := c.Load(); ok || err != nil {
+		t.Fatalf("empty cache: ok %v, err %v", ok, err)
+	}
+	want := Backlog{FetchedAt: time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC), Backlog: []ticket.Ticket{{Key: "DEMO-180", Board: "User Access Center"}}, HasPoints: true}
+	if err := c.Save(want); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := c.Load()
+	if !ok || err != nil || !got.FetchedAt.Equal(want.FetchedAt) || len(got.Backlog) != 1 || got.Backlog[0].Board != "User Access Center" || !got.HasPoints {
+		t.Errorf("got %+v, %v, %v", got, ok, err)
+	}
+	if fi, err := os.Stat(c.Path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("cache file: %v %v", fi, err)
 	}
 }
