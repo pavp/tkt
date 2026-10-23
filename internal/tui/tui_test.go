@@ -2955,7 +2955,7 @@ func TestListColorsStatusesAndSubtaskArrows(t *testing.T) {
 	}
 }
 
-func TestPullRequestApprovalsKeepThePlainColor(t *testing.T) {
+func TestPullRequestApprovalsAreDimmed(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
@@ -2963,8 +2963,8 @@ func TestPullRequestApprovalsKeepThePlainColor(t *testing.T) {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = press(m, "2")
 	line := strings.Split(m.View(), "\n")[lineIndex(m.View(), "#816")]
-	if !strings.Contains(line, ok.Render("Approved")+" · 2 approvals") {
-		t.Errorf("only the status takes its color, not its approvals: %q", line)
+	if !strings.Contains(line, ok.Render("Approved")+dim.Render(" · 2 approvals")) {
+		t.Errorf("only the status takes its color; its approvals are dimmed: %q", line)
 	}
 }
 
