@@ -75,7 +75,7 @@ func (m Model) assigned(msg AssignedMsg) (tea.Model, tea.Cmd) {
 	loading := m.beginLoading()
 	cmds := []tea.Cmd{m.actions.Refresh(), loading}
 	if m.backlog != nil {
-		cmds = append(cmds, m.loadBacklog())
+		cmds = append(cmds, m.loadBacklog(true))
 	}
 	return m, tea.Batch(cmds...)
 }

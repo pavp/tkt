@@ -23,8 +23,9 @@ type fakeJira struct {
 	// future and backlog answer OpenSprints and BacklogIssues per board.
 	future  map[int][]jira.Sprint
 	backlog map[int][]jira.Issue
-	// sprinted records each MoveToSprint as "KEY sprint".
-	sprinted []string
+	// sprinted records each MoveToSprint as "KEY sprint"; backlogCalls counts BacklogIssues.
+	sprinted     []string
+	backlogCalls int
 	// transitions answers Transitions per key; moved records every Transition as "KEY id".
 	transitions map[string][]jira.Transition
 	moved       []string
@@ -114,6 +115,9 @@ func (f *fakeJira) MoveToSprint(_ context.Context, sprint int, key string) error
 }
 
 func (f *fakeJira) BacklogIssues(_ context.Context, board int, _ []string) ([]jira.Issue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.backlogCalls++
 	return f.backlog[board], nil
 }
 

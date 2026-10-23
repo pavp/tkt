@@ -95,8 +95,8 @@ func (r *recorder) MoveToSprint(k ticket.Key, sprint int, name string) tea.Cmd {
 	return func() tea.Msg { return SprintMovedMsg{Key: k, Sprint: name} }
 }
 
-func (r *recorder) Backlog() tea.Cmd {
-	r.calls = append(r.calls, "backlog")
+func (r *recorder) Backlog(force bool) tea.Cmd {
+	r.calls = append(r.calls, map[bool]string{false: "backlog", true: "backlog force"}[force])
 	return nil
 }
 
@@ -4019,8 +4019,8 @@ func TestBacklogLoadsWhenOpenedAndOnRefresh(t *testing.T) {
 		t.Errorf("coming back shows what was loaded: %v", r.calls)
 	}
 	press(m, "g")
-	if !slices.Equal(r.calls, []string{"backlog", "backlog"}) {
-		t.Errorf("g reloads the backlog: %v", r.calls)
+	if !slices.Equal(r.calls, []string{"backlog", "backlog force"}) {
+		t.Errorf("g asks Jira again: %v", r.calls)
 	}
 	m, _ = m.Update(BacklogMsg{Err: errors.New("jira: 500")})
 	if v := stripANSI(m.View()); !strings.Contains(v, "could not load the backlog: jira: 500") || !strings.Contains(v, "DEMO-210") {
@@ -4211,8 +4211,8 @@ func TestBacklogAssignKnowsTheAssigneeAndReloads(t *testing.T) {
 		t.Fatalf("the assignee comes from the backlog:\n%s", v)
 	}
 	m, _ = m.Update(AssignedMsg{Key: "DEMO-200", Who: Assignee{Me: true}})
-	if n := slices.Index(r.calls, "backlog"); n < 0 || !slices.Contains(r.calls[n+1:], "backlog") {
-		t.Errorf("an assignment from the backlog reloads it: %v", r.calls)
+	if !slices.Contains(r.calls, "backlog force") {
+		t.Errorf("an assignment from the backlog reloads it from Jira: %v", r.calls)
 	}
 }
 
@@ -4398,13 +4398,7 @@ func TestBacklogMovesATicketToItsBoardsCurrentSprint(t *testing.T) {
 		t.Fatalf("calls %v", r.calls)
 	}
 	m, _ = m.Update(cmd())
-	reloads := 0
-	for _, c := range r.calls {
-		if c == "backlog" {
-			reloads++
-		}
-	}
-	if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-210 moved to UAC S42") || reloads != 2 {
+	if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-210 moved to UAC S42") || !slices.Contains(r.calls, "backlog force") {
 		t.Errorf("a move says so and reloads the backlog (calls %v):\n%s", r.calls, v)
 	}
 	for _, key := range []ticket.Key{"DEMO-200", "DEMO-301"} {
@@ -4715,5 +4709,24 @@ func TestAFixWithoutACloneAsksToCloneIt(t *testing.T) {
 	pick(t, m, "Yes, clone it and start")
 	if !slices.Contains(r.calls, "clone and start DEMO-1's feedback example-org/api") {
 		t.Errorf("calls %v", r.calls)
+	}
+}
+
+func TestOpenBacklogFollowsTheDaemonsCopy(t *testing.T) {
+	r := backlogRecorder()
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	m := tea.Model(openBacklog(r, 160, BoardState{}).(Model).WithClock(func() time.Time { return now }))
+	m, _ = m.Update(tickMsg(now))
+	if slices.Contains(r.calls[1:], "backlog") {
+		t.Fatalf("a fresh backlog stays: %v", r.calls)
+	}
+	now = now.Add(board.BacklogEvery)
+	m, _ = m.Update(tickMsg(now))
+	if !slices.Contains(r.calls[1:], "backlog") || slices.Contains(r.calls, "backlog force") {
+		t.Errorf("an old one asks for the daemon's copy, not Jira: %v", r.calls)
+	}
+	m, _ = m.Update(BacklogMsg{Backlog: backlogData(), Cached: true})
+	if !m.(Model).backlogLoading {
+		t.Error("an older copy shown while Jira answers keeps the backlog loading")
 	}
 }

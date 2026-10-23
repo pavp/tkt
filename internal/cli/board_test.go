@@ -713,7 +713,7 @@ func TestBoardActionsAssignTickets(t *testing.T) {
 	}
 }
 
-func TestBoardActionsLoadTheBacklog(t *testing.T) {
+func TestBoardActionsLoadTheBacklogFromItsCopy(t *testing.T) {
 	h, _ := listHarness(t)
 	c, err := h.app.LoadConfig()
 	if err != nil {
@@ -721,10 +721,50 @@ func TestBoardActionsLoadTheBacklog(t *testing.T) {
 	}
 	c.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 418, Name: "User Access Center"}}
 	h.jira.backlog = map[int][]jira.Issue{418: {{Key: "DEMO-180", Summary: "Clean old roles", Status: "To Do", StatusCategory: "new"}}}
-	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
-	got, ok := b.Backlog()().(tui.BacklogMsg)
-	if !ok || got.Err != nil || len(got.Backlog.Backlog) != 1 || got.Backlog.Backlog[0].Board != "User Access Center" {
-		t.Errorf("msg = %+v", got)
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	h.app.Now = func() time.Time { return now }
+	var sent []tea.Msg
+	b := &boardActions{a: h.app, c: c, ctx: context.Background(), send: func(m tea.Msg) { sent = append(sent, m) }}
+	got, ok := b.Backlog(false)().(tui.BacklogMsg)
+	if !ok || got.Err != nil || len(got.Backlog.Backlog) != 1 || got.Backlog.Backlog[0].Board != "User Access Center" || h.jira.backlogCalls != 1 {
+		t.Fatalf("msg = %+v, calls %d", got, h.jira.backlogCalls)
+	}
+	if cached, ok, _ := h.app.backlogCache().Load(); !ok || !cached.FetchedAt.Equal(now) {
+		t.Errorf("a fetch keeps its copy: %+v", cached)
+	}
+	now = now.Add(board.BacklogEvery - time.Second)
+	if got, _ := b.Backlog(false)().(tui.BacklogMsg); len(got.Backlog.Backlog) != 1 || h.jira.backlogCalls != 1 {
+		t.Errorf("a fresh copy opens without asking Jira: calls %d", h.jira.backlogCalls)
+	}
+	if b.Backlog(true)(); h.jira.backlogCalls != 2 {
+		t.Errorf("g asks Jira anyway: calls %d", h.jira.backlogCalls)
+	}
+	now = now.Add(2 * board.BacklogEvery)
+	sent = nil
+	if b.Backlog(false)(); h.jira.backlogCalls != 3 || len(sent) != 1 {
+		t.Errorf("an old copy shows at once while Jira answers: calls %d, sent %v", h.jira.backlogCalls, sent)
+	}
+}
+
+func TestDaemonRefreshesTheBacklogOnlyWithTeamBoards(t *testing.T) {
+	h, _ := listHarness(t)
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.app.refreshBacklog(context.Background(), c); err != nil || h.jira.backlogCalls != 0 {
+		t.Fatalf("without team boards nothing is asked: %v, calls %d", err, h.jira.backlogCalls)
+	}
+	if _, ok, _ := h.app.backlogCache().Load(); ok {
+		t.Error("nothing to keep without team boards")
+	}
+	c.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 418, Name: "User Access Center"}}
+	h.jira.backlog = map[int][]jira.Issue{418: {{Key: "DEMO-180", Summary: "Clean old roles", Status: "To Do", StatusCategory: "new"}}}
+	if err := h.app.refreshBacklog(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	if cached, ok, _ := h.app.backlogCache().Load(); !ok || len(cached.Backlog) != 1 {
+		t.Errorf("the daemon keeps the backlog: %+v", cached)
 	}
 }
 

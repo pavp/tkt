@@ -75,8 +75,9 @@ type Actions interface {
 	Assign(key ticket.Key, who Assignee) tea.Cmd
 	// Users lists the users assignable to key that match query; they arrive as a UsersListedMsg.
 	Users(key ticket.Key, query string) tea.Cmd
-	// Backlog asks Jira for the team boards' open sprints and backlog; they arrive as a BacklogMsg.
-	Backlog() tea.Cmd
+	// Backlog delivers the team boards' open sprints and backlog as a BacklogMsg, from the daemon's copy while it is
+	// fresh; force asks Jira anyway.
+	Backlog(force bool) tea.Cmd
 	// MoveToSprint moves key into the sprint id named name; the outcome arrives as a SprintMovedMsg. The board
 	// calls it only after the user confirmed.
 	MoveToSprint(key ticket.Key, sprint int, name string) tea.Cmd
@@ -146,9 +147,11 @@ type SnapshotMsg struct {
 	Quiet bool
 }
 
-// BacklogMsg delivers the team boards' backlog, or why it could not be read.
+// BacklogMsg delivers the team boards' backlog, or why it could not be read. Cached marks an older copy shown
+// while Jira answers.
 type BacklogMsg struct {
 	Backlog board.Backlog
+	Cached  bool
 	Err     error
 }
 
@@ -819,12 +822,12 @@ func (m *Model) enterFilter() tea.Cmd {
 	if m.filter != FilterBacklog || m.backlog != nil || m.backlogLoading || !m.hasTeamBoards() {
 		return nil
 	}
-	return m.loadBacklog()
+	return m.loadBacklog(false)
 }
 
-func (m *Model) loadBacklog() tea.Cmd {
+func (m *Model) loadBacklog(force bool) tea.Cmd {
 	m.backlogLoading = true
-	return m.actions.Backlog()
+	return m.actions.Backlog(force)
 }
 
 func (m Model) teamButton() string {
@@ -1071,7 +1074,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.reselect()
 	case BacklogMsg:
-		m.backlogLoading = false
+		m.backlogLoading = msg.Cached
 		if msg.Err != nil {
 			m.status = "could not load the backlog: " + msg.Err.Error()
 			return m, nil
@@ -1102,7 +1105,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.status = string(msg.Key) + " moved to " + msg.Sprint
-		return m, tea.Batch(m.actions.Refresh(), m.beginLoading(), m.loadBacklog())
+		return m, tea.Batch(m.actions.Refresh(), m.beginLoading(), m.loadBacklog(true))
 	case TransitionedMsg:
 		return m.transitioned(msg)
 	case UsersListedMsg:
@@ -1124,6 +1127,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		if m.loading && m.now().Sub(m.loadingSince) > loadingLimit {
 			m.loading = false
+		}
+		// The open Backlog follows the daemon's copy, which it refreshes every board.BacklogEvery.
+		if m.filter == FilterBacklog && m.backlog != nil && !m.backlogLoading && m.now().Sub(m.backlog.FetchedAt) >= board.BacklogEvery {
+			return m, tea.Batch(m.loadBacklog(false), tick())
 		}
 		if !m.loading && m.now().Sub(m.snap.FetchedAt) >= refreshEvery {
 			return m, tea.Batch(m.actions.Refresh(), tick(), m.beginLoading())
@@ -1447,7 +1454,7 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.backlogLoading || !m.hasTeamBoards() {
 				return m, nil
 			}
-			return m, m.loadBacklog()
+			return m, m.loadBacklog(true)
 		}
 		return m, tea.Batch(m.actions.Refresh(), m.beginLoading())
 	case "enter", " ":
