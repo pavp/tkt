@@ -1947,6 +1947,31 @@ func TestBoardShowsSnapshotWarningsUnderTheHeader(t *testing.T) {
 	}
 }
 
+func TestWarningsReviewRequestsAndAttentionHaveTheirOwnColors(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	snap := snapshot()
+	snap.Warnings = []string{"pull requests unavailable"}
+	m, _ := New(snap, false, &recorder{}, ViewList).Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	lines := strings.Split(m.View(), "\n")
+	banner := lines[lineIndex(m.View(), "! pull requests unavailable")]
+	chip := lines[lineIndex(m.View(), "#820")-1]
+	fg := func(c lipgloss.Color) string {
+		s := lipgloss.NewStyle().Foreground(c).Render("x")
+		return s[:strings.Index(s, "x")]
+	}
+	if !strings.Contains(banner, fg(colorWarning)) || strings.Contains(banner, fg(colorAttention)) || strings.Contains(banner, fg(colorReview)) {
+		t.Errorf("the warning banner should be the warning color alone: %q", banner)
+	}
+	if !strings.Contains(chip, fg(colorReview)) || strings.Contains(chip, fg(colorWarning)) {
+		t.Errorf("a review request's chip should be framed in the review color: %q", chip)
+	}
+	if colorWarning == colorAttention || colorWarning == colorReview || colorAttention == colorReview || colorError == colorWarning {
+		t.Error("warnings, attention, review requests and errors must not share a color")
+	}
+}
+
 func tallBoard(t *testing.T) tea.Model {
 	t.Helper()
 	snap := snapshot()

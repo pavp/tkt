@@ -196,7 +196,7 @@ func (b *dirBrowser) view() string {
 	lines = append(lines, "")
 	switch {
 	case b.err != "":
-		lines = append(lines, warn.Render("! "+b.err))
+		lines = append(lines, failure.Render("! "+b.err))
 	case b.req != "" && b.rows == nil:
 		lines = append(lines, dim.Render("loading…"))
 	case len(b.rows) == 0 && b.filter != "":

@@ -1266,16 +1266,6 @@ func clamp(v, lo, hi int) int {
 	return v
 }
 
-var (
-	dim      = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	warn     = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	ok       = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
-	bold     = lipgloss.NewStyle().Bold(true)
-	selected = lipgloss.NewStyle().Background(lipgloss.Color("24")).Foreground(lipgloss.Color("255"))
-	box      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")).Padding(0, 1)
-	boxSel   = box.BorderForeground(lipgloss.Color("111"))
-)
-
 // View pins the header to the top and the preview and key legend to the bottom; the board in between
 // scrolls so the selected card or row stays visible.
 // margin is the left and right padding around the whole board, like the prototype's popup padding;
@@ -1376,7 +1366,7 @@ func (m Model) header() string {
 	}
 	top += "\n" + dim.Render(strings.Repeat("─", m.width))
 	if len(m.snap.Warnings) > 0 {
-		top += "\n" + warn.Render(truncate("! "+strings.Join(m.snap.Warnings, " · "), m.width))
+		top += "\n" + notice.Render(truncate("! "+strings.Join(m.snap.Warnings, " · "), m.width))
 	}
 	// The notice is the header's last line, where a click opens the repository filter.
 	if notice := m.repoNotice(); notice != "" {
@@ -1392,8 +1382,8 @@ type headerSpan struct {
 }
 
 var (
-	filterOff = box.Foreground(lipgloss.Color("250"))
-	filterOn  = boxSel.Foreground(lipgloss.Color("153")).Bold(true)
+	filterOff = box.Foreground(colorSubtle)
+	filterOn  = boxSel.Foreground(colorActive).Bold(true)
 )
 
 // headerLayout places the filter and view buttons, boxed as in the prototype, right of the title; on a
@@ -1547,7 +1537,7 @@ func (m Model) syncLabel() string {
 	return "✓ synced " + m.snap.FetchedAt.Local().Format("15:04")
 }
 
-var reviewChip = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("214")).Padding(0, 1)
+var reviewChip = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorReview).Padding(0, 1)
 
 // reviewStrip shows review requests above the columns, each in its own orange chip as in the mockup.
 func (m Model) reviewStrip() string {
@@ -1578,7 +1568,7 @@ func (m Model) reviewChips() (string, []chipSpan) {
 		}
 		chip := reviewChip.Render(warn.Render("!") + text)
 		if m.inStrip && len(spans) == m.stripSel {
-			chip = reviewChip.BorderForeground(lipgloss.Color("111")).Render(selected.Render("▸" + text))
+			chip = reviewChip.BorderForeground(colorAccent).Render(selected.Render("▸" + text))
 		}
 		// A chip only fits if the "+N more" label for the chips after it still fits beside it.
 		need := used + 2 + lipgloss.Width(chip)
@@ -1745,15 +1735,15 @@ func columnHead(name string, count int, points float64, width int) []string {
 }
 
 var (
-	cardBox    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238"))
-	cardBoxSel = cardBox.BorderForeground(lipgloss.Color("111"))
+	cardBox    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorCard)
+	cardBoxSel = cardBox.BorderForeground(colorAccent)
 )
 
 // card renders one ticket in its own bordered box of the given outer width.
 var (
-	cardBoxWarn = cardBox.BorderForeground(lipgloss.Color("130"))
-	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255"))
-	keyDim      = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+	cardBoxWarn = cardBox.BorderForeground(colorAttention)
+	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(colorText)
+	keyDim      = lipgloss.NewStyle().Foreground(colorSubtle)
 )
 
 // subtaskProgress words a parent's subtasks, "1/3 subtasks · 1 to do": how many are done and how many have
@@ -2260,20 +2250,7 @@ func agentShort(status string) (string, board.AgentKind) {
 	return strings.Replace(line, "claude ", "", 1), kind
 }
 
-// Herdr's catppuccin palette, so an agent's dot reads the same on the board as in Herdr's sidebar.
-const (
-	herdrGreen  = lipgloss.Color("#a6e3a1")
-	herdrYellow = lipgloss.Color("#f9e2af")
-	herdrRed    = lipgloss.Color("#f38ba8")
-	herdrTeal   = lipgloss.Color("#94e2d5")
-	herdrBlue   = lipgloss.Color("#89b4fa")
-	herdrMauve  = lipgloss.Color("#cba6f7")
-	herdrPeach  = lipgloss.Color("#fab387")
-	herdrGray   = lipgloss.Color("#9399b2")
-	herdrBase   = lipgloss.Color("#1e1e2e")
-)
-
-var columnColors = map[ticket.Category]lipgloss.Color{ticket.ToDo: herdrGray, ticket.InProgress: herdrBlue, ticket.InReview: herdrMauve, ticket.Done: herdrGreen}
+var columnColors = map[ticket.Category]lipgloss.Color{ticket.ToDo: ctpGray, ticket.InProgress: ctpBlue, ticket.InReview: ctpMauve, ticket.Done: ctpGreen}
 
 // statusBadge is a ticket's Jira status, with its mark's icon, on its column's color.
 func statusBadge(t ticket.Ticket) string {
@@ -2281,12 +2258,12 @@ func statusBadge(t ticket.Ticket) string {
 	if icon, _, _ := statusMark(t); icon != "" {
 		text = icon + " " + text
 	}
-	return lipgloss.NewStyle().Background(columnColors[t.Category]).Foreground(herdrBase).Render(" " + text + " ")
+	return lipgloss.NewStyle().Background(columnColors[t.Category]).Foreground(colorOnBadge).Render(" " + text + " ")
 }
 
 // agentStyle colors an agent status as Herdr does: working yellow, blocked red, done teal, idle green.
 func agentStyle(status string) lipgloss.Style {
-	colors := map[string]lipgloss.Color{"working": herdrYellow, "blocked": herdrRed, "done": herdrTeal, "idle": herdrGreen}
+	colors := map[string]lipgloss.Color{"working": ctpYellow, "blocked": ctpRed, "done": ctpTeal, "idle": ctpGreen}
 	return lipgloss.NewStyle().Foreground(colors[status])
 }
 
@@ -2295,12 +2272,12 @@ var markIcons = map[ticket.Mark]struct {
 	glyph string
 	color lipgloss.Color
 }{
-	ticket.MarkDiamond:  {"◇", herdrBlue},
-	ticket.MarkBlocked:  {"⊘", herdrPeach},
-	ticket.MarkClock:    {"◷", herdrTeal},
-	ticket.MarkFlag:     {"⚑", herdrMauve},
-	ticket.MarkStar:     {"★", herdrYellow},
-	ticket.MarkTriangle: {"▲", herdrGreen},
+	ticket.MarkDiamond:  {"◇", ctpBlue},
+	ticket.MarkBlocked:  {"⊘", ctpPeach},
+	ticket.MarkClock:    {"◷", ctpTeal},
+	ticket.MarkFlag:     {"⚑", ctpMauve},
+	ticket.MarkStar:     {"★", ctpYellow},
+	ticket.MarkTriangle: {"▲", ctpGreen},
 }
 
 // statusMark is the icon of a ticket's status mark, its wider wording with the status name, and its style;
@@ -2320,11 +2297,11 @@ var typeIcons = []struct {
 	glyph string
 	color lipgloss.Color
 }{
-	{[]string{"bug", "error", "defect"}, "●", herdrRed},
-	{[]string{"epic", "épica"}, "◆", herdrMauve},
-	{[]string{"sub"}, "■", herdrTeal},
-	{[]string{"story", "historia"}, "■", herdrGreen},
-	{[]string{"task", "tarea"}, "■", herdrBlue},
+	{[]string{"bug", "error", "defect"}, "●", ctpRed},
+	{[]string{"epic", "épica"}, "◆", ctpMauve},
+	{[]string{"sub"}, "■", ctpTeal},
+	{[]string{"story", "historia"}, "■", ctpGreen},
+	{[]string{"task", "tarea"}, "■", ctpBlue},
 }
 
 // typeGlyph is a one-cell colored icon for a Jira issue type, like Jira's own; empty when there is no type.
@@ -2548,7 +2525,7 @@ func actionHint(t ticket.Ticket) string {
 	return "p opens the PR ↗"
 }
 
-var keyStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
+var keyStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
 
 // footer is the key legend: each key highlighted, its meaning dimmed, with room between commands.
 func (m Model) footer() string {
@@ -2591,7 +2568,7 @@ func (m Model) footer() string {
 	}
 	sync := dim.Render(m.syncLabel())
 	if m.stale != nil {
-		sync = warn.Render(m.syncLabel())
+		sync = notice.Render(m.syncLabel())
 	}
 	// The sync state sits at the bottom right: on the legend's last line when its widest wording fits,
 	// else on its own. Deciding by the widest wording keeps it from jumping between lines, and the
