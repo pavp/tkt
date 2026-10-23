@@ -1483,7 +1483,7 @@ func (m Model) viewSwitch() headerItem {
 	if m.effectiveView() == ViewColumns {
 		return headerItem{view: ViewList, label: " ◫ View "}
 	}
-	return headerItem{view: ViewColumns, label: " ☰ View "}
+	return headerItem{view: ViewColumns, label: " ≣ View "}
 }
 
 // reposButton opens the repository filter; it says how many repositories show while any is hidden.

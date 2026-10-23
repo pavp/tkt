@@ -2554,9 +2554,9 @@ func TestViewChoiceIsRemembered(t *testing.T) {
 		t.Fatalf("v should remember the list and keep the rest: %+v", r.states)
 	}
 	v := stripANSI(m.View())
-	y := lineIndex(v, "☰ View")
+	y := lineIndex(v, "≣ View")
 	line := strings.Split(v, "\n")[y]
-	m = click(m, lipgloss.Width(line[:strings.Index(line, "☰ View")])+1, y)
+	m = click(m, lipgloss.Width(line[:strings.Index(line, "≣ View")])+1, y)
 	if got := r.states[len(r.states)-1].View; got != ViewColumns {
 		t.Errorf("a click on the view switch should switch back to columns and remember it: %q", got)
 	}
@@ -3203,8 +3203,14 @@ func TestViewButtonsShowOnlyWhereTheyApply(t *testing.T) {
 	if v := stripANSI(m.View()); !strings.Contains(v, "│ ◫ View │") {
 		t.Errorf("one switch names the view in use:\n%s", v)
 	}
-	if v := stripANSI(press(m, "v").View()); !strings.Contains(v, "│ ☰ View │") {
+	if v := stripANSI(press(m, "v").View()); !strings.Contains(v, "│ ≣ View │") {
 		t.Errorf("the switch follows v to the list:\n%s", v)
+	}
+	for _, label := range []string{m.(Model).viewSwitch().label, press(m, "v").(Model).viewSwitch().label} {
+		// Unicode 16 made the trigrams U+2630–U+2637 wide; terminals that follow it draw ☰ in two cells.
+		if strings.IndexFunc(label, func(r rune) bool { return r >= 0x2630 && r <= 0x2637 }) >= 0 {
+			t.Errorf("the switch uses a trigram, which newer terminals draw two cells wide: %q", label)
+		}
 	}
 	head := func(m tea.Model) string { return strings.Split(stripANSI(m.View()), "\n")[1] }
 	if a, b := head(m), head(press(m, "v")); strings.Index(a, "Team") < 0 || strings.Index(a, "Team") != strings.Index(b, "Team") {
