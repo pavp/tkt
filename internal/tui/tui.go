@@ -3155,10 +3155,10 @@ func (m Model) legend() string {
 		if m.backlogMerged {
 			other = "split"
 		}
-		legend = append(legend, [][2]string{{"i", "details"}, {"o", "Jira ↗"}, {"O", "copy link"}, {"tab 1-3", "filter"}, {"v", other}}...)
+		legend = append(legend, [][2]string{{"i", "details"}, {"o", "Jira ↗"}, {"O", "copy link"}, {"tab 1-3", "switch tab"}, {"v", other}}...)
 	} else {
 		legend = append(legend, [][2]string{
-			{"f", "send feedback"}, {"i", "details"}, {"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-3", "filter"},
+			{"f", "send feedback"}, {"i", "details"}, {"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-3", "switch tab"},
 		}...)
 	}
 	if m.filter == FilterAll && m.width >= narrowWidth {

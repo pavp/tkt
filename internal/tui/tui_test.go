@@ -4156,7 +4156,7 @@ func TestBacklogFitsTheTrayPanel(t *testing.T) {
 func TestBacklogTicketMenuAndLegend(t *testing.T) {
 	m := openBacklog(backlogRecorder(), 180, BoardState{})
 	v := stripANSI(m.View())
-	for _, want := range []string{"enter actions · fold group", "B boards", "g refresh", "tab 1-3 filter"} {
+	for _, want := range []string{"enter actions · fold group", "B boards", "g refresh", "tab 1-3 switch tab"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("legend lacks %q:\n%s", want, v)
 		}
