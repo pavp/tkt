@@ -1477,12 +1477,13 @@ func (m Model) headerSpec() []headerItem {
 	return spec
 }
 
-// viewSwitch names the view in use; a click switches to the other one, as v does.
+// viewSwitch shows the view in use by its icon; a click switches to the other one, as v does. The word
+// stays the same so the header does not shift when the view changes.
 func (m Model) viewSwitch() headerItem {
 	if m.effectiveView() == ViewColumns {
-		return headerItem{view: ViewList, label: " ◫ Columns "}
+		return headerItem{view: ViewList, label: " ◫ View "}
 	}
-	return headerItem{view: ViewColumns, label: " ☰ List "}
+	return headerItem{view: ViewColumns, label: " ☰ View "}
 }
 
 // reposButton opens the repository filter; it says how many repositories show while any is hidden.
