@@ -18,7 +18,7 @@ Forecast (slice-plan, 2026-10-23): 540–920 authored changed lines; slice 1 330
 |---|---|---|---|---|---|
 | T0 | S4 (queueing on a working agent) | 1 | inline, no Writer reason | done (live Herdr probe, workspace closed) | — |
 | T1 | S1, S2, S3, S4, S6 (send to its agent or an open agent) | 1 | inline, no Writer reason | done (RED → GREEN; -race) | 924fd83 |
-| T2 | S1, S2, S4, S5 (a new agent, placed) | 2 | inline, no Writer reason | done (RED → GREEN; -race) | slice 2 commit |
+| T2 | S1, S2, S4, S5 (a new agent, placed) | 2 | inline, no Writer reason | done (RED → GREEN; -race) | 2d83fd6, 6d9fe87, 391c8e9, 0003267, c358c0e |
 
 Native grouping: once the slice 2 PR is open, group with `gh stack link <pr-1> <pr-2>`; merging the top PR then takes the one below. Both branches live in pavp/tkt; read back each PR's base and diff after linking, and `gh stack unstack <stack>` dissolves the stack before any base can be corrected.
 
@@ -38,3 +38,4 @@ Native grouping: once the slice 2 PR is open, group with `gh stack link <pr-1> <
 - L9 (2026-10-23, user): "otra cosa, la opcion de review creo que deberia estar habilitada para todos los PR" → "Review with ▸" on every pull request's menu: the user's (prMenu), review requests and anyone else's. Done with L8: review without a clone → <data>/reviews (0700) with a no-clone note; fix without a clone → CloneNeededMsg, "Clone owner/name?" into repo_roots[0], CloneAndStart (Resolver.Clone, then the agent in the new clone); no repo_roots → a message saying to set it. Tests RED → GREEN.
 - L10 (2026-10-23, user): "ok veo que muestra ya el branch, pero estaria bueno que mostrara la informacion de ese space. Que carpeta esta por ejemplo?" → under each agent, a line with its Herdr workspace's label and its folder (~ for the home), then its branch; menu notes may hold several lines.
 - L11 (2026-10-23, user): "otra cosa deberia de poner ir hasta el agente y ponerlo en primer plano" → after a task is sent (open agent, new agent, and f's own agent), tkt focused only the pane; Start's go-to-agent focuses the workspace first, then the pane. bringForward now does both everywhere. Not verified live: whether the board's popup closing returns focus elsewhere.
+- L12 (2026-10-23, user): "ok sube el codigo y publica" → slice 1 PR on main, slice 2 PR on slice 1, merged in order (no gh stack grouping, as both merge at once), then tagged as a minor release. Verified before: go test ./... (15 packages), -race on cli and tui, vet, gofmt.
