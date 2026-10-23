@@ -35,16 +35,21 @@ func TestRenderIsValidTOML(t *testing.T) {
 	if strings.Contains(out, "{{") {
 		t.Error("unfilled placeholder")
 	}
+	actions := map[string]string{}
 	for _, a := range m.Actions {
 		if a.Command[0] != "/Users/dev/My Tools/tkt" {
 			t.Errorf("action %s runs %q", a.ID, a.Command[0])
 		}
+		actions[a.ID] = strings.Join(a.Command[1:], " ")
+	}
+	if actions["board-pane"] != "herdr open-board-pane" {
+		t.Errorf("actions = %v", actions)
 	}
 	panes := map[string]string{}
 	for _, p := range m.Panes {
 		panes[p.ID] = p.Placement + " " + strings.Join(p.Command[1:], " ")
 	}
-	if panes["board"] != "popup board" || panes["ticket"] != "split show --watch" || panes["setup"] != "tab init" {
+	if panes["board"] != "popup board" || panes["board-split"] != "split board --pane" || panes["ticket"] != "split show --watch" || panes["setup"] != "tab init" {
 		t.Errorf("panes = %v", panes)
 	}
 	if len(m.Events) != 1 || m.Events[0].On != "worktree.created" || strings.Join(m.Events[0].Command[1:], " ") != "herdr on-worktree" {

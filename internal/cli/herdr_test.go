@@ -84,7 +84,7 @@ func TestHerdrInstallAddsAndUninstallRemovesKeys(t *testing.T) {
 	if count(f, "server.reload_config") != 1 {
 		t.Error("config not reloaded")
 	}
-	if !strings.Contains(h.errOut.String(), "Add Herdr keybindings prefix+i (tkt ticket pane), prefix+t (tkt board)?") {
+	if !strings.Contains(h.errOut.String(), "Add Herdr keybindings prefix+alt+t (tkt board in a pane), prefix+i (tkt ticket pane), prefix+t (tkt board)?") {
 		t.Errorf("prompt = %q", h.errOut)
 	}
 
@@ -372,6 +372,21 @@ func TestHerdrOpenBoardOrSetup(t *testing.T) {
 	h.env["HERDR_PLUGIN_ID"] = "tkt-dev"
 	h.exec("herdr", "open-board")
 	if got := f.Last("plugin.pane.open"); got["entrypoint"] != "setup" || got["plugin_id"] != "tkt-dev" {
+		t.Errorf("unconfigured pane = %v", got)
+	}
+}
+
+func TestHerdrOpenBoardInAPane(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	if code := h.exec("herdr", "open-board-pane"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if got := f.Last("plugin.pane.open"); got["entrypoint"] != "board-split" || got["plugin_id"] != "tkt" {
+		t.Errorf("pane = %v", got)
+	}
+	os.Remove(h.app.configPath)
+	h.exec("herdr", "open-board-pane")
+	if got := f.Last("plugin.pane.open"); got["entrypoint"] != "setup" {
 		t.Errorf("unconfigured pane = %v", got)
 	}
 }

@@ -33,6 +33,7 @@ import (
 
 func newBoardCmd(a *App) *cobra.Command {
 	var view string
+	var pane bool
 	cmd := &cobra.Command{
 		Use:   "board",
 		Short: "Interactive board: columns or list, filters, start, fix CI (the Herdr popup)",
@@ -58,8 +59,11 @@ func newBoardCmd(a *App) *cobra.Command {
 				return err
 			}
 			forceColor(a.Env.Getenv)
-			defer a.claimBoardPane()()
-			actions := &boardActions{a: a, c: c, ctx: cmd.Context()}
+			// A board kept in a pane leaves the popup's record alone: the popup shortcut would otherwise close it.
+			if !pane {
+				defer a.claimBoardPane()()
+			}
+			actions := &boardActions{a: a, c: c, ctx: cmd.Context(), pane: pane}
 			prog := tea.NewProgram(tui.New(snap, have, actions, a.boardView(view)).WithState(a.loadBoardState()), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
 			actions.send = prog.Send
 			follow, stop := context.WithCancel(cmd.Context())
@@ -73,6 +77,7 @@ func newBoardCmd(a *App) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&view, "view", "", "initial view: columns or list (default: the one last used, else columns)")
+	cmd.Flags().BoolVar(&pane, "pane", false, "stay open after handing work to an agent, as a board kept in a Herdr pane does")
 	return cmd
 }
 
@@ -123,6 +128,16 @@ type boardActions struct {
 	live *daemon.Client
 	// send delivers a message to the running board, such as the partial board a refresh paints first.
 	send func(tea.Msg)
+	// pane marks a board kept in a pane, which stays open after handing work to an agent instead of closing.
+	pane bool
+}
+
+// handedOff closes a popup board once its agent comes forward; a board in a pane stays and says so.
+func (b *boardActions) handedOff(done string) tea.Msg {
+	if b.pane {
+		return tui.StatusMsg(done)
+	}
+	return tea.QuitMsg{}
 }
 
 func (b *boardActions) setLive(c *daemon.Client) {
@@ -580,7 +595,7 @@ func (b *boardActions) Fix(key ticket.Key, known *ticket.Ticket) tea.Cmd {
 			return tui.StatusMsg(msg)
 		}
 		bringForward(b.ctx, b.a.NewHerdr(), pane)
-		return tea.QuitMsg{}
+		return b.handedOff(msg)
 	}
 }
 

@@ -21,10 +21,10 @@ func TestPlanKeys(t *testing.T) {
 		add, present []string
 		conflict     map[string]string
 	}{
-		{"fresh config", "", []string{"prefix+t", "prefix+i"}, nil, nil},
-		{"already bound by hand", "[[keys.command]]\nkey = \"prefix+t\"\ntype = \"plugin_action\"\ncommand = \"tkt.board\"\n", []string{"prefix+i"}, []string{"prefix+t"}, nil},
-		{"key taken by the user", "[keys]\nzoom = \"prefix+t\"\n", []string{"prefix+i"}, nil, map[string]string{"prefix+t": "zoom"}},
-		{"key taken by another plugin", "[[keys.command]]\nkey = \"prefix+i\"\ntype = \"plugin_action\"\ncommand = \"other.thing\"\n", []string{"prefix+t"}, nil, map[string]string{"prefix+i": "other.thing"}},
+		{"fresh config", "", []string{"prefix+t", "prefix+alt+t", "prefix+i"}, nil, nil},
+		{"already bound by hand", "[[keys.command]]\nkey = \"prefix+t\"\ntype = \"plugin_action\"\ncommand = \"tkt.board\"\n", []string{"prefix+alt+t", "prefix+i"}, []string{"prefix+t"}, nil},
+		{"key taken by the user", "[keys]\nzoom = \"prefix+t\"\n", []string{"prefix+alt+t", "prefix+i"}, nil, map[string]string{"prefix+t": "zoom"}},
+		{"key taken by another plugin", "[[keys.command]]\nkey = \"prefix+i\"\ntype = \"plugin_action\"\ncommand = \"other.thing\"\n", []string{"prefix+t", "prefix+alt+t"}, nil, map[string]string{"prefix+i": "other.thing"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,7 +52,7 @@ func TestPlanKeysRespectsHerdrDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Conflict["prefix+t"] != "something" || len(plan.Add) != 1 {
+	if plan.Conflict["prefix+t"] != "something" || len(plan.Add) != 2 {
 		t.Errorf("plan = %+v", plan)
 	}
 }
@@ -77,7 +77,7 @@ func TestAddAndRemoveBlock(t *testing.T) {
 	if _, err := toml.Decode(added, &parsed); err != nil {
 		t.Fatalf("result is not valid TOML: %v\n%s", err, added)
 	}
-	if len(parsed.Keys.Command) != 2 || parsed.Keys.Command[0].Command != "tkt.board" || parsed.Keys.Command[1].Type != "plugin_action" {
+	if len(parsed.Keys.Command) != 3 || parsed.Keys.Command[0].Command != "tkt.board" || parsed.Keys.Command[1].Command != "tkt.board-pane" || parsed.Keys.Command[1].Type != "plugin_action" {
 		t.Errorf("bindings = %+v", parsed.Keys.Command)
 	}
 	removed, ok := RemoveBlock(added)
