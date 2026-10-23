@@ -1930,7 +1930,7 @@ func coloredPRs(prs []ticket.PullRequest, width int) string {
 		markText, style := checkMark(pr.Checks), checkStyle(pr.Checks)
 		switch pr.State {
 		case ticket.PRMerged:
-			markText, style = "merged", ok
+			markText, style = "merged", dim
 		case ticket.PRClosed:
 			markText, style = "closed", dim
 		}
@@ -1948,11 +1948,11 @@ func coloredPRs(prs []ticket.PullRequest, width int) string {
 	if merged+closed == 1 {
 		for _, pr := range prs {
 			if pr.State != ticket.PROpen {
-				parts = append(parts, ok.Render(prRef(pr)))
+				parts = append(parts, dim.Render(prRef(pr)))
 			}
 		}
 	} else if f := ticket.FinishedSummary(merged, closed); f != "" && used+len(f) <= width {
-		parts = append(parts, ok.Render(f))
+		parts = append(parts, dim.Render(f))
 	}
 	return strings.Join(parts, " ")
 }

@@ -2968,6 +2968,24 @@ func TestPullRequestApprovalsKeepThePlainColor(t *testing.T) {
 	}
 }
 
+func TestFinishedPullRequestsAreDimmed(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	tk := ticket.Ticket{Key: "DEMO-5", PRs: []ticket.PullRequest{{Number: 700, State: ticket.PRMerged}, {Number: 701, State: ticket.PROpen, Checks: ticket.ChecksPass}}}
+	if got := coloredPRs(tk.PRs, 40); !strings.Contains(got, dim.Render("#700 merged")) || !strings.Contains(got, ok.Render("✓")) {
+		t.Errorf("a merged pull request is history and dims, a passing check stays green: %q", got)
+	}
+	tk.PRs = append(tk.PRs, ticket.PullRequest{Number: 699, State: ticket.PRClosed})
+	if got := coloredPRs(tk.PRs, 40); !strings.Contains(got, dim.Render("1 merged · 1 closed")) {
+		t.Errorf("several finished pull requests dim as a count: %q", got)
+	}
+	tk.PRs = []ticket.PullRequest{{Number: 702, State: ticket.PRMerged}, {Number: 703, State: ticket.PRMerged}}
+	if got := coloredPRs(tk.PRs, 40); strings.Contains(got, fgCode(colorDone)) {
+		t.Errorf("finished pull requests should not share the Done status's green: %q", got)
+	}
+}
+
 func TestPullRequestStatusColors(t *testing.T) {
 	tk := ticket.Ticket{Key: "DEMO-1"}
 	tests := []struct {
