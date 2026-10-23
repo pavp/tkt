@@ -642,6 +642,26 @@ func TestPreviewStartsWithTheTicketsLabel(t *testing.T) {
 	if v := m.View(); !strings.Contains(v, labelBadge.Render(" User Access Center ")+" "+dim.Render("unassigned · ")[:len(fgCode(colorMuted))]+"unassigned · ") {
 		t.Errorf("preview should start with the label as a badge, the rest dimmed:\n%q", strings.Split(v, "\n")[lineIndex(v, "User Access Center")])
 	}
+	if v := stripANSI(m.View()); strings.TrimSpace(strings.Split(v, "\n")[lineIndex(v, "User Access Center")-1]) == "" {
+		t.Errorf("without a label field configured the detail line keeps to its title:\n%s", v)
+	}
+	snap.LabelField = "Product"
+	m, _ = New(snap, true, &recorder{}, ViewColumns).Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	lines := strings.Split(stripANSI(m.View()), "\n")
+	at := len(lines) - 1
+	for at > 0 && !strings.Contains(lines[at], " User Access Center ") {
+		at--
+	}
+	if strings.TrimSpace(lines[at-1]) != "" || !strings.Contains(lines[at-2], "DEMO-3") {
+		t.Errorf("with a label field the badge gets a blank line from the title above it:\n%s", strings.Join(lines[at-3:at+1], "\n"))
+	}
+	for i := 0; i < 3; i++ {
+		before := m.(Model).columnsHeight()
+		m = press(m, "d")
+		if m.(Model).columnsHeight() != before {
+			t.Errorf("moving between tickets with and without a label should not resize the board")
+		}
+	}
 }
 
 func TestDaemonSyncsDriveTheSpinner(t *testing.T) {

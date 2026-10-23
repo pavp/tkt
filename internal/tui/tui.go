@@ -2487,7 +2487,17 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 	return lines, at
 }
 
+// preview is the selected item's title and detail line; with a label field configured a blank line parts
+// them, on every item alike so the board keeps its height, as the label's badge would touch the title.
 func (m Model) preview() string {
+	p := m.previewLines()
+	if m.snap.LabelField != "" && strings.Count(p, "\n") == 1 {
+		p = strings.Replace(p, "\n", "\n\n", 1)
+	}
+	return p
+}
+
+func (m Model) previewLines() string {
 	if m.status != "" {
 		return ansi.Truncate(m.status, m.width, "…")
 	}
