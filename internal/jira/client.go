@@ -658,6 +658,11 @@ func (c *Client) BacklogIssues(ctx context.Context, board int, fields []string) 
 	return nil, errors.New("jira backlog returned too many pages")
 }
 
+// MoveToSprint moves an issue into a sprint (POST /rest/agile/1.0/sprint/{id}/issue).
+func (c *Client) MoveToSprint(ctx context.Context, sprint int, key string) error {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/rest/agile/1.0/sprint/%d/issue", sprint), map[string]any{"issues": []string{key}}, nil)
+}
+
 // SprintsJQL selects the issues of the given sprints in the backlog's rank order, subtasks left out.
 func SprintsJQL(ids []int) string {
 	s := make([]string, len(ids))

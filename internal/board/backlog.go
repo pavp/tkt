@@ -17,6 +17,7 @@ type BacklogSource interface {
 	Search(ctx context.Context, jql string, fields []string) ([]jira.Issue, error)
 	FieldID(ctx context.Context, name string) (string, error)
 	BrowseURL(key string) string
+	Myself(ctx context.Context) (jira.User, error)
 	OpenSprints(ctx context.Context, board int) ([]jira.Sprint, error)
 	BacklogIssues(ctx context.Context, board int, fields []string) ([]jira.Issue, error)
 }
@@ -31,6 +32,8 @@ type Backlog struct {
 	LabelField string          `json:"label_field,omitempty"`
 	// HasPoints says the site has a story points field, so an unestimated ticket counts as one.
 	HasPoints bool `json:"has_points,omitempty"`
+	// Me is the user's name as Jira gives it to assignees, to tell the user's tickets apart.
+	Me string `json:"me,omitempty"`
 }
 
 type BacklogSprint struct {
@@ -56,6 +59,11 @@ func FetchBacklog(ctx context.Context, c *config.Config, js BacklogSource, now t
 		out.LabelField = c.Jira.LabelField
 	}
 	out.HasPoints = pointsID != ""
+	if me, err := js.Myself(ctx); err == nil {
+		out.Me = me.DisplayName
+	} else {
+		out.Warnings = append(out.Warnings, "your Jira user is unknown: "+err.Error())
+	}
 	toTicket := func(is jira.Issue, board string) ticket.Ticket {
 		t := ToTicket(c, is, js.BrowseURL(is.Key))
 		if labelID != "" {

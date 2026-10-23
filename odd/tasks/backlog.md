@@ -1,6 +1,6 @@
 # tkt: a Backlog screen and a boards filter
 
-Objective: a list-only Backlog screen of the selected team boards' future sprints and backlog, with work started from it, and a boards filter replacing the repositories filter outside the PRs filter. Delivery **Chain** (budget 800, user's explicit number: "sube a 800 el presupuesto"): tracker `feat/backlog` (draft PR to `main`), slices `feat/backlog-1-board-filter` → `feat/backlog-2-backlog-view` → `feat/backlog-3-backlog-actions`. Test runner: `go test ./...`.
+Objective: a list-only Backlog screen of the selected team boards' future sprints and backlog, with work started from it, and a boards filter replacing the repositories filter outside the PRs filter. Delivery **Chain** (budget 800, user's explicit number: "sube a 800 el presupuesto"): tracker `feat/backlog` (draft PR to `main`), slices `feat/backlog-1-board-filter` → `feat/backlog-2-backlog-view` → `feat/backlog-3-steady-header` → `feat/backlog-4-backlog-actions`. Test runner: `go test ./...`.
 Forecast (slice-plan, 2026-10-23): 930–1540 authored changed lines; slice A 230–390, slice B 470–750, slice C 230–380.
 
 ## Specs
@@ -22,12 +22,12 @@ Forecast (slice-plan, 2026-10-23): 930–1540 authored changed lines; slice A 23
 | T1 | S7, S8 (boards filter in Sprint) | A | inline, no Writer reason | done (RED: compile + behavior → GREEN; -race tui/board; live check pending on the user) | see slice A commit |
 | T2 | S1, S2, S3, S7, S8 (Backlog data and read-only screen) | B | inline, no Writer reason | done (RED → GREEN; -race tui/board/cli; live read-only check of sprints and points); approved size exception: 1412 lines | see slice B commit |
 | T4 | S9, S8 (steady header and legend across tabs) | C | inline, no Writer reason | done (RED → GREEN; -race; rendered at 150 and 56 columns) | see header commit |
-| T3 | S4, S5, S6, S8 (Backlog actions) | C | inline, no Writer reason | pending | |
+| T3 | S4, S5, S6, S8 (Backlog actions, menu title on two lines) | D | inline, no Writer reason | done (RED → GREEN; -race tui/cli/board; no live write) | see slice D commit |
 
 Native grouping: never grouped: a stack would merge the draft tracker.
 
 > Before each commit, run `git diff --numstat <base>` and sum additions + deletions, skipping binary rows (`-\t-`) and generated paths (lockfiles, `__snapshots__/`, files marked `linguist-generated` in `.gitattributes`); if the current work unit — slice or single unit — is over 800 real changed lines, stop: hand the accumulated diff to `slice-diff` (budget 800), then re-forecast every slice not yet started with `slice-plan` (budget 800) — a slice that overran invalidates the estimates that assumed its size, not just its own. Slices already merged stay as they are.
-> Slice A base: `feat/backlog`. Slice B base: `feat/backlog-1-board-filter`. Slice C base: `feat/backlog-2-backlog-view`.
+> Slice A base: `feat/backlog`. Slice B base: `feat/backlog-1-board-filter`. Slice C base: `feat/backlog-2-backlog-view`. Slice D base: `feat/backlog-3-steady-header`.
 
 ## Log
 
@@ -48,3 +48,5 @@ Native grouping: never grouped: a stack would merge the draft tracker.
 - L15 (2026-10-23, user): header analysis and mockups agreed ("ok me gusta"; tabs: "si" to the dimmed key and the count badge) → S9, T4 on feat/backlog-3-backlog-actions before T3.
 - L16 (2026-10-23, user): "el menu de un ticket en backlog es muy ancho, podrias dividir el titulo en 2 lineas" + "faltaria implementar la opcion de comenzar un ticket desde el backlog?" → menu title on two lines goes with T3 (Start from the backlog, next after T4).
 - L17: T4 done: headerLayout rebuilt (tabs anchored left with dimmed key and count badge; three fixed-width control slots measured over every tab; one row / controls row / title line / plain fallback decided by width only); contextLine per tab replaces the title's sprints and the notice line (notice on its right where it fits, click opens the filter); footer padded to the tallest tab's legend. Tests that assumed the old header (rule at line 3, notice line, "1 Sprint 3" labels, tray notice) updated to the agreed design.
+- L18: slice C (scroll indicators 65 + steady header 533 = 598 lines) would pass 800 with T3 (230–380), so the chain gains a slice: C renamed feat/backlog-3-steady-header (local only), T3 moves to slice D feat/backlog-4-backlog-actions.
+- L19: T3 done: Backlog.Me from /myself (a warning when unknown); backlog menu "Actions for KEY" + subtitle "status · assignee · board"; Start first: the user's own ticket starts at once, else a submenu "KEY is not yours / now NAME" offers "Assign it to me, then start" (Assign then StartChoices in sequence), "Start without assigning", "Cancel"; "Move to the current sprint · NAME" when the ticket's board runs an active sprint it is not in, confirmed, several asking which; jira MoveToSprint POST /rest/agile/1.0/sprint/{id}/issue; SprintMovedMsg refreshes the board and reloads the backlog. Agent states are not read for backlog tickets: the Herdr read also rewrites the sidebar from the snapshot it gets, so a backlog-only snapshot could overwrite the user's lines; Start on a ticket with a worktree still opens it through StartChoices.

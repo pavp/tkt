@@ -497,6 +497,16 @@ func TestSprintsJQLKeepsTheBacklogOrder(t *testing.T) {
 	}
 }
 
+func TestMoveToSprintPostsTheIssue(t *testing.T) {
+	c, calls := server(t, map[string]string{"POST /rest/agile/1.0/sprint/42/issue": ""})
+	if err := c.MoveToSprint(context.Background(), 42, "DEMO-210"); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint((*calls)[0].body["issues"]); got != "[DEMO-210]" {
+		t.Errorf("issues sent = %s", got)
+	}
+}
+
 func TestTransitionsDescribeTheirForms(t *testing.T) {
 	c, calls := server(t, map[string]string{
 		"GET /rest/api/3/issue/DEMO-12/transitions": `{"transitions":[

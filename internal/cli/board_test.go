@@ -728,6 +728,19 @@ func TestBoardActionsLoadTheBacklog(t *testing.T) {
 	}
 }
 
+func TestBoardActionsMoveTicketsToASprint(t *testing.T) {
+	h, _ := listHarness(t)
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	got, ok := b.MoveToSprint("DEMO-210", 40, "UAC S42")().(tui.SprintMovedMsg)
+	if !ok || got != (tui.SprintMovedMsg{Key: "DEMO-210", Sprint: "UAC S42"}) || !slices.Equal(h.jira.sprinted, []string{"DEMO-210 40"}) {
+		t.Errorf("msg %+v, calls %v", got, h.jira.sprinted)
+	}
+}
+
 func TestBoardActionsMoveTicketsInJira(t *testing.T) {
 	h, _ := listHarness(t)
 	h.jira.transitions = map[string][]jira.Transition{"DEMO-1": {

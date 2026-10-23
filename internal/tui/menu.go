@@ -51,7 +51,7 @@ var menuBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForegro
 func (m Model) buildMenu(it item) *menu {
 	a := m.actions
 	if m.filter == FilterBacklog && it.ticket != nil {
-		return m.teamMenu(*it.ticket)
+		return m.backlogMenu(*it.ticket)
 	}
 	if it.mine() {
 		return m.prMenu(it)
@@ -158,6 +158,76 @@ func (m Model) teamMenu(t ticket.Ticket) *menu {
 	}
 	items = append(items, m.assignItem(t.Key), menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
 	return &menu{title: "Actions for " + string(t.Key) + " · " + t.Status + " · " + cmp.Or(t.Assignee, "unassigned"), items: items}
+}
+
+// backlogMenu offers starting work on a backlog ticket, after offering to take it when it is someone else's or
+// nobody's, and moving it into its board's running sprint; its details go on a second line to keep it narrow.
+func (m Model) backlogMenu(t ticket.Ticket) *menu {
+	a := m.actions
+	start := menuItem{label: m.startLabel(t.Key), run: func() tea.Cmd { return a.StartChoices(t.Key) }}
+	if m.backlog != nil && (t.Assignee == "" || t.Assignee != m.backlog.Me) {
+		start = menuItem{label: m.startLabel(t.Key), sub: func() *menu {
+			return &menu{title: string(t.Key) + " is not yours", subtitle: "now " + cmp.Or(t.Assignee, "unassigned"), items: []menuItem{
+				{label: "Assign it to me, then start", run: func() tea.Cmd {
+					return tea.Sequence(a.Assign(t.Key, Assignee{Me: true}), a.StartChoices(t.Key))
+				}},
+				{label: "Start without assigning", run: func() tea.Cmd { return a.StartChoices(t.Key) }},
+				{label: "Cancel", run: func() tea.Cmd { return nil }},
+			}}
+		}}
+	}
+	items := []menuItem{start}
+	if move, ok := m.sprintMoveItem(t); ok {
+		items = append(items, move)
+	}
+	items = append(items, menuItem{label: "Show details", key: "i", detail: t.Key})
+	if t.URL != "" {
+		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
+	}
+	items = append(items, m.assignItem(t.Key), menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
+	sub := t.Status + " · " + cmp.Or(t.Assignee, "unassigned")
+	if t.Board != "" {
+		sub += " · " + t.Board
+	}
+	return &menu{title: "Actions for " + string(t.Key), subtitle: sub, items: items}
+}
+
+// sprintMoveItem moves a ticket into its board's active sprint, asking which when the board runs several; a
+// ticket already in one, or whose board runs none, gets no item.
+func (m Model) sprintMoveItem(t ticket.Ticket) (menuItem, bool) {
+	if m.backlog == nil {
+		return menuItem{}, false
+	}
+	var active []board.BacklogSprint
+	for _, sp := range m.backlog.Sprints {
+		in := slices.ContainsFunc(sp.Tickets, func(o ticket.Ticket) bool { return o.Key == t.Key })
+		if sp.State == "active" && in {
+			return menuItem{}, false
+		}
+		if sp.State == "active" && sp.BoardName == t.Board {
+			active = append(active, sp)
+		}
+	}
+	confirm := func(sp board.BacklogSprint) *menu {
+		return &menu{title: "Move " + string(t.Key) + " to " + sp.Name + "?", items: []menuItem{
+			{label: "Yes, move it", run: func() tea.Cmd { return m.actions.MoveToSprint(t.Key, sp.ID, sp.Name) }},
+			{label: "Cancel", run: func() tea.Cmd { return nil }},
+		}}
+	}
+	switch len(active) {
+	case 0:
+		return menuItem{}, false
+	case 1:
+		sp := active[0]
+		return menuItem{label: "Move to the current sprint · " + sp.Name, sub: func() *menu { return confirm(sp) }}, true
+	}
+	return menuItem{label: "Move to the current sprint ▸", sub: func() *menu {
+		var items []menuItem
+		for _, sp := range active {
+			items = append(items, menuItem{label: sp.Name, sub: func() *menu { return confirm(sp) }})
+		}
+		return &menu{title: "Move " + string(t.Key) + " to which sprint?", items: items}
+	}}, true
 }
 
 // prsMenu lists a ticket's pull requests to open one, those that need the user first and finished ones last.

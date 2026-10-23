@@ -75,8 +75,11 @@ type Actions interface {
 	Assign(key ticket.Key, who Assignee) tea.Cmd
 	// Users lists the users assignable to key that match query; they arrive as a UsersListedMsg.
 	Users(key ticket.Key, query string) tea.Cmd
-	// Backlog asks Jira for the team boards' future sprints and backlog; they arrive as a BacklogMsg.
+	// Backlog asks Jira for the team boards' open sprints and backlog; they arrive as a BacklogMsg.
 	Backlog() tea.Cmd
+	// MoveToSprint moves key into the sprint id named name; the outcome arrives as a SprintMovedMsg. The board
+	// calls it only after the user confirmed.
+	MoveToSprint(key ticket.Key, sprint int, name string) tea.Cmd
 }
 
 // BoardState is what the board remembers between openings.
@@ -133,6 +136,13 @@ type SnapshotMsg struct {
 type BacklogMsg struct {
 	Backlog board.Backlog
 	Err     error
+}
+
+// SprintMovedMsg reports a ticket moved into a sprint, or why it could not be.
+type SprintMovedMsg struct {
+	Key    ticket.Key
+	Sprint string
+	Err    error
 }
 
 // AgentsMsg delivers the agent states read for the board fetched at FetchedAt.
@@ -1064,6 +1074,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.movesFetched(msg)
 	case AssignedMsg:
 		return m.assigned(msg)
+	case SprintMovedMsg:
+		if msg.Err != nil {
+			m.status = "could not move " + string(msg.Key) + " to " + msg.Sprint + ": " + msg.Err.Error()
+			return m, nil
+		}
+		m.status = string(msg.Key) + " moved to " + msg.Sprint
+		return m, tea.Batch(m.actions.Refresh(), m.beginLoading(), m.loadBacklog())
 	case TransitionedMsg:
 		return m.transitioned(msg)
 	case UsersListedMsg:

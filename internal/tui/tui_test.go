@@ -63,6 +63,11 @@ type recorder struct {
 	users map[string][]User
 }
 
+func (r *recorder) MoveToSprint(k ticket.Key, sprint int, name string) tea.Cmd {
+	r.calls = append(r.calls, fmt.Sprintf("sprint %s %d", k, sprint))
+	return func() tea.Msg { return SprintMovedMsg{Key: k, Sprint: name} }
+}
+
 func (r *recorder) Backlog() tea.Cmd {
 	r.calls = append(r.calls, "backlog")
 	return nil
@@ -3928,6 +3933,7 @@ func backlogData() board.Backlog {
 	return board.Backlog{
 		FetchedAt: time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC),
 		HasPoints: true,
+		Me:        "Ana López",
 		Sprints: []board.BacklogSprint{
 			{Sprint: jira.Sprint{ID: 40, Name: "UAC S42", State: "active", Start: time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC), End: nov(2)}, BoardName: uac, Tickets: []ticket.Ticket{
 				tk("DEMO-200", "Story", "Lock idle sessions", ticket.InProgress, 3, "Ana López", uac),
@@ -4173,8 +4179,7 @@ func TestBacklogTicketMenuAndLegend(t *testing.T) {
 func TestBacklogAssignKnowsTheAssigneeAndReloads(t *testing.T) {
 	r := backlogRecorder()
 	m := openBacklog(r, 180, BoardState{})
-	m = press(m, "enter")
-	m = press(m, "s", "s", "enter")
+	m = pick(t, press(m, "enter"), "Assign to")
 	if v := stripANSI(m.View()); !strings.Contains(v, "Assign DEMO-200 · now Ana López") || !strings.Contains(v, "Unassign") {
 		t.Fatalf("the assignee comes from the backlog:\n%s", v)
 	}
@@ -4291,4 +4296,126 @@ func TestTabsShowTheirKeyAndCountApart(t *testing.T) {
 			t.Errorf("tabs lack %q:\n%s", want, v)
 		}
 	}
+}
+
+// backlogMenu opens the menu of the backlog ticket key.
+func backlogMenu(t *testing.T, m tea.Model, key ticket.Key) tea.Model {
+	t.Helper()
+	for i := 0; i < 30; i++ {
+		if it, _ := m.(Model).current(); it.key == key {
+			return press(m, "enter")
+		}
+		m = press(m, "s")
+	}
+	t.Fatalf("%s not in the backlog", key)
+	return m
+}
+
+func TestBacklogMenuTitleTakesTwoLines(t *testing.T) {
+	m := backlogMenu(t, openBacklog(backlogRecorder(), 180, BoardState{}), "DEMO-214")
+	v := stripANSI(m.View())
+	title, sub := lineIndex(v, "Actions for DEMO-214"), lineIndex(v, "In Progress · Pablo Vera · User Access Center")
+	if title < 0 || sub != title+1 || strings.Contains(strings.Split(v, "\n")[title], "Pablo") {
+		t.Errorf("the details go on a second line:\n%s", v)
+	}
+}
+
+func TestBacklogStartsTheUsersTicketAtOnce(t *testing.T) {
+	r := backlogRecorder()
+	m := backlogMenu(t, openBacklog(r, 180, BoardState{}), "DEMO-210")
+	if v := stripANSI(m.View()); !strings.Contains(v, "▸ Start · open the agent") {
+		t.Fatalf("Start comes first:\n%s", v)
+	}
+	_, msg := run(m, "enter")
+	if _, ok := msg.(StartChoicesMsg); !ok || !slices.Contains(r.calls, "choices DEMO-210") || slices.ContainsFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, "assign") }) {
+		t.Errorf("the user's own ticket starts without asking: %v", r.calls)
+	}
+}
+
+func TestBacklogOffersToAssignBeforeStarting(t *testing.T) {
+	r := backlogRecorder()
+	m := backlogMenu(t, openBacklog(r, 180, BoardState{}), "DEMO-214")
+	m = press(m, "enter")
+	v := stripANSI(m.View())
+	for _, want := range []string{"DEMO-214 is not yours", "now Pablo Vera", "Assign it to me, then start", "Start without assigning", "Cancel"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("the offer lacks %q:\n%s", want, v)
+		}
+	}
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	drain(cmd)
+	if n := slices.Index(r.calls, "assign DEMO-214 me"); n < 0 || !slices.Contains(r.calls[n:], "choices DEMO-214") {
+		t.Errorf("assign first, then start: %v", r.calls)
+	}
+	r2 := backlogRecorder()
+	m = backlogMenu(t, openBacklog(r2, 180, BoardState{}), "DEMO-219")
+	m = press(m, "enter", "s", "enter")
+	if !slices.Contains(r2.calls, "choices DEMO-219") || slices.ContainsFunc(r2.calls, func(c string) bool { return strings.HasPrefix(c, "assign") }) {
+		t.Errorf("starting without assigning leaves Jira alone: %v", r2.calls)
+	}
+}
+
+func TestBacklogMovesATicketToItsBoardsCurrentSprint(t *testing.T) {
+	r := backlogRecorder()
+	m := backlogMenu(t, openBacklog(r, 180, BoardState{}), "DEMO-210")
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "Move to the current sprint · UAC S42") {
+		t.Fatalf("a future sprint's ticket can move to the board's active sprint:\n%s", v)
+	}
+	m = pick(t, m, "Move to the current sprint")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Move DEMO-210 to UAC S42?") {
+		t.Fatalf("moving asks first:\n%s", v)
+	}
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !slices.Contains(r.calls, "sprint DEMO-210 40") {
+		t.Fatalf("calls %v", r.calls)
+	}
+	m, _ = m.Update(cmd())
+	reloads := 0
+	for _, c := range r.calls {
+		if c == "backlog" {
+			reloads++
+		}
+	}
+	if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-210 moved to UAC S42") || reloads != 2 {
+		t.Errorf("a move says so and reloads the backlog (calls %v):\n%s", r.calls, v)
+	}
+	for _, key := range []ticket.Key{"DEMO-200", "DEMO-301"} {
+		m := backlogMenu(t, openBacklog(backlogRecorder(), 180, BoardState{}), key)
+		if v := stripANSI(m.View()); strings.Contains(v, "Move to the current sprint") {
+			t.Errorf("%s: already in it, or its board has none:\n%s", key, v)
+		}
+	}
+}
+
+func TestBacklogAsksWhichSprintWhenItsBoardRunsSeveral(t *testing.T) {
+	data := backlogData()
+	data.Sprints = append([]board.BacklogSprint{{Sprint: jira.Sprint{ID: 41, Name: "UAC S42b", State: "active"}, BoardName: "User Access Center"}}, data.Sprints...)
+	r := backlogRecorder()
+	m := tea.Model(New(snapshot(), true, r, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 180, Height: 40})
+	m = press(m, "3")
+	m, _ = m.Update(BacklogMsg{Backlog: data})
+	m = backlogMenu(t, m, "DEMO-210")
+	v := stripANSI(pick(t, m, "Move to the current sprint").View())
+	if !strings.Contains(v, "UAC S42b") || !strings.Contains(v, "UAC S42") || !strings.Contains(v, "Move DEMO-210 to which sprint?") {
+		t.Errorf("several active sprints ask which:\n%s", v)
+	}
+}
+
+// pick moves the open menu's cursor to the item whose label starts with label and runs it.
+func pick(t *testing.T, m tea.Model, label string) tea.Model {
+	t.Helper()
+	mn := m.(Model).menu
+	if mn == nil {
+		t.Fatalf("no menu open to pick %q", label)
+	}
+	for i := 0; i < len(mn.items); i++ {
+		if strings.HasPrefix(m.(Model).menu.items[m.(Model).menu.sel].label, label) {
+			return press(m, "enter")
+		}
+		m = press(m, "s")
+	}
+	t.Fatalf("menu has no %q", label)
+	return m
 }

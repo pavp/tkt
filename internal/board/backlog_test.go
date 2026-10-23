@@ -37,6 +37,10 @@ func (s *stubBacklog) FieldID(_ context.Context, name string) (string, error) {
 	return "", jira.ErrFieldNotFound
 }
 
+func (s *stubBacklog) Myself(context.Context) (jira.User, error) {
+	return jira.User{AccountID: "acc-me", DisplayName: "Dev Example"}, nil
+}
+
 func (s *stubBacklog) BrowseURL(key string) string {
 	return "https://example.atlassian.net/browse/" + key
 }
@@ -115,6 +119,9 @@ func TestBacklogGroupsActiveSprintsThenFutureSoonestFirstThenTheBacklog(t *testi
 	}
 	if !got.HasPoints {
 		t.Error("the space has a story points field")
+	}
+	if got.Me != "Dev Example" {
+		t.Errorf("the backlog knows who the user is: %q", got.Me)
 	}
 	if !got.FetchedAt.Equal(now) {
 		t.Errorf("fetched at %v", got.FetchedAt)
