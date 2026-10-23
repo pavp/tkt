@@ -80,6 +80,15 @@ type Actions interface {
 	// MoveToSprint moves key into the sprint id named name; the outcome arrives as a SprintMovedMsg. The board
 	// calls it only after the user confirmed.
 	MoveToSprint(key ticket.Key, sprint int, name string) tea.Cmd
+	// InHerdr reports whether the board runs inside Herdr, whose agents can take tasks.
+	InHerdr() bool
+	// OpenAgents lists the agents open in Herdr that task can go to, the free ones in its repository first; they
+	// arrive as an AgentsListedMsg.
+	OpenAgents(task AgentTask) tea.Cmd
+	// SendTask prompts the agent in pane with task and focuses it.
+	SendTask(task AgentTask, pane string) tea.Cmd
+	// CopyTaskPrompt puts task's prompt on the clipboard, for an agent outside Herdr.
+	CopyTaskPrompt(task AgentTask) tea.Cmd
 }
 
 // BoardState is what the board remembers between openings.
@@ -1078,6 +1087,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.movesFetched(msg)
 	case AssignedMsg:
 		return m.assigned(msg)
+	case AgentsListedMsg:
+		return m.agentsListed(msg)
 	case SprintMovedMsg:
 		if msg.Err != nil {
 			m.status = "could not move " + string(msg.Key) + " to " + msg.Sprint + ": " + msg.Err.Error()
@@ -3073,8 +3084,13 @@ func (m Model) preview() string {
 		}
 	}
 	hint := actionHint(*t)
-	if m.filter == FilterBacklog {
+	switch {
+	case m.filter == FilterBacklog:
 		hint = "enter for actions"
+	case strings.HasPrefix(hint, "f sends") && !m.actions.InHerdr():
+		hint = "f copies the feedback prompt"
+	case strings.HasPrefix(hint, "f sends") && m.snap.Agents[string(t.Key)] == "":
+		hint = strings.Replace(hint, "to the agent", "to an agent", 1)
 	}
 	if hint != "" {
 		parts = append(parts, hint)

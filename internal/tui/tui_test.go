@@ -61,6 +61,25 @@ type recorder struct {
 	comment     string
 	// users answers Users per query.
 	users map[string][]User
+	// outsideHerdr makes InHerdr false; agents answers OpenAgents.
+	outsideHerdr bool
+	agents       []OpenAgent
+}
+
+func (r *recorder) InHerdr() bool { return !r.outsideHerdr }
+
+func (r *recorder) OpenAgents(task AgentTask) tea.Cmd {
+	r.calls = append(r.calls, "agents "+task.String())
+	agents := r.agents
+	return func() tea.Msg { return AgentsListedMsg{Task: task, Agents: agents} }
+}
+
+func (r *recorder) SendTask(task AgentTask, pane string) tea.Cmd {
+	return r.cmd("send " + task.String() + " " + pane)
+}
+
+func (r *recorder) CopyTaskPrompt(task AgentTask) tea.Cmd {
+	return r.cmd("copy prompt " + task.String())
 }
 
 func (r *recorder) MoveToSprint(k ticket.Key, sprint int, name string) tea.Cmd {
@@ -422,7 +441,7 @@ func TestFilters(t *testing.T) {
 
 func TestActionKeys(t *testing.T) {
 	r := &recorder{}
-	m := press(loaded(r), "l")
+	m := press(withAgent(loaded(r), "DEMO-1"), "l")
 	tests := []struct{ key, want string }{
 		{"f", "fix DEMO-1 known"},
 		{"o", "open https://example.atlassian.net/browse/DEMO-1"},
@@ -579,7 +598,7 @@ func TestMatchesMockupDetails(t *testing.T) {
 		}
 	}
 	next = press(next, "l")
-	if !strings.Contains(stripANSI(next.View()), "DEMO-1  In Progress  · Filter accounts\n unassigned · CI failing · #812 · f sends the failure to the agent") {
+	if !strings.Contains(stripANSI(next.View()), "DEMO-1  In Progress  · Filter accounts\n unassigned · CI failing · #812 · f sends the failure to an agent") {
 		t.Errorf("preview hint missing:\n%s", stripANSI(next.View()))
 	}
 }
@@ -1132,7 +1151,7 @@ func TestStartWithNothingToAskRunsAtOnce(t *testing.T) {
 
 func TestActionsMenu(t *testing.T) {
 	r := &recorder{}
-	m := press(loaded(r), "l", "enter")
+	m := press(withAgent(loaded(r), "DEMO-1"), "l", "enter")
 	v := stripANSI(m.View())
 	for _, want := range []string{"Actions for DEMO-1", "In Progress", "Start · open the agent", "Show details", "Open the ticket pane next to its agent", "Open in Jira ↗", "Open #812 ✕ in GitHub ↗", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
 		if !strings.Contains(v, want) {
@@ -1568,7 +1587,7 @@ func TestPRsFilterListsMyOpenPRsThenReviews(t *testing.T) {
 
 func TestPRsFilterActsOnTheRowsTicket(t *testing.T) {
 	r := &recorder{}
-	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m := withAgent(tea.Model(New(prsSnapshot(), false, r, ViewList)), "DEMO-4")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = press(m, "2")
 	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#815"); i++ {
@@ -1583,7 +1602,7 @@ func TestPRsFilterActsOnTheRowsTicket(t *testing.T) {
 
 func TestPRMenuLeadsWithThePullRequest(t *testing.T) {
 	r := &recorder{}
-	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m := withAgent(tea.Model(New(prsSnapshot(), false, r, ViewList)), "DEMO-4")
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = press(m, "2")
 	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#815"); i++ {
@@ -1645,7 +1664,7 @@ func TestPRMenuOffersTheFixForItsReason(t *testing.T) {
 		pr.Repo, pr.Number, pr.State, pr.URL = "example-org/web", 900, ticket.PROpen, "https://github.com/example-org/web/pull/900"
 		snap := prsSnapshot()
 		snap.Tickets = []ticket.Ticket{{Key: "DEMO-9", Summary: "Rename", Status: "In Review", Category: ticket.InReview, PRs: []ticket.PullRequest{pr}}}
-		m := tea.Model(New(snap, false, &recorder{}, ViewList))
+		m := withAgent(tea.Model(New(snap, false, &recorder{}, ViewList)), "DEMO-9")
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 		v := stripANSI(press(m, "2", "enter").View())
 		if !strings.Contains(v, tt.want) {
@@ -3706,7 +3725,7 @@ func TestMoveToSaysItIsLoadingUntilJiraAnswers(t *testing.T) {
 
 func TestFixFromTheMenuSaysItIsWorking(t *testing.T) {
 	r := &recorder{}
-	m := selectMenuItem(t, press(loaded(r), "l", "enter"), "Send the CI failure to the agent")
+	m := selectMenuItem(t, press(withAgent(loaded(r), "DEMO-1"), "l", "enter"), "Send the CI failure to the agent")
 	m = press(m, "enter")
 	if r.last() != "fix DEMO-1 known" {
 		t.Fatalf("fix should reuse the board's ticket: %v", r.calls)
@@ -4472,4 +4491,137 @@ func TestSprintMenuShowsALongStatusWhole(t *testing.T) {
 	if !strings.Contains(lines[1], "Actions for DEMO-170446") || !strings.Contains(lines[2]+" "+lines[3], "Ready to be Released by the release train") || strings.Contains(lines[2], "…") {
 		t.Errorf("the status goes whole under the title:\n%s", strings.Join(lines, "\n"))
 	}
+}
+
+func openAgentsFixture() []OpenAgent {
+	return []OpenAgent{
+		{Name: "claude", Pane: "w1:p1", Status: "idle", Folder: "/src/web", SameRepo: true},
+		{Name: "claude-2", Pane: "w2:p1", Status: "done", Folder: "/src/api"},
+		{Name: "claude-3", Pane: "w3:p1", Status: "working", Folder: "/src/web-DEMO-2", SameRepo: true},
+	}
+}
+
+// reviewMenu opens the PRs filter's menu of the review request #820.
+func reviewMenu(t *testing.T, r *recorder) tea.Model {
+	t.Helper()
+	m := press(loaded(r), "2")
+	for i := 0; i < 10; i++ {
+		if it, _ := m.(Model).current(); it.review() {
+			return press(m, "enter")
+		}
+		m = press(m, "s")
+	}
+	t.Fatal("no review request")
+	return m
+}
+
+func TestReviewRequestGoesToAnOpenAgent(t *testing.T) {
+	r := &recorder{agents: openAgentsFixture()}
+	m := pick(t, reviewMenu(t, r), "Review with an open agent")
+	if !slices.Contains(r.calls, "agents review of #820") {
+		t.Fatalf("calls %v", r.calls)
+	}
+	m, _ = m.Update(AgentsListedMsg{Task: AgentTask{Review: &ticket.PullRequest{Repo: "example-org/web", Number: 820}}, Agents: openAgentsFixture()})
+	v := stripANSI(m.View())
+	order := []string{"Send the review of #820 to", "claude · web · idle", "claude-2 · api · done", "claude-3 · web-DEMO-2 · working, it queues"}
+	last := -1
+	for _, want := range order {
+		at := lineIndex(v, want)
+		if at <= last {
+			t.Fatalf("%q missing or out of order:\n%s", want, v)
+		}
+		last = at
+	}
+	m = pick(t, m, "claude-3")
+	if !slices.Contains(r.calls, "send review of #820 w3:p1") {
+		t.Errorf("a working agent can still take it, queued: %v", r.calls)
+	}
+}
+
+func TestReviewPromptIsCopiedOutsideHerdr(t *testing.T) {
+	r := &recorder{outsideHerdr: true}
+	m := reviewMenu(t, r)
+	if v := stripANSI(m.View()); strings.Contains(v, "Review with") {
+		t.Fatalf("outside Herdr there is no agent to pick:\n%s", v)
+	}
+	pick(t, m, "Copy the review prompt")
+	if !slices.Contains(r.calls, "copy prompt review of #820") {
+		t.Errorf("calls %v", r.calls)
+	}
+}
+
+func TestNoOpenAgentSaysSo(t *testing.T) {
+	r := &recorder{}
+	m := pick(t, reviewMenu(t, r), "Review with an open agent")
+	m, _ = m.Update(AgentsListedMsg{Task: AgentTask{Review: &ticket.PullRequest{Number: 820}}})
+	if v := stripANSI(m.View()); !strings.Contains(v, "no agent is open in Herdr") || strings.Contains(v, "Send the review") {
+		t.Errorf("an empty list says so:\n%s", v)
+	}
+}
+
+func TestFeedbackGoesToItsAgentOrAnother(t *testing.T) {
+	r := &recorder{agents: openAgentsFixture()}
+	snap := snapshot()
+	snap.Agents = map[string]string{"DEMO-1": "claude working"}
+	m := tea.Model(New(snap, true, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	for i := 0; i < 5; i++ {
+		if it, _ := m.(Model).current(); it.key == "DEMO-1" {
+			break
+		}
+		m = press(m, "s")
+	}
+	menu := press(m, "enter")
+	v := stripANSI(menu.View())
+	if !strings.Contains(v, "Send the CI failure to the agent") || !strings.Contains(v, "Send its feedback to another agent ▸") {
+		t.Fatalf("its own agent first, then another:\n%s", v)
+	}
+	pick(t, menu, "Send its feedback to another agent")
+	if !slices.Contains(r.calls, "agents DEMO-1's feedback") {
+		t.Errorf("calls %v", r.calls)
+	}
+	if _, msg := run(m, "f"); msg != StatusMsg("fix DEMO-1 known") {
+		t.Errorf("f still sends to its agent: %v", msg)
+	}
+}
+
+func TestFeedbackWithoutAnAgentAsksWhichOne(t *testing.T) {
+	r := &recorder{agents: openAgentsFixture()}
+	m := tea.Model(New(snapshot(), true, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	for i := 0; i < 5; i++ {
+		if it, _ := m.(Model).current(); it.key == "DEMO-1" {
+			break
+		}
+		m = press(m, "s")
+	}
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Send the CI failure to an agent ▸") || strings.Contains(v, "to the agent") {
+		t.Fatalf("without its own agent, the fix picks one:\n%s", v)
+	}
+	press(m, "f")
+	if !slices.Contains(r.calls, "agents DEMO-1's feedback") || slices.Contains(r.calls, "fix DEMO-1") {
+		t.Errorf("f asks which agent: %v", r.calls)
+	}
+	out := &recorder{outsideHerdr: true}
+	o := tea.Model(New(snapshot(), true, out, ViewList))
+	o, _ = o.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	for i := 0; i < 5; i++ {
+		if it, _ := o.(Model).current(); it.key == "DEMO-1" {
+			break
+		}
+		o = press(o, "s")
+	}
+	if v := stripANSI(press(o, "enter").View()); !strings.Contains(v, "Copy the feedback prompt") {
+		t.Errorf("outside Herdr the fix copies its prompt:\n%s", v)
+	}
+	press(o, "f")
+	if !slices.Contains(out.calls, "copy prompt DEMO-1's feedback") {
+		t.Errorf("calls %v", out.calls)
+	}
+}
+
+// withAgent gives key an idle agent in Herdr, so its feedback goes straight to it.
+func withAgent(m tea.Model, key string) tea.Model {
+	m, _ = m.Update(AgentsMsg{FetchedAt: m.(Model).snap.FetchedAt, Agents: map[string]string{key: "claude idle"}})
+	return m
 }

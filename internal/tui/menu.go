@@ -63,10 +63,12 @@ func (m Model) buildMenu(it item) *menu {
 		if it.review() {
 			subtitle += " · review requested"
 		}
-		return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: cmp.Or(pr.Repo, "unknown repository") + " · " + subtitle, items: []menuItem{
-			{label: "Open in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }},
-			{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }},
-		}}
+		items := []menuItem{{label: "Open in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}}
+		if it.review() {
+			items = append(items, m.reviewItem(pr))
+		}
+		items = append(items, menuItem{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
+		return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: cmp.Or(pr.Repo, "unknown repository") + " · " + subtitle, items: items}
 	}
 	t := *it.ticket
 	if t.Team {
@@ -88,8 +90,8 @@ func (m Model) buildMenu(it item) *menu {
 	default:
 		items = append(items, menuItem{label: fmt.Sprintf("Pull requests (%d) ▸", len(t.PRs)), key: "p", sub: func() *menu { return m.prsMenu(t) }})
 	}
-	for _, r := range t.Attention() {
-		items = append(items, menuItem{label: fixLabel(r), key: "f", fix: t.Key})
+	if reasons := t.Attention(); len(reasons) > 0 {
+		items = append(items, m.feedbackItems(t, reasons[0])...)
 	}
 	items = append(items, m.moveItem(t.Key), m.assignItem(t.Key))
 	if len(t.PRs) == 1 && t.PRs[0].URL != "" {
@@ -110,7 +112,7 @@ func (m Model) prMenu(it item) *menu {
 	pr, t := *it.pr, *it.ticket
 	items := []menuItem{{label: fmt.Sprintf("Open #%d in GitHub ↗", pr.Number), key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}}
 	if reasons := pr.Attention(); len(reasons) > 0 {
-		items = append(items, menuItem{label: fixLabel(reasons[0]), key: "f", fix: t.Key})
+		items = append(items, m.feedbackItems(t, reasons[0])...)
 	}
 	items = append(items,
 		menuItem{label: m.startLabel(t.Key), run: func() tea.Cmd { return a.StartChoices(t.Key) }},
