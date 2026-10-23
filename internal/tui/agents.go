@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -36,6 +37,8 @@ func (t AgentTask) phrase() string {
 // OpenAgent is an agent running in Herdr, as the "an open agent" menus list it.
 type OpenAgent struct {
 	Name, Pane, Status, Folder string
+	// Workspace is the label of the Herdr workspace the agent runs in.
+	Workspace string
 	// Repo ("owner/name") and Branch say what the agent's checkout holds, Ticket the key in that branch; all
 	// empty outside a git checkout.
 	Repo, Branch string
@@ -78,7 +81,7 @@ func (m Model) agentsListed(msg AgentsListedMsg) (tea.Model, tea.Cmd) {
 }
 
 // agentsMenu offers the open agents in the order they arrive, the free ones first, each named with its repository,
-// ticket and status over its branch; a working agent can still take the task, which waits in its queue until it
+// ticket and status over its Herdr workspace, folder and branch; a working agent can still take the task, which waits in its queue until it
 // finishes.
 func (m Model) agentsMenu(task AgentTask, agents []OpenAgent) *menu {
 	var items []menuItem
@@ -94,9 +97,21 @@ func (m Model) agentsMenu(task AgentTask, agents []OpenAgent) *menu {
 		if status == "working" {
 			status = "working, it queues"
 		}
-		items = append(items, menuItem{label: strings.Join(append(parts, status), " · "), note: ag.Branch, run: func() tea.Cmd { return m.actions.SendTask(task, ag.Pane) }})
+		where := strings.TrimSpace(ag.Workspace + "  " + homeShort(ag.Folder))
+		note := strings.TrimSpace(where + "\n" + ag.Branch)
+		items = append(items, menuItem{label: strings.Join(append(parts, status), " · "), note: note, run: func() tea.Cmd { return m.actions.SendTask(task, ag.Pane) }})
 	}
 	return &menu{title: "Send " + task.phrase() + " to", subtitle: "an agent open in Herdr", items: items}
+}
+
+// homeShort writes a folder under the user's home as "~/…".
+func homeShort(dir string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if rest, ok := strings.CutPrefix(dir, home); ok && (rest == "" || strings.HasPrefix(rest, "/")) {
+			return "~" + rest
+		}
+	}
+	return dir
 }
 
 // agentChoice asks which agent takes a task: a new one, placed where its work belongs, or one already open.

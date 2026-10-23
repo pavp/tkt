@@ -34,6 +34,12 @@ func (b *boardActions) OpenAgents(task tui.AgentTask) tea.Cmd {
 			return tui.AgentsListedMsg{Task: task, Err: err}
 		}
 		wanted, res := taskRepos(task), b.a.Resolver(b.cfg())
+		labels := map[string]string{}
+		if wss, err := b.a.NewHerdr().Workspaces(ctx); err == nil {
+			for _, ws := range wss {
+				labels[ws.ID] = ws.Label
+			}
+		}
 		var out []tui.OpenAgent
 		for _, ag := range agents {
 			if ag.Agent == "" {
@@ -41,7 +47,7 @@ func (b *boardActions) OpenAgents(task tui.AgentTask) tea.Cmd {
 			}
 			repo, _ := res.RepoAt(ctx, ag.Cwd)
 			agent := tui.OpenAgent{
-				Name: cmp.Or(ag.Name, ag.Agent), Pane: ag.PaneID, Status: ag.Status, Folder: ag.Cwd, Repo: repo,
+				Name: cmp.Or(ag.Name, ag.Agent), Pane: ag.PaneID, Status: ag.Status, Folder: ag.Cwd, Repo: repo, Workspace: labels[ag.WorkspaceID],
 				SameRepo: repo != "" && slices.Contains(wanted, repo),
 			}
 			if repo != "" {

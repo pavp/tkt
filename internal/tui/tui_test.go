@@ -4505,7 +4505,7 @@ func openAgentsFixture() []OpenAgent {
 	return []OpenAgent{
 		{Name: "claude", Pane: "w1:p1", Status: "idle", Folder: "/src/web", Repo: "example-org/web", Branch: "main", SameRepo: true},
 		{Name: "claude-2", Pane: "w2:p1", Status: "done", Folder: "/src/api", Repo: "example-org/api", Branch: "feature/DEMO-31-limits", Ticket: "DEMO-31"},
-		{Name: "claude-3", Pane: "w3:p1", Status: "working", Folder: "/src/web-DEMO-2", Repo: "example-org/web", Branch: "feature/DEMO-2-pager", Ticket: "DEMO-2", SameRepo: true},
+		{Name: "claude-3", Pane: "w3:p1", Status: "working", Folder: "/src/web-DEMO-2", Workspace: "DEMO-2 · web", Repo: "example-org/web", Branch: "feature/DEMO-2-pager", Ticket: "DEMO-2", SameRepo: true},
 		{Name: "claude-4", Pane: "w4:p1", Status: "idle", Folder: "/tmp/notes"},
 	}
 }
@@ -4657,8 +4657,8 @@ func TestAgentListPutsTheBranchUnderEachAgent(t *testing.T) {
 	m, _ = m.Update(AgentsListedMsg{Task: AgentTask{Review: &ticket.PullRequest{Number: 820}}, Agents: openAgentsFixture()})
 	lines := strings.Split(stripANSI(m.(Model).menuView()), "\n")
 	at := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "claude-3 · web · DEMO-2") })
-	if at < 0 || !strings.Contains(lines[at+1], "feature/DEMO-2-pager") || strings.Contains(lines[at+1], "claude") {
-		t.Fatalf("the branch goes on its own line:\n%s", strings.Join(lines, "\n"))
+	if at < 0 || !strings.Contains(lines[at+1], "DEMO-2 · web  /src/web-DEMO-2") || !strings.Contains(lines[at+2], "feature/DEMO-2-pager") {
+		t.Fatalf("where it runs, then its branch, under each agent:\n%s", strings.Join(lines, "\n"))
 	}
 	if strings.Contains(strings.Join(lines, "\n"), "notes\n") {
 		t.Errorf("a folder outside git has no branch line:\n%s", strings.Join(lines, "\n"))

@@ -16,7 +16,7 @@ import (
 
 type menuItem struct {
 	label string
-	// note, when set, is a dimmed line under the label that belongs to the item.
+	// note, when set, is dimmed lines under the label that belong to the item.
 	note string
 	key  string
 	run  func() tea.Cmd
@@ -379,7 +379,9 @@ func (m Model) menuLines() (lines []string, rows []int) {
 		}
 		lines, rows = append(lines, line), append(rows, i)
 		if it.note != "" {
-			lines, rows = append(lines, "  "+dim.Render(ansi.Truncate(it.note, width-6, "…"))), append(rows, i)
+			for _, n := range strings.Split(it.note, "\n") {
+				lines, rows = append(lines, "  "+dim.Render(ansi.Truncate(n, width-6, "…"))), append(rows, i)
+			}
 		}
 	}
 	// The footer grows on an item with a link; it keeps the height of its longer wording so the box stays still.
