@@ -16,8 +16,10 @@ import (
 
 type menuItem struct {
 	label string
-	key   string
-	run   func() tea.Cmd
+	// note, when set, is dimmed lines under the label that belong to the item.
+	note string
+	key  string
+	run  func() tea.Cmd
 	// detail, when set, opens that ticket's detail view instead of running an action.
 	detail ticket.Key
 	// link is the URL c copies while the item is highlighted.
@@ -63,10 +65,7 @@ func (m Model) buildMenu(it item) *menu {
 		if it.review() {
 			subtitle += " · review requested"
 		}
-		items := []menuItem{{label: "Open in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}}
-		if it.review() {
-			items = append(items, m.reviewItem(pr))
-		}
+		items := []menuItem{{label: "Open in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}, m.reviewItem(pr)}
 		items = append(items, menuItem{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
 		return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: cmp.Or(pr.Repo, "unknown repository") + " · " + subtitle, items: items}
 	}
@@ -114,6 +113,7 @@ func (m Model) prMenu(it item) *menu {
 	if reasons := pr.Attention(); len(reasons) > 0 {
 		items = append(items, m.feedbackItems(t, reasons[0])...)
 	}
+	items = append(items, m.reviewItem(pr))
 	items = append(items,
 		menuItem{label: m.startLabel(t.Key), run: func() tea.Cmd { return a.StartChoices(t.Key) }},
 		menuItem{label: "Open the ticket pane next to its agent", run: func() tea.Cmd { return a.TicketPane(t.Key) }},
@@ -341,8 +341,9 @@ const menuMaxWidth = 44
 // menuMinWidth keeps a short menu wide enough that its subtitle wraps into a line or two, not a column of words.
 const menuMinWidth = 46
 
-// menuLines are the menu box's lines inside its border and padding, and the line its first item is on.
-func (m Model) menuLines() (lines []string, firstItem int) {
+// menuLines are the menu box's lines inside its border and padding, and for each line the item on it (-1 for the
+// title, details and footer), an item's note lines included.
+func (m Model) menuLines() (lines []string, rows []int) {
 	mn := m.menu
 	const keys, linkKeys = "enter run · esc close", "enter run · c copy link · esc close"
 	width := max(menuMinWidth, min(lipgloss.Width(mn.title)+6, menuMaxWidth))
@@ -362,7 +363,9 @@ func (m Model) menuLines() (lines []string, firstItem int) {
 		}
 	}
 	lines = append(lines, "")
-	firstItem = len(lines)
+	for range lines {
+		rows = append(rows, -1)
+	}
 	for i, it := range mn.items {
 		hint := ""
 		if it.key != "" {
@@ -374,7 +377,12 @@ func (m Model) menuLines() (lines []string, firstItem int) {
 		if i == mn.sel {
 			line = selected.Render("▸ "+label+strings.Repeat(" ", gap-2)) + hint
 		}
-		lines = append(lines, line)
+		lines, rows = append(lines, line), append(rows, i)
+		if it.note != "" {
+			for _, n := range strings.Split(it.note, "\n") {
+				lines, rows = append(lines, "  "+dim.Render(ansi.Truncate(n, width-6, "…"))), append(rows, i)
+			}
+		}
 	}
 	// The footer grows on an item with a link; it keeps the height of its longer wording so the box stays still.
 	foot := wrapped(keys)
@@ -388,7 +396,10 @@ func (m Model) menuLines() (lines []string, firstItem int) {
 	for range len(wrapped(linkKeys)) - len(foot) {
 		lines = append(lines, "")
 	}
-	return lines, firstItem
+	for len(rows) < len(lines) {
+		rows = append(rows, -1)
+	}
+	return lines, rows
 }
 
 // menuItemAt maps a click to a menu item, given where View centered the menu box.
@@ -397,11 +408,10 @@ func (m Model) menuItemAt(x, y, top, height int) int {
 	bw, bh := lipgloss.Width(box), lipgloss.Height(box)
 	left := (m.width - bw) / 2
 	boxTop := top + (height-bh)/2
-	// The border, then the title, its subtitle lines and a blank line come before the first item.
-	_, first := m.menuLines()
-	i := y - boxTop - 1 - first
-	if x < left || x >= left+bw || i < 0 || i >= len(m.menu.items) {
+	_, rows := m.menuLines()
+	line := y - boxTop - 1
+	if x < left || x >= left+bw || line < 0 || line >= len(rows) {
 		return -1
 	}
-	return i
+	return rows[line]
 }
