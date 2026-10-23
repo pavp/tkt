@@ -26,6 +26,7 @@ func agentsHarness(t *testing.T) (*boardActions, *harness, *herdrtest.FakeServer
 	h.run.out["remote /src/web-DEMO-2"] = "git@github.com:example-org/web.git"
 	h.run.out["remote /src/api"] = "git@github.com:example-org/api.git"
 	h.run.out["pbcopy"] = ""
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-2-pager"
 	c, err := h.app.LoadConfig()
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +47,9 @@ func TestOpenAgentsPutTheFreeOnesOfTheRepositoryFirst(t *testing.T) {
 	}
 	if strings.Join(order, ", ") != "claude idle, claude-2 done, claude-3 working" {
 		t.Errorf("free in the repository, free elsewhere, then working; panes without an agent left out: %v", order)
+	}
+	if a := got.Agents[0]; a.Repo != "example-org/web" || a.Branch != "feature/DEMO-2-pager" || a.Ticket != "DEMO-2" {
+		t.Errorf("each agent says what it works on: %+v", a)
 	}
 	if !got.Agents[0].SameRepo || got.Agents[1].SameRepo || got.Agents[0].Pane != "w1:p1" || got.Agents[0].Folder != "/src/web" {
 		t.Errorf("agents %+v", got.Agents)

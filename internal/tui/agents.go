@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -35,6 +36,10 @@ func (t AgentTask) phrase() string {
 // OpenAgent is an agent running in Herdr, as the "an open agent" menus list it.
 type OpenAgent struct {
 	Name, Pane, Status, Folder string
+	// Repo ("owner/name") and Branch say what the agent's checkout holds, Ticket the key in that branch; all
+	// empty outside a git checkout.
+	Repo, Branch string
+	Ticket       ticket.Key
 	// SameRepo marks an agent working in a checkout of the task's repository.
 	SameRepo bool
 }
@@ -58,16 +63,24 @@ func (m Model) agentsListed(msg AgentsListedMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// agentsMenu offers the open agents in the order they arrive, the free ones first; a working agent can still
-// take the task, which waits in its queue until it finishes.
+// agentsMenu offers the open agents in the order they arrive, the free ones first, each named with its repository,
+// ticket and status over its branch; a working agent can still take the task, which waits in its queue until it
+// finishes.
 func (m Model) agentsMenu(task AgentTask, agents []OpenAgent) *menu {
 	var items []menuItem
 	for _, ag := range agents {
+		parts := []string{ag.Name, filepath.Base(ag.Folder)}
+		if _, name, ok := strings.Cut(ag.Repo, "/"); ok {
+			parts[1] = name
+		}
+		if ag.Ticket != "" {
+			parts = append(parts, string(ag.Ticket))
+		}
 		status := ag.Status
 		if status == "working" {
 			status = "working, it queues"
 		}
-		items = append(items, menuItem{label: ag.Name + " · " + filepath.Base(ag.Folder) + " · " + status, run: func() tea.Cmd { return m.actions.SendTask(task, ag.Pane) }})
+		items = append(items, menuItem{label: strings.Join(append(parts, status), " · "), note: ag.Branch, run: func() tea.Cmd { return m.actions.SendTask(task, ag.Pane) }})
 	}
 	return &menu{title: "Send " + task.phrase() + " to", subtitle: "an agent open in Herdr", items: items}
 }

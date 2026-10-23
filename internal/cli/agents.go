@@ -37,10 +37,17 @@ func (b *boardActions) OpenAgents(task tui.AgentTask) tea.Cmd {
 				continue
 			}
 			repo, _ := res.RepoAt(ctx, ag.Cwd)
-			out = append(out, tui.OpenAgent{
-				Name: cmp.Or(ag.Name, ag.Agent), Pane: ag.PaneID, Status: ag.Status, Folder: ag.Cwd,
+			agent := tui.OpenAgent{
+				Name: cmp.Or(ag.Name, ag.Agent), Pane: ag.PaneID, Status: ag.Status, Folder: ag.Cwd, Repo: repo,
 				SameRepo: repo != "" && slices.Contains(wanted, repo),
-			})
+			}
+			if repo != "" {
+				if head, err := b.a.Run.Run(ctx, ag.Cwd, "git", []string{"rev-parse", "--abbrev-ref", "HEAD"}, nil); err == nil {
+					agent.Branch = strings.TrimSpace(string(head))
+					agent.Ticket, _ = ticket.KeyInBranch(agent.Branch, b.cfg().SpaceKeys())
+				}
+			}
+			out = append(out, agent)
 		}
 		rank := func(ag tui.OpenAgent) int {
 			free := ag.Status == "idle" || ag.Status == "done"

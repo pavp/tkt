@@ -4499,9 +4499,10 @@ func TestSprintMenuShowsALongStatusWhole(t *testing.T) {
 
 func openAgentsFixture() []OpenAgent {
 	return []OpenAgent{
-		{Name: "claude", Pane: "w1:p1", Status: "idle", Folder: "/src/web", SameRepo: true},
-		{Name: "claude-2", Pane: "w2:p1", Status: "done", Folder: "/src/api"},
-		{Name: "claude-3", Pane: "w3:p1", Status: "working", Folder: "/src/web-DEMO-2", SameRepo: true},
+		{Name: "claude", Pane: "w1:p1", Status: "idle", Folder: "/src/web", Repo: "example-org/web", Branch: "main", SameRepo: true},
+		{Name: "claude-2", Pane: "w2:p1", Status: "done", Folder: "/src/api", Repo: "example-org/api", Branch: "feature/DEMO-31-limits", Ticket: "DEMO-31"},
+		{Name: "claude-3", Pane: "w3:p1", Status: "working", Folder: "/src/web-DEMO-2", Repo: "example-org/web", Branch: "feature/DEMO-2-pager", Ticket: "DEMO-2", SameRepo: true},
+		{Name: "claude-4", Pane: "w4:p1", Status: "idle", Folder: "/tmp/notes"},
 	}
 }
 
@@ -4527,7 +4528,7 @@ func TestReviewRequestGoesToAnOpenAgent(t *testing.T) {
 	}
 	m, _ = m.Update(AgentsListedMsg{Task: AgentTask{Review: &ticket.PullRequest{Repo: "example-org/web", Number: 820}}, Agents: openAgentsFixture()})
 	v := stripANSI(m.View())
-	order := []string{"Send the review of #820 to", "claude · web · idle", "claude-2 · api · done", "claude-3 · web-DEMO-2 · working, it queues"}
+	order := []string{"Send the review of #820 to", "claude · web · idle", "main", "claude-2 · api · DEMO-31 · done", "feature/DEMO-31-limits", "claude-3 · web · DEMO-2 · working, it queues", "feature/DEMO-2-pager", "claude-4 · notes · idle"}
 	last := -1
 	for _, want := range order {
 		at := lineIndex(v, want)
@@ -4643,5 +4644,28 @@ func TestReviewRequestGoesToANewAgent(t *testing.T) {
 	pick(t, m, "A new agent")
 	if !slices.Contains(r.calls, "new agent review of #820") {
 		t.Errorf("calls %v", r.calls)
+	}
+}
+
+func TestAgentListPutsTheBranchUnderEachAgent(t *testing.T) {
+	r := &recorder{agents: openAgentsFixture()}
+	m := pick(t, pick(t, reviewMenu(t, r), "Review with"), "An open agent")
+	m, _ = m.Update(AgentsListedMsg{Task: AgentTask{Review: &ticket.PullRequest{Number: 820}}, Agents: openAgentsFixture()})
+	lines := strings.Split(stripANSI(m.(Model).menuView()), "\n")
+	at := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, "claude-3 · web · DEMO-2") })
+	if at < 0 || !strings.Contains(lines[at+1], "feature/DEMO-2-pager") || strings.Contains(lines[at+1], "claude") {
+		t.Fatalf("the branch goes on its own line:\n%s", strings.Join(lines, "\n"))
+	}
+	if strings.Contains(strings.Join(lines, "\n"), "notes\n") {
+		t.Errorf("a folder outside git has no branch line:\n%s", strings.Join(lines, "\n"))
+	}
+	v := m.View()
+	y := lineIndex(v, "feature/DEMO-2-pager")
+	m, cmd := m.Update(tea.MouseMsg{X: m.(Model).width / 2, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if cmd != nil {
+		cmd()
+	}
+	if !slices.Contains(r.calls, "send review of #820 w3:p1") {
+		t.Errorf("a click on the branch line picks its agent: %v", r.calls)
 	}
 }
