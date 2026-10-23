@@ -2159,11 +2159,11 @@ func (m Model) listView() string {
 	if m.filter != FilterPRs {
 		for _, it := range measured {
 			if it.ticket != nil && it.ticket.Points != 0 {
-				pointsW = max(pointsW, lipgloss.Width("SP"), lipgloss.Width(pointsCell(it.ticket.Points, 1)))
+				pointsW = max(pointsW, lipgloss.Width("SP"), lipgloss.Width(strings.TrimSpace(pointsCell(it.ticket.Points, 1))))
 			}
 		}
 		if pointsW > 0 {
-			pointsW++
+			pointsW += 2
 		}
 	}
 	// Narrow panes drop AGENT first, then shrink PR / CI, then STATUS, so the title always keeps some room.
@@ -2224,7 +2224,7 @@ const (
 	authorMaxWidth   = 20
 )
 
-// pointsCell is a list row's story points, padded to pointsW (which includes its gap); blank when unestimated.
+// pointsCell is a list row's story points, padded to pointsW (which includes a space on each side); blank when unestimated.
 func pointsCell(p float64, pointsW int) string {
 	if pointsW == 0 {
 		return ""
@@ -2233,7 +2233,7 @@ func pointsCell(p float64, pointsW int) string {
 	if p != 0 {
 		n = strconv.FormatFloat(p, 'f', -1, 64)
 	}
-	return pad(n, pointsW)
+	return " " + pad(n, pointsW-1)
 }
 
 // authorCell is a pull request row's author, padded to authorW (which includes its gap).
@@ -2370,7 +2370,7 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		header = pad(label, assigneeW) + header
 	}
 	if pointsW > 0 {
-		header = pad("SP", pointsW) + header
+		header = " " + pad("SP", pointsW-1) + header
 	}
 	heads := m.listHeads()
 	lines := []string{"  " + dim.Render(row(heads[0], heads[1], header, heads[2], "TITLE")), dim.Render(strings.Repeat("─", m.width))}

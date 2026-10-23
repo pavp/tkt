@@ -2986,6 +2986,20 @@ func TestFinishedPullRequestsAreLavender(t *testing.T) {
 	}
 }
 
+func TestListPointsKeepRoomFromTheLongestStatus(t *testing.T) {
+	snap := snapshot()
+	snap.Reviews = nil
+	snap.Tickets[1].Status, snap.Tickets[1].Category, snap.Tickets[1].Points = "Ready to be Released", ticket.Done, 3
+	m, _ := New(snap, true, &recorder{}, ViewList).Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	if row := strings.Split(v, "\n")[lineIndex(v, "DEMO-1 ")]; !strings.Contains(row, "Ready to be Released  3 ") {
+		t.Errorf("the points keep two spaces from the longest status: %q", row)
+	}
+	if head := strings.Split(v, "\n")[lineIndex(v, "STATUS")]; !strings.Contains(head, "  SP ") {
+		t.Errorf("the SP header moves with its column: %q", head)
+	}
+}
+
 func TestPullRequestStatusColors(t *testing.T) {
 	tk := ticket.Ticket{Key: "DEMO-1"}
 	tests := []struct {
