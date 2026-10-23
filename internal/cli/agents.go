@@ -99,7 +99,7 @@ func (b *boardActions) SendTask(task tui.AgentTask, pane string) tea.Cmd {
 		if err := h.Prompt(b.ctx, pane, prompt); err != nil {
 			return tui.StatusMsg("could not send the " + task.String() + ": " + err.Error())
 		}
-		_ = h.FocusPane(b.ctx, pane)
+		bringForward(b.ctx, h, pane)
 		return tea.QuitMsg{}
 	}
 }
@@ -188,6 +188,17 @@ type noClone struct{ repo string }
 
 func (e noClone) Error() string { return e.repo + " is not cloned locally" }
 
+// bringForward shows an agent's pane wherever it is: its workspace first, then the pane, which brings its own tab
+// forward, as Start's "Go to the agent in Herdr" does.
+func bringForward(ctx context.Context, h HerdrAPI, pane string) {
+	if panes, err := h.Panes(ctx); err == nil {
+		if i := slices.IndexFunc(panes, func(p herdr.Pane) bool { return p.ID == pane }); i >= 0 {
+			_ = h.FocusWorkspace(ctx, panes[i].WorkspaceID)
+		}
+	}
+	_ = h.FocusPane(ctx, pane)
+}
+
 // startTask hands the task to an agent in dir, the note added to its prompt, and closes the board on its pane.
 func (b *boardActions) startTask(task tui.AgentTask, prompt, dir, note, label string) tea.Msg {
 	if note != "" {
@@ -198,7 +209,7 @@ func (b *boardActions) startTask(task tui.AgentTask, prompt, dir, note, label st
 	if err != nil {
 		return tui.StatusMsg("could not start an agent for the " + task.String() + ": " + err.Error())
 	}
-	_ = h.FocusPane(b.ctx, pane)
+	bringForward(b.ctx, h, pane)
 	return tea.QuitMsg{}
 }
 

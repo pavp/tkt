@@ -30,6 +30,7 @@ func agentsHarness(t *testing.T) (*boardActions, *harness, *herdrtest.FakeServer
 	h.run.out["remote /src/api"] = "git@github.com:example-org/api.git"
 	h.run.out["pbcopy"] = ""
 	h.run.out["git rev-parse --abbrev-ref HEAD"] = "feature/DEMO-2-pager"
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w3:p1","workspace_id":"w3","cwd":"/src/web-DEMO-2"},{"pane_id":"w1:p1","workspace_id":"w1","cwd":"/src/web"}]}`
 	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w1","label":"web"},{"workspace_id":"w3","label":"DEMO-2 · web"}]}`
 	c, err := h.app.LoadConfig()
 	if err != nil {
@@ -73,8 +74,17 @@ func TestSendTaskPromptsTheAgentWithTheReview(t *testing.T) {
 			t.Errorf("prompt lacks %q:\n%s", want, text)
 		}
 	}
-	if got["target"] != "w3:p1" || f.Last("pane.focus")["pane_id"] != "w3:p1" {
-		t.Errorf("prompt %v, focus %v", got, f.Last("pane.focus"))
+	if got["target"] != "w3:p1" || f.Last("pane.focus")["pane_id"] != "w3:p1" || f.Last("workspace.focus")["workspace_id"] != "w3" {
+		t.Errorf("prompt %v, focus %v %v", got, f.Last("workspace.focus"), f.Last("pane.focus"))
+	}
+	var order []string
+	for _, r := range f.Requests {
+		if m := r["method"].(string); m == "workspace.focus" || m == "pane.focus" {
+			order = append(order, m)
+		}
+	}
+	if strings.Join(order, ",") != "workspace.focus,pane.focus" {
+		t.Errorf("the agent's workspace comes forward, then its pane: %v", order)
 	}
 }
 

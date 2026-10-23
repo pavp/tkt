@@ -566,7 +566,7 @@ func (b *boardActions) Fix(key ticket.Key, known *ticket.Ticket) tea.Cmd {
 		if pane == "" {
 			return tui.StatusMsg(msg)
 		}
-		_ = b.a.NewHerdr().FocusPane(b.ctx, pane)
+		bringForward(b.ctx, b.a.NewHerdr(), pane)
 		return tea.QuitMsg{}
 	}
 }
