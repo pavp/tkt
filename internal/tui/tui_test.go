@@ -2914,6 +2914,71 @@ func TestSubtasksHaveCardsInTheirOwnColumn(t *testing.T) {
 	}
 }
 
+func fgCode(c lipgloss.Color) string {
+	s := lipgloss.NewStyle().Foreground(c).Render("x")
+	return s[:strings.Index(s, "x")]
+}
+
+func TestListColorsStatusesAndSubtaskArrows(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+	m, _ := New(subtaskSnapshot(), true, &recorder{}, ViewList).Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	lines := strings.Split(m.View(), "\n")
+	cases := []struct {
+		key, status string
+		color       lipgloss.Color
+	}{
+		{"DEMO-3 ", "To Do", columnColors[ticket.ToDo]},
+		{"DEMO-2 ", "In Review", columnColors[ticket.InReview]},
+		{"DEMO-13", "In Progress", columnColors[ticket.InProgress]},
+		{"DEMO-12", "Done", columnColors[ticket.Done]},
+	}
+	for _, c := range cases {
+		line := lines[lineIndex(m.View(), c.key)]
+		if strings.Contains(line, "\x1b[48;2") {
+			continue
+		}
+		if !strings.Contains(line, fgCode(c.color)+c.status) {
+			t.Errorf("%s's status should take its column's color: %q", c.key, line)
+		}
+	}
+	if line := lines[lineIndex(m.View(), "DEMO-11")]; !strings.Contains(line, fgCode(colorSubtask)+"↳") {
+		t.Errorf("a subtask's arrow should be colored: %q", line)
+	}
+	if sel := selectedLine(m.View()); strings.Contains(sel, fgCode(columnColors[ticket.ToDo])) || strings.Contains(sel, fgCode(columnColors[ticket.InProgress])) {
+		t.Errorf("the selected row keeps its status plain on the selection: %q", sel)
+	}
+	tk := subtaskSnapshot().Tickets[1].Subtasks[0]
+	if c := card(cardTicket(item{key: tk.Key, ticket: &tk, parent: "DEMO-1"}), 40, false, false, ""); !strings.Contains(c, fgCode(colorSubtask)+"↳") {
+		t.Errorf("a subtask card's arrow should be colored too:\n%s", c)
+	}
+}
+
+func TestPullRequestStatusColors(t *testing.T) {
+	tk := ticket.Ticket{Key: "DEMO-1"}
+	tests := []struct {
+		name string
+		it   item
+		want lipgloss.Style
+	}{
+		{"review requested", item{pr: &ticket.PullRequest{State: ticket.PROpen}}, lipgloss.NewStyle().Foreground(colorReview)},
+		{"mine, CI failing", item{ticket: &tk, pr: &ticket.PullRequest{State: ticket.PROpen, Checks: ticket.ChecksFail}}, warn},
+		{"another's, changes requested", item{other: true, pr: &ticket.PullRequest{State: ticket.PROpen, Review: ticket.ReviewChangesRequested}}, warn},
+		{"draft", item{ticket: &tk, pr: &ticket.PullRequest{State: ticket.PROpen, Draft: true}}, dim},
+		{"ready to merge", item{ticket: &tk, pr: &ticket.PullRequest{State: ticket.PROpen, Merge: ticket.MergeReady}}, ok},
+		{"approved", item{other: true, pr: &ticket.PullRequest{State: ticket.PROpen, Review: ticket.ReviewApproved}}, ok},
+		{"waiting review", item{ticket: &tk, pr: &ticket.PullRequest{State: ticket.PROpen, Review: ticket.ReviewRequired}}, lipgloss.NewStyle().Foreground(colorReview)},
+		{"CI running", item{ticket: &tk, pr: &ticket.PullRequest{State: ticket.PROpen, Checks: ticket.ChecksPending}}, lipgloss.NewStyle().Foreground(colorAccent)},
+		{"open", item{ticket: &tk, pr: &ticket.PullRequest{State: ticket.PROpen}}, lipgloss.NewStyle()},
+	}
+	for _, tt := range tests {
+		if got := statusStyle(tt.it).GetForeground(); got != tt.want.GetForeground() {
+			t.Errorf("%s: color %v, want %v", tt.name, got, tt.want.GetForeground())
+		}
+	}
+}
+
 func TestListShowsSubtasksUnderTheirParent(t *testing.T) {
 	r := &recorder{}
 	m := tea.Model(New(subtaskSnapshot(), true, r, ViewList))

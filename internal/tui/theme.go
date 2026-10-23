@@ -36,6 +36,7 @@ const (
 	colorWarning   = ctpYellow
 	colorError     = ctpRed
 	colorReview    = ctpMauve
+	colorSubtask   = ctpTeal
 	colorOnBadge   = ctpBase
 )
 

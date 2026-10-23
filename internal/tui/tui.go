@@ -1781,6 +1781,9 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 	width := outer - 2
 	inner := width - 2
 	head := keyDim.Render(string(t.Key))
+	if k, ok := strings.CutPrefix(string(t.Key), "↳ "); ok {
+		head = subtaskArrow(keyDim.Render(k), false)
+	}
 	if sel {
 		head = selected.Render("▸ " + string(t.Key))
 	}
@@ -2059,6 +2062,38 @@ func statusText(it item) string {
 		s += " · " + a
 	}
 	return s
+}
+
+// statusStyle colors a row's STATUS: a ticket by its column, a pull request by where it stands.
+func statusStyle(it item) lipgloss.Style {
+	s := lipgloss.NewStyle()
+	if it.pr == nil {
+		return s.Foreground(columnColors[it.ticket.Category])
+	}
+	pr := *it.pr
+	switch {
+	case it.review():
+		return s.Foreground(colorReview)
+	case needsYou(pr):
+		return warn
+	case pr.Draft:
+		return dim
+	case pr.Merge == ticket.MergeReady, pr.Review == ticket.ReviewApproved:
+		return ok
+	case pr.Review == ticket.ReviewRequired:
+		return s.Foreground(colorReview)
+	case pr.Checks == ticket.ChecksPending:
+		return s.Foreground(colorAccent)
+	}
+	return s
+}
+
+// subtaskArrow marks a subtask's key, colored unless the row is selected, whose background it would break.
+func subtaskArrow(key string, sel bool) string {
+	if sel {
+		return "↳ " + key
+	}
+	return lipgloss.NewStyle().Foreground(colorSubtask).Render("↳") + " " + key
 }
 
 // pad truncates s to n cells and fills the rest with spaces, so columns line up.
@@ -2389,14 +2424,14 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		if it.pr != nil && i != m.row {
 			ci = checkStyle(it.pr.Checks).Render(ci)
 		}
+		status := statusText(it)
+		if i != m.row && !it.heading() {
+			status = statusStyle(it).Render(status)
+		}
 		switch {
 		case it.review(), it.other:
-			line = row(string(it.key), statusText(it), pad("", pointsW)+authorCell(it.pr.Author, assigneeW)+pad("", agentW), ci, it.pr.Title)
+			line = row(string(it.key), status, pad("", pointsW)+authorCell(it.pr.Author, assigneeW)+pad("", agentW), ci, it.pr.Title)
 		case it.mine():
-			status := statusText(it)
-			if i != m.row && needsYou(*it.pr) {
-				status = warn.Render(status)
-			}
 			line = row(string(it.key), status, authorCell(it.pr.Author, assigneeW)+agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, cmp.Or(it.pr.Title, it.ticket.Summary))
 		default:
 			title, key := it.ticket.Summary, string(it.key)
@@ -2404,9 +2439,9 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 				title = dim.Render(title)
 			}
 			if it.parent != "" {
-				key = "↳ " + key
+				key = subtaskArrow(key, i == m.row)
 			}
-			line = row(key, it.ticket.Status, pointsCell(it.ticket.Points, pointsW)+assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
+			line = row(key, status, pointsCell(it.ticket.Points, pointsW)+assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
 		}
 		var mark string
 		var markStyle lipgloss.Style
