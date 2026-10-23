@@ -337,7 +337,7 @@ func (m Model) menuView() string {
 const menuMaxWidth = 44
 
 // menuMinWidth keeps a short menu wide enough that its subtitle wraps into a line or two, not a column of words.
-const menuMinWidth = 34
+const menuMinWidth = 46
 
 // menuLines are the menu box's lines inside its border and padding, and the line its first item is on.
 func (m Model) menuLines() (lines []string, firstItem int) {

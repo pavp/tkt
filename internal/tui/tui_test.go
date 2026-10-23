@@ -3368,8 +3368,8 @@ func TestPRMenusPutTheirDetailsOnASecondLine(t *testing.T) {
 	m := loaded(r).(Model)
 	m.menu = m.buildMenu(item{key: "#820", pr: &pr})
 	lines := strings.Split(stripANSI(m.menuView()), "\n")
-	if !strings.Contains(lines[1], "Pull request #820") || !strings.Contains(lines[2], "example-org/web · alex") || !strings.Contains(lines[3], "review requested") {
-		t.Fatalf("title then details, wrapped at their dots:\n%s", strings.Join(lines, "\n"))
+	if !strings.Contains(lines[1], "Pull request #820") || !strings.Contains(lines[2], "example-org/web · alex · review requested") {
+		t.Fatalf("title then details:\n%s", strings.Join(lines, "\n"))
 	}
 	if w := lipgloss.Width(m.menuView()); w > menuMinWidth+2 {
 		t.Errorf("the details wrap rather than widen the menu, got %d", w)
@@ -4315,7 +4315,7 @@ func TestBacklogMenuTitleTakesTwoLines(t *testing.T) {
 	m := backlogMenu(t, openBacklog(backlogRecorder(), 180, BoardState{}), "DEMO-214")
 	v := stripANSI(m.View())
 	title, sub, board := lineIndex(v, "Actions for DEMO-214"), lineIndex(v, "In Progress · Pablo Vera"), lineIndex(v, "│  User Access Center")
-	if title < 0 || sub != title+1 || board != title+2 || lipgloss.Width(m.(Model).menuView()) > 40 {
+	if title < 0 || sub != title+1 || board != title+2 || lipgloss.Width(m.(Model).menuView()) > menuMinWidth+2 {
 		t.Errorf("the details go under the title, wrapped to a narrow box:\n%s", v)
 	}
 }
