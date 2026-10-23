@@ -942,6 +942,30 @@ func TestToTicketKeepsTheAssignee(t *testing.T) {
 	}
 }
 
+func TestMyTicketsTakeTheTeamBoardOfTheirSprint(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	js := &stubJira{
+		issues: []jira.Issue{
+			{ID: "1", Key: "DEMO-1", Summary: "On a team board", Status: "To Do", StatusCategory: "new",
+				Sprints: []jira.Sprint{{ID: 41, Space: "DEMO", Name: "DEMO S41", State: "closed", Board: 418}, {ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active", Board: 5205}}},
+			{ID: "2", Key: "DEMO-2", Summary: "On another board", Status: "To Do", StatusCategory: "new",
+				Sprints: []jira.Sprint{{ID: 50, Space: "DEMO", Name: "Other S1", State: "active", Board: 77}}},
+		},
+		linked: map[string][]jira.DevPullRequest{},
+	}
+	snap, err := FetchWith(context.Background(), teamCfg(), js, &stubGitHub{}, now, Snapshot{}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byKey := map[ticket.Key]ticket.Ticket{}
+	for _, tk := range snap.Tickets {
+		byKey[tk.Key] = tk
+	}
+	if byKey["DEMO-1"].Board != "Authorization Center" || byKey["DEMO-2"].Board != "" {
+		t.Errorf("boards: %+v", snap.Tickets)
+	}
+}
+
 func TestTeamTicketsComeOnlyWhenAsked(t *testing.T) {
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 	js := &stubJira{

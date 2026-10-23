@@ -79,8 +79,10 @@ type Actions interface {
 
 // BoardState is what the board remembers between openings.
 type BoardState struct {
-	// HiddenRepos lists the repositories ("owner/name") whose pull requests and tickets the board hides.
+	// HiddenRepos lists the repositories ("owner/name") whose pull requests the PRs filter hides.
 	HiddenRepos []string `json:"hidden_repos,omitempty"`
+	// HiddenBoards lists the team boards whose tickets the board hides outside the PRs filter.
+	HiddenBoards []string `json:"hidden_boards,omitempty"`
 	// Collapsed lists the PRs filter's collapsed groups, such as "mine:owner/name" or "review:owner/name".
 	Collapsed []string `json:"collapsed,omitempty"`
 	// View is the view the user last chose, ViewColumns or ViewList.
@@ -183,6 +185,8 @@ type Model struct {
 	compact      bool
 	// hiddenRepos holds the repositories ("owner/name") the user chose not to see.
 	hiddenRepos map[string]bool
+	// hiddenBoards holds the team boards whose tickets the user chose not to see.
+	hiddenBoards map[string]bool
 	// collapsed holds the PRs filter's collapsed groups.
 	collapsed map[string]bool
 	// team shows the team's tickets beside the user's.
@@ -277,9 +281,12 @@ func (m Model) Init() tea.Cmd {
 
 // WithState restores what the board remembered from its last opening.
 func (m Model) WithState(s BoardState) Model {
-	m.hiddenRepos, m.collapsed = map[string]bool{}, map[string]bool{}
+	m.hiddenRepos, m.hiddenBoards, m.collapsed = map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, r := range s.HiddenRepos {
 		m.hiddenRepos[r] = true
+	}
+	for _, b := range s.HiddenBoards {
+		m.hiddenBoards[b] = true
 	}
 	for _, g := range s.Collapsed {
 		m.collapsed[g] = true
@@ -294,7 +301,7 @@ func (m Model) WithState(s BoardState) Model {
 // state is what the board remembers for its next opening.
 func (m Model) state() BoardState {
 	teamPRs := m.teamPRs
-	return BoardState{HiddenRepos: trueKeys(m.hiddenRepos), Collapsed: trueKeys(m.collapsed), View: m.view, Team: m.team, TeamPRs: &teamPRs}
+	return BoardState{HiddenRepos: trueKeys(m.hiddenRepos), HiddenBoards: trueKeys(m.hiddenBoards), Collapsed: trueKeys(m.collapsed), View: m.view, Team: m.team, TeamPRs: &teamPRs}
 }
 
 func trueKeys(set map[string]bool) []string {
@@ -334,12 +341,19 @@ func (m *Model) explainList() {
 	}
 }
 
+// reviews are the review requests the PRs filter lists, those of hidden repositories left out.
 func (m Model) reviews() []ticket.PullRequest {
+	return slices.DeleteFunc(m.stripReviews(), func(pr ticket.PullRequest) bool { return m.repoHidden(pr.Repo) })
+}
+
+// stripReviews are the review requests the strip above the tickets shows; the repository filter belongs to
+// the PRs filter and leaves them alone.
+func (m Model) stripReviews() []ticket.PullRequest {
 	reviews := m.snap.Reviews
 	if !m.showBots {
 		reviews = m.snap.WithoutBots().Reviews
 	}
-	return slices.DeleteFunc(slices.Clone(reviews), func(pr ticket.PullRequest) bool { return m.repoHidden(pr.Repo) })
+	return slices.Clone(reviews)
 }
 
 // prCount counts the PRs filter's pull requests: the user's, the review requests and, while shown, the team's.
@@ -363,13 +377,22 @@ func (m Model) others() []ticket.PullRequest {
 // repoHidden reports whether the user hid repo; a pull request whose repository is unknown always shows.
 func (m Model) repoHidden(repo string) bool { return repo != "" && m.hiddenRepos[repo] }
 
-// ticketShown hides a ticket only when every one of its pull requests is in a hidden repository, as a ticket
-// without pull requests belongs to no repository.
-func (m Model) ticketShown(t ticket.Ticket) bool {
-	return len(t.PRs) == 0 || slices.ContainsFunc(t.PRs, func(pr ticket.PullRequest) bool { return !m.repoHidden(pr.Repo) })
+// ticketShown hides the tickets of hidden boards; a ticket on no team board always shows.
+func (m Model) ticketShown(t ticket.Ticket) bool { return t.Board == "" || !m.hiddenBoards[t.Board] }
+
+// boardTickets counts, per team board, the tickets Sprint can show, the team's only while it is on; the board
+// filter offers them.
+func (m Model) boardTickets() map[string]int {
+	boards := map[string]int{}
+	for _, t := range m.snap.Tickets {
+		if t.Board != "" && (!t.Team || m.team) {
+			boards[t.Board]++
+		}
+	}
+	return boards
 }
 
-// shownTickets are the user's tickets the repository filter leaves.
+// shownTickets are the user's tickets the board filter leaves.
 // Team tickets show only while the team is on, after the user's own.
 func (m Model) shownTickets() []ticket.Ticket {
 	var mine, team []ticket.Ticket
@@ -428,6 +451,41 @@ func (m Model) repoNotice() string {
 		return ""
 	}
 	return dim.Render(fmt.Sprintf("Showing %d of %d repositories · ", len(repos)-hidden, len(repos))) + keyStyle.Render("R") + dim.Render(" change")
+}
+
+// boardNotice says how many team boards the filter leaves; it is empty while every one shows.
+func (m Model) boardNotice() string {
+	boards := m.boardTickets()
+	hidden := 0
+	for b := range boards {
+		if m.hiddenBoards[b] {
+			hidden++
+		}
+	}
+	if hidden == 0 {
+		return ""
+	}
+	return dim.Render(fmt.Sprintf("Showing %d of %d boards · ", len(boards)-hidden, len(boards))) + keyStyle.Render("B") + dim.Render(" change")
+}
+
+// scopeFilter opens the filter of the screen in view: repositories in the PRs filter, team boards elsewhere;
+// nil when there is nothing to choose from.
+func (m Model) scopeFilter() *picker {
+	switch {
+	case m.filter == FilterPRs && len(m.boardRepos()) > 0:
+		return m.repoFilter()
+	case m.filter != FilterPRs && len(m.boardTickets()) > 0:
+		return m.boardFilter()
+	}
+	return nil
+}
+
+// scopeNotice is the notice of the screen in view's filter.
+func (m Model) scopeNotice() string {
+	if m.filter == FilterPRs {
+		return m.repoNotice()
+	}
+	return m.boardNotice()
 }
 
 func (m Model) hiddenBots() int {
@@ -933,8 +991,8 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if _, _, x, y, h, _ := m.headerLayout(); msg.Y >= y && msg.Y < y+h {
 		return m, m.clickHeader(msg.X - x)
 	}
-	if m.repoNotice() != "" && msg.Y == headerLines-1 {
-		m.picker = m.repoFilter()
+	if m.scopeNotice() != "" && msg.Y == headerLines-1 {
+		m.picker = m.scopeFilter()
 		return m, nil
 	}
 	body := msg.Y - headerLines
@@ -1036,8 +1094,8 @@ func (m *Model) clickHeader(x int) tea.Cmd {
 	_, _, _, _, _, spans := m.headerLayout()
 	for _, sp := range spans {
 		if x >= sp.start && x < sp.start+sp.width {
-			if sp.repos {
-				m.picker = m.repoFilter()
+			if sp.scope {
+				m.picker = m.scopeFilter()
 				return nil
 			}
 			if sp.team {
@@ -1111,8 +1169,12 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.toggleBots()
 		}
 	case "R":
-		if len(m.boardRepos()) > 0 {
-			m.picker = m.repoFilter()
+		if m.filter == FilterPRs {
+			m.picker = m.scopeFilter()
+		}
+	case "B":
+		if m.filter != FilterPRs {
+			m.picker = m.scopeFilter()
 		}
 	case "n", "r":
 		if m.filter == FilterPRs {
@@ -1368,8 +1430,8 @@ func (m Model) header() string {
 	if len(m.snap.Warnings) > 0 {
 		top += "\n" + notice.Render(truncate("! "+strings.Join(m.snap.Warnings, " · "), m.width))
 	}
-	// The notice is the header's last line, where a click opens the repository filter.
-	if notice := m.repoNotice(); notice != "" {
+	// The notice is the header's last line, where a click opens the filter it describes.
+	if notice := m.scopeNotice(); notice != "" {
 		top += "\n" + truncate(notice, m.width)
 	}
 	return top
@@ -1378,7 +1440,7 @@ func (m Model) header() string {
 type headerSpan struct {
 	start, width int
 	filter, view string
-	repos, team  bool
+	scope, team  bool
 }
 
 var (
@@ -1395,11 +1457,11 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 		parts = append(parts, sp.Space+" · "+board.SprintLabel(sp, m.snap.FetchedAt))
 	}
 	title = strings.Join(parts, " · ")
-	// The Repos button shows only where the boxed buttons still fit with it; otherwise R and the notice open
-	// the filter.
+	// The Repos or Boards button shows only where the boxed buttons still fit with it; otherwise its key and
+	// the notice open the filter.
 	specs := [][]headerItem{m.headerSpec(), m.headerSpec()}
-	if len(m.boardRepos()) > 0 {
-		specs[0] = append(specs[0], m.reposButton())
+	if it, ok := m.scopeButton(); ok {
+		specs[0] = append(specs[0], it)
 	}
 	specs[0] = append(specs[0], headerItem{team: true, label: " " + m.teamButton() + " "})
 	for pass := 0; pass < 2; pass++ {
@@ -1409,17 +1471,17 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 			spans = nil
 			for i, it := range spec {
 				gap := map[bool]int{true: 1, false: 0}[i > 0]
-				if i == len(filterOrder) || it.repos || (it.team && !spec[i-1].repos) {
+				if i == len(filterOrder) || it.scope || (it.team && !spec[i-1].scope) {
 					gap = 2
 				}
 				row = append(row, strings.Repeat(" ", gap))
 				pos += gap
 				st := filterOff
-				if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.repos && m.repoNotice() != "") || (it.team && m.teamButtonOn()) {
+				if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.scope && m.scopeNotice() != "") || (it.team && m.teamButtonOn()) {
 					st = filterOn
 				}
 				chip := st.Render(strings.TrimSpace(it.label))
-				spans = append(spans, headerSpan{start: pos, width: lipgloss.Width(chip), filter: it.filter, view: it.view, repos: it.repos, team: it.team})
+				spans = append(spans, headerSpan{start: pos, width: lipgloss.Width(chip), filter: it.filter, view: it.view, scope: it.scope, team: it.team})
 				row = append(row, chip)
 				pos += lipgloss.Width(chip)
 			}
@@ -1460,8 +1522,9 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 type headerItem struct {
 	filter, view string
 	label        string
-	// repos marks the button that opens the repository filter, team the one that shows the team's tickets.
-	repos, team bool
+	// scope marks the button that opens the repository or board filter, team the one that shows the team's
+	// tickets.
+	scope, team bool
 }
 
 // headerSpec lists the filter buttons and, where the user can choose the view, the view switch: the PRs
@@ -1486,19 +1549,27 @@ func (m Model) viewSwitch() headerItem {
 	return headerItem{view: ViewColumns, label: " ≣ View "}
 }
 
-// reposButton opens the repository filter; it says how many repositories show while any is hidden.
-func (m Model) reposButton() headerItem {
-	repos := m.boardRepos()
-	shown := 0
-	for r := range repos {
-		if !m.repoHidden(r) {
+// scopeButton opens the screen's filter, Repos in the PRs filter and Boards elsewhere; it says how many show
+// while any is hidden. There is none when there is nothing to choose from.
+func (m Model) scopeButton() (headerItem, bool) {
+	name, all, hidden := "Boards", maps.Keys(m.boardTickets()), m.hiddenBoards
+	if m.filter == FilterPRs {
+		name, all, hidden = "Repos", maps.Keys(m.boardRepos()), m.hiddenRepos
+	}
+	total, shown := 0, 0
+	for k := range all {
+		total++
+		if !hidden[k] {
 			shown++
 		}
 	}
-	if shown < len(repos) {
-		return headerItem{repos: true, label: fmt.Sprintf(" Repos %d/%d ", shown, len(repos))}
+	switch {
+	case total == 0:
+		return headerItem{}, false
+	case shown < total:
+		return headerItem{scope: true, label: fmt.Sprintf(" %s %d/%d ", name, shown, total)}, true
 	}
-	return headerItem{repos: true, label: " Repos "}
+	return headerItem{scope: true, label: " " + name + " "}, true
 }
 
 // headerItems renders the filter and view buttons; views sit together after a wider gap.
@@ -1562,7 +1633,7 @@ type chipSpan struct {
 
 // reviewChips renders the strip and returns each visible chip's horizontal span.
 func (m Model) reviewChips() (string, []chipSpan) {
-	reviews := m.reviews()
+	reviews := m.stripReviews()
 	if len(reviews) == 0 || m.filter == FilterPRs {
 		return "", nil
 	}
@@ -2594,7 +2665,7 @@ func (m Model) footer() string {
 	// Each screen lists only the keys that do something there: the review strip only exists in columns,
 	// density only changes cards, the view only toggles where columns can show.
 	columns := m.effectiveView() == ViewColumns
-	strip := m.filter != FilterPRs && len(m.reviews()) > 0
+	strip := m.filter != FilterPRs && len(m.stripReviews()) > 0
 	move, moveHint, clickHint, enterHint := "↑↓ ws", "move", "select", "actions"
 	if columns {
 		move = "←↑↓→ wasd"
@@ -2620,8 +2691,11 @@ func (m Model) footer() string {
 		legend = append(legend, [2]string{"z", "density"})
 	}
 	legend = append(legend, [2]string{"t", strings.ToLower(m.teamButton())})
-	if len(m.boardRepos()) > 0 {
+	switch {
+	case m.filter == FilterPRs && len(m.boardRepos()) > 0:
 		legend = append(legend, [2]string{"R", "repos"})
+	case m.filter != FilterPRs && len(m.boardTickets()) > 0:
+		legend = append(legend, [2]string{"B", "boards"})
 	}
 	legend = append(legend, [][2]string{{",", "settings"}, {"g", "refresh"}, {"q", "close"}}...)
 	items := make([]string, len(legend))

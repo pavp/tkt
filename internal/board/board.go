@@ -174,8 +174,21 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		}
 		return t
 	}
+	boardNames := map[int]string{}
+	for _, s := range c.Spaces {
+		for _, b := range s.TeamBoards {
+			boardNames[b.ID] = b.Name
+		}
+	}
 	for _, is := range issues {
-		tickets = append(tickets, toTicket(is))
+		t := toTicket(is)
+		for _, sp := range is.Sprints {
+			if name, ok := boardNames[sp.Board]; ok && sp.State == "active" {
+				t.Board = name
+				break
+			}
+		}
+		tickets = append(tickets, t)
 		ids[ticket.Key(is.Key)] = is.ID
 		updated[ticket.Key(is.Key)] = is.Updated
 		for _, sp := range is.Sprints {

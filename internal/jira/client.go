@@ -243,12 +243,13 @@ func (r rawIssue) decode(sprintField string) (Issue, error) {
 			ID      int    `json:"id"`
 			Name    string `json:"name"`
 			State   string `json:"state"`
+			BoardID int    `json:"boardId"`
 			EndDate string `json:"endDate"`
 		}
 		if json.Unmarshal(raw, &sprints) == nil {
 			space, _, _ := strings.Cut(r.Key, "-")
 			for _, sp := range sprints {
-				out := Sprint{ID: sp.ID, Space: space, Name: sp.Name, State: sp.State}
+				out := Sprint{ID: sp.ID, Space: space, Name: sp.Name, State: sp.State, Board: sp.BoardID}
 				if t, err := time.Parse(time.RFC3339, sp.EndDate); err == nil {
 					out.End = t
 				}
@@ -747,10 +748,12 @@ func (c *Client) AssignableUsers(ctx context.Context, key, query string) ([]User
 }
 
 type Sprint struct {
-	ID    int       `json:"id,omitempty"`
-	Space string    `json:"space"`
-	Name  string    `json:"name"`
-	State string    `json:"state,omitempty"`
+	ID    int    `json:"id,omitempty"`
+	Space string `json:"space"`
+	Name  string `json:"name"`
+	State string `json:"state,omitempty"`
+	// Board is the id of the board the sprint belongs to.
+	Board int       `json:"board,omitempty"`
 	End   time.Time `json:"end"`
 }
 

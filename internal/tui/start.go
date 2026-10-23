@@ -50,8 +50,8 @@ type picker struct {
 	title, question string
 	rows            []pickerRow
 	multi           bool
-	// filter marks the repository filter, which applies the checked repositories instead of starting.
-	filter bool
+	// filter marks the repository or board filter, which applies the checked rows instead of starting.
+	filter string
 	sel    int
 }
 
@@ -97,16 +97,35 @@ func repoPicker(key ticket.Key, rs []RepoChoice) *picker {
 func (m Model) repoFilter() *picker {
 	counts := m.boardRepos()
 	names := slices.Sorted(maps.Keys(counts))
-	p := &picker{title: "Repositories", question: "Show the pull requests and tickets of", multi: true, filter: true}
+	p := &picker{title: "Repositories", question: "Show the pull requests of", multi: true, filter: filterRepos}
 	for _, r := range names {
 		p.rows = append(p.rows, pickerRow{label: r, hint: fmt.Sprintf("%d open", counts[r]), value: r, checked: !m.repoHidden(r)})
 	}
 	return p
 }
 
+const (
+	filterRepos  = "repos"
+	filterBoards = "boards"
+)
+
+// boardFilter asks which team boards' tickets the board shows, each with how many it has.
+func (m Model) boardFilter() *picker {
+	counts := m.boardTickets()
+	p := &picker{title: "Boards", question: "Show the tickets of", multi: true, filter: filterBoards}
+	for _, b := range slices.Sorted(maps.Keys(counts)) {
+		hint := fmt.Sprintf("%d tickets", counts[b])
+		if counts[b] == 1 {
+			hint = "1 ticket"
+		}
+		p.rows = append(p.rows, pickerRow{label: b, hint: hint, value: b, checked: !m.hiddenBoards[b]})
+	}
+	return p
+}
+
 func (p *picker) action() string {
 	switch {
-	case p.filter:
+	case p.filter != "":
 		return "Apply"
 	case p.multi:
 		return "Start"
@@ -153,11 +172,14 @@ func (m Model) finishPicker() (tea.Model, tea.Cmd) {
 	}
 	if len(repos) == 0 {
 		m.status = "pick at least one repository"
+		if p.filter == filterBoards {
+			m.status = "pick at least one board"
+		}
 		return m, nil
 	}
 	m.picker = nil
-	if p.filter {
-		return m.applyRepoFilter(p)
+	if p.filter != "" {
+		return m.applyFilter(p)
 	}
 	return m, m.actions.Start(p.key, StartOptions{Repos: repos})
 }
@@ -176,7 +198,7 @@ func (m Model) pickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			p.rows[p.sel].checked = !p.rows[p.sel].checked
 		}
 	case "a":
-		if p.filter {
+		if p.filter != "" {
 			all := !slices.ContainsFunc(p.rows, func(r pickerRow) bool { return !r.checked })
 			for i := range p.rows {
 				p.rows[i].checked = !all
@@ -200,7 +222,7 @@ func (m Model) pickerLayout() (box string, firstRow, buttonsRow int, buttons []c
 	}
 	keys := "enter " + strings.ToLower(p.action()) + " · esc cancel"
 	switch {
-	case p.filter:
+	case p.filter != "":
 		keys = "space toggle · a all · " + keys
 	case p.multi:
 		keys = "space toggle · " + keys
@@ -278,13 +300,18 @@ func (m Model) pickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// applyRepoFilter hides the repositories left unchecked and remembers them for the board's next opening.
-func (m Model) applyRepoFilter(p *picker) (tea.Model, tea.Cmd) {
-	m.hiddenRepos = map[string]bool{}
+// applyFilter hides the repositories or boards left unchecked and remembers them for the board's next opening.
+func (m Model) applyFilter(p *picker) (tea.Model, tea.Cmd) {
+	hidden := map[string]bool{}
 	for _, r := range p.rows {
 		if !r.checked {
-			m.hiddenRepos[r.value] = true
+			hidden[r.value] = true
 		}
+	}
+	if p.filter == filterBoards {
+		m.hiddenBoards = hidden
+	} else {
+		m.hiddenRepos = hidden
 	}
 	m.reselect()
 	return m, m.actions.SaveState(m.state())

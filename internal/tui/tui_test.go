@@ -2388,27 +2388,24 @@ func TestRepoFilterHidesRepositoriesInThePRsFilter(t *testing.T) {
 	}
 }
 
-func TestRepoFilterAppliesToAll(t *testing.T) {
-	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenRepos: []string{"example-org/web"}}))
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	v := stripANSI(m.View())
-	if !strings.Contains(v, "DEMO-4") || strings.Contains(v, "#820") || !strings.Contains(v, "Showing 1 of 2 repositories") {
-		t.Fatalf("a ticket with a pull request in a shown repository stays; the web review hides:\n%s", v)
-	}
-	m = tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenRepos: []string{"example-org/web", "example-org/api"}}))
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	v = stripANSI(m.View())
-	if strings.Contains(v, "DEMO-4") || !strings.Contains(v, "DEMO-1") || !strings.Contains(v, "DEMO-3") {
-		t.Errorf("a ticket hides only when all its pull requests are in hidden repositories:\n%s", v)
-	}
-	if !strings.Contains(v, "1 Sprint 3") {
-		t.Errorf("All counts what it shows:\n%s", v)
-	}
-	for _, view := range []string{ViewColumns} {
-		m := tea.Model(New(prsSnapshot(), false, &recorder{}, view).WithState(BoardState{HiddenRepos: []string{"example-org/web"}}))
+func TestRepoFilterAppliesOnlyToThePRsFilter(t *testing.T) {
+	for _, view := range []string{ViewList, ViewColumns} {
+		m := tea.Model(New(prsSnapshot(), false, &recorder{}, view).WithState(BoardState{HiddenRepos: []string{"example-org/web", "example-org/api"}}))
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-		if v := stripANSI(m.View()); strings.Contains(v, "#820") || !strings.Contains(v, "Showing 1 of 2 repositories") {
-			t.Errorf("%s: the review strip hides hidden repositories with the notice:\n%s", view, v)
+		v := stripANSI(m.View())
+		if !strings.Contains(v, "DEMO-4") || !strings.Contains(v, "#820") || strings.Contains(v, "Showing") || !strings.Contains(v, "1 Sprint 4") {
+			t.Errorf("%s: Sprint ignores the repository filter, review strip included:\n%s", view, v)
+		}
+		if strings.Contains(v, "Repos") || strings.Contains(v, "R repos") {
+			t.Errorf("%s: Sprint offers no repository filter:\n%s", view, v)
+		}
+		m = press(m, "R")
+		if v := stripANSI(m.View()); strings.Contains(v, "Repositories") {
+			t.Errorf("%s: R opens nothing in Sprint:\n%s", view, v)
+		}
+		v = stripANSI(press(m, "2").View())
+		if strings.Contains(v, "#820") || strings.Contains(v, "#815") || !strings.Contains(v, "Showing 0 of 2 repositories · R change") {
+			t.Errorf("%s: the PRs filter keeps hiding them:\n%s", view, v)
 		}
 	}
 }
@@ -2416,6 +2413,7 @@ func TestRepoFilterAppliesToAll(t *testing.T) {
 func TestRepoFilterNoticeOpensTheModalAndFitsTheTrayPanel(t *testing.T) {
 	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenRepos: []string{"example-org/api"}}))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	m = press(m, "2")
 	v := stripANSI(m.View())
 	y := lineIndex(v, "Showing 1 of 2")
 	if y < 0 {
@@ -2491,7 +2489,7 @@ func TestRepoFilterListsTheConfiguredRepositories(t *testing.T) {
 	r := &recorder{cfg: config.Config{Spaces: []config.Space{{Key: "DEMO", Repos: []config.Repo{{Name: "example-org/docs"}, {Name: "example-org/web"}}}}}}
 	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	v := stripANSI(press(m, "R").View())
+	v := stripANSI(press(m, "2", "R").View())
 	for _, want := range []string{"[x] example-org/docs", "0 open", "[x] example-org/api", "[x] example-org/web"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("filter lacks %q:\n%s", want, v)
@@ -2523,6 +2521,7 @@ func TestCollapsingKeepsTheColumns(t *testing.T) {
 func TestReposButtonOpensAndClosesTheFilter(t *testing.T) {
 	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
 	v := stripANSI(m.View())
 	y := lineIndex(v, "Repos")
 	if y < 0 {
@@ -2538,10 +2537,123 @@ func TestReposButtonOpensAndClosesTheFilter(t *testing.T) {
 	if v := stripANSI(m.View()); strings.Contains(v, "[x] example-org/api") {
 		t.Errorf("another click on Repos should close it:\n%s", v)
 	}
-	narrow := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+}
+
+func boardsSnapshot() board.Snapshot {
+	snap := teamSnapshot()
+	for i, t := range snap.Tickets {
+		switch t.Key {
+		case "DEMO-1", "DEMO-9":
+			snap.Tickets[i].Board = "Payments"
+		case "DEMO-3":
+			snap.Tickets[i].Board = "Accounts"
+		}
+	}
+	return snap
+}
+
+func TestBoardFilterHidesTicketsOfHiddenBoards(t *testing.T) {
+	for _, view := range []string{ViewList, ViewColumns} {
+		r := &recorder{}
+		m := tea.Model(New(boardsSnapshot(), false, r, view))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+		m = press(m, "B")
+		v := stripANSI(m.View())
+		for _, want := range []string{"Boards", "[x] Accounts", "1 ticket", "[x] Payments", "Apply"} {
+			if !strings.Contains(v, want) {
+				t.Fatalf("%s: filter modal lacks %q:\n%s", view, want, v)
+			}
+		}
+		m = press(m, " ", "enter")
+		v = stripANSI(m.View())
+		if strings.Contains(v, "DEMO-3") || !strings.Contains(v, "DEMO-1") || !strings.Contains(v, "DEMO-2") || !strings.Contains(v, "Showing 1 of 2 boards · B change") || !strings.Contains(v, "1 Sprint 3") {
+			t.Errorf("%s: Accounts should hide, tickets without a board stay, with a notice:\n%s", view, v)
+		}
+		if len(r.states) == 0 || !slices.Equal(r.states[len(r.states)-1].HiddenBoards, []string{"Accounts"}) {
+			t.Errorf("%s: saved states = %+v", view, r.states)
+		}
+		m = press(m, "B", "a", "a", "enter")
+		if v := stripANSI(m.View()); !strings.Contains(v, "pick at least one board") {
+			t.Errorf("%s: unchecking every board should be refused:\n%s", view, v)
+		}
+		m = press(m, "esc", "B", "a", "enter")
+		if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-3") || strings.Contains(v, "Showing") {
+			t.Errorf("%s: a all should show every board again:\n%s", view, v)
+		}
+	}
+}
+
+func TestBoardFilterCountsTheTeamOnlyWhileShown(t *testing.T) {
+	m := tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(press(m, "B").View()); !strings.Contains(v, "[x] Payments") || !strings.Contains(v, "1 ticket") {
+		t.Fatalf("Payments has one ticket of the user's:\n%s", v)
+	}
+	m = tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{Team: true, HiddenBoards: []string{"Payments"}}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	if strings.Contains(v, "DEMO-9") || strings.Contains(v, "DEMO-1 ") || !strings.Contains(v, "Showing 1 of 2 boards") {
+		t.Errorf("a hidden board hides the team's tickets too:\n%s", v)
+	}
+	if v := stripANSI(press(m, "B").View()); !strings.Contains(v, "[ ] Payments") || !strings.Contains(v, "2 tickets") {
+		t.Errorf("with the team shown, Payments counts both:\n%s", v)
+	}
+}
+
+func TestBoardFilterIsOnlyInSprint(t *testing.T) {
+	m := tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenBoards: []string{"Accounts"}}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "Boards 1/2") || strings.Contains(v, "Repos") || !strings.Contains(v, "B boards") || strings.Contains(v, "R repos") {
+		t.Errorf("Sprint offers the boards filter only:\n%s", v)
+	}
+	m = press(m, "2")
+	v = stripANSI(m.View())
+	if strings.Contains(v, "Boards") || strings.Contains(v, "B boards") || !strings.Contains(v, "Repos") || strings.Contains(v, "Showing 1 of 2 boards") {
+		t.Errorf("the PRs filter offers the repositories filter only:\n%s", v)
+	}
+	if v := stripANSI(press(m, "B").View()); strings.Contains(v, "[x] Payments") {
+		t.Errorf("B opens nothing in the PRs filter:\n%s", v)
+	}
+	plain := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+	plain, _ = plain.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(press(plain, "B").View()); strings.Contains(v, "Boards") || strings.Contains(v, "B boards") {
+		t.Errorf("without boards there is no filter:\n%s", v)
+	}
+}
+
+func TestBoardsButtonAndNoticeOpenTheFilterAndFitTheTrayPanel(t *testing.T) {
+	m := tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	y := lineIndex(v, "Boards")
+	line := strings.Split(v, "\n")[y]
+	x := lipgloss.Width(line[:strings.Index(line, "Boards")])
+	m = click(m, x+1, y)
+	if v := stripANSI(m.View()); !strings.Contains(v, "[x] Payments") {
+		t.Fatalf("a click on Boards should open the filter:\n%s", v)
+	}
+	narrow := tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList))
 	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
-	if v := stripANSI(narrow.View()); !strings.Contains(v, "╭") || !strings.Contains(v, "│ Repos │") {
+	if v := stripANSI(narrow.View()); !strings.Contains(v, "│ Boards │") {
 		t.Errorf("the tray panel keeps its boxed buttons:\n%s", v)
+	}
+	narrow = tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenBoards: []string{"Accounts"}}))
+	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	v = stripANSI(narrow.View())
+	y = lineIndex(v, "Showing 1 of 2 boards")
+	if y < 0 {
+		t.Fatalf("no notice:\n%s", v)
+	}
+	narrow = click(narrow, 5, y)
+	v = stripANSI(narrow.View())
+	if !strings.Contains(v, "[ ] Accounts") {
+		t.Fatalf("a click on the notice should open the filter:\n%s", v)
+	}
+	for _, l := range strings.Split(v, "\n") {
+		if lipgloss.Width(l) > 56 {
+			t.Errorf("wider than the tray panel: %q", l)
+		}
 	}
 }
 
@@ -3368,11 +3480,12 @@ func TestLegendFitsEachScreen(t *testing.T) {
 		v          string
 		want, dont []string
 	}{
-		{"columns", open(snapshot(), ViewColumns), []string{"←↑↓→ wasd move · ↑ to reviews", "click select · open review", "enter actions", "f send feedback", "i details", "v view", "z density", "t team", "R repos"},
-			[]string{"ticket pane", "fix CI", "fold group"}},
+		{"columns", open(snapshot(), ViewColumns), []string{"←↑↓→ wasd move · ↑ to reviews", "click select · open review", "enter actions", "f send feedback", "i details", "v view", "z density", "t team"},
+			[]string{"ticket pane", "fix CI", "fold group", "R repos", "B boards"}},
+		{"boards", open(boardsSnapshot(), ViewColumns), []string{"t team", "B boards"}, []string{"R repos"}},
 		{"columns without reviews", open(noReviews, ViewColumns), []string{"←↑↓→ wasd move", "click select"}, []string{"↑ to reviews", "open review"}},
 		{"list", open(snapshot(), ViewList), []string{"↑↓ ws move · ↑ to reviews", "click select · open review", "v view", "t team"}, []string{"z density"}},
-		{"PRs", open(snapshot(), ViewColumns, "2"), []string{"↑↓ ws move", "click select", "enter actions · fold group", "f send feedback", "t requested", "R repos"}, []string{"v view", "z density", "open review"}},
+		{"PRs", open(snapshot(), ViewColumns, "2"), []string{"↑↓ ws move", "click select", "enter actions · fold group", "f send feedback", "t requested", "R repos"}, []string{"v view", "z density", "open review", "B boards"}},
 		{"no repositories", open(noRepos, ViewColumns), []string{"t team"}, []string{"R repos"}},
 	}
 	for _, c := range cases {
