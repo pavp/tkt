@@ -3001,10 +3001,10 @@ func TestCardsShowTheLabelFieldOnItsOwnLine(t *testing.T) {
 	v := stripANSI(m.View())
 	lines := strings.Split(v, "\n")
 	key, label := lineIndex(v, "DEMO-3"), lineIndex(v, "User Access Center")
-	if label != key+3 || m.(Model).cardLines() != 8 {
-		t.Errorf("the label goes on its own line under the title:\n%s", v)
+	if label != key+5 || m.(Model).cardLines() != 8 {
+		t.Errorf("the label goes on its own line at the bottom of the card:\n%s", v)
 	}
-	if other := lineIndex(v, "DEMO-7"); other < 0 || strings.TrimSpace(strings.Trim(lines[other+3][:40], "│ ")) != "" {
+	if other := lineIndex(v, "DEMO-7"); other < 0 || strings.TrimSpace(strings.Trim(lines[other+5][:40], "│ ")) != "" {
 		t.Errorf("a ticket without a label leaves its line blank, so cards keep one size:\n%s", v)
 	}
 	x := lipgloss.Width(lines[lineIndex(v, "DEMO-7")][:strings.Index(lines[lineIndex(v, "DEMO-7")], "DEMO-7")])

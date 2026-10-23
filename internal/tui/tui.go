@@ -1838,9 +1838,6 @@ func card(t ticket.Ticket, outer int, sel, compact, labeled bool, agent string) 
 		lines = append(lines, title.Render(l))
 	}
 	if !compact {
-		if labeled {
-			lines = append(lines, dim.Render(truncate(t.Label, inner)))
-		}
 		lines = append(lines, coloredPRs(t.PRs, inner))
 		icon := typeGlyph(t.Type)
 		if icon != "" {
@@ -1868,6 +1865,9 @@ func card(t ticket.Ticket, outer int, sel, compact, labeled bool, agent string) 
 			who = info + " · " + who
 		}
 		lines = append(lines, icon+dim.Render(truncate(who, inner-lipgloss.Width(icon))))
+		if labeled {
+			lines = append(lines, dim.Render(truncate(t.Label, inner)))
+		}
 	}
 	for i, l := range lines {
 		lines[i] = " " + l
