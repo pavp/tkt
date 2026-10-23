@@ -93,3 +93,70 @@ func TestCopyTaskPrompt(t *testing.T) {
 		t.Errorf("status %v", got)
 	}
 }
+
+func TestNewAgentPlacesTheReview(t *testing.T) {
+	tests := []struct {
+		name, agents, panes string
+		wantPrompt          string
+		wantSplit, wantNew  bool
+	}{
+		{name: "a free agent in the clone takes it", agents: `[{"pane_id":"w5:p1","workspace_id":"w5","agent":"claude","name":"claude-5","agent_status":"done","cwd":"WEB"}]`, panes: `[]`, wantPrompt: "w5:p1"},
+		{name: "a busy clone gets a pane beside", agents: `[{"pane_id":"w5:p1","workspace_id":"w5","agent":"claude","agent_status":"working","cwd":"WEB"}]`, panes: `[{"pane_id":"w5:p1","workspace_id":"w5","cwd":"WEB"}]`, wantSplit: true, wantPrompt: "claude"},
+		{name: "a shell in the clone is left alone", agents: `[]`, panes: `[{"pane_id":"w6:p1","workspace_id":"w6","cwd":"WEB"}]`, wantSplit: true, wantPrompt: "claude"},
+		{name: "nothing open there opens a workspace", agents: `[]`, panes: `[]`, wantNew: true, wantPrompt: "claude"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, h, f := agentsHarness(t)
+			web := h.clone(t, "web")
+			f.Results["agent.list"] = `{"type":"agent_list","agents":` + strings.ReplaceAll(tt.agents, "WEB", web) + `}`
+			f.Results["pane.list"] = `{"type":"pane_list","panes":` + strings.ReplaceAll(tt.panes, "WEB", web) + `}`
+			f.Results["pane.split"] = `{"type":"pane_info","pane":{"pane_id":"w5:p9","workspace_id":"w5","cwd":"` + web + `"}}`
+			f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+			pr := ticket.PullRequest{Repo: "example-org/web", Number: 820, URL: "https://github.com/example-org/web/pull/820"}
+			if msg := b.NewAgentTask(tui.AgentTask{Review: &pr})(); msg != (tea.QuitMsg{}) {
+				t.Fatalf("msg %v", msg)
+			}
+			if got := f.Last("agent.prompt"); got["target"] != tt.wantPrompt || !strings.Contains(got["text"].(string), "Review pull request") {
+				t.Errorf("prompt %v", got)
+			}
+			if (count(f, "pane.split") > 0) != tt.wantSplit || (count(f, "workspace.create") > 0) != tt.wantNew {
+				t.Errorf("split %d, created %d", count(f, "pane.split"), count(f, "workspace.create"))
+			}
+			if tt.wantSplit && (f.Last("pane.split")["cwd"] != web || f.Last("agent.start")["pane_id"] != "w5:p9") {
+				t.Errorf("split %v, start %v", f.Last("pane.split"), f.Last("agent.start"))
+			}
+			if tt.wantNew && f.Last("workspace.create")["cwd"] != web {
+				t.Errorf("create %v", f.Last("workspace.create"))
+			}
+		})
+	}
+}
+
+func TestNewAgentWorksOnTheFixWhereItCan(t *testing.T) {
+	for _, dirty := range []bool{false, true} {
+		b, h, f := agentsHarness(t)
+		h.clone(t, "web")
+		api := h.clone(t, "api")
+		f.Results["agent.list"] = `{"type":"agent_list","agents":[]}`
+		f.Results["pane.list"] = `{"type":"pane_list","panes":[]}`
+		f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+		h.run.out["git status --porcelain"] = ""
+		if dirty {
+			h.run.out["git status --porcelain"] = " M web/form.go"
+		}
+		h.run.out["git rev-parse --abbrev-ref HEAD"] = "main"
+		h.run.out["git symbolic-ref --short refs/remotes/origin/HEAD"] = "origin/main"
+		if msg := b.NewAgentTask(tui.AgentTask{Key: "DEMO-1"})(); msg != (tea.QuitMsg{}) {
+			t.Fatalf("dirty %v: msg %v", dirty, msg)
+		}
+		text, _ := f.Last("agent.prompt")["text"].(string)
+		want := "check out its branch feature/DEMO-1-filter"
+		if dirty {
+			want = "create a worktree for its branch feature/DEMO-1-filter"
+		}
+		if !strings.Contains(text, `CI check "unit-tests" failed`) || !strings.Contains(text, want) || f.Last("workspace.create")["cwd"] != api {
+			t.Errorf("dirty %v: prompt %q in %v", dirty, text, f.Last("workspace.create"))
+		}
+	}
+}

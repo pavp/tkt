@@ -24,6 +24,14 @@ func (t AgentTask) String() string {
 	return string(t.Key) + "'s feedback"
 }
 
+// phrase names the task in a sentence, "the review of #820" or "DEMO-1's feedback".
+func (t AgentTask) phrase() string {
+	if t.Review != nil {
+		return "the " + t.String()
+	}
+	return t.String()
+}
+
 // OpenAgent is an agent running in Herdr, as the "an open agent" menus list it.
 type OpenAgent struct {
 	Name, Pane, Status, Folder string
@@ -61,13 +69,15 @@ func (m Model) agentsMenu(task AgentTask, agents []OpenAgent) *menu {
 		}
 		items = append(items, menuItem{label: ag.Name + " · " + filepath.Base(ag.Folder) + " · " + status, run: func() tea.Cmd { return m.actions.SendTask(task, ag.Pane) }})
 	}
-	return &menu{title: "Send the " + task.String() + " to", subtitle: "an agent open in Herdr", items: items}
+	return &menu{title: "Send " + task.phrase() + " to", subtitle: "an agent open in Herdr", items: items}
 }
 
-// listAgents asks for the open agents a task can go to; they arrive as an AgentsListedMsg.
-func (m *Model) listAgents(task AgentTask) tea.Cmd {
-	m.status = "listing the agents open in Herdr…"
-	return m.actions.OpenAgents(task)
+// agentChoice asks which agent takes a task: a new one, placed where its work belongs, or one already open.
+func (m Model) agentChoice(task AgentTask) *menu {
+	return &menu{title: "Send " + task.phrase() + " to", items: []menuItem{
+		{label: "A new agent", run: func() tea.Cmd { return m.actions.NewAgentTask(task) }},
+		{label: "An open agent ▸", run: func() tea.Cmd { return m.actions.OpenAgents(task) }},
+	}}
 }
 
 // feedbackItems send a ticket's feedback: to its own agent when it has one, with another agent a step away;
@@ -80,10 +90,10 @@ func (m Model) feedbackItems(t ticket.Ticket, r ticket.Reason) []menuItem {
 	case m.snap.Agents[string(t.Key)] != "":
 		return []menuItem{
 			{label: fixLabel(r), key: "f", fix: t.Key},
-			{label: "Send its feedback to another agent ▸", run: func() tea.Cmd { return m.actions.OpenAgents(task) }},
+			{label: "Send its feedback to another agent ▸", sub: func() *menu { return m.agentChoice(task) }},
 		}
 	}
-	return []menuItem{{label: anyAgentLabel(r), key: "f", run: func() tea.Cmd { return m.actions.OpenAgents(task) }}}
+	return []menuItem{{label: anyAgentLabel(r), key: "f", sub: func() *menu { return m.agentChoice(task) }}}
 }
 
 // anyAgentLabel words the fix for a reason when an agent is still to be picked.
@@ -105,5 +115,5 @@ func (m Model) reviewItem(pr ticket.PullRequest) menuItem {
 	if !m.actions.InHerdr() {
 		return menuItem{label: "Copy the review prompt", run: func() tea.Cmd { return m.actions.CopyTaskPrompt(task) }}
 	}
-	return menuItem{label: "Review with an open agent ▸", run: func() tea.Cmd { return m.actions.OpenAgents(task) }}
+	return menuItem{label: "Review with ▸", sub: func() *menu { return m.agentChoice(task) }}
 }

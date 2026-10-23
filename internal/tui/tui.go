@@ -87,6 +87,9 @@ type Actions interface {
 	OpenAgents(task AgentTask) tea.Cmd
 	// SendTask prompts the agent in pane with task and focuses it.
 	SendTask(task AgentTask, pane string) tea.Cmd
+	// NewAgentTask hands task to an agent where its work belongs: a free agent already there, else a new one in a
+	// pane beside that folder's or in a new workspace.
+	NewAgentTask(task AgentTask) tea.Cmd
 	// CopyTaskPrompt puts task's prompt on the clipboard, for an agent outside Herdr.
 	CopyTaskPrompt(task AgentTask) tea.Cmd
 }

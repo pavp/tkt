@@ -157,7 +157,8 @@ func (m Model) startFix(k ticket.Key) (tea.Model, tea.Cmd) {
 	case !m.actions.InHerdr():
 		return m, m.actions.CopyTaskPrompt(task)
 	case m.snap.Agents[string(k)] == "":
-		return m, m.listAgents(task)
+		m.menu = m.agentChoice(task)
+		return m, nil
 	}
 	m.status = string(k) + " · sending its feedback to the agent…"
 	return m, m.actions.Fix(k, known)

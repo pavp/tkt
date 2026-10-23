@@ -17,8 +17,8 @@ Forecast (slice-plan, 2026-10-23): 540–920 authored changed lines; slice 1 330
 | ID | Specs | Slice | Route | Status | Commit |
 |---|---|---|---|---|---|
 | T0 | S4 (queueing on a working agent) | 1 | inline, no Writer reason | done (live Herdr probe, workspace closed) | — |
-| T1 | S1, S2, S3, S4, S6 (send to its agent or an open agent) | 1 | inline, no Writer reason | done (RED → GREEN; -race) | slice 1 commit |
-| T2 | S1, S2, S4, S5 (a new agent, placed) | 2 | inline, no Writer reason | pending | |
+| T1 | S1, S2, S3, S4, S6 (send to its agent or an open agent) | 1 | inline, no Writer reason | done (RED → GREEN; -race) | 924fd83 |
+| T2 | S1, S2, S4, S5 (a new agent, placed) | 2 | inline, no Writer reason | done (RED → GREEN; -race) | slice 2 commit |
 
 Native grouping: once the slice 2 PR is open, group with `gh stack link <pr-1> <pr-2>`; merging the top PR then takes the one below. Both branches live in pavp/tkt; read back each PR's base and diff after linking, and `gh stack unstack <stack>` dissolves the stack before any base can be corrected.
 
@@ -32,3 +32,4 @@ Native grouping: once the slice 2 PR is open, group with `gh stack link <pr-1> <
 - L3 (2026-10-23, user): "ok vamos con stacked".
 - L4 (verification T0): Herdr's docs do not say what agent.prompt does to a working agent, so a throwaway workspace (tkt-queue-test, closed after) ran a claude agent: a 500-word story prompt, then while `working` a second prompt; Herdr accepted it (status working in the response) and Claude Code ran it after the first ("FIRST-DONE", then "SECOND-DONE"). Queueing on a working agent is safe.
 - L5: T1 done: tui.AgentTask / OpenAgent / AgentsListedMsg; Actions InHerdr, OpenAgents (Herdr agents with an agent, ranked free+same repo, free, busy; repo from each cwd's origin), SendTask (agent.prompt then pane.focus, board closes), CopyTaskPrompt; review prompt asks for findings in the pane only, never posting to GitHub; review requests get "Review with an open agent ▸"; a ticket with an agent keeps "Send … to the agent" plus "Send its feedback to another agent ▸", without one the fix and `f` list the agents ("… to an agent ▸"), outside Herdr both copy the prompt; the preview's f hint follows. Old fix tests now give their ticket an agent (withAgent).
+- L6: T2 done: Actions.NewAgentTask; taskPlace (review → the repository's clone via Resolver; fix → ticket worktree, else a checkout on the PR's branch, else the clone with a prompt note: check the branch out when checkoutFree, else create a worktree per the project's rules and tkt link); startTaskAgent (free agent in the folder → prompt it; else split beside a pane of the folder; else new workspace; never a pane without an agent; quiet, unlike startInWorkspace which prints and takes over agentless panes for Start); menus "Review with ▸" / "… to an agent ▸" / "another agent ▸" open "A new agent" or "An open agent ▸"; f without an agent opens that choice. originRepo replaced by the existing Resolver.RepoAt. The clone is the configured path or the first found; choosing among several clones was left out.

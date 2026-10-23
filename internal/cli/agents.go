@@ -4,15 +4,18 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/pavp/tkt/internal/repos"
+	"github.com/pavp/tkt/internal/config"
+	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
+	"github.com/pavp/tkt/internal/workspace"
 )
 
 func (b *boardActions) InHerdr() bool { return b.inHerdr() }
@@ -27,15 +30,16 @@ func (b *boardActions) OpenAgents(task tui.AgentTask) tea.Cmd {
 		if err != nil {
 			return tui.AgentsListedMsg{Task: task, Err: err}
 		}
-		wanted := taskRepos(task)
+		wanted, res := taskRepos(task), b.a.Resolver(b.cfg())
 		var out []tui.OpenAgent
 		for _, ag := range agents {
 			if ag.Agent == "" {
 				continue
 			}
+			repo, _ := res.RepoAt(ctx, ag.Cwd)
 			out = append(out, tui.OpenAgent{
 				Name: cmp.Or(ag.Name, ag.Agent), Pane: ag.PaneID, Status: ag.Status, Folder: ag.Cwd,
-				SameRepo: slices.Contains(wanted, b.a.originRepo(ctx, ag.Cwd)),
+				SameRepo: repo != "" && slices.Contains(wanted, repo),
 			})
 		}
 		rank := func(ag tui.OpenAgent) int {
@@ -65,22 +69,6 @@ func taskRepos(task tui.AgentTask) []string {
 		}
 	}
 	return out
-}
-
-// originRepo names the GitHub repository ("owner/name") a folder's origin points to, or "".
-func (a *App) originRepo(ctx context.Context, dir string) string {
-	if dir == "" {
-		return ""
-	}
-	out, err := a.Run.Run(ctx, dir, "git", []string{"remote", "get-url", "origin"}, nil)
-	if err != nil {
-		return ""
-	}
-	owner, name, ok := repos.ParseRemote(strings.TrimSpace(string(out)))
-	if !ok {
-		return ""
-	}
-	return owner + "/" + name
 }
 
 // SendTask prompts the agent in pane with the task, which waits in its queue when it is working, then focuses it
@@ -118,15 +106,141 @@ func (b *boardActions) taskPrompt(task tui.AgentTask) (string, error) {
 	if task.Review != nil {
 		return reviewPrompt(*task.Review), nil
 	}
-	t := task.Known
-	if t == nil {
-		d, err := b.a.loadDetail(b.ctx, b.cfg(), task.Key, nil)
+	t, err := b.taskTicket(task)
+	if err != nil {
+		return "", err
+	}
+	return b.a.feedbackPrompt(b.ctx, b.cfg(), *t)
+}
+
+// taskTicket is the ticket whose feedback a task sends, the board's copy when it has one.
+func (b *boardActions) taskTicket(task tui.AgentTask) (*ticket.Ticket, error) {
+	if task.Known != nil {
+		return task.Known, nil
+	}
+	d, err := b.a.loadDetail(b.ctx, b.cfg(), task.Key, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &d.Ticket, nil
+}
+
+// NewAgentTask hands a task to an agent where its work belongs, opening only what is missing; the board then
+// closes on the agent's pane.
+func (b *boardActions) NewAgentTask(task tui.AgentTask) tea.Cmd {
+	return func() tea.Msg {
+		prompt, err := b.taskPrompt(task)
+		if err != nil {
+			return tui.StatusMsg(err.Error())
+		}
+		dir, note, label, err := b.taskPlace(task)
+		if err != nil {
+			return tui.StatusMsg(err.Error())
+		}
+		if note != "" {
+			prompt += "\n\n" + note
+		}
+		h := b.a.NewHerdr()
+		pane, err := b.a.startTaskAgent(b.ctx, h, dir, label, prompt)
+		if err != nil {
+			return tui.StatusMsg("could not start an agent for the " + task.String() + ": " + err.Error())
+		}
+		_ = h.FocusPane(b.ctx, pane)
+		return tea.QuitMsg{}
+	}
+}
+
+// taskPlace is the folder a new agent works on a task in, and what it is told about it. A review runs in the
+// repository's clone and the agent picks its own tools. A fix runs in the ticket's worktree, else in a checkout
+// already on its pull request's branch, else in the clone: checking the branch out there when the clone is free,
+// creating a worktree for it otherwise, since tkt never creates worktrees itself.
+func (b *boardActions) taskPlace(task tui.AgentTask) (dir, note, label string, err error) {
+	if task.Review != nil {
+		_, name, _ := strings.Cut(task.Review.Repo, "/")
+		dir, err = b.cloneOf(task.Review.Repo)
+		return dir, "", fmt.Sprintf("review · %s#%d", name, task.Review.Number), err
+	}
+	t, err := b.taskTicket(task)
+	if err != nil {
+		return "", "", "", err
+	}
+	label = string(t.Key)
+	all, err := b.a.allWork(b.ctx, b.cfg())
+	if err != nil {
+		return "", "", "", err
+	}
+	for _, w := range workspace.For(all, t.Key) {
+		if w.Path != "" {
+			return w.Path, "", label, nil
+		}
+	}
+	i := slices.IndexFunc(t.PRs, func(pr ticket.PullRequest) bool { return pr.State == ticket.PROpen })
+	if i < 0 {
+		return "", "", "", fmt.Errorf("%s has no open pull request to work on", t.Key)
+	}
+	pr := t.PRs[i]
+	for _, w := range all {
+		if w.Branch == pr.Branch && w.Path != "" {
+			return w.Path, "", label, nil
+		}
+	}
+	if dir, err = b.cloneOf(pr.Repo); err != nil {
+		return "", "", "", err
+	}
+	note = fmt.Sprintf("Work in this checkout: check out its branch %s first.", pr.Branch)
+	if !b.a.checkoutFree(b.ctx, dir) {
+		note = fmt.Sprintf("This checkout has work in progress: create a worktree for its branch %s following the project's rules, work there, and register it with `tkt link`.", pr.Branch)
+	}
+	return dir, note, label, nil
+}
+
+// cloneOf is the local clone of a repository ("owner/name"): its configured path, else the first one found.
+func (b *boardActions) cloneOf(repo string) (string, error) {
+	c := b.cfg()
+	r := config.Repo{Name: repo}
+	if i := slices.IndexFunc(c.Repos(), func(x config.Repo) bool { return x.Name == repo }); i >= 0 {
+		r = c.Repos()[i]
+	}
+	return b.a.Resolver(c).Resolve(b.ctx, r)
+}
+
+// startTaskAgent prompts a free agent already in dir, else starts one in a pane opened beside a pane of dir, else
+// in a new workspace; panes without an agent are never taken over, since tkt cannot tell what runs in them. It
+// returns the pane the task went to.
+func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, dir, label, prompt string) (string, error) {
+	same := func(p string) bool { return p != "" && filepath.Clean(p) == filepath.Clean(dir) }
+	agents, err := h.Agents(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, ag := range agents {
+		if ag.Agent != "" && same(ag.Cwd) && (ag.Status == "idle" || ag.Status == "done") {
+			return ag.PaneID, h.Prompt(ctx, ag.PaneID, prompt)
+		}
+	}
+	pane := ""
+	if panes, err := h.Panes(ctx); err == nil {
+		if i := slices.IndexFunc(panes, func(p herdr.Pane) bool { return same(p.Cwd) }); i >= 0 {
+			if split, err := h.SplitPane(ctx, panes[i].ID, dir); err == nil {
+				pane = split.ID
+			}
+		}
+	}
+	if pane == "" {
+		_, root, err := h.CreateWorkspace(ctx, dir, label, false)
 		if err != nil {
 			return "", err
 		}
-		t = &d.Ticket
+		pane = root.ID
 	}
-	return b.a.feedbackPrompt(b.ctx, b.cfg(), *t)
+	name, err := startClaude(ctx, h, pane)
+	if notReady(err) {
+		err = h.WaitAgent(ctx, name, "idle", 4*time.Minute)
+	}
+	if err != nil {
+		return "", err
+	}
+	return pane, a.promptWhenNamed(ctx, h, name, prompt)
 }
 
 // reviewPrompt asks an agent to review a pull request with its own tools and to keep its findings to itself: what

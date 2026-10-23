@@ -78,6 +78,10 @@ func (r *recorder) SendTask(task AgentTask, pane string) tea.Cmd {
 	return r.cmd("send " + task.String() + " " + pane)
 }
 
+func (r *recorder) NewAgentTask(task AgentTask) tea.Cmd {
+	return r.cmd("new agent " + task.String())
+}
+
 func (r *recorder) CopyTaskPrompt(task AgentTask) tea.Cmd {
 	return r.cmd("copy prompt " + task.String())
 }
@@ -4517,7 +4521,7 @@ func reviewMenu(t *testing.T, r *recorder) tea.Model {
 
 func TestReviewRequestGoesToAnOpenAgent(t *testing.T) {
 	r := &recorder{agents: openAgentsFixture()}
-	m := pick(t, reviewMenu(t, r), "Review with an open agent")
+	m := pick(t, pick(t, reviewMenu(t, r), "Review with"), "An open agent")
 	if !slices.Contains(r.calls, "agents review of #820") {
 		t.Fatalf("calls %v", r.calls)
 	}
@@ -4552,7 +4556,7 @@ func TestReviewPromptIsCopiedOutsideHerdr(t *testing.T) {
 
 func TestNoOpenAgentSaysSo(t *testing.T) {
 	r := &recorder{}
-	m := pick(t, reviewMenu(t, r), "Review with an open agent")
+	m := pick(t, pick(t, reviewMenu(t, r), "Review with"), "An open agent")
 	m, _ = m.Update(AgentsListedMsg{Task: AgentTask{Review: &ticket.PullRequest{Number: 820}}})
 	if v := stripANSI(m.View()); !strings.Contains(v, "no agent is open in Herdr") || strings.Contains(v, "Send the review") {
 		t.Errorf("an empty list says so:\n%s", v)
@@ -4576,7 +4580,7 @@ func TestFeedbackGoesToItsAgentOrAnother(t *testing.T) {
 	if !strings.Contains(v, "Send the CI failure to the agent") || !strings.Contains(v, "Send its feedback to another agent ▸") {
 		t.Fatalf("its own agent first, then another:\n%s", v)
 	}
-	pick(t, menu, "Send its feedback to another agent")
+	pick(t, pick(t, menu, "Send its feedback to another agent"), "An open agent")
 	if !slices.Contains(r.calls, "agents DEMO-1's feedback") {
 		t.Errorf("calls %v", r.calls)
 	}
@@ -4598,9 +4602,13 @@ func TestFeedbackWithoutAnAgentAsksWhichOne(t *testing.T) {
 	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Send the CI failure to an agent ▸") || strings.Contains(v, "to the agent") {
 		t.Fatalf("without its own agent, the fix picks one:\n%s", v)
 	}
-	press(m, "f")
-	if !slices.Contains(r.calls, "agents DEMO-1's feedback") || slices.Contains(r.calls, "fix DEMO-1") {
-		t.Errorf("f asks which agent: %v", r.calls)
+	asked := press(m, "f")
+	if v := stripANSI(asked.View()); !strings.Contains(v, "Send DEMO-1's feedback to") || !strings.Contains(v, "A new agent") || !strings.Contains(v, "An open agent ▸") || slices.Contains(r.calls, "fix DEMO-1") {
+		t.Fatalf("f asks which agent:\n%s", v)
+	}
+	pick(t, asked, "A new agent")
+	if !slices.Contains(r.calls, "new agent DEMO-1's feedback") {
+		t.Errorf("calls %v", r.calls)
 	}
 	out := &recorder{outsideHerdr: true}
 	o := tea.Model(New(snapshot(), true, out, ViewList))
@@ -4624,4 +4632,16 @@ func TestFeedbackWithoutAnAgentAsksWhichOne(t *testing.T) {
 func withAgent(m tea.Model, key string) tea.Model {
 	m, _ = m.Update(AgentsMsg{FetchedAt: m.(Model).snap.FetchedAt, Agents: map[string]string{key: "claude idle"}})
 	return m
+}
+
+func TestReviewRequestGoesToANewAgent(t *testing.T) {
+	r := &recorder{}
+	m := pick(t, reviewMenu(t, r), "Review with")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Send the review of #820 to") || !strings.Contains(v, "A new agent") {
+		t.Fatalf("the review asks which agent:\n%s", v)
+	}
+	pick(t, m, "A new agent")
+	if !slices.Contains(r.calls, "new agent review of #820") {
+		t.Errorf("calls %v", r.calls)
+	}
 }
