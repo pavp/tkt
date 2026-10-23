@@ -563,7 +563,7 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 Sprint 3", "2 PRs 3", "│ Columns │ │ List │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 Sprint 3", "2 PRs 3", "│ ◫ Columns │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
@@ -751,9 +751,9 @@ func TestMouseSelectsCardsRowsAndFilters(t *testing.T) {
 	}
 
 	header := strings.Split(stripANSI(m.View()), "\n")[1]
-	m = click(m, lipgloss.Width(header[:strings.Index(header, "List")])+1, 1)
+	m = click(m, lipgloss.Width(header[:strings.Index(header, "◫ Columns")])+1, 1)
 	if !strings.Contains(stripANSI(m.View()), "↑↓ ws move") {
-		t.Fatalf("click on List did not switch view:\n%s", header)
+		t.Fatalf("a click on the view switch did not switch to the list:\n%s", header)
 	}
 	view = m.View()
 	y = lineIndex(view, "DEMO-3")
@@ -1779,7 +1779,7 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	m := loaded(&recorder{})
 	lines := strings.Split(stripANSI(m.View()), "\n")
 	first := lines[1]
-	for _, want := range []string{"tkt", "│ 1 Sprint 3 │", "│ 2 PRs 3 │", "│ Columns │", "│ List │"} {
+	for _, want := range []string{"tkt", "│ 1 Sprint 3 │", "│ 2 PRs 3 │", "│ ◫ Columns │"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("title row lacks %q: %q", want, first)
 		}
@@ -2554,11 +2554,11 @@ func TestViewChoiceIsRemembered(t *testing.T) {
 		t.Fatalf("v should remember the list and keep the rest: %+v", r.states)
 	}
 	v := stripANSI(m.View())
-	y := lineIndex(v, "Columns")
+	y := lineIndex(v, "☰ List")
 	line := strings.Split(v, "\n")[y]
-	m = click(m, lipgloss.Width(line[:strings.Index(line, "Columns")])+1, y)
+	m = click(m, lipgloss.Width(line[:strings.Index(line, "☰ List")])+1, y)
 	if got := r.states[len(r.states)-1].View; got != ViewColumns {
-		t.Errorf("a click on Columns should remember it: %q", got)
+		t.Errorf("a click on the view switch should switch back to columns and remember it: %q", got)
 	}
 }
 
@@ -3197,8 +3197,11 @@ func TestTeamModeListsEveryOpenPullRequestWithItsAuthor(t *testing.T) {
 func TestViewButtonsShowOnlyWhereTheyApply(t *testing.T) {
 	m := tea.Model(New(snapshot(), true, &recorder{}, ViewColumns))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	if v := stripANSI(m.View()); !strings.Contains(v, "│ Columns │ │ List │") {
-		t.Errorf("the tickets' view offers both views:\n%s", v)
+	if v := stripANSI(m.View()); !strings.Contains(v, "│ ◫ Columns │") || strings.Contains(v, "List │") {
+		t.Errorf("one switch names the view in use:\n%s", v)
+	}
+	if v := stripANSI(press(m, "v").View()); !strings.Contains(v, "│ ☰ List │") || strings.Contains(v, "Columns │") {
+		t.Errorf("the switch follows v to the list:\n%s", v)
 	}
 	if head := strings.Join(strings.Split(stripANSI(press(m, "2").View()), "\n")[:4], "\n"); strings.Contains(head, "Columns") || strings.Contains(head, "List") {
 		t.Errorf("the PRs filter is always a list, so it offers no view:\n%s", head)

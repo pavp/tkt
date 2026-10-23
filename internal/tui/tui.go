@@ -1464,7 +1464,7 @@ type headerItem struct {
 	repos, team bool
 }
 
-// headerSpec lists the filter buttons and, where the user can choose the view, the view buttons: the PRs
+// headerSpec lists the filter buttons and, where the user can choose the view, the view switch: the PRs
 // filter and a pane too narrow for columns always show the list.
 func (m Model) headerSpec() []headerItem {
 	spec := []headerItem{
@@ -1472,9 +1472,17 @@ func (m Model) headerSpec() []headerItem {
 		{filter: FilterPRs, label: fmt.Sprintf(" 2 PRs %d ", m.prCount())},
 	}
 	if m.filter != FilterPRs && m.width >= narrowWidth {
-		spec = append(spec, headerItem{view: ViewColumns, label: " Columns "}, headerItem{view: ViewList, label: " List "})
+		spec = append(spec, m.viewSwitch())
 	}
 	return spec
+}
+
+// viewSwitch names the view in use; a click switches to the other one, as v does.
+func (m Model) viewSwitch() headerItem {
+	if m.effectiveView() == ViewColumns {
+		return headerItem{view: ViewList, label: " ◫ Columns "}
+	}
+	return headerItem{view: ViewColumns, label: " ☰ List "}
 }
 
 // reposButton opens the repository filter; it says how many repositories show while any is hidden.
