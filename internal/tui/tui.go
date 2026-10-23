@@ -75,6 +75,8 @@ type Actions interface {
 	Assign(key ticket.Key, who Assignee) tea.Cmd
 	// Users lists the users assignable to key that match query; they arrive as a UsersListedMsg.
 	Users(key ticket.Key, query string) tea.Cmd
+	// Backlog asks Jira for the team boards' future sprints and backlog; they arrive as a BacklogMsg.
+	Backlog() tea.Cmd
 }
 
 // BoardState is what the board remembers between openings.
@@ -92,6 +94,8 @@ type BoardState struct {
 	// TeamPRs shows everyone else's open pull requests in the PRs filter; unset, it follows Team, as
 	// one toggle did both before.
 	TeamPRs *bool `json:"team_prs,omitempty"`
+	// BacklogMerged groups the backlog's sprints by name instead of one group per sprint and board.
+	BacklogMerged bool `json:"backlog_merged,omitempty"`
 }
 
 type ClonesFoundMsg struct {
@@ -125,6 +129,12 @@ type SnapshotMsg struct {
 	Quiet bool
 }
 
+// BacklogMsg delivers the team boards' backlog, or why it could not be read.
+type BacklogMsg struct {
+	Backlog board.Backlog
+	Err     error
+}
+
 // AgentsMsg delivers the agent states read for the board fetched at FetchedAt.
 type AgentsMsg struct {
 	FetchedAt time.Time
@@ -141,6 +151,8 @@ const (
 	FilterAll = "all"
 	// FilterPRs lists the user's own open pull requests, then the review requests.
 	FilterPRs = "prs"
+	// FilterBacklog lists the team boards' future sprints and backlog, asked of Jira when it opens.
+	FilterBacklog = "backlog"
 
 	// narrowWidth is the terminal width below which four columns no longer fit.
 	narrowWidth = 100
@@ -159,6 +171,9 @@ type item struct {
 	parent ticket.Key
 	// other marks someone else's pull request that asks nothing of the user, listed while Team is on.
 	other bool
+	// board, dates and badges, on a backlog group's title row, show its sprint's board and dates and its story
+	// points by stage; shortBadges leaves out the count of unestimated tickets, for narrow panes.
+	board, dates, badges, shortBadges string
 }
 
 func (it item) review() bool  { return it.pr != nil && it.ticket == nil && !it.other }
@@ -210,6 +225,11 @@ type Model struct {
 	loadingSince time.Time
 	// showBots also lists review requests on pull requests opened by bots.
 	showBots bool
+	// backlog is the team boards' backlog once loaded; backlogLoading says a load is under way.
+	backlog        *board.Backlog
+	backlogLoading bool
+	// backlogMerged shows one group per sprint name instead of one per sprint and board.
+	backlogMerged bool
 	// moves keeps the statuses each ticket could move to, asked when its menu opened, so Move to… opens
 	// at once; shared by the model's copies and only touched in Update.
 	moves map[ticket.Key]knownMoves
@@ -252,7 +272,7 @@ const (
 	refreshEvery = 2 * time.Minute
 )
 
-var filterOrder = []string{FilterAll, FilterPRs}
+var filterOrder = []string{FilterAll, FilterPRs, FilterBacklog}
 
 func tick() tea.Cmd {
 	return tea.Tick(tickEvery, func(t time.Time) tea.Msg { return tickMsg(t) })
@@ -291,7 +311,7 @@ func (m Model) WithState(s BoardState) Model {
 	for _, g := range s.Collapsed {
 		m.collapsed[g] = true
 	}
-	m.team, m.teamPRs = s.Team, s.Team
+	m.team, m.teamPRs, m.backlogMerged = s.Team, s.Team, s.BacklogMerged
 	if s.TeamPRs != nil {
 		m.teamPRs = *s.TeamPRs
 	}
@@ -301,7 +321,7 @@ func (m Model) WithState(s BoardState) Model {
 // state is what the board remembers for its next opening.
 func (m Model) state() BoardState {
 	teamPRs := m.teamPRs
-	return BoardState{HiddenRepos: trueKeys(m.hiddenRepos), HiddenBoards: trueKeys(m.hiddenBoards), Collapsed: trueKeys(m.collapsed), View: m.view, Team: m.team, TeamPRs: &teamPRs}
+	return BoardState{HiddenRepos: trueKeys(m.hiddenRepos), HiddenBoards: trueKeys(m.hiddenBoards), Collapsed: trueKeys(m.collapsed), View: m.view, Team: m.team, TeamPRs: &teamPRs, BacklogMerged: m.backlogMerged}
 }
 
 func trueKeys(set map[string]bool) []string {
@@ -324,7 +344,7 @@ func (m Model) WithClock(now func() time.Time) Model {
 // effectiveView falls back to the list when columns would not fit or when showing pull requests, which
 // have no column of their own.
 func (m Model) effectiveView() string {
-	if m.filter == FilterPRs || m.width < narrowWidth {
+	if m.filter != FilterAll || m.width < narrowWidth {
 		return ViewList
 	}
 	return m.view
@@ -336,6 +356,8 @@ func (m *Model) explainList() {
 	case m.view != ViewColumns || m.effectiveView() == ViewColumns:
 	case m.filter == FilterPRs:
 		m.status = "the PRs filter always shows a list · press 1 for all tickets"
+	case m.filter == FilterBacklog:
+		m.status = "the backlog always shows a list · press 1 for the sprint"
 	default:
 		m.status = fmt.Sprintf("columns need a pane at least %d columns wide (this one has %d) · showing the list", narrowWidth, m.width)
 	}
@@ -384,6 +406,12 @@ func (m Model) ticketShown(t ticket.Ticket) bool { return t.Board == "" || !m.hi
 // filter offers them.
 func (m Model) boardTickets() map[string]int {
 	boards := map[string]int{}
+	if m.filter == FilterBacklog {
+		for _, t := range m.backlogTickets() {
+			boards[t.Board]++
+		}
+		return boards
+	}
 	for _, t := range m.snap.Tickets {
 		if t.Board != "" && (!t.Team || m.team) {
 			boards[t.Board]++
@@ -493,8 +521,12 @@ func (m Model) hiddenBots() int {
 	return len(m.snap.Reviews) + len(m.snap.Others) - len(shown.Reviews) - len(shown.Others)
 }
 
-// botToggleLine is listLines' marker for the reviews filter's "show bots" line, which a click toggles.
-const botToggleLine = -2
+// botToggleLine is listLines' marker for the reviews filter's "show bots" line, which a click toggles;
+// sectionLine marks a section's title, such as "My tickets".
+const (
+	botToggleLine = -2
+	sectionLine   = -3
+)
 
 func (m *Model) toggleBots() {
 	m.showBots = !m.showBots
@@ -555,7 +587,7 @@ func (m Model) prLayout(every bool) []item {
 			}
 		}
 		out = append(out, item{key: ticket.Key("group:" + group), group: group, title: title, count: len(rows), needs: needs})
-		if every || !m.collapsed[group] {
+		if every || !m.folded(group) {
 			out = append(out, rows...)
 		}
 	}
@@ -600,16 +632,26 @@ func (m Model) prLayout(every bool) []item {
 // groupTitle renders a group's title row: ▾ while open, ▸ with how many need the user once collapsed.
 func (m Model) groupTitle(it item, sel bool) string {
 	mark, count := "▾ ", strconv.Itoa(it.count)
-	if m.collapsed[it.group] {
+	if m.folded(it.group) {
 		mark = "▸ "
 		if it.needs > 0 {
 			count += fmt.Sprintf(" · %d needs you", it.needs)
 		}
 	}
-	if sel {
-		return selected.Render(mark + it.title + "  " + count)
+	// The board's badge brings its own padding, so one space sets it apart where text needs two.
+	plain, styled := it.title, bold.Render(it.title)
+	if it.board != "" {
+		plain, styled = plain+"  "+it.board+" ", styled+" "+labelBadge.Render(" "+it.board+" ")
 	}
-	return mark + bold.Render(it.title) + "  " + dim.Render(count)
+	if it.dates != "" {
+		gap := map[bool]string{true: " ", false: "  "}[it.board != ""]
+		plain, styled = plain+gap+it.dates, styled+gap+lipgloss.NewStyle().Foreground(colorSubtle).Render(it.dates)
+	}
+	gap := map[bool]string{true: " ", false: "  "}[it.board != "" && it.dates == ""]
+	if sel {
+		return selected.Render(mark + plain + gap + count)
+	}
+	return mark + styled + gap + dim.Render(count)
 }
 
 // hasTeamBoards reports whether any space names the boards the team comes from.
@@ -622,6 +664,141 @@ func (m Model) hasTeamBoards() bool {
 // the sync reads it to know whether to fetch them.
 // teamButton names the toggle of the filter in view: Team for the team's tickets, Requested in the PRs
 // filter, which narrows the pull requests to those asking for the user's review.
+// backlogTickets are every ticket of the loaded backlog, sprints first.
+func (m Model) backlogTickets() []ticket.Ticket {
+	if m.backlog == nil {
+		return nil
+	}
+	var out []ticket.Ticket
+	for _, sp := range m.backlog.Sprints {
+		out = append(out, sp.Tickets...)
+	}
+	return append(out, m.backlog.Backlog...)
+}
+
+// backlogGroup is the backlog's sprintless group, folded until the user opens it, as it is usually the
+// longest; collapsed then records it open.
+const backlogGroup = "backlog:"
+
+// folded reports whether a group's rows are hidden.
+func (m Model) folded(group string) bool { return m.collapsed[group] != (group == backlogGroup) }
+
+// backlogItems lists the backlog's active sprints, then its future sprints soonest first, one group per
+// sprint and board, or per sprint name while merged, then its tickets in no sprint; each group's title row
+// folds and shows its story points by stage. Hidden boards' sprints and tickets are left out.
+func (m Model) backlogItems() []item {
+	if m.backlog == nil {
+		return nil
+	}
+	var out []item
+	add := func(group, title, boardName, dates string, ts []ticket.Ticket) {
+		ts = slices.DeleteFunc(slices.Clone(ts), func(t ticket.Ticket) bool { return !m.ticketShown(t) })
+		head := item{key: ticket.Key("group:" + group), group: group, title: title, board: boardName, dates: dates, count: len(ts)}
+		if m.backlog.HasPoints {
+			head.badges, head.shortBadges = pointBadges(ts)
+		}
+		out = append(out, head)
+		if !m.folded(group) {
+			for _, t := range ts {
+				out = append(out, item{key: t.Key, ticket: &t})
+			}
+		}
+	}
+	type sprintGroup struct {
+		key, title, board string
+		start, end        time.Time
+		active            bool
+		tickets           []ticket.Ticket
+	}
+	// Sprints come active first, then soonest first, so a group's first sprint places it.
+	var groups []*sprintGroup
+	byKey := map[string]*sprintGroup{}
+	for _, sp := range m.backlog.Sprints {
+		if m.hiddenBoards[sp.BoardName] {
+			continue
+		}
+		key, boardName := fmt.Sprintf("sprint:%d", sp.ID), sp.BoardName
+		if m.backlogMerged {
+			key, boardName = "sprint:"+sp.Name, ""
+		}
+		g, ok := byKey[key]
+		if !ok {
+			g = &sprintGroup{key: key, title: sp.Name, board: boardName}
+			byKey[key] = g
+			groups = append(groups, g)
+		}
+		if !sp.Start.IsZero() && (g.start.IsZero() || sp.Start.Before(g.start)) {
+			g.start = sp.Start
+		}
+		if sp.End.After(g.end) {
+			g.end = sp.End
+		}
+		g.active = g.active || sp.State == "active"
+		g.tickets = append(g.tickets, sp.Tickets...)
+	}
+	for _, g := range groups {
+		var dates []string
+		switch {
+		case !g.start.IsZero() && !g.end.IsZero():
+			dates = append(dates, g.start.Format("Jan 2")+" – "+g.end.Format("Jan 2"))
+		case !g.start.IsZero():
+			dates = append(dates, "from "+g.start.Format("Jan 2"))
+		}
+		if g.active {
+			dates = append(dates, "active")
+		}
+		add(g.key, g.title, g.board, strings.Join(dates, " · "), g.tickets)
+	}
+	add(backlogGroup, "Backlog", "", "", m.backlog.Backlog)
+	return out
+}
+
+// toggleBacklogMerged switches the backlog between one group per sprint and board and one per sprint name.
+func (m *Model) toggleBacklogMerged() tea.Cmd {
+	m.backlogMerged = !m.backlogMerged
+	m.reselect()
+	return m.actions.SaveState(m.state())
+}
+
+// pointBadges renders a group's story points not started, in progress and done as filled badges on their
+// columns' colors, then how many tickets have no estimate; short leaves that count out.
+func pointBadges(ts []ticket.Ticket) (full, short string) {
+	todo, doing, done, unestimated := board.PointsByStage(ts)
+	badge := func(p float64, c ticket.Category) string {
+		return lipgloss.NewStyle().Background(columnColors[c]).Foreground(colorOnBadge).Render(" " + strconv.FormatFloat(p, 'f', -1, 64) + " ")
+	}
+	// The unestimated count goes before the badges, so the badges end in the same column on every group.
+	short = badge(todo, ticket.ToDo) + " " + badge(doing, ticket.InProgress) + " " + badge(done, ticket.Done)
+	if unestimated > 0 {
+		return dim.Render(fmt.Sprintf("%d unestimated", unestimated)) + "  " + short, short
+	}
+	return short, short
+}
+
+// backlogCount counts the backlog's tickets the board filter leaves.
+func (m Model) backlogCount() int {
+	n := 0
+	for _, it := range m.backlogItems() {
+		if it.heading() {
+			n += it.count
+		}
+	}
+	return n
+}
+
+// enterFilter loads the backlog the first time it opens.
+func (m *Model) enterFilter() tea.Cmd {
+	if m.filter != FilterBacklog || m.backlog != nil || m.backlogLoading || !m.hasTeamBoards() {
+		return nil
+	}
+	return m.loadBacklog()
+}
+
+func (m *Model) loadBacklog() tea.Cmd {
+	m.backlogLoading = true
+	return m.actions.Backlog()
+}
+
 func (m Model) teamButton() string {
 	if m.filter == FilterPRs {
 		return "Requested"
@@ -742,8 +919,11 @@ func (m Model) columns() [][]item {
 }
 
 func (m Model) listItems() []item {
-	if m.filter == FilterPRs {
+	switch m.filter {
+	case FilterPRs:
 		return m.prItems()
+	case FilterBacklog:
+		return m.backlogItems()
 	}
 	var out []item
 	ts := m.tickets()
@@ -861,6 +1041,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.Quiet {
 			m.status = ""
 		}
+		m.reselect()
+	case BacklogMsg:
+		m.backlogLoading = false
+		if msg.Err != nil {
+			m.status = "could not load the backlog: " + msg.Err.Error()
+			return m, nil
+		}
+		m.backlog = &msg.Backlog
 		m.reselect()
 	case AgentsMsg:
 		if msg.FetchedAt.Equal(m.snap.FetchedAt) {
@@ -1015,10 +1203,13 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if m.effectiveView() == ViewList {
-		fixed, _, _, start := m.listLayout()
-		_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, 0, 0, 0)
+		fixed, _, _, start, sticky := m.listLayout()
+		_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, listWidths{})
 		// at counts the table's header and rule, which listLayout keeps among the fixed lines.
 		i := 2 + start + body - len(fixed)
+		if sticky >= 0 && body == len(fixed) {
+			i = 2 + sticky
+		}
 		if body < len(fixed) {
 			i = -1
 		}
@@ -1101,6 +1292,9 @@ func (m *Model) clickHeader(x int) tea.Cmd {
 			if sp.team {
 				return m.toggleTeam()
 			}
+			if sp.grouping {
+				return m.toggleBacklogMerged()
+			}
 			if sp.filter != "" {
 				m.filter = sp.filter
 			} else {
@@ -1111,7 +1305,7 @@ func (m *Model) clickHeader(x int) tea.Cmd {
 			if sp.view != "" {
 				return m.actions.SaveState(m.state())
 			}
-			return nil
+			return m.enterFilter()
 		}
 	}
 	return nil
@@ -1156,6 +1350,9 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "detailed cards · z for compact"
 		}
 	case "v":
+		if m.filter == FilterBacklog {
+			return m, m.toggleBacklogMerged()
+		}
 		if m.view == ViewColumns {
 			m.view = ViewList
 		} else {
@@ -1195,9 +1392,11 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.reselect()
-	case "1", "2":
+		return m, m.enterFilter()
+	case "1", "2", "3":
 		m.filter = filterOrder[k.String()[0]-'1']
 		m.reselect()
+		return m, m.enterFilter()
 	case "down", "s", "j":
 		m.move(0, 1)
 	case "up", "w", "k":
@@ -1207,6 +1406,12 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "left", "a", "h":
 		m.move(-1, 0)
 	case "g":
+		if m.filter == FilterBacklog {
+			if m.backlogLoading || !m.hasTeamBoards() {
+				return m, nil
+			}
+			return m, m.loadBacklog()
+		}
 		return m, tea.Batch(m.actions.Refresh(), m.beginLoading())
 	case "enter", " ":
 		if it, ok := m.current(); ok && it.heading() {
@@ -1249,8 +1454,13 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "t":
-		return m, m.toggleTeam()
+		if m.filter != FilterBacklog {
+			return m, m.toggleTeam()
+		}
 	case "f":
+		if m.filter == FilterBacklog {
+			return m, nil
+		}
 		if it, ok := m.current(); ok && it.ticket != nil && it.ticket.Team {
 			m.status = fmt.Sprintf("%s is %s's ticket", it.ticket.Key, cmp.Or(it.ticket.Assignee, "nobody"))
 			return m, nil
@@ -1438,9 +1648,9 @@ func (m Model) header() string {
 }
 
 type headerSpan struct {
-	start, width int
-	filter, view string
-	scope, team  bool
+	start, width          int
+	filter, view          string
+	scope, team, grouping bool
 }
 
 var (
@@ -1459,42 +1669,48 @@ func (m Model) headerLayout() (title, controls string, x, y, h int, spans []head
 	title = strings.Join(parts, " · ")
 	// The Repos or Boards button shows only where the boxed buttons still fit with it; otherwise its key and
 	// the notice open the filter.
-	specs := [][]headerItem{m.headerSpec(), m.headerSpec()}
-	if it, ok := m.scopeButton(); ok {
-		specs[0] = append(specs[0], it)
+	var team []headerItem
+	if m.filter != FilterBacklog {
+		team = append(team, headerItem{team: true, label: " " + m.teamButton() + " "})
 	}
-	specs[0] = append(specs[0], headerItem{team: true, label: " " + m.teamButton() + " "})
-	for pass := 0; pass < 2; pass++ {
-		for _, spec := range specs {
-			var row []string
-			pos := 0
-			spans = nil
-			for i, it := range spec {
-				gap := map[bool]int{true: 1, false: 0}[i > 0]
-				if i == len(filterOrder) || it.scope || (it.team && !spec[i-1].scope) {
-					gap = 2
-				}
-				row = append(row, strings.Repeat(" ", gap))
-				pos += gap
-				st := filterOff
-				if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.scope && m.scopeNotice() != "") || (it.team && m.teamButtonOn()) {
-					st = filterOn
-				}
-				chip := st.Render(strings.TrimSpace(it.label))
-				spans = append(spans, headerSpan{start: pos, width: lipgloss.Width(chip), filter: it.filter, view: it.view, scope: it.scope, team: it.team})
-				row = append(row, chip)
-				pos += lipgloss.Width(chip)
+	// The Team button rather moves the controls to their own row than leaves the header.
+	type attempt struct {
+		spec []headerItem
+		own  bool
+	}
+	withTeam := append(m.headerSpec(), team...)
+	attempts := []attempt{{withTeam, false}, {withTeam, true}, {m.headerSpec(), false}, {m.headerSpec(), true}}
+	if it, ok := m.scopeButton(); ok {
+		attempts = slices.Insert(attempts, 0, attempt{append(append(m.headerSpec(), it), team...), false})
+	}
+	for _, a := range attempts {
+		spec := a.spec
+		var row []string
+		pos := 0
+		spans = nil
+		for i, it := range spec {
+			gap := map[bool]int{true: 1, false: 0}[i > 0]
+			if i == len(filterOrder) || it.scope || (it.team && !spec[i-1].scope) {
+				gap = 2
 			}
-			controls = lipgloss.JoinHorizontal(lipgloss.Top, row...)
-			cw := lipgloss.Width(controls)
-			// The first pass looks for room on the title row, with the Repos button then without; the second
-			// gives the controls their own row.
-			switch {
-			case pass == 0 && lipgloss.Width(title)+2+cw <= m.width:
-				return title, controls, m.width - cw, 0, 3, spans
-			case pass == 1 && cw <= m.width:
-				return truncate(title, m.width), controls, 0, 1, 3, spans
+			row = append(row, strings.Repeat(" ", gap))
+			pos += gap
+			st := filterOff
+			if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.scope && m.scopeNotice() != "") || (it.team && m.teamButtonOn()) {
+				st = filterOn
 			}
+			chip := st.Render(strings.TrimSpace(it.label))
+			spans = append(spans, headerSpan{start: pos, width: lipgloss.Width(chip), filter: it.filter, view: it.view, scope: it.scope, team: it.team, grouping: it.grouping})
+			row = append(row, chip)
+			pos += lipgloss.Width(chip)
+		}
+		controls = lipgloss.JoinHorizontal(lipgloss.Top, row...)
+		cw := lipgloss.Width(controls)
+		switch {
+		case !a.own && lipgloss.Width(title)+2+cw <= m.width:
+			return title, controls, m.width - cw, 0, 3, spans
+		case a.own && cw <= m.width:
+			return truncate(title, m.width), controls, 0, 1, 3, spans
 		}
 	}
 	items := m.headerItems()
@@ -1523,8 +1739,8 @@ type headerItem struct {
 	filter, view string
 	label        string
 	// scope marks the button that opens the repository or board filter, team the one that shows the team's
-	// tickets.
-	scope, team bool
+	// tickets, grouping the backlog's switch between split and merged sprints.
+	scope, team, grouping bool
 }
 
 // headerSpec lists the filter buttons and, where the user can choose the view, the view switch: the PRs
@@ -1533,9 +1749,21 @@ func (m Model) headerSpec() []headerItem {
 	spec := []headerItem{
 		{filter: FilterAll, label: fmt.Sprintf(" 1 Sprint %d ", len(m.shownTickets()))},
 		{filter: FilterPRs, label: fmt.Sprintf(" 2 PRs %d ", m.prCount())},
+		{filter: FilterBacklog, label: " 3 Backlog "},
 	}
-	if m.filter != FilterPRs && m.width >= narrowWidth {
+	if m.backlog != nil {
+		spec[2].label = fmt.Sprintf(" 3 Backlog %d ", m.backlogCount())
+	}
+	if m.filter == FilterAll && m.width >= narrowWidth {
 		spec = append(spec, m.viewSwitch())
+	}
+	if m.filter == FilterBacklog {
+		// Both words take the same width, so the header does not shift when the grouping changes.
+		label := " Split  "
+		if m.backlogMerged {
+			label = " Merged "
+		}
+		spec = append(spec, headerItem{grouping: true, label: label})
 	}
 	return spec
 }
@@ -1634,7 +1862,7 @@ type chipSpan struct {
 // reviewChips renders the strip and returns each visible chip's horizontal span.
 func (m Model) reviewChips() (string, []chipSpan) {
 	reviews := m.stripReviews()
-	if len(reviews) == 0 || m.filter == FilterPRs {
+	if len(reviews) == 0 || m.filter != FilterAll {
 		return "", nil
 	}
 	label := dim.Render("Review requested")
@@ -1681,13 +1909,15 @@ func (m Model) cardLines() int {
 
 // listLayout splits the list view into what stays put — the review strip with the blank line under it, and
 // the table's header and rule — and the rows that scroll, which get rows lines, keeping one blank line
-// between the table and the bottom. start is the first row shown.
-func (m Model) listLayout() (fixed, rows []string, height, start int) {
+// between the table and the bottom. start is the first row shown; once the rows scroll past a section's or
+// group's title, that title takes the first row's place, and sticky is its row (else -1).
+func (m Model) listLayout() (fixed, rows []string, height, start, sticky int) {
+	sticky = -1
 	if strip := m.reviewStrip(); strip != "" {
 		fixed = append(strings.Split(strip, "\n"), "")
 	}
 	all := strings.Split(strings.TrimRight(m.listView(), "\n"), "\n")
-	_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, 0, 0, 0)
+	_, at := m.listLines(func(k, s, a, p, t string) string { return "" }, func(item) string { return "" }, listWidths{})
 	if len(all) >= 2 {
 		fixed, all, at = append(fixed, all[:2]...), all[2:], at[min(2, len(at)):]
 	}
@@ -1699,14 +1929,30 @@ func (m Model) listLayout() (fixed, rows []string, height, start int) {
 			sel = max(0, slices.Index(at, m.row))
 		}
 		start = min(max(0, sel-height/2), len(all)-height)
-		all = all[start : start+height]
+		items := m.listItems()
+		title := func(j int) bool {
+			return at[j] == sectionLine || at[j] >= 0 && at[j] < len(items) && items[at[j]].heading()
+		}
+		if start > 0 && sel > start && !title(start) {
+			for j := start - 1; j >= 0; j-- {
+				if title(j) {
+					sticky = j
+					break
+				}
+			}
+		}
+		window := slices.Clone(all[start : start+height])
+		if sticky >= 0 {
+			window[0] = all[sticky]
+		}
+		all = window
 	}
-	return fixed, all, height, start
+	return fixed, all, height, start, sticky
 }
 
 // listWindow is the list view as drawn: the fixed lines, then the rows in view.
 func (m Model) listWindow() []string {
-	fixed, rows, height, _ := m.listLayout()
+	fixed, rows, height, _, _ := m.listLayout()
 	for len(rows) < height {
 		rows = append(rows, "")
 	}
@@ -2194,12 +2440,19 @@ func pad(s string, n int) string {
 
 func (m Model) listView() string {
 	items := m.listItems()
-	if len(items) == 0 {
+	switch {
+	case m.filter == FilterBacklog && !m.hasTeamBoards():
+		return dim.Render("  no team boards yet · add team boards in Settings (,)")
+	case m.filter == FilterBacklog && m.backlog == nil && m.backlogLoading:
+		return dim.Render("  loading backlog…")
+	case m.filter == FilterBacklog && m.backlog == nil:
+		return dim.Render("  the backlog could not be loaded · g tries again")
+	case len(items) == 0:
 		return dim.Render("  nothing matches this filter")
 	}
 	prText := func(it item) string {
 		switch {
-		case it.heading():
+		case it.heading(), m.filter == FilterBacklog:
 			return ""
 		case it.pr != nil:
 			return checkMark(it.pr.Checks)
@@ -2256,9 +2509,24 @@ func (m Model) listView() string {
 			pointsW += 2
 		}
 	}
-	// Narrow panes drop AGENT first, then shrink PR / CI, then STATUS, so the title always keeps some room.
+	boardW := 0
+	if m.filter == FilterBacklog {
+		for _, it := range measured {
+			if it.ticket != nil {
+				boardW = max(boardW, lipgloss.Width("BOARD"), lipgloss.Width(it.ticket.Board)+2)
+			}
+		}
+		if boardW > 0 {
+			boardW = min(boardW, boardMaxWidth) + 1
+		}
+	}
+	// Narrow panes drop BOARD and AGENT first, then shrink PR / CI, then STATUS, so the title always keeps
+	// some room.
 	const minTitle = 12
 	keyW := keyWidth
+	if m.filter == FilterBacklog {
+		keyW += 2
+	}
 	if m.filter == FilterPRs {
 		keyW = lipgloss.Width(m.listHeads()[0])
 		for _, it := range measured {
@@ -2267,7 +2535,10 @@ func (m Model) listView() string {
 			}
 		}
 	}
-	room := func() int { return m.width - 2 - keyW - statusW - agentW - assigneeW - pointsW - prW - 3 }
+	room := func() int { return m.width - 2 - keyW - statusW - boardW - agentW - assigneeW - pointsW - prW - 3 }
+	if minTitle > room() {
+		boardW = 0
+	}
 	if minTitle > room() {
 		agentW = 0
 	}
@@ -2286,15 +2557,24 @@ func (m Model) listView() string {
 	row := func(key, status, agent, pr, title string) string {
 		return pad(key, keyW) + " " + pad(status, statusW) + " " + agent + pad(pr, prW) + " " + truncate(title, titleWidth)
 	}
-	lines, _ := m.listLines(row, prText, agentW, assigneeW, pointsW)
+	lines, _ := m.listLines(row, prText, listWidths{agent: agentW, assignee: assigneeW, points: pointsW, board: boardW})
 	return strings.Join(lines, "\n") + "\n"
 }
+
+// listWidths are the widths of the list's optional columns; 0 leaves a column out.
+type listWidths struct{ agent, assignee, points, board int }
+
+// boardMaxWidth bounds the backlog's BOARD column; longer names are cut.
+const boardMaxWidth = 22
 
 // listHeads names the key, status and PR columns; the PRs filter lists pull requests by number with only
 // their CI mark, so its headers say so and the mark's column stays narrow.
 func (m Model) listHeads() [3]string {
-	if m.filter == FilterPRs {
+	switch m.filter {
+	case FilterPRs:
 		return [3]string{"PR", "STATUS", "CI"}
+	case FilterBacklog:
+		return [3]string{"KEY", "STATUS", ""}
 	}
 	return [3]string{"KEY", "STATUS", "PR / CI"}
 }
@@ -2446,7 +2726,8 @@ func typeGlyph(typ string) string {
 // listLines lays the list out in sections, the user's tickets and review requests per repo, and returns for
 // every line the index of the item on it (-1 for titles and spacing, botToggleLine for the bots toggle), so
 // clicks map back to items.
-func (m Model) listLines(row func(key, status, agent, pr, title string) string, prText func(item) string, agentW, assigneeW, pointsW int) ([]string, []int) {
+func (m Model) listLines(row func(key, status, agent, pr, title string) string, prText func(item) string, w listWidths) ([]string, []int) {
+	agentW, assigneeW, pointsW := w.agent, w.assignee, w.points
 	items := m.listItems()
 	header := pad("", agentW)
 	if agentW > 0 {
@@ -2458,6 +2739,9 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			label = "AUTHOR"
 		}
 		header = pad(label, assigneeW) + header
+	}
+	if w.board > 0 {
+		header = pad("BOARD", w.board) + header
 	}
 	if pointsW > 0 {
 		header = " " + pad("SP", pointsW-1) + header
@@ -2483,14 +2767,33 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			lines, at = append(lines, ""), append(at, -1)
 		}
 		lines = append(lines, bold.Render(title)+"  "+dim.Render(strconv.Itoa(n)))
-		at = append(at, -1)
+		at = append(at, sectionLine)
 	}
 	for i, it := range items {
 		if it.heading() {
 			if len(lines) > 2 {
 				lines, at = append(lines, ""), append(at, -1)
 			}
-			lines, at = append(lines, m.groupTitle(it, i == m.row)), append(at, i)
+			title := m.groupTitle(it, i == m.row)
+			if badges := it.badges; badges != "" {
+				// A narrow pane gives up the unestimated count, then the dates, before cutting the title.
+				fits := func() bool { return m.width-2-lipgloss.Width(title)-lipgloss.Width(badges) >= 2 }
+				if !fits() {
+					badges = it.shortBadges
+				}
+				if !fits() {
+					bare := it
+					bare.dates = ""
+					title = m.groupTitle(bare, i == m.row)
+				}
+				gap := m.width - 2 - lipgloss.Width(title) - lipgloss.Width(badges)
+				if gap < 2 {
+					title = truncate(title, max(8, m.width-2-lipgloss.Width(badges)-2))
+					gap = 2
+				}
+				title += strings.Repeat(" ", gap) + badges
+			}
+			lines, at = append(lines, truncate(title, m.width)), append(at, i)
 			continue
 		}
 		switch {
@@ -2538,7 +2841,18 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			if it.parent != "" {
 				key = subtaskArrow(key, i == m.row)
 			}
-			line = row(key, status, pointsCell(it.ticket.Points, pointsW)+assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
+			if m.filter == FilterBacklog {
+				key = cmp.Or(typeGlyph(it.ticket.Type), " ") + " " + key
+			}
+			boardCell := ""
+			if w.board > 0 {
+				name := " " + truncate(it.ticket.Board, w.board-3) + " "
+				if i != m.row {
+					name = labelBadge.Render(name)
+				}
+				boardCell = name + strings.Repeat(" ", max(0, w.board-lipgloss.Width(name)))
+			}
+			line = row(key, status, pointsCell(it.ticket.Points, pointsW)+boardCell+assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
 		}
 		var mark string
 		var markStyle lipgloss.Style
@@ -2618,7 +2932,11 @@ func (m Model) preview() string {
 			parts = append(parts, pr.Repo+"#"+fmt.Sprint(pr.Number))
 		}
 	}
-	if hint := actionHint(*t); hint != "" {
+	hint := actionHint(*t)
+	if m.filter == FilterBacklog {
+		hint = "enter for actions"
+	}
+	if hint != "" {
 		parts = append(parts, hint)
 	}
 	if t.Label == "" {
@@ -2665,7 +2983,7 @@ func (m Model) footer() string {
 	// Each screen lists only the keys that do something there: the review strip only exists in columns,
 	// density only changes cards, the view only toggles where columns can show.
 	columns := m.effectiveView() == ViewColumns
-	strip := m.filter != FilterPRs && len(m.stripReviews()) > 0
+	strip := m.filter == FilterAll && len(m.stripReviews()) > 0
 	move, moveHint, clickHint, enterHint := "↑↓ ws", "move", "select", "actions"
 	if columns {
 		move = "←↑↓→ wasd"
@@ -2673,24 +2991,34 @@ func (m Model) footer() string {
 	if strip {
 		moveHint, clickHint = "move · ↑ to reviews", "select · open review"
 	}
-	if m.filter == FilterPRs {
+	if m.filter != FilterAll {
 		enterHint = "actions · fold group"
 	}
 	legend := [][2]string{{move, moveHint}}
 	if m.filter == FilterPRs && m.hiddenBots() > 0 {
 		legend = append(legend, [2]string{"b", "bots"})
 	}
-	legend = append(legend, [][2]string{
-		{"click", clickHint}, {"double-click", "actions"}, {"enter", enterHint}, {"f", "send feedback"}, {"i", "details"},
-		{"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-2", "filter"},
-	}...)
-	if m.filter != FilterPRs && m.width >= narrowWidth {
+	legend = append(legend, [][2]string{{"click", clickHint}, {"double-click", "actions"}, {"enter", enterHint}}...)
+	if m.filter == FilterBacklog {
+		other := "merge"
+		if m.backlogMerged {
+			other = "split"
+		}
+		legend = append(legend, [][2]string{{"i", "details"}, {"o", "Jira ↗"}, {"O", "copy link"}, {"tab 1-3", "filter"}, {"v", other}}...)
+	} else {
+		legend = append(legend, [][2]string{
+			{"f", "send feedback"}, {"i", "details"}, {"o", "Jira ↗"}, {"p", "PR ↗"}, {"O P", "copy link"}, {"tab 1-3", "filter"},
+		}...)
+	}
+	if m.filter == FilterAll && m.width >= narrowWidth {
 		legend = append(legend, [2]string{"v", "view"})
 	}
 	if columns {
 		legend = append(legend, [2]string{"z", "density"})
 	}
-	legend = append(legend, [2]string{"t", strings.ToLower(m.teamButton())})
+	if m.filter != FilterBacklog {
+		legend = append(legend, [2]string{"t", strings.ToLower(m.teamButton())})
+	}
 	switch {
 	case m.filter == FilterPRs && len(m.boardRepos()) > 0:
 		legend = append(legend, [2]string{"R", "repos"})

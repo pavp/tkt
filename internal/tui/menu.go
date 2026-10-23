@@ -50,6 +50,9 @@ var menuBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForegro
 // or changes were requested.
 func (m Model) buildMenu(it item) *menu {
 	a := m.actions
+	if m.filter == FilterBacklog && it.ticket != nil {
+		return m.teamMenu(*it.ticket)
+	}
 	if it.mine() {
 		return m.prMenu(it)
 	}

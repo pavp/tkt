@@ -591,6 +591,82 @@ func (c *Client) ActiveSprints(ctx context.Context, board int) ([]int, error) {
 	return ids, nil
 }
 
+// OpenSprints lists a board's active sprints and those not started yet, in the board's order.
+func (c *Client) OpenSprints(ctx context.Context, board int) ([]Sprint, error) {
+	var out []Sprint
+	for at := 0; ; {
+		var page struct {
+			IsLast bool `json:"isLast"`
+			Values []struct {
+				ID        int    `json:"id"`
+				Name      string `json:"name"`
+				State     string `json:"state"`
+				StartDate string `json:"startDate"`
+				EndDate   string `json:"endDate"`
+			} `json:"values"`
+		}
+		q := url.Values{"state": {"active,future"}, "maxResults": {"50"}, "startAt": {strconv.Itoa(at)}}
+		if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/rest/agile/1.0/board/%d/sprint?%s", board, q.Encode()), nil, &page); err != nil {
+			return nil, err
+		}
+		for _, v := range page.Values {
+			sp := Sprint{ID: v.ID, Name: v.Name, State: v.State, Board: board}
+			if t, err := time.Parse(time.RFC3339, v.StartDate); err == nil {
+				sp.Start = t
+			}
+			if t, err := time.Parse(time.RFC3339, v.EndDate); err == nil {
+				sp.End = t
+			}
+			out = append(out, sp)
+		}
+		at += len(page.Values)
+		if page.IsLast || len(page.Values) == 0 {
+			return out, nil
+		}
+	}
+}
+
+// BacklogIssues lists a board's backlog, the issues in none of its sprints, in the board's rank order and
+// without subtasks.
+func (c *Client) BacklogIssues(ctx context.Context, board int, fields []string) ([]Issue, error) {
+	fields, err := c.resolveFields(ctx, fields)
+	if err != nil {
+		return nil, err
+	}
+	var out []Issue
+	for at, page := 0, 0; page < 50; page++ {
+		var resp struct {
+			Total  int        `json:"total"`
+			Issues []rawIssue `json:"issues"`
+		}
+		q := url.Values{"fields": {strings.Join(fields, ",")}, "jql": {"issuetype not in subTaskIssueTypes()"}, "maxResults": {"100"}, "startAt": {strconv.Itoa(at)}}
+		if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/rest/agile/1.0/board/%d/backlog?%s", board, q.Encode()), nil, &resp); err != nil {
+			return nil, err
+		}
+		for _, r := range resp.Issues {
+			is, err := r.decode(c.sprintField)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, is)
+		}
+		at += len(resp.Issues)
+		if len(resp.Issues) == 0 || at >= resp.Total {
+			return out, nil
+		}
+	}
+	return nil, errors.New("jira backlog returned too many pages")
+}
+
+// SprintsJQL selects the issues of the given sprints in the backlog's rank order, subtasks left out.
+func SprintsJQL(ids []int) string {
+	s := make([]string, len(ids))
+	for i, id := range ids {
+		s[i] = strconv.Itoa(id)
+	}
+	return fmt.Sprintf("sprint in (%s) AND issuetype not in subTaskIssueTypes() ORDER BY Rank ASC", strings.Join(s, ", "))
+}
+
 // sprintSchema is the custom type of Jira Software's Sprint field.
 const sprintSchema = "com.pyxis.greenhopper.jira:gh-sprint"
 
@@ -754,6 +830,7 @@ type Sprint struct {
 	State string `json:"state,omitempty"`
 	// Board is the id of the board the sprint belongs to.
 	Board int       `json:"board,omitempty"`
+	Start time.Time `json:"start,omitzero"`
 	End   time.Time `json:"end"`
 }
 

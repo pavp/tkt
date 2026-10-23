@@ -63,6 +63,11 @@ type recorder struct {
 	users map[string][]User
 }
 
+func (r *recorder) Backlog() tea.Cmd {
+	r.calls = append(r.calls, "backlog")
+	return nil
+}
+
 func (r *recorder) Users(k ticket.Key, query string) tea.Cmd {
 	r.calls = append(r.calls, "users "+query)
 	users := r.users[query]
@@ -2635,8 +2640,8 @@ func TestBoardsButtonAndNoticeOpenTheFilterAndFitTheTrayPanel(t *testing.T) {
 	}
 	narrow := tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList))
 	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
-	if v := stripANSI(narrow.View()); !strings.Contains(v, "│ Boards │") {
-		t.Errorf("the tray panel keeps its boxed buttons:\n%s", v)
+	if v := stripANSI(narrow.View()); !strings.Contains(v, "│ Team │") {
+		t.Errorf("where Boards does not fit, the tray panel keeps the Team button:\n%s", v)
 	}
 	narrow = tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenBoards: []string{"Accounts"}}))
 	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
@@ -3894,5 +3899,306 @@ func TestUserSearchScrollsToTheSelection(t *testing.T) {
 	}
 	if v := stripANSI(send(m, tea.KeyMsg{Type: tea.KeyDown}).View()); !strings.Contains(v, "▸ Person 12") {
 		t.Errorf("down on the last user should stay on it:\n%s", v)
+	}
+}
+
+func backlogData() board.Backlog {
+	nov := func(d int) time.Time { return time.Date(2026, 11, d, 9, 0, 0, 0, time.UTC) }
+	uac, ac := "User Access Center", "Authorization Center"
+	tk := func(key, typ, summary string, cat ticket.Category, points float64, assignee, b string) ticket.Ticket {
+		status := map[ticket.Category]string{ticket.ToDo: "To Do", ticket.InProgress: "In Progress", ticket.Done: "Done"}[cat]
+		return ticket.Ticket{Key: ticket.Key(key), Type: typ, Summary: summary, Status: status, Category: cat, Points: points, Assignee: assignee, Board: b,
+			URL: "https://example.atlassian.net/browse/" + key}
+	}
+	return board.Backlog{
+		FetchedAt: time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC),
+		HasPoints: true,
+		Sprints: []board.BacklogSprint{
+			{Sprint: jira.Sprint{ID: 40, Name: "UAC S42", State: "active", Start: time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC), End: nov(2)}, BoardName: uac, Tickets: []ticket.Ticket{
+				tk("DEMO-200", "Story", "Lock idle sessions", ticket.InProgress, 3, "Ana López", uac),
+			}},
+			{Sprint: jira.Sprint{ID: 43, Name: "UAC S43", State: "future", Start: nov(3), End: nov(17)}, BoardName: uac, Tickets: []ticket.Ticket{
+				tk("DEMO-210", "Story", "Export users to CSV", ticket.ToDo, 5, "Ana López", uac),
+				tk("DEMO-214", "Bug", "Fix session timeout", ticket.InProgress, 3, "Pablo Vera", uac),
+				tk("DEMO-219", "Story", "Audit log filters", ticket.ToDo, 0, "", uac),
+			}},
+			{Sprint: jira.Sprint{ID: 12, Name: "AC S12", State: "future", Start: nov(6)}, BoardName: ac, Tickets: []ticket.Ticket{
+				tk("DEMO-301", "Story", "Role matrix", ticket.ToDo, 5, "", ac),
+			}},
+			{Sprint: jira.Sprint{ID: 44, Name: "UAC S44", State: "future"}, BoardName: uac, Tickets: []ticket.Ticket{
+				tk("DEMO-220", "Task", "Archive sessions", ticket.ToDo, 8, "", uac),
+			}},
+			{Sprint: jira.Sprint{ID: 45, Name: "UAC S44", State: "future"}, BoardName: ac, Tickets: []ticket.Ticket{
+				tk("DEMO-302", "Task", "Grant audit", ticket.Done, 1, "", ac),
+			}},
+		},
+		Backlog: []ticket.Ticket{
+			tk("DEMO-180", "Task", "Clean old roles", ticket.ToDo, 2, "", uac),
+			tk("DEMO-305", "Story", "Rename roles", ticket.ToDo, 0, "", ac),
+		},
+	}
+}
+
+func backlogRecorder() *recorder {
+	return &recorder{cfg: config.Config{Spaces: []config.Space{{Key: "DEMO", TeamBoards: []config.TeamBoard{{ID: 418, Name: "User Access Center"}, {ID: 5205, Name: "Authorization Center"}}}}}}
+}
+
+func openBacklog(r *recorder, width int, state BoardState) tea.Model {
+	m := tea.Model(New(snapshot(), true, r, ViewColumns).WithState(state))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+	m = press(m, "3")
+	m, _ = m.Update(BacklogMsg{Backlog: backlogData()})
+	return m
+}
+
+func TestBacklogLoadsWhenOpenedAndOnRefresh(t *testing.T) {
+	r := backlogRecorder()
+	m := tea.Model(New(snapshot(), true, r, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "3")
+	if v := stripANSI(m.View()); !strings.Contains(v, "loading backlog…") || !slices.Equal(r.calls, []string{"backlog"}) {
+		t.Fatalf("3 should ask for the backlog (calls %v):\n%s", r.calls, v)
+	}
+	m, _ = m.Update(BacklogMsg{Backlog: backlogData()})
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "3 Backlog 9") || strings.Contains(v, "loading backlog") {
+		t.Errorf("the button counts the backlog's tickets once loaded:\n%s", v)
+	}
+	m = press(m, "1", "3")
+	if !slices.Equal(r.calls, []string{"backlog"}) {
+		t.Errorf("coming back shows what was loaded: %v", r.calls)
+	}
+	press(m, "g")
+	if !slices.Equal(r.calls, []string{"backlog", "backlog"}) {
+		t.Errorf("g reloads the backlog: %v", r.calls)
+	}
+	m, _ = m.Update(BacklogMsg{Err: errors.New("jira: 500")})
+	if v := stripANSI(m.View()); !strings.Contains(v, "could not load the backlog: jira: 500") || !strings.Contains(v, "DEMO-210") {
+		t.Errorf("a failed reload keeps the last backlog and says why:\n%s", v)
+	}
+}
+
+func TestBacklogGroupsBySprintWithTheBoardOnEachRow(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 180, BoardState{})
+	v := stripANSI(m.View())
+	inOrder := func(v string, order ...string) {
+		t.Helper()
+		last := -1
+		for _, want := range order {
+			at := lineIndex(v, want)
+			if at <= last {
+				t.Fatalf("%q missing or out of order:\n%s", want, v)
+			}
+			last = at
+		}
+	}
+	inOrder(v, "▾ UAC S42  User Access Center  Oct 20 – Nov 2 · active  1", "DEMO-200",
+		"▾ UAC S43  User Access Center  Nov 3 – Nov 17  3", "DEMO-210", "DEMO-214", "DEMO-219",
+		"▾ AC S12  Authorization Center  from Nov 6  1", "DEMO-301",
+		"▾ UAC S44  User Access Center  1", "DEMO-220", "▾ UAC S44  Authorization Center  1", "DEMO-302", "▸ Backlog  2")
+	if strings.Contains(v, "DEMO-180") {
+		t.Errorf("the Backlog group starts folded:\n%s", v)
+	}
+	if !strings.Contains(v, "BOARD") || !strings.Contains(strings.Split(v, "\n")[lineIndex(v, "DEMO-301")], "Authorization Center") {
+		t.Errorf("each row names its board:\n%s", v)
+	}
+	row := strings.Split(v, "\n")[lineIndex(v, "DEMO-214")]
+	if !strings.Contains(row, "● DEMO-214") || !strings.Contains(row, "In Progress") || !strings.Contains(row, "Pablo V.") {
+		t.Errorf("the type's icon leads the key: %q", row)
+	}
+	for _, gone := range []string{"View", "Team", "TYPE", "PR / CI", "Review requested"} {
+		if strings.Contains(v, gone) {
+			t.Errorf("the backlog shows no %q:\n%s", gone, v)
+		}
+	}
+}
+
+func TestBacklogMergesSprintsByNameOnRequest(t *testing.T) {
+	r := backlogRecorder()
+	m := openBacklog(r, 180, BoardState{})
+	if v := stripANSI(m.View()); !strings.Contains(v, "Split") || !strings.Contains(v, "v merge") {
+		t.Fatalf("the header and legend offer the merged view:\n%s", v)
+	}
+	m = press(m, "v")
+	v := stripANSI(m.View())
+	for _, want := range []string{"▾ UAC S42  Oct 20 – Nov 2 · active  1", "▾ UAC S44  2", "Merged", "v split"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("merged view lacks %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "UAC S44  Authorization Center") {
+		t.Errorf("one group per name:\n%s", v)
+	}
+	if len(r.states) == 0 || !r.states[len(r.states)-1].BacklogMerged {
+		t.Fatalf("the choice is remembered: %+v", r.states)
+	}
+	again := openBacklog(backlogRecorder(), 180, r.states[len(r.states)-1])
+	if v := stripANSI(again.View()); !strings.Contains(v, "▾ UAC S44  2") {
+		t.Errorf("reopened merged:\n%s", v)
+	}
+	y := lineIndex(v, "Merged")
+	line := strings.Split(v, "\n")[y]
+	m = click(m, lipgloss.Width(line[:strings.Index(line, "Merged")])+1, y)
+	if v := stripANSI(m.View()); !strings.Contains(v, "UAC S44  Authorization Center") {
+		t.Errorf("a click on the switch splits again:\n%s", v)
+	}
+}
+
+func TestBacklogSprintHeadersShowPointsByStage(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 180, BoardState{})
+	v := stripANSI(m.View())
+	head := strings.Fields(strings.Split(v, "\n")[lineIndex(v, "UAC S43")])
+	if tail := strings.Join(head[len(head)-5:], " "); tail != "1 unestimated 5 3 0" {
+		t.Errorf("S43 badges = %q", tail)
+	}
+	head = strings.Fields(strings.Split(v, "\n")[lineIndex(v, "UAC S44")])
+	if tail := strings.Join(head[len(head)-3:], " "); tail != "8 0 0" {
+		t.Errorf("S44 badges = %q", tail)
+	}
+	plain := backlogData()
+	plain.HasPoints = false
+	m, _ = m.Update(BacklogMsg{Backlog: plain})
+	if v := stripANSI(m.View()); strings.HasSuffix(strings.TrimSpace(strings.Split(v, "\n")[lineIndex(v, "UAC S43")]), " 0") {
+		t.Errorf("no badges without a points field:\n%s", v)
+	}
+}
+
+func TestBacklogGroupsFoldAndAreRemembered(t *testing.T) {
+	r := backlogRecorder()
+	m := openBacklog(r, 180, BoardState{})
+	for i := 0; i < 30; i++ {
+		if it, _ := m.(Model).current(); it.heading() && strings.Contains(it.title, "Backlog") {
+			break
+		}
+		m = press(m, "s")
+	}
+	m = press(m, "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-180") || !strings.Contains(v, "▾ Backlog  2") {
+		t.Fatalf("enter should open the Backlog group:\n%s", v)
+	}
+	if len(r.states) == 0 || !slices.Contains(r.states[len(r.states)-1].Collapsed, "backlog:") {
+		t.Errorf("saved states = %+v", r.states)
+	}
+	again := openBacklog(backlogRecorder(), 180, r.states[len(r.states)-1])
+	if v := stripANSI(again.View()); !strings.Contains(v, "DEMO-180") {
+		t.Errorf("the open Backlog group is remembered:\n%s", v)
+	}
+}
+
+func TestBacklogBoardFilter(t *testing.T) {
+	r := backlogRecorder()
+	m := openBacklog(r, 180, BoardState{})
+	v := stripANSI(press(m, "B").View())
+	for _, want := range []string{"[x] Authorization Center", "3 tickets", "[x] User Access Center", "6 tickets"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("filter lacks %q:\n%s", want, v)
+		}
+	}
+	m = press(m, "B", " ", "enter")
+	v = stripANSI(m.View())
+	if strings.Contains(v, "DEMO-301") || strings.Contains(v, "DEMO-302") || strings.Contains(v, "AC S12") || !strings.Contains(v, "▾ UAC S44  User Access Center  1") || !strings.Contains(v, "▸ Backlog  1") || !strings.Contains(v, "Showing 1 of 2 boards") {
+		t.Errorf("a hidden board hides its sprints and backlog tickets:\n%s", v)
+	}
+	if !strings.Contains(v, "3 Backlog 6") {
+		t.Errorf("the button counts what shows:\n%s", v)
+	}
+}
+
+func TestBacklogWithoutTeamBoardsSaysWhereToAddThem(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(snapshot(), true, r, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(press(m, "3").View())
+	if !strings.Contains(v, "no team boards yet · add team boards in Settings (,)") || slices.Contains(r.calls, "backlog") {
+		t.Errorf("calls %v:\n%s", r.calls, v)
+	}
+}
+
+func TestBacklogFitsTheTrayPanel(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 56, BoardState{})
+	v := stripANSI(m.View())
+	for _, l := range strings.Split(v, "\n") {
+		if lipgloss.Width(l) > 56 {
+			t.Errorf("wider than the tray panel: %q", l)
+		}
+	}
+	if strings.Contains(v, "BOARD") || !strings.Contains(v, "DEMO-214") || !strings.Contains(v, "UAC S43") {
+		t.Errorf("the tray drops the board column first:\n%s", v)
+	}
+	if line := strings.Split(v, "\n")[lineIndex(v, "UAC S43")]; !strings.Contains(line, "▾ UAC S43  User Access Center  3") || strings.Contains(line, "unestimated") {
+		t.Errorf("a narrow title gives up the unestimated count and the dates, keeping its count:\n%s", v)
+	}
+}
+
+func TestBacklogTicketMenuAndLegend(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 180, BoardState{})
+	v := stripANSI(m.View())
+	for _, want := range []string{"enter actions · fold group", "B boards", "g refresh", "tab 1-3 filter"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("legend lacks %q:\n%s", want, v)
+		}
+	}
+	for _, gone := range []string{"v view", "t team", "z density", "f send feedback"} {
+		if strings.Contains(v, gone) {
+			t.Errorf("legend offers %q:\n%s", gone, v)
+		}
+	}
+	if !strings.Contains(v, "3 points · Ana López · enter for actions") {
+		t.Errorf("the preview says what enter does here:\n%s", v)
+	}
+	m = press(m, "enter")
+	v = stripANSI(m.View())
+	if !strings.Contains(v, "Actions for DEMO-200") || !strings.Contains(v, "Open in Jira ↗") || !strings.Contains(v, "Assign to…") {
+		t.Errorf("a backlog ticket's menu:\n%s", v)
+	}
+}
+
+func TestBacklogAssignKnowsTheAssigneeAndReloads(t *testing.T) {
+	r := backlogRecorder()
+	m := openBacklog(r, 180, BoardState{})
+	m = press(m, "enter")
+	m = press(m, "s", "s", "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Assign DEMO-200 · now Ana López") || !strings.Contains(v, "Unassign") {
+		t.Fatalf("the assignee comes from the backlog:\n%s", v)
+	}
+	m, _ = m.Update(AssignedMsg{Key: "DEMO-200", Who: Assignee{Me: true}})
+	if n := slices.Index(r.calls, "backlog"); n < 0 || !slices.Contains(r.calls[n+1:], "backlog") {
+		t.Errorf("an assignment from the backlog reloads it: %v", r.calls)
+	}
+}
+
+func TestBacklogBadgesStayAlignedWhateverTheUnestimatedCount(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 180, BoardState{})
+	v := stripANSI(m.View())
+	end := func(key string) int {
+		line := strings.TrimRight(strings.Split(v, "\n")[lineIndex(v, key)], " ")
+		return lipgloss.Width(line)
+	}
+	if end("UAC S43") != end("UAC S42") {
+		t.Errorf("the badges end in the same column:\n%s", v)
+	}
+}
+
+func TestListKeepsTheSectionTitleOnTopWhileScrolling(t *testing.T) {
+	r := backlogRecorder()
+	m := tea.Model(New(snapshot(), true, r, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 22})
+	m = press(m, "3")
+	m, _ = m.Update(BacklogMsg{Backlog: backlogData()})
+	for i := 0; i < 30; i++ {
+		if it, _ := m.(Model).current(); it.key == "DEMO-219" {
+			break
+		}
+		m = press(m, "s")
+	}
+	v := stripANSI(m.View())
+	rows := strings.Split(v, "\n")
+	first := lineIndex(v, "KEY") + 2
+	if !strings.Contains(rows[first], "▾ UAC S42") || strings.Contains(v, "DEMO-200") {
+		t.Fatalf("with DEMO-200 scrolled out, its group's title stays on top:\n%s", v)
+	}
+	m = click(m, 4, first)
+	if v := stripANSI(m.View()); !strings.Contains(v, "▸ UAC S42") {
+		t.Errorf("a click on the kept title folds its group:\n%s", v)
 	}
 }

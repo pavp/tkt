@@ -2,6 +2,7 @@ package tui
 
 import (
 	"cmp"
+	"slices"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -39,7 +40,7 @@ func (m Model) assignItem(k ticket.Key) menuItem {
 
 func (m Model) assignMenu(k ticket.Key) *menu {
 	var now string
-	if t, ok := m.snap.Find(k); ok {
+	if t, ok := m.findTicket(k); ok {
 		now = t.Assignee
 	}
 	items := []menuItem{{label: "Me", sub: func() *menu { return m.confirmAssign(k, Assignee{Me: true}) }}}
@@ -72,5 +73,21 @@ func (m Model) assigned(msg AssignedMsg) (tea.Model, tea.Cmd) {
 		m.status = string(msg.Key) + " is now unassigned"
 	}
 	loading := m.beginLoading()
-	return m, tea.Batch(m.actions.Refresh(), loading)
+	cmds := []tea.Cmd{m.actions.Refresh(), loading}
+	if m.backlog != nil {
+		cmds = append(cmds, m.loadBacklog())
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// findTicket looks for a ticket on the board, then in the backlog.
+func (m Model) findTicket(k ticket.Key) (ticket.Ticket, bool) {
+	if t, ok := m.snap.Find(k); ok {
+		return t, true
+	}
+	i := slices.IndexFunc(m.backlogTickets(), func(t ticket.Ticket) bool { return t.Key == k })
+	if i < 0 {
+		return ticket.Ticket{}, false
+	}
+	return m.backlogTickets()[i], true
 }

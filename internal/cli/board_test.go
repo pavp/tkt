@@ -713,6 +713,21 @@ func TestBoardActionsAssignTickets(t *testing.T) {
 	}
 }
 
+func TestBoardActionsLoadTheBacklog(t *testing.T) {
+	h, _ := listHarness(t)
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 418, Name: "User Access Center"}}
+	h.jira.backlog = map[int][]jira.Issue{418: {{Key: "DEMO-180", Summary: "Clean old roles", Status: "To Do", StatusCategory: "new"}}}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	got, ok := b.Backlog()().(tui.BacklogMsg)
+	if !ok || got.Err != nil || len(got.Backlog.Backlog) != 1 || got.Backlog.Backlog[0].Board != "User Access Center" {
+		t.Errorf("msg = %+v", got)
+	}
+}
+
 func TestBoardActionsMoveTicketsInJira(t *testing.T) {
 	h, _ := listHarness(t)
 	h.jira.transitions = map[string][]jira.Transition{"DEMO-1": {
