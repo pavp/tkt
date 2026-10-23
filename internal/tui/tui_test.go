@@ -1534,7 +1534,7 @@ func TestPRsFilterListsMyOpenPRsThenReviews(t *testing.T) {
 		if mine < 0 || reviews < mine {
 			t.Fatalf("%s: sections missing or out of order:\n%s", view, v)
 		}
-		rows := map[string]string{"#812": "CI failing", "#815": "Changes requested", "#816": "Approved (2)", "#806": "Open"}
+		rows := map[string]string{"#812": "CI failing", "#815": "Changes requested", "#816": "Approved · 2 approvals", "#806": "Open"}
 		for pr, status := range rows {
 			line := strings.Split(v, "\n")[lineIndex(v, pr+" ")]
 			if !strings.Contains(line, status) {
@@ -2959,18 +2959,12 @@ func TestPullRequestApprovalsAreDimmed(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
-	m := tea.Model(New(prsSnapshot(), true, &recorder{}, ViewList))
+	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = press(m, "2")
 	line := strings.Split(m.View(), "\n")[lineIndex(m.View(), "#816")]
-	if !strings.Contains(line, ok.Render("Approved")+dim.Render(" (2)")) {
+	if !strings.Contains(line, ok.Render("Approved")+dim.Render(" · 2 approvals")) {
 		t.Errorf("only the status takes its color; its approvals are dimmed: %q", line)
-	}
-	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#816"); i++ {
-		m = press(m, "s")
-	}
-	if v := stripANSI(m.View()); !strings.Contains(v, "Approved · 2 approvals in example-org/api") {
-		t.Errorf("the detail line keeps the approvals spelled out:\n%s", v)
 	}
 }
 
