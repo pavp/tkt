@@ -1464,10 +1464,10 @@ func TestBlockedMarkShrinksToItsIcon(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lines := strings.Split(stripANSI(card(tt.tk, tt.outer, false, true, "")), "\n")
+			lines := strings.Split(stripANSI(card(tt.tk, tt.outer, false, true, false, "")), "\n")
 			plain := tt.tk
 			plain.Status, plain.PRs = "To Do", nil
-			if n := strings.Count(card(plain, tt.outer, false, true, ""), "\n") + 1; len(lines) != n {
+			if n := strings.Count(card(plain, tt.outer, false, true, false, ""), "\n") + 1; len(lines) != n {
 				t.Errorf("card is %d lines, want %d:\n%s", len(lines), n, strings.Join(lines, "\n"))
 			}
 			first := lines[1]
@@ -1762,11 +1762,11 @@ func TestCardLinesStartAtTheSameColumn(t *testing.T) {
 		}
 		return -1
 	}
-	plain := card(tk, 30, false, false, "")
+	plain := card(tk, 30, false, false, false, "")
 	if k, ti, ty := col(plain, "DEMO-1"), col(plain, "Filter"), col(plain, "■ Story"); k != ti || ti != ty {
 		t.Errorf("unselected card columns key=%d title=%d type=%d:\n%s", k, ti, ty, stripANSI(plain))
 	}
-	sel := card(tk, 30, true, false, "")
+	sel := card(tk, 30, true, false, false, "")
 	if m, ti := col(sel, "▸ DEMO-1"), col(sel, "Filter"); m != ti {
 		t.Errorf("selected card: mark at %d, title at %d:\n%s", m, ti, stripANSI(sel))
 	}
@@ -2198,7 +2198,7 @@ func TestCardFitsPullRequestsBesideTheAgentWithoutBreakingColors(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 	for _, status := range []string{"idle", "blocked", "working"} {
-		out := card(tk, 30, false, false, status)
+		out := card(tk, 30, false, false, false, status)
 		plain := ansi.Strip(out)
 		if brokenEscape.MatchString(out) || strings.ContainsRune(plain, utf8.RuneError) || !utf8.ValidString(out) {
 			t.Errorf("%s: a cut escape code leaks into the card: %q", status, out)
@@ -2247,28 +2247,28 @@ func TestCardShowsTheTypeWholeOrOnlyItsIcon(t *testing.T) {
 		{24, "■ Pedro P."},
 	}
 	for _, c := range cases {
-		lines := strings.Split(ansi.Strip(card(tk, c.outer, true, false, "idle")), "\n")
+		lines := strings.Split(ansi.Strip(card(tk, c.outer, true, false, false, "idle")), "\n")
 		meta := lines[len(lines)-2]
 		if !strings.Contains(meta, c.want) || strings.Contains(meta, "…") {
 			t.Errorf("width %d: meta line %q, want %q uncut", c.outer, meta, c.want)
 		}
 	}
 	tk.Assignee = ""
-	if plain := ansi.Strip(card(tk, 40, false, false, "")); !strings.Contains(plain, "unassigned") {
+	if plain := ansi.Strip(card(tk, 40, false, false, false, "")); !strings.Contains(plain, "unassigned") {
 		t.Errorf("an unassigned ticket says so:\n%s", plain)
 	}
 }
 
 func TestCardShowsAStatusMovedToItsColumn(t *testing.T) {
 	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Status: "Pending test", Mark: ticket.MarkDiamond, Assignee: "Ana López"}
-	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, "working"), "\n")[1]); !strings.Contains(head, "◇ Pending test ●") {
+	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, false, "working"), "\n")[1]); !strings.Contains(head, "◇ Pending test ●") {
 		t.Errorf("a moved status shows its name before the agent: %q", head)
 	}
-	if head := ansi.Strip(strings.Split(card(tk, 24, true, false, "working"), "\n")[1]); !strings.Contains(head, "◇ ●") || strings.Contains(head, "Pending") {
+	if head := ansi.Strip(strings.Split(card(tk, 24, true, false, false, "working"), "\n")[1]); !strings.Contains(head, "◇ ●") || strings.Contains(head, "Pending") {
 		t.Errorf("without room only the mark stays: %q", head)
 	}
 	tk.Mark = ticket.MarkNone
-	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, ""), "\n")[1]); strings.Contains(head, "◇") || strings.Contains(head, "Pending") {
+	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, false, ""), "\n")[1]); strings.Contains(head, "◇") || strings.Contains(head, "Pending") {
 		t.Errorf("an unmarked status shows nothing: %q", head)
 	}
 }
@@ -2290,7 +2290,7 @@ func TestStatusMarksShowTheirIconAndColor(t *testing.T) {
 	}
 	for _, c := range cases {
 		tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Status: "On hold", Mark: c.mark}
-		head := strings.Split(card(tk, 40, false, false, ""), "\n")[1]
+		head := strings.Split(card(tk, 40, false, false, false, ""), "\n")[1]
 		if want := lipgloss.NewStyle().Foreground(lipgloss.Color(c.hex)).Render(c.icon + " On hold"); !strings.Contains(head, want) {
 			t.Errorf("%s: header %q lacks %q", c.mark, head, want)
 		}
@@ -2337,7 +2337,7 @@ func TestCardShowsTheAgentAsHerdrsDot(t *testing.T) {
 	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 	tk := ticket.Ticket{Key: "DEMO-1", Summary: "x", Type: "Story", Assignee: "Ana López"}
 	for status, want := range map[string][2]string{"working": {"●", "#f9e2af"}, "blocked": {"●", "#f38ba8"}, "done": {"●", "#94e2d5"}, "idle": {"○", "#a6e3a1"}} {
-		out := card(tk, 30, false, false, status)
+		out := card(tk, 30, false, false, false, status)
 		head := strings.Split(out, "\n")[1]
 		if dot := lipgloss.NewStyle().Foreground(lipgloss.Color(want[1])).Render(want[0]); !strings.Contains(head, dot) {
 			t.Errorf("%s: header should end with %s in %s, as Herdr draws it: %q", status, want[0], want[1], head)
@@ -2346,11 +2346,11 @@ func TestCardShowsTheAgentAsHerdrsDot(t *testing.T) {
 			t.Errorf("%s: the card shows the dot, not the word:\n%s", status, plain)
 		}
 	}
-	if head := ansi.Strip(strings.Split(card(tk, 30, false, false, "unknown"), "\n")[1]); strings.Contains(head, "●") {
+	if head := ansi.Strip(strings.Split(card(tk, 30, false, false, false, "unknown"), "\n")[1]); strings.Contains(head, "●") {
 		t.Errorf("an unknown agent shows no dot: %q", head)
 	}
 	tk.Status, tk.Mark = "Blocked", ticket.MarkBlocked
-	head := strings.Split(card(tk, 24, false, false, "blocked"), "\n")[1]
+	head := strings.Split(card(tk, 24, false, false, false, "blocked"), "\n")[1]
 	if icon := lipgloss.NewStyle().Foreground(lipgloss.Color("#fab387")).Render("⊘ Blocked"); !strings.Contains(head, icon) {
 		t.Errorf("a blocked ticket's icon is orange, apart from the agent's red dot: %q", head)
 	}
@@ -2884,7 +2884,7 @@ func TestCardsShowSubtaskProgress(t *testing.T) {
 	snap := subtaskSnapshot()
 	tk := snap.Tickets[slices.IndexFunc(snap.Tickets, func(t ticket.Ticket) bool { return t.Key == "DEMO-1" })]
 	tk.Type = "Story"
-	plain := ansi.Strip(card(tk, 42, false, false, ""))
+	plain := ansi.Strip(card(tk, 42, false, false, false, ""))
 	if !strings.Contains(plain, "1/3 subtasks · 1 to do") {
 		t.Errorf("the parent should show its progress and what is still to do:\n%s", plain)
 	}
@@ -2950,7 +2950,7 @@ func TestListColorsStatusesAndSubtaskArrows(t *testing.T) {
 		t.Errorf("the selected row keeps its status plain on the selection: %q", sel)
 	}
 	tk := subtaskSnapshot().Tickets[1].Subtasks[0]
-	if c := card(cardTicket(item{key: tk.Key, ticket: &tk, parent: "DEMO-1"}), 40, false, false, ""); !strings.Contains(c, fgCode(colorSubtask)+"↳") {
+	if c := card(cardTicket(item{key: tk.Key, ticket: &tk, parent: "DEMO-1"}), 40, false, false, false, ""); !strings.Contains(c, fgCode(colorSubtask)+"↳") {
 		t.Errorf("a subtask card's arrow should be colored too:\n%s", c)
 	}
 }
@@ -2983,6 +2983,36 @@ func TestFinishedPullRequestsAreLavender(t *testing.T) {
 	tk.PRs = []ticket.PullRequest{{Number: 702, State: ticket.PRMerged}, {Number: 703, State: ticket.PRMerged}}
 	if got := coloredPRs(tk.PRs, 40); strings.Contains(got, fgCode(colorDone)) {
 		t.Errorf("finished pull requests should not share the Done status's green: %q", got)
+	}
+}
+
+func TestCardsShowTheLabelFieldOnItsOwnLine(t *testing.T) {
+	snap := snapshot()
+	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-7", Summary: "Second to do", Status: "To Do", Category: ticket.ToDo})
+	snap.Tickets[0].Label = "User Access Center"
+	plain := tea.Model(New(snap, true, &recorder{}, ViewColumns))
+	plain, _ = plain.Update(tea.WindowSizeMsg{Width: 160, Height: 50})
+	if strings.Contains(stripANSI(plain.View()), "User Access Center\n") || plain.(Model).cardLines() != 7 {
+		t.Errorf("without a label field configured the cards keep their size:\n%s", stripANSI(plain.View()))
+	}
+	snap.LabelField = "Product"
+	m := tea.Model(New(snap, true, &recorder{}, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 50})
+	v := stripANSI(m.View())
+	lines := strings.Split(v, "\n")
+	key, label := lineIndex(v, "DEMO-3"), lineIndex(v, "User Access Center")
+	if label != key+3 || m.(Model).cardLines() != 8 {
+		t.Errorf("the label goes on its own line under the title:\n%s", v)
+	}
+	if other := lineIndex(v, "DEMO-7"); other < 0 || strings.TrimSpace(strings.Trim(lines[other+3][:40], "│ ")) != "" {
+		t.Errorf("a ticket without a label leaves its line blank, so cards keep one size:\n%s", v)
+	}
+	x := lipgloss.Width(lines[lineIndex(v, "DEMO-7")][:strings.Index(lines[lineIndex(v, "DEMO-7")], "DEMO-7")])
+	if after := stripANSI(click(m, x, lineIndex(v, "DEMO-7")).View()); !strings.Contains(after, "▸ DEMO-7") {
+		t.Errorf("clicks should still find the card under a taller one:\n%s", after)
+	}
+	if c := press(m, "z").(Model); c.cardLines() != 4 || strings.Contains(stripANSI(c.View()), "User Access Center") {
+		t.Errorf("compact cards leave the label out")
 	}
 }
 
@@ -3196,21 +3226,21 @@ func TestPRMenusPutTheirDetailsOnASecondLine(t *testing.T) {
 
 func TestStoryPointsShowOnCardsColumnsListAndPreview(t *testing.T) {
 	tk := ticket.Ticket{Key: "ACTO-170450", Summary: "Homogenize", Status: "En curso", Category: ticket.InProgress, Points: 3, Mark: ticket.MarkDiamond}
-	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, "idle"), "\n")[1]); !strings.Contains(head, "ACTO-170450 3pt") || !strings.Contains(head, "○") {
+	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, false, "idle"), "\n")[1]); !strings.Contains(head, "ACTO-170450 3pt") || !strings.Contains(head, "○") {
 		t.Errorf("points sit beside the key, before the marks: %q", head)
 	}
-	if head := ansi.Strip(strings.Split(card(tk, 26, true, false, "idle"), "\n")[1]); !strings.Contains(head, "▸ ACTO-170450 3pt") || !strings.Contains(head, "◇ ○") || strings.Contains(head, "En curso") {
+	if head := ansi.Strip(strings.Split(card(tk, 26, true, false, false, "idle"), "\n")[1]); !strings.Contains(head, "▸ ACTO-170450 3pt") || !strings.Contains(head, "◇ ○") || strings.Contains(head, "En curso") {
 		t.Errorf("on a narrow card the mark shrinks to its icon first: %q", head)
 	}
-	if head := ansi.Strip(strings.Split(card(tk, 24, true, false, "idle"), "\n")[1]); strings.Contains(head, "3pt") || !strings.Contains(head, "◇ ○") || lipgloss.Width(head) > 24 {
+	if head := ansi.Strip(strings.Split(card(tk, 24, true, false, false, "idle"), "\n")[1]); strings.Contains(head, "3pt") || !strings.Contains(head, "◇ ○") || lipgloss.Width(head) > 24 {
 		t.Errorf("without room for both, the points give way: %q", head)
 	}
 	tk.Points = 0.5
-	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, ""), "\n")[1]); !strings.Contains(head, "0.5pt") {
+	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, false, ""), "\n")[1]); !strings.Contains(head, "0.5pt") {
 		t.Errorf("half points: %q", head)
 	}
 	tk.Points = 0
-	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, ""), "\n")[1]); strings.Contains(head, "pt") {
+	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, false, ""), "\n")[1]); strings.Contains(head, "pt") {
 		t.Errorf("an unestimated ticket shows no points: %q", head)
 	}
 

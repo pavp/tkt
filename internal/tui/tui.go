@@ -1590,8 +1590,11 @@ func moreReviews(n int) string { return fmt.Sprintf("+%d more · press 2", n) }
 
 // cardLines is how many lines one bordered card takes: two border lines plus its content lines.
 func (m Model) cardLines() int {
-	if m.compact {
+	switch {
+	case m.compact:
 		return 4
+	case m.snap.LabelField != "":
+		return 8
 	}
 	return 7
 }
@@ -1688,7 +1691,7 @@ func (m Model) columnsView(height int) string {
 		}
 		for ri := off; ri < end; ri++ {
 			it := cols[ci][ri]
-			parts = append(parts, card(cardTicket(it), inner, ci == m.col && ri == m.row && !m.inStrip, m.compact, m.snap.Agents[string(it.key)]))
+			parts = append(parts, card(cardTicket(it), inner, ci == m.col && ri == m.row && !m.inStrip, m.compact, m.snap.LabelField != "", m.snap.Agents[string(it.key)]))
 		}
 		if scroll {
 			parts = append(parts, moreLine("↓", n-end))
@@ -1777,7 +1780,7 @@ func cardTicket(it item) ticket.Ticket {
 
 // card renders one ticket in its own bordered box: key and attention flag, title, then (unless compact)
 // its pull requests with colored CI marks and a dimmed line with type and subtasks.
-func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
+func card(t ticket.Ticket, outer int, sel, compact, labeled bool, agent string) string {
 	width := outer - 2
 	inner := width - 2
 	head := keyDim.Render(string(t.Key))
@@ -1835,6 +1838,9 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 		lines = append(lines, title.Render(l))
 	}
 	if !compact {
+		if labeled {
+			lines = append(lines, dim.Render(truncate(t.Label, inner)))
+		}
 		lines = append(lines, coloredPRs(t.PRs, inner))
 		icon := typeGlyph(t.Type)
 		if icon != "" {

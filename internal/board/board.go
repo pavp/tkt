@@ -36,6 +36,8 @@ type Snapshot struct {
 	Panels map[string]DevPanel `json:"panels,omitempty"`
 	// Partial marks a board painted before GitHub answered: Jira's tickets with earlier pull request data.
 	Partial bool `json:"partial,omitempty"`
+	// LabelField names the Jira field whose value each ticket's Label holds, when one is configured and found.
+	LabelField string `json:"label_field,omitempty"`
 }
 
 // DevPanel is a ticket's development panel as last asked: the issue's updated time it belongs to and
@@ -99,6 +101,7 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		switch {
 		case err == nil:
 			labelID, fields = id, append(slices.Clone(fields), id)
+			snap.LabelField = name
 		case errors.Is(err, jira.ErrFieldNotFound):
 			snap.Warnings = append(snap.Warnings, fmt.Sprintf("Jira has no field %q: check label_field in the config", name))
 		default:
@@ -397,7 +400,7 @@ func partialBoard(snap Snapshot, mine, team []ticket.Ticket, linked map[ticket.K
 		}
 		return out
 	}
-	p := Snapshot{FetchedAt: snap.FetchedAt, Sprints: slices.Clone(snap.Sprints), Reviews: slices.Clone(prev.Reviews), Others: slices.Clone(prev.Others), Partial: true, Repos: map[string][]string{}}
+	p := Snapshot{FetchedAt: snap.FetchedAt, Sprints: slices.Clone(snap.Sprints), Reviews: slices.Clone(prev.Reviews), Others: slices.Clone(prev.Others), Partial: true, Repos: map[string][]string{}, LabelField: snap.LabelField}
 	for k, v := range snap.Repos {
 		p.Repos[k] = slices.Clone(v)
 	}
