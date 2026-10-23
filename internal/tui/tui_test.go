@@ -3014,8 +3014,8 @@ func TestCardsShowTheLabelFieldOnItsOwnLine(t *testing.T) {
 	if after := stripANSI(click(m, x, lineIndex(v, "DEMO-7")).View()); !strings.Contains(after, "▸ DEMO-7") {
 		t.Errorf("clicks should still find the card under a taller one:\n%s", after)
 	}
-	if raw := m.View(); !strings.Contains(raw, labelStyle.Render("User Access Center")) || labelStyle.GetForeground() == dim.GetForeground() {
-		t.Errorf("the label takes its own shade, apart from the dimmed type line")
+	if raw := m.View(); !strings.Contains(raw, labelBadge.Render(" User Access Center ")) || labelBadge.GetBackground() == (lipgloss.NoColor{}) {
+		t.Errorf("the label shows as a badge, on a background of its own")
 	}
 	if c := press(m, "z").(Model); c.cardLines() != 4 || strings.Contains(stripANSI(c.View()), "User Access Center") {
 		t.Errorf("compact cards leave the label out")

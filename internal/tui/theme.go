@@ -38,6 +38,7 @@ const (
 	colorReview    = ctpMauve
 	colorSubtask   = ctpTeal
 	colorFinished  = ctpLavender
+	colorBadge     = ctpSurface1
 	colorOnBadge   = ctpBase
 )
 
@@ -48,7 +49,7 @@ var (
 	failure    = lipgloss.NewStyle().Foreground(colorError)
 	ok         = lipgloss.NewStyle().Foreground(colorDone)
 	finished   = lipgloss.NewStyle().Foreground(colorFinished)
-	labelStyle = lipgloss.NewStyle().Foreground(colorSubtle)
+	labelBadge = lipgloss.NewStyle().Background(colorBadge).Foreground(colorText)
 	bold       = lipgloss.NewStyle().Bold(true)
 	selected   = lipgloss.NewStyle().Background(colorSelection).Foreground(colorText)
 	box        = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Padding(0, 1)

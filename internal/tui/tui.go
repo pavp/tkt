@@ -1865,7 +1865,11 @@ func card(t ticket.Ticket, outer int, sel, compact, labeled bool, agent string) 
 			who = info + " · " + who
 		}
 		if labeled {
-			lines = append(lines, labelStyle.Render(truncate(t.Label, inner)))
+			label := ""
+			if t.Label != "" {
+				label = labelBadge.Render(" " + truncate(t.Label, inner-2) + " ")
+			}
+			lines = append(lines, label)
 		}
 		lines = append(lines, icon+dim.Render(truncate(who, inner-lipgloss.Width(icon))))
 	}
