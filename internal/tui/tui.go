@@ -2058,10 +2058,15 @@ func statusText(it item) string {
 	default:
 		return it.ticket.Status
 	}
-	if a := it.pr.ApprovalsText(); a != "" {
-		s += " · " + a
+	return s + approvalsCount(*it.pr)
+}
+
+// approvalsCount is a pull request's approvals as the STATUS column shows them, such as " (2)".
+func approvalsCount(pr ticket.PullRequest) string {
+	if pr.Approvals == 0 {
+		return ""
 	}
-	return s
+	return fmt.Sprintf(" (%d)", pr.Approvals)
 }
 
 // statusStyle colors a row's STATUS: a ticket by its column, a pull request by where it stands.
@@ -2427,8 +2432,8 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		status := statusText(it)
 		if i != m.row && !it.heading() {
 			approvals := ""
-			if it.pr != nil && it.pr.ApprovalsText() != "" {
-				approvals = " · " + it.pr.ApprovalsText()
+			if it.pr != nil {
+				approvals = approvalsCount(*it.pr)
 			}
 			status = statusStyle(it).Render(strings.TrimSuffix(status, approvals))
 			if approvals != "" {
@@ -2494,7 +2499,11 @@ func (m Model) preview() string {
 	}
 	if it.mine() {
 		title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s · %s", it.key, it.ticket.Key, cmp.Or(it.pr.Title, it.ticket.Summary)), m.width))
-		return title + "\n" + dim.Render(truncate(fmt.Sprintf("%s in %s · CI %s · enter for actions", statusText(it), it.pr.Repo, ciWord(it.pr.Checks)), m.width))
+		status := strings.TrimSuffix(statusText(it), approvalsCount(*it.pr))
+		if a := it.pr.ApprovalsText(); a != "" {
+			status += " · " + a
+		}
+		return title + "\n" + dim.Render(truncate(fmt.Sprintf("%s in %s · CI %s · enter for actions", status, it.pr.Repo, ciWord(it.pr.Checks)), m.width))
 	}
 	if it.pr != nil {
 		title := titleStyle.Render(truncate(fmt.Sprintf("%s · %s", it.key, it.pr.Title), m.width))
