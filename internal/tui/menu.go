@@ -44,7 +44,7 @@ type menu struct {
 	loading ticket.Key
 }
 
-var menuBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("111")).Padding(0, 2)
+var menuBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Padding(0, 2)
 
 // buildMenu offers only the actions that apply: PR links when there are PRs, feedback when CI fails
 // or changes were requested.

@@ -628,7 +628,7 @@ func (m Model) settingsLines() ([]string, []int) {
 	return lines, at
 }
 
-var removeMark = lipgloss.NewStyle().Foreground(lipgloss.Color("167")).Render("✕")
+var removeMark = lipgloss.NewStyle().Foreground(colorError).Render("✕")
 
 // settingsColumns sizes the repository and path columns to their longest value, within limits, so the
 // ✕ that removes a row sits right after them, at removeX.
@@ -756,7 +756,7 @@ func (m Model) settingsFooter() string {
 	case s.saving:
 		status = dim.Render("saving…")
 	case s.err != "":
-		status = warn.Render("! " + s.err)
+		status = failure.Render("! " + s.err)
 	case s.msg != "":
 		status = keyDim.Render(s.msg)
 	}

@@ -308,9 +308,13 @@ func TestFetchLabelsTicketsWithTheConfiguredField(t *testing.T) {
 			js := &stubJira{issues: issues, fieldIDs: map[string]string{"Product": "customfield_10136"}}
 			c := cfg()
 			c.Jira.LabelField = tt.field
-			snap, err := Fetch(context.Background(), c, js, &stubGitHub{}, now)
+			var partial Snapshot
+			snap, err := FetchWith(context.Background(), c, js, &stubGitHub{}, now, Snapshot{}, Options{Partial: func(p Snapshot) { partial = p }})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if want := map[bool]string{true: tt.field}[tt.wantField]; snap.LabelField != want || partial.LabelField != want {
+				t.Errorf("label field = %q, partial %q, want %q", snap.LabelField, partial.LabelField, want)
 			}
 			if snap.Tickets[0].Label != tt.wantLabel || snap.Tickets[1].Label != "" {
 				t.Errorf("labels = %q, %q", snap.Tickets[0].Label, snap.Tickets[1].Label)

@@ -1266,16 +1266,6 @@ func clamp(v, lo, hi int) int {
 	return v
 }
 
-var (
-	dim      = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
-	warn     = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
-	ok       = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))
-	bold     = lipgloss.NewStyle().Bold(true)
-	selected = lipgloss.NewStyle().Background(lipgloss.Color("24")).Foreground(lipgloss.Color("255"))
-	box      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240")).Padding(0, 1)
-	boxSel   = box.BorderForeground(lipgloss.Color("111"))
-)
-
 // View pins the header to the top and the preview and key legend to the bottom; the board in between
 // scrolls so the selected card or row stays visible.
 // margin is the left and right padding around the whole board, like the prototype's popup padding;
@@ -1376,7 +1366,7 @@ func (m Model) header() string {
 	}
 	top += "\n" + dim.Render(strings.Repeat("─", m.width))
 	if len(m.snap.Warnings) > 0 {
-		top += "\n" + warn.Render(truncate("! "+strings.Join(m.snap.Warnings, " · "), m.width))
+		top += "\n" + notice.Render(truncate("! "+strings.Join(m.snap.Warnings, " · "), m.width))
 	}
 	// The notice is the header's last line, where a click opens the repository filter.
 	if notice := m.repoNotice(); notice != "" {
@@ -1392,8 +1382,8 @@ type headerSpan struct {
 }
 
 var (
-	filterOff = box.Foreground(lipgloss.Color("250"))
-	filterOn  = boxSel.Foreground(lipgloss.Color("153")).Bold(true)
+	filterOff = box.Foreground(colorSubtle)
+	filterOn  = boxSel.Foreground(colorActive).Bold(true)
 )
 
 // headerLayout places the filter and view buttons, boxed as in the prototype, right of the title; on a
@@ -1547,7 +1537,7 @@ func (m Model) syncLabel() string {
 	return "✓ synced " + m.snap.FetchedAt.Local().Format("15:04")
 }
 
-var reviewChip = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("214")).Padding(0, 1)
+var reviewChip = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorReview).Padding(0, 1)
 
 // reviewStrip shows review requests above the columns, each in its own orange chip as in the mockup.
 func (m Model) reviewStrip() string {
@@ -1578,7 +1568,7 @@ func (m Model) reviewChips() (string, []chipSpan) {
 		}
 		chip := reviewChip.Render(warn.Render("!") + text)
 		if m.inStrip && len(spans) == m.stripSel {
-			chip = reviewChip.BorderForeground(lipgloss.Color("111")).Render(selected.Render("▸" + text))
+			chip = reviewChip.BorderForeground(colorAccent).Render(selected.Render("▸" + text))
 		}
 		// A chip only fits if the "+N more" label for the chips after it still fits beside it.
 		need := used + 2 + lipgloss.Width(chip)
@@ -1600,8 +1590,11 @@ func moreReviews(n int) string { return fmt.Sprintf("+%d more · press 2", n) }
 
 // cardLines is how many lines one bordered card takes: two border lines plus its content lines.
 func (m Model) cardLines() int {
-	if m.compact {
+	switch {
+	case m.compact:
 		return 4
+	case m.snap.LabelField != "":
+		return 8
 	}
 	return 7
 }
@@ -1698,7 +1691,7 @@ func (m Model) columnsView(height int) string {
 		}
 		for ri := off; ri < end; ri++ {
 			it := cols[ci][ri]
-			parts = append(parts, card(cardTicket(it), inner, ci == m.col && ri == m.row && !m.inStrip, m.compact, m.snap.Agents[string(it.key)]))
+			parts = append(parts, card(cardTicket(it), inner, ci == m.col && ri == m.row && !m.inStrip, m.compact, m.snap.LabelField != "", m.snap.Agents[string(it.key)]))
 		}
 		if scroll {
 			parts = append(parts, moreLine("↓", n-end))
@@ -1745,15 +1738,15 @@ func columnHead(name string, count int, points float64, width int) []string {
 }
 
 var (
-	cardBox    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238"))
-	cardBoxSel = cardBox.BorderForeground(lipgloss.Color("111"))
+	cardBox    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorCard)
+	cardBoxSel = cardBox.BorderForeground(colorAccent)
 )
 
 // card renders one ticket in its own bordered box of the given outer width.
 var (
-	cardBoxWarn = cardBox.BorderForeground(lipgloss.Color("130"))
-	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("255"))
-	keyDim      = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))
+	cardBoxWarn = cardBox.BorderForeground(colorAttention)
+	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(colorText)
+	keyDim      = lipgloss.NewStyle().Foreground(colorSubtle)
 )
 
 // subtaskProgress words a parent's subtasks, "1/3 subtasks · 1 to do": how many are done and how many have
@@ -1787,10 +1780,13 @@ func cardTicket(it item) ticket.Ticket {
 
 // card renders one ticket in its own bordered box: key and attention flag, title, then (unless compact)
 // its pull requests with colored CI marks and a dimmed line with type and subtasks.
-func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
+func card(t ticket.Ticket, outer int, sel, compact, labeled bool, agent string) string {
 	width := outer - 2
 	inner := width - 2
 	head := keyDim.Render(string(t.Key))
+	if k, ok := strings.CutPrefix(string(t.Key), "↳ "); ok {
+		head = subtaskArrow(keyDim.Render(k), false)
+	}
 	if sel {
 		head = selected.Render("▸ " + string(t.Key))
 	}
@@ -1868,6 +1864,13 @@ func card(t ticket.Ticket, outer int, sel, compact bool, agent string) string {
 		if info != "" {
 			who = info + " · " + who
 		}
+		if labeled {
+			label := ""
+			if t.Label != "" {
+				label = labelBadge.Render(" " + truncate(t.Label, inner-2) + " ")
+			}
+			lines = append(lines, label)
+		}
 		lines = append(lines, icon+dim.Render(truncate(who, inner-lipgloss.Width(icon))))
 	}
 	for i, l := range lines {
@@ -1937,9 +1940,9 @@ func coloredPRs(prs []ticket.PullRequest, width int) string {
 		markText, style := checkMark(pr.Checks), checkStyle(pr.Checks)
 		switch pr.State {
 		case ticket.PRMerged:
-			markText, style = "merged", ok
+			markText, style = "merged", finished
 		case ticket.PRClosed:
-			markText, style = "closed", dim
+			markText, style = "closed", finished
 		}
 		w := lipgloss.Width(ref) + 1 + lipgloss.Width(markText)
 		if used > 0 && used+1+w > width {
@@ -1955,11 +1958,11 @@ func coloredPRs(prs []ticket.PullRequest, width int) string {
 	if merged+closed == 1 {
 		for _, pr := range prs {
 			if pr.State != ticket.PROpen {
-				parts = append(parts, ok.Render(prRef(pr)))
+				parts = append(parts, finished.Render(prRef(pr)))
 			}
 		}
 	} else if f := ticket.FinishedSummary(merged, closed); f != "" && used+len(f) <= width {
-		parts = append(parts, ok.Render(f))
+		parts = append(parts, finished.Render(f))
 	}
 	return strings.Join(parts, " ")
 }
@@ -2071,6 +2074,38 @@ func statusText(it item) string {
 	return s
 }
 
+// statusStyle colors a row's STATUS: a ticket by its column, a pull request by where it stands.
+func statusStyle(it item) lipgloss.Style {
+	s := lipgloss.NewStyle()
+	if it.pr == nil {
+		return s.Foreground(columnColors[it.ticket.Category])
+	}
+	pr := *it.pr
+	switch {
+	case it.review():
+		return s.Foreground(colorReview)
+	case needsYou(pr):
+		return warn
+	case pr.Draft:
+		return dim
+	case pr.Merge == ticket.MergeReady, pr.Review == ticket.ReviewApproved:
+		return ok
+	case pr.Review == ticket.ReviewRequired:
+		return s.Foreground(colorReview)
+	case pr.Checks == ticket.ChecksPending:
+		return s.Foreground(colorAccent)
+	}
+	return s
+}
+
+// subtaskArrow marks a subtask's key, colored unless the row is selected, whose background it would break.
+func subtaskArrow(key string, sel bool) string {
+	if sel {
+		return "↳ " + key
+	}
+	return lipgloss.NewStyle().Foreground(colorSubtask).Render("↳") + " " + key
+}
+
 // pad truncates s to n cells and fills the rest with spaces, so columns line up.
 func pad(s string, n int) string {
 	s = truncate(s, n)
@@ -2134,11 +2169,11 @@ func (m Model) listView() string {
 	if m.filter != FilterPRs {
 		for _, it := range measured {
 			if it.ticket != nil && it.ticket.Points != 0 {
-				pointsW = max(pointsW, lipgloss.Width("SP"), lipgloss.Width(pointsCell(it.ticket.Points, 1)))
+				pointsW = max(pointsW, lipgloss.Width("SP"), lipgloss.Width(strings.TrimSpace(pointsCell(it.ticket.Points, 1))))
 			}
 		}
 		if pointsW > 0 {
-			pointsW++
+			pointsW += 2
 		}
 	}
 	// Narrow panes drop AGENT first, then shrink PR / CI, then STATUS, so the title always keeps some room.
@@ -2199,7 +2234,7 @@ const (
 	authorMaxWidth   = 20
 )
 
-// pointsCell is a list row's story points, padded to pointsW (which includes its gap); blank when unestimated.
+// pointsCell is a list row's story points, padded to pointsW (which includes a space on each side); blank when unestimated.
 func pointsCell(p float64, pointsW int) string {
 	if pointsW == 0 {
 		return ""
@@ -2208,7 +2243,7 @@ func pointsCell(p float64, pointsW int) string {
 	if p != 0 {
 		n = strconv.FormatFloat(p, 'f', -1, 64)
 	}
-	return pad(n, pointsW)
+	return " " + pad(n, pointsW-1)
 }
 
 // authorCell is a pull request row's author, padded to authorW (which includes its gap).
@@ -2260,20 +2295,7 @@ func agentShort(status string) (string, board.AgentKind) {
 	return strings.Replace(line, "claude ", "", 1), kind
 }
 
-// Herdr's catppuccin palette, so an agent's dot reads the same on the board as in Herdr's sidebar.
-const (
-	herdrGreen  = lipgloss.Color("#a6e3a1")
-	herdrYellow = lipgloss.Color("#f9e2af")
-	herdrRed    = lipgloss.Color("#f38ba8")
-	herdrTeal   = lipgloss.Color("#94e2d5")
-	herdrBlue   = lipgloss.Color("#89b4fa")
-	herdrMauve  = lipgloss.Color("#cba6f7")
-	herdrPeach  = lipgloss.Color("#fab387")
-	herdrGray   = lipgloss.Color("#9399b2")
-	herdrBase   = lipgloss.Color("#1e1e2e")
-)
-
-var columnColors = map[ticket.Category]lipgloss.Color{ticket.ToDo: herdrGray, ticket.InProgress: herdrBlue, ticket.InReview: herdrMauve, ticket.Done: herdrGreen}
+var columnColors = map[ticket.Category]lipgloss.Color{ticket.ToDo: ctpGray, ticket.InProgress: ctpBlue, ticket.InReview: ctpMauve, ticket.Done: ctpGreen}
 
 // statusBadge is a ticket's Jira status, with its mark's icon, on its column's color.
 func statusBadge(t ticket.Ticket) string {
@@ -2281,12 +2303,12 @@ func statusBadge(t ticket.Ticket) string {
 	if icon, _, _ := statusMark(t); icon != "" {
 		text = icon + " " + text
 	}
-	return lipgloss.NewStyle().Background(columnColors[t.Category]).Foreground(herdrBase).Render(" " + text + " ")
+	return lipgloss.NewStyle().Background(columnColors[t.Category]).Foreground(colorOnBadge).Render(" " + text + " ")
 }
 
 // agentStyle colors an agent status as Herdr does: working yellow, blocked red, done teal, idle green.
 func agentStyle(status string) lipgloss.Style {
-	colors := map[string]lipgloss.Color{"working": herdrYellow, "blocked": herdrRed, "done": herdrTeal, "idle": herdrGreen}
+	colors := map[string]lipgloss.Color{"working": ctpYellow, "blocked": ctpRed, "done": ctpTeal, "idle": ctpGreen}
 	return lipgloss.NewStyle().Foreground(colors[status])
 }
 
@@ -2295,12 +2317,12 @@ var markIcons = map[ticket.Mark]struct {
 	glyph string
 	color lipgloss.Color
 }{
-	ticket.MarkDiamond:  {"◇", herdrBlue},
-	ticket.MarkBlocked:  {"⊘", herdrPeach},
-	ticket.MarkClock:    {"◷", herdrTeal},
-	ticket.MarkFlag:     {"⚑", herdrMauve},
-	ticket.MarkStar:     {"★", herdrYellow},
-	ticket.MarkTriangle: {"▲", herdrGreen},
+	ticket.MarkDiamond:  {"◇", ctpBlue},
+	ticket.MarkBlocked:  {"⊘", ctpPeach},
+	ticket.MarkClock:    {"◷", ctpTeal},
+	ticket.MarkFlag:     {"⚑", ctpMauve},
+	ticket.MarkStar:     {"★", ctpYellow},
+	ticket.MarkTriangle: {"▲", ctpGreen},
 }
 
 // statusMark is the icon of a ticket's status mark, its wider wording with the status name, and its style;
@@ -2320,11 +2342,11 @@ var typeIcons = []struct {
 	glyph string
 	color lipgloss.Color
 }{
-	{[]string{"bug", "error", "defect"}, "●", herdrRed},
-	{[]string{"epic", "épica"}, "◆", herdrMauve},
-	{[]string{"sub"}, "■", herdrTeal},
-	{[]string{"story", "historia"}, "■", herdrGreen},
-	{[]string{"task", "tarea"}, "■", herdrBlue},
+	{[]string{"bug", "error", "defect"}, "●", ctpRed},
+	{[]string{"epic", "épica"}, "◆", ctpMauve},
+	{[]string{"sub"}, "■", ctpTeal},
+	{[]string{"story", "historia"}, "■", ctpGreen},
+	{[]string{"task", "tarea"}, "■", ctpBlue},
 }
 
 // typeGlyph is a one-cell colored icon for a Jira issue type, like Jira's own; empty when there is no type.
@@ -2358,7 +2380,7 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		header = pad(label, assigneeW) + header
 	}
 	if pointsW > 0 {
-		header = pad("SP", pointsW) + header
+		header = " " + pad("SP", pointsW-1) + header
 	}
 	heads := m.listHeads()
 	lines := []string{"  " + dim.Render(row(heads[0], heads[1], header, heads[2], "TITLE")), dim.Render(strings.Repeat("─", m.width))}
@@ -2412,14 +2434,21 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		if it.pr != nil && i != m.row {
 			ci = checkStyle(it.pr.Checks).Render(ci)
 		}
+		status := statusText(it)
+		if i != m.row && !it.heading() {
+			approvals := ""
+			if it.pr != nil && it.pr.ApprovalsText() != "" {
+				approvals = " · " + it.pr.ApprovalsText()
+			}
+			status = statusStyle(it).Render(strings.TrimSuffix(status, approvals))
+			if approvals != "" {
+				status += dim.Render(approvals)
+			}
+		}
 		switch {
 		case it.review(), it.other:
-			line = row(string(it.key), statusText(it), pad("", pointsW)+authorCell(it.pr.Author, assigneeW)+pad("", agentW), ci, it.pr.Title)
+			line = row(string(it.key), status, pad("", pointsW)+authorCell(it.pr.Author, assigneeW)+pad("", agentW), ci, it.pr.Title)
 		case it.mine():
-			status := statusText(it)
-			if i != m.row && needsYou(*it.pr) {
-				status = warn.Render(status)
-			}
 			line = row(string(it.key), status, authorCell(it.pr.Author, assigneeW)+agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, cmp.Or(it.pr.Title, it.ticket.Summary))
 		default:
 			title, key := it.ticket.Summary, string(it.key)
@@ -2427,9 +2456,9 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 				title = dim.Render(title)
 			}
 			if it.parent != "" {
-				key = "↳ " + key
+				key = subtaskArrow(key, i == m.row)
 			}
-			line = row(key, it.ticket.Status, pointsCell(it.ticket.Points, pointsW)+assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
+			line = row(key, status, pointsCell(it.ticket.Points, pointsW)+assigneeCell(it.ticket.Assignee, assigneeW)+agentCell(m.snap.Agents[string(it.key)], agentW, i == m.row), prText(it), title)
 		}
 		var mark string
 		var markStyle lipgloss.Style
@@ -2498,9 +2527,6 @@ func (m Model) preview() string {
 	case t.Points != 0:
 		parts = append([]string{strconv.FormatFloat(t.Points, 'f', -1, 64) + " points"}, parts...)
 	}
-	if t.Label != "" {
-		parts = append([]string{t.Label}, parts...)
-	}
 	for _, r := range t.Attention() {
 		parts = append(parts, string(r))
 	}
@@ -2515,7 +2541,11 @@ func (m Model) preview() string {
 	if hint := actionHint(*t); hint != "" {
 		parts = append(parts, hint)
 	}
-	return title + "\n" + dim.Render(truncate(strings.Join(parts, " · "), m.width))
+	if t.Label == "" {
+		return title + "\n" + dim.Render(truncate(strings.Join(parts, " · "), m.width))
+	}
+	badge := labelBadge.Render(" " + truncate(t.Label, m.width-2) + " ")
+	return title + "\n" + badge + " " + dim.Render(truncate(strings.Join(parts, " · "), max(0, m.width-lipgloss.Width(badge)-1)))
 }
 
 func ciWord(c ticket.CheckState) string {
@@ -2548,7 +2578,7 @@ func actionHint(t ticket.Ticket) string {
 	return "p opens the PR ↗"
 }
 
-var keyStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("111"))
+var keyStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
 
 // footer is the key legend: each key highlighted, its meaning dimmed, with room between commands.
 func (m Model) footer() string {
@@ -2591,7 +2621,7 @@ func (m Model) footer() string {
 	}
 	sync := dim.Render(m.syncLabel())
 	if m.stale != nil {
-		sync = warn.Render(m.syncLabel())
+		sync = notice.Render(m.syncLabel())
 	}
 	// The sync state sits at the bottom right: on the legend's last line when its widest wording fits,
 	// else on its own. Deciding by the widest wording keeps it from jumping between lines, and the
