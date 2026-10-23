@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -19,6 +20,11 @@ type fakeJira struct {
 	sprints map[int][]int
 	// boards answers Boards per space.
 	boards map[string][]jira.Board
+	// future and backlog answer OpenSprints and BacklogIssues per board.
+	future  map[int][]jira.Sprint
+	backlog map[int][]jira.Issue
+	// sprinted records each MoveToSprint as "KEY sprint".
+	sprinted []string
 	// transitions answers Transitions per key; moved records every Transition as "KEY id".
 	transitions map[string][]jira.Transition
 	moved       []string
@@ -94,6 +100,21 @@ func (f *fakeJira) ActiveSprints(_ context.Context, board int) ([]int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.sprints[board], nil
+}
+
+func (f *fakeJira) OpenSprints(_ context.Context, board int) ([]jira.Sprint, error) {
+	return f.future[board], nil
+}
+
+func (f *fakeJira) MoveToSprint(_ context.Context, sprint int, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sprinted = append(f.sprinted, fmt.Sprintf("%s %d", key, sprint))
+	return nil
+}
+
+func (f *fakeJira) BacklogIssues(_ context.Context, board int, _ []string) ([]jira.Issue, error) {
+	return f.backlog[board], nil
 }
 
 func (f *fakeJira) Issue(_ context.Context, key string, _ ...string) (jira.Issue, error) {

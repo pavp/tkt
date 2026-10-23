@@ -95,41 +95,10 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 	if len(c.Spaces) == 0 {
 		return snap, errors.New("no Jira spaces configured: add [[spaces]] to the config or run `tkt init`")
 	}
-	fields, labelID := jira.ListFields, ""
-	if name := c.Jira.LabelField; name != "" {
-		id, err := js.FieldID(ctx, name)
-		switch {
-		case err == nil:
-			labelID, fields = id, append(slices.Clone(fields), id)
-			snap.LabelField = name
-		case errors.Is(err, jira.ErrFieldNotFound):
-			snap.Warnings = append(snap.Warnings, fmt.Sprintf("Jira has no field %q: check label_field in the config", name))
-		default:
-			snap.Warnings = append(snap.Warnings, "ticket labels unavailable: "+err.Error())
-		}
-	}
-	pointsID := ""
-	if name := c.Jira.PointsField; name != "" {
-		id, err := js.FieldID(ctx, name)
-		switch {
-		case err == nil:
-			pointsID = id
-		case errors.Is(err, jira.ErrFieldNotFound):
-			snap.Warnings = append(snap.Warnings, fmt.Sprintf("Jira has no field %q: check points_field in the config", name))
-		default:
-			snap.Warnings = append(snap.Warnings, "story points unavailable: "+err.Error())
-		}
-	} else {
-		// Company-managed spaces call the field "Story Points", team-managed ones "Story point estimate".
-		for _, name := range []string{"Story Points", "Story point estimate"} {
-			if id, err := js.FieldID(ctx, name); err == nil {
-				pointsID = id
-				break
-			}
-		}
-	}
-	if pointsID != "" {
-		fields = append(slices.Clone(fields), pointsID)
+	fields, labelID, pointsID, warnings := issueFields(ctx, c, js)
+	snap.Warnings = append(snap.Warnings, warnings...)
+	if labelID != "" {
+		snap.LabelField = c.Jira.LabelField
 	}
 	// The team is the active sprints of the boards the user picked; its search runs beside everything
 	// else and is joined last.
@@ -174,8 +143,21 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		}
 		return t
 	}
+	boardNames := map[int]string{}
+	for _, s := range c.Spaces {
+		for _, b := range s.TeamBoards {
+			boardNames[b.ID] = b.Name
+		}
+	}
 	for _, is := range issues {
-		tickets = append(tickets, toTicket(is))
+		t := toTicket(is)
+		for _, sp := range is.Sprints {
+			if name, ok := boardNames[sp.Board]; ok && sp.State == "active" {
+				t.Board = name
+				break
+			}
+		}
+		tickets = append(tickets, t)
 		ids[ticket.Key(is.Key)] = is.ID
 		updated[ticket.Key(is.Key)] = is.Updated
 		for _, sp := range is.Sprints {
@@ -354,6 +336,48 @@ func others(listed []ticket.PullRequest, tickets []ticket.Ticket, reviews []tick
 	}
 	slices.SortStableFunc(out, byRepoNumber)
 	return out
+}
+
+// issueFields lists the fields a ticket search asks for, with the ids of the label and story points fields
+// when Jira has them; a missing one becomes a warning.
+func issueFields(ctx context.Context, c *config.Config, js interface {
+	FieldID(ctx context.Context, name string) (string, error)
+}) (fields []string, labelID, pointsID string, warnings []string) {
+	fields = jira.ListFields
+	if name := c.Jira.LabelField; name != "" {
+		id, err := js.FieldID(ctx, name)
+		switch {
+		case err == nil:
+			labelID, fields = id, append(slices.Clone(fields), id)
+		case errors.Is(err, jira.ErrFieldNotFound):
+			warnings = append(warnings, fmt.Sprintf("Jira has no field %q: check label_field in the config", name))
+		default:
+			warnings = append(warnings, "ticket labels unavailable: "+err.Error())
+		}
+	}
+	if name := c.Jira.PointsField; name != "" {
+		id, err := js.FieldID(ctx, name)
+		switch {
+		case err == nil:
+			pointsID = id
+		case errors.Is(err, jira.ErrFieldNotFound):
+			warnings = append(warnings, fmt.Sprintf("Jira has no field %q: check points_field in the config", name))
+		default:
+			warnings = append(warnings, "story points unavailable: "+err.Error())
+		}
+	} else {
+		// Company-managed spaces call the field "Story Points", team-managed ones "Story point estimate".
+		for _, name := range []string{"Story Points", "Story point estimate"} {
+			if id, err := js.FieldID(ctx, name); err == nil {
+				pointsID = id
+				break
+			}
+		}
+	}
+	if pointsID != "" {
+		fields = append(slices.Clone(fields), pointsID)
+	}
+	return fields, labelID, pointsID, warnings
 }
 
 // activeSprints asks each team board for its active sprints, all at once, and maps each sprint to its

@@ -63,6 +63,16 @@ type recorder struct {
 	users map[string][]User
 }
 
+func (r *recorder) MoveToSprint(k ticket.Key, sprint int, name string) tea.Cmd {
+	r.calls = append(r.calls, fmt.Sprintf("sprint %s %d", k, sprint))
+	return func() tea.Msg { return SprintMovedMsg{Key: k, Sprint: name} }
+}
+
+func (r *recorder) Backlog() tea.Cmd {
+	r.calls = append(r.calls, "backlog")
+	return nil
+}
+
 func (r *recorder) Users(k ticket.Key, query string) tea.Cmd {
 	r.calls = append(r.calls, "users "+query)
 	users := r.users[query]
@@ -563,7 +573,7 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 Sprint 3", "2 PRs 3", "│ ◫ View │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 Sprint  3 ", "2 PRs  3 ", "│ ◫ View │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
@@ -1124,7 +1134,7 @@ func TestActionsMenu(t *testing.T) {
 	r := &recorder{}
 	m := press(loaded(r), "l", "enter")
 	v := stripANSI(m.View())
-	for _, want := range []string{"Actions for DEMO-1 · In Progress", "Start · open the agent", "Show details", "Open the ticket pane next to its agent", "Open in Jira ↗", "Open #812 ✕ in GitHub ↗", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
+	for _, want := range []string{"Actions for DEMO-1", "In Progress", "Start · open the agent", "Show details", "Open the ticket pane next to its agent", "Open in Jira ↗", "Open #812 ✕ in GitHub ↗", "Send the CI failure to the agent", "Copy the key DEMO-1", "Copy the ticket context (.ticket.md)", "enter run · esc close"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("menu missing %q:\n%s", want, v)
 		}
@@ -1231,25 +1241,25 @@ func TestPRColumnFitsItsContent(t *testing.T) {
 	t.Fatal("row not found")
 }
 
-func TestClickOnReviewChipOpensThePR(t *testing.T) {
+func TestClickOnReviewChipOpensItsMenu(t *testing.T) {
 	r := &recorder{}
 	m := loaded(r)
 	v := m.View()
 	y := lineIndex(v, "! #820")
 	line := strings.Split(stripANSI(v), "\n")[y]
 	x := lipgloss.Width(line[:strings.Index(line, "#820")])
-	_, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	if cmd == nil {
-		t.Fatal("click on the chip did nothing")
+	m, _ = m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	v = stripANSI(m.View())
+	for _, want := range []string{"Pull request #820", "example-org/web · alex", "review requested", "Open in GitHub ↗", "Copy the PR link"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("a click on a chip opens the menu the PRs filter gives it, lacking %q:\n%s", want, v)
+		}
 	}
-	cmd()
-	if r.last() != "open https://github.com/example-org/web/pull/820" {
-		t.Errorf("click ran %v", r.calls)
+	if slices.ContainsFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, "open ") }) {
+		t.Errorf("the click itself opens nothing: %v", r.calls)
 	}
-	before := len(r.calls)
-	m, cmd = m.Update(tea.MouseMsg{X: 2, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	if cmd != nil || len(r.calls) != before {
-		t.Error("click on the strip label should do nothing")
+	if m = press(m, "esc"); !m.(Model).inStrip {
+		t.Error("the clicked chip stays selected")
 	}
 }
 
@@ -1273,7 +1283,7 @@ func TestKeyboardReachesReviewChips(t *testing.T) {
 		t.Fatalf("right should move to the next chip:\n%s", stripANSI(next.View()))
 	}
 	next = press(next, "enter")
-	if v := stripANSI(next.View()); !strings.Contains(v, "Pull request #821 · example-org/api  ") || !strings.Contains(v, "unknown author · review requested") {
+	if v := stripANSI(next.View()); !strings.Contains(v, "Pull request #821") || !strings.Contains(v, "example-org/api") || !strings.Contains(v, "review requested") {
 		t.Fatalf("enter on a chip should open its menu:\n%s", stripANSI(next.View()))
 	}
 	next, _ = run(next, "enter")
@@ -1362,9 +1372,9 @@ func TestListShowsReviewRequestsInTheStrip(t *testing.T) {
 	}
 	y := lineIndex(m.View(), "#820 │")
 	x := strings.Index(strings.Split(stripANSI(m.View()), "\n")[y], "#820")
-	_, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	if cmd == nil || cmd() != StatusMsg("open https://github.com/example-org/web/pull/820") {
-		t.Errorf("a click on a chip opens its pull request")
+	m, _ = m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if v := stripANSI(m.View()); !strings.Contains(v, "Pull request #820") {
+		t.Errorf("a click on a chip opens its menu:\n%s", v)
 	}
 }
 
@@ -1395,7 +1405,7 @@ func TestPRsFilterTogglesBots(t *testing.T) {
 	snap.Reviews = append(snap.Reviews, ticket.PullRequest{Repo: "example-org/web", Number: 830, Title: "Bump vite", Author: "dependabot", AuthorBot: true})
 	m := tea.Model(New(snap, false, &recorder{}, ViewColumns))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	if v := stripANSI(m.View()); strings.Contains(v, "#830") || !strings.Contains(v, "2 PRs 3") || !strings.Contains(v, "1 Sprint 3") {
+	if v := stripANSI(m.View()); strings.Contains(v, "#830") || !strings.Contains(v, "2 PRs  3 ") || !strings.Contains(v, "1 Sprint  3 ") {
 		t.Fatalf("bot review shown by default:\n%s", v)
 	}
 	if v := stripANSI(press(m, "b").View()); strings.Contains(v, "#830") {
@@ -1407,7 +1417,7 @@ func TestPRsFilterTogglesBots(t *testing.T) {
 		t.Fatalf("reviews filter before b:\n%s", v)
 	}
 	shown := press(m, "b")
-	if v := stripANSI(shown.View()); !strings.Contains(v, "#830") || !strings.Contains(v, "b hide bots") || !strings.Contains(v, "2 PRs 4") {
+	if v := stripANSI(shown.View()); !strings.Contains(v, "#830") || !strings.Contains(v, "b hide bots") || !strings.Contains(v, "2 PRs  4 ") {
 		t.Errorf("b did not show bots:\n%s", v)
 	}
 	if v := stripANSI(press(shown, "b").View()); strings.Contains(v, "#830") {
@@ -1530,7 +1540,7 @@ func TestPRsFilterListsMyOpenPRsThenReviews(t *testing.T) {
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 		m = press(m, "2")
 		v := stripANSI(m.View())
-		if !strings.Contains(v, "2 PRs 5") || strings.Contains(v, "Reviews 1") || strings.Contains(v, "Needs you") {
+		if !strings.Contains(v, "2 PRs  5 ") || strings.Contains(v, "Reviews 1") || strings.Contains(v, "Needs you") {
 			t.Fatalf("%s: header:\n%s", view, v)
 		}
 		mine, reviews := strings.Index(v, "Mine"), strings.Index(v, "Review requested · example-org/web  1")
@@ -1581,7 +1591,7 @@ func TestPRMenuLeadsWithThePullRequest(t *testing.T) {
 	}
 	m = press(m, "enter")
 	v := stripANSI(m.View())
-	for _, want := range []string{"Pull request #815 · DEMO-4", "Open #815 in GitHub ↗", "Send the review comments to the agent", "Start · open the agent", "Open the ticket pane next to its agent", "Show details of DEMO-4", "Open DEMO-4 in Jira ↗"} {
+	for _, want := range []string{"Pull request #815", "DEMO-4 · In Review", "Open #815 in GitHub ↗", "Send the review comments to the agent", "Start · open the agent", "Open the ticket pane next to its agent", "Show details of DEMO-4", "Open DEMO-4 in Jira ↗"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("PR menu missing %q:\n%s", want, v)
 		}
@@ -1779,7 +1789,7 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	m := loaded(&recorder{})
 	lines := strings.Split(stripANSI(m.View()), "\n")
 	first := lines[1]
-	for _, want := range []string{"tkt", "│ 1 Sprint 3 │", "│ 2 PRs 3 │", "│ ◫ View │"} {
+	for _, want := range []string{"tkt", "│ 1 Sprint  3  │", "│ 2 PRs  3  │", "│ ◫ View │"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("title row lacks %q: %q", want, first)
 		}
@@ -1790,8 +1800,8 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	if strings.Index(first, "1 Sprint") < strings.Index(first, "tkt") || strings.Contains(first, "synced") || strings.Contains(first, "refreshing") {
 		t.Errorf("controls should sit right of the title, the sync state at the bottom: %q", first)
 	}
-	if !strings.HasPrefix(strings.TrimSpace(lines[3]), "──────") {
-		t.Errorf("no rule under the header: %q", lines[3])
+	if !strings.HasPrefix(strings.TrimSpace(lines[4]), "──────") {
+		t.Errorf("no rule under the header and its context line: %q", lines[4])
 	}
 
 	tray, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 40})
@@ -1940,8 +1950,8 @@ func TestBoardShowsSnapshotWarningsUnderTheHeader(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	lines := strings.Split(stripANSI(next.View()), "\n")
-	if !strings.HasPrefix(strings.TrimSpace(lines[4]), "! DEMO has no repositories yet") {
-		t.Errorf("warning not under the header rule:\n%s", strings.Join(lines[:6], "\n"))
+	if !strings.HasPrefix(strings.TrimSpace(lines[5]), "! DEMO has no repositories yet") {
+		t.Errorf("warning not under the header rule:\n%s", strings.Join(lines[:7], "\n"))
 	}
 	y := lineIndex(next.View(), "DEMO-2")
 	x := lipgloss.Width(lines[y][:strings.Index(lines[y], "DEMO-2")])
@@ -2388,43 +2398,55 @@ func TestRepoFilterHidesRepositoriesInThePRsFilter(t *testing.T) {
 	}
 }
 
-func TestRepoFilterAppliesToAll(t *testing.T) {
-	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenRepos: []string{"example-org/web"}}))
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	v := stripANSI(m.View())
-	if !strings.Contains(v, "DEMO-4") || strings.Contains(v, "#820") || !strings.Contains(v, "Showing 1 of 2 repositories") {
-		t.Fatalf("a ticket with a pull request in a shown repository stays; the web review hides:\n%s", v)
-	}
-	m = tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenRepos: []string{"example-org/web", "example-org/api"}}))
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	v = stripANSI(m.View())
-	if strings.Contains(v, "DEMO-4") || !strings.Contains(v, "DEMO-1") || !strings.Contains(v, "DEMO-3") {
-		t.Errorf("a ticket hides only when all its pull requests are in hidden repositories:\n%s", v)
-	}
-	if !strings.Contains(v, "1 Sprint 3") {
-		t.Errorf("All counts what it shows:\n%s", v)
-	}
-	for _, view := range []string{ViewColumns} {
-		m := tea.Model(New(prsSnapshot(), false, &recorder{}, view).WithState(BoardState{HiddenRepos: []string{"example-org/web"}}))
+func TestRepoFilterAppliesOnlyToThePRsFilter(t *testing.T) {
+	for _, view := range []string{ViewList, ViewColumns} {
+		m := tea.Model(New(prsSnapshot(), false, &recorder{}, view).WithState(BoardState{HiddenRepos: []string{"example-org/web", "example-org/api"}}))
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-		if v := stripANSI(m.View()); strings.Contains(v, "#820") || !strings.Contains(v, "Showing 1 of 2 repositories") {
-			t.Errorf("%s: the review strip hides hidden repositories with the notice:\n%s", view, v)
+		v := stripANSI(m.View())
+		if !strings.Contains(v, "DEMO-4") || !strings.Contains(v, "#820") || strings.Contains(v, "Showing") || !strings.Contains(v, "1 Sprint  4 ") {
+			t.Errorf("%s: Sprint ignores the repository filter, review strip included:\n%s", view, v)
+		}
+		if strings.Contains(v, "Repos") || strings.Contains(v, "R repos") {
+			t.Errorf("%s: Sprint offers no repository filter:\n%s", view, v)
+		}
+		m = press(m, "R")
+		if v := stripANSI(m.View()); strings.Contains(v, "Repositories") {
+			t.Errorf("%s: R opens nothing in Sprint:\n%s", view, v)
+		}
+		v = stripANSI(press(m, "2").View())
+		if strings.Contains(v, "#820") || strings.Contains(v, "#815") || !strings.Contains(v, "Showing 0 of 2 repositories · R change") {
+			t.Errorf("%s: the PRs filter keeps hiding them:\n%s", view, v)
 		}
 	}
 }
 
 func TestRepoFilterNoticeOpensTheModalAndFitsTheTrayPanel(t *testing.T) {
 	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenRepos: []string{"example-org/api"}}))
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
+	m = press(m, "2")
 	v := stripANSI(m.View())
 	y := lineIndex(v, "Showing 1 of 2")
 	if y < 0 {
 		t.Fatalf("no notice:\n%s", v)
 	}
-	m = click(m, 5, y)
-	v = stripANSI(m.View())
-	if !strings.Contains(v, "[ ] example-org/api") {
+	line := strings.Split(v, "\n")[y]
+	if v := stripANSI(click(m, lipgloss.Width(line[:strings.Index(line, "Showing")])+1, y).View()); !strings.Contains(v, "[ ] example-org/api") {
 		t.Fatalf("a click on the notice should open the filter:\n%s", v)
+	}
+	if v := stripANSI(click(m, 2, y).View()); strings.Contains(v, "[ ] example-org/api") {
+		t.Errorf("a click on the context's own words opens nothing:\n%s", v)
+	}
+	tray := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenRepos: []string{"example-org/api"}}))
+	tray, _ = tray.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	v = stripANSI(press(tray, "2").View())
+	y = lineIndex(v, "Repos 1/2")
+	if y < 0 || strings.Contains(v, "Showing") {
+		t.Fatalf("where the notice does not fit beside the context, the button counts:\n%s", v)
+	}
+	line = strings.Split(v, "\n")[y]
+	v = stripANSI(click(press(tray, "2"), lipgloss.Width(line[:strings.Index(line, "Repos")])+1, y).View())
+	if !strings.Contains(v, "[ ] example-org/api") {
+		t.Fatalf("a click on the button should open the filter:\n%s", v)
 	}
 	for _, l := range strings.Split(v, "\n") {
 		if lipgloss.Width(l) > 56 {
@@ -2491,7 +2513,7 @@ func TestRepoFilterListsTheConfiguredRepositories(t *testing.T) {
 	r := &recorder{cfg: config.Config{Spaces: []config.Space{{Key: "DEMO", Repos: []config.Repo{{Name: "example-org/docs"}, {Name: "example-org/web"}}}}}}
 	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	v := stripANSI(press(m, "R").View())
+	v := stripANSI(press(m, "2", "R").View())
 	for _, want := range []string{"[x] example-org/docs", "0 open", "[x] example-org/api", "[x] example-org/web"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("filter lacks %q:\n%s", want, v)
@@ -2523,6 +2545,7 @@ func TestCollapsingKeepsTheColumns(t *testing.T) {
 func TestReposButtonOpensAndClosesTheFilter(t *testing.T) {
 	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
 	v := stripANSI(m.View())
 	y := lineIndex(v, "Repos")
 	if y < 0 {
@@ -2538,10 +2561,124 @@ func TestReposButtonOpensAndClosesTheFilter(t *testing.T) {
 	if v := stripANSI(m.View()); strings.Contains(v, "[x] example-org/api") {
 		t.Errorf("another click on Repos should close it:\n%s", v)
 	}
-	narrow := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+}
+
+func boardsSnapshot() board.Snapshot {
+	snap := teamSnapshot()
+	for i, t := range snap.Tickets {
+		switch t.Key {
+		case "DEMO-1", "DEMO-9":
+			snap.Tickets[i].Board = "Payments"
+		case "DEMO-3":
+			snap.Tickets[i].Board = "Accounts"
+		}
+	}
+	return snap
+}
+
+func TestBoardFilterHidesTicketsOfHiddenBoards(t *testing.T) {
+	for _, view := range []string{ViewList, ViewColumns} {
+		r := &recorder{}
+		m := tea.Model(New(boardsSnapshot(), false, r, view))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+		m = press(m, "B")
+		v := stripANSI(m.View())
+		for _, want := range []string{"Boards", "[x] Accounts", "1 ticket", "[x] Payments", "Apply"} {
+			if !strings.Contains(v, want) {
+				t.Fatalf("%s: filter modal lacks %q:\n%s", view, want, v)
+			}
+		}
+		m = press(m, " ", "enter")
+		v = stripANSI(m.View())
+		if strings.Contains(v, "DEMO-3") || !strings.Contains(v, "DEMO-1") || !strings.Contains(v, "DEMO-2") || !strings.Contains(v, "Showing 1 of 2 boards · B change") || !strings.Contains(v, "1 Sprint  3 ") {
+			t.Errorf("%s: Accounts should hide, tickets without a board stay, with a notice:\n%s", view, v)
+		}
+		if len(r.states) == 0 || !slices.Equal(r.states[len(r.states)-1].HiddenBoards, []string{"Accounts"}) {
+			t.Errorf("%s: saved states = %+v", view, r.states)
+		}
+		m = press(m, "B", "a", "a", "enter")
+		if v := stripANSI(m.View()); !strings.Contains(v, "pick at least one board") {
+			t.Errorf("%s: unchecking every board should be refused:\n%s", view, v)
+		}
+		m = press(m, "esc", "B", "a", "enter")
+		if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-3") || strings.Contains(v, "Showing") {
+			t.Errorf("%s: a all should show every board again:\n%s", view, v)
+		}
+	}
+}
+
+func TestBoardFilterCountsTheTeamOnlyWhileShown(t *testing.T) {
+	m := tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(press(m, "B").View()); !strings.Contains(v, "[x] Payments") || !strings.Contains(v, "1 ticket") {
+		t.Fatalf("Payments has one ticket of the user's:\n%s", v)
+	}
+	m = tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{Team: true, HiddenBoards: []string{"Payments"}}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	if strings.Contains(v, "DEMO-9") || strings.Contains(v, "DEMO-1 ") || !strings.Contains(v, "Showing 1 of 2 boards") {
+		t.Errorf("a hidden board hides the team's tickets too:\n%s", v)
+	}
+	if v := stripANSI(press(m, "B").View()); !strings.Contains(v, "[ ] Payments") || !strings.Contains(v, "2 tickets") {
+		t.Errorf("with the team shown, Payments counts both:\n%s", v)
+	}
+}
+
+func TestBoardFilterIsOnlyInSprint(t *testing.T) {
+	m := tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenBoards: []string{"Accounts"}}))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "Boards 1/2") || strings.Contains(v, "Repos") || !strings.Contains(v, "B boards") || strings.Contains(v, "R repos") {
+		t.Errorf("Sprint offers the boards filter only:\n%s", v)
+	}
+	m = press(m, "2")
+	v = stripANSI(m.View())
+	if strings.Contains(v, "Boards") || strings.Contains(v, "B boards") || !strings.Contains(v, "Repos") || strings.Contains(v, "Showing 1 of 2 boards") {
+		t.Errorf("the PRs filter offers the repositories filter only:\n%s", v)
+	}
+	if v := stripANSI(press(m, "B").View()); strings.Contains(v, "[x] Payments") {
+		t.Errorf("B opens nothing in the PRs filter:\n%s", v)
+	}
+	plain := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList))
+	plain, _ = plain.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	if v := stripANSI(press(plain, "B").View()); strings.Contains(v, "Boards") || strings.Contains(v, "B boards") {
+		t.Errorf("without boards there is no filter:\n%s", v)
+	}
+}
+
+func TestBoardsButtonAndNoticeOpenTheFilterAndFitTheTrayPanel(t *testing.T) {
+	m := tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(m.View())
+	y := lineIndex(v, "Boards")
+	line := strings.Split(v, "\n")[y]
+	x := lipgloss.Width(line[:strings.Index(line, "Boards")])
+	m = click(m, x+1, y)
+	if v := stripANSI(m.View()); !strings.Contains(v, "[x] Payments") {
+		t.Fatalf("a click on Boards should open the filter:\n%s", v)
+	}
+	narrow := tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList))
 	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
-	if v := stripANSI(narrow.View()); !strings.Contains(v, "╭") || !strings.Contains(v, "│ Repos │") {
-		t.Errorf("the tray panel keeps its boxed buttons:\n%s", v)
+	if v := stripANSI(narrow.View()); !strings.Contains(v, "│ Team │") || !strings.Contains(v, "│ Boards │") {
+		t.Errorf("the tray panel keeps every control:\n%s", v)
+	}
+	narrow = tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenBoards: []string{"Accounts"}}))
+	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	v = stripANSI(narrow.View())
+	y = lineIndex(v, "Showing 1 of 2 boards")
+	if y < 0 {
+		t.Fatalf("no notice:\n%s", v)
+	}
+	line = strings.Split(v, "\n")[y]
+	narrow = click(narrow, lipgloss.Width(line[:strings.Index(line, "Showing")])+1, y)
+	v = stripANSI(narrow.View())
+	if !strings.Contains(v, "[ ] Accounts") {
+		t.Fatalf("a click on the notice should open the filter:\n%s", v)
+	}
+	for _, l := range strings.Split(v, "\n") {
+		if lipgloss.Width(l) > 56 {
+			t.Errorf("wider than the tray panel: %q", l)
+		}
 	}
 }
 
@@ -2762,7 +2899,7 @@ func TestTeamTicketsOfferNoAgentActions(t *testing.T) {
 		t.Errorf("f on a team ticket does nothing but say why: %v\n%s", r.calls, stripANSI(m.View()))
 	}
 	v := stripANSI(press(m, "enter").View())
-	for _, want := range []string{"Actions for DEMO-9 · To Do · Bea Ruiz", "Show details", "Open in Jira ↗", "Assign to…", "Copy the key DEMO-9"} {
+	for _, want := range []string{"Actions for DEMO-9", "To Do · Bea Ruiz", "Show details", "Open in Jira ↗", "Assign to…", "Copy the key DEMO-9"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("menu lacks %q:\n%s", want, v)
 		}
@@ -3188,7 +3325,7 @@ func TestTeamModeListsEveryOpenPullRequestWithItsAuthor(t *testing.T) {
 	for i := 0; i < 20 && !strings.Contains(selectedLine(m.View()), "#901"); i++ {
 		m = press(m, "s")
 	}
-	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #901 · example-org/api  ") || !strings.Contains(v, "  sam  ") || !strings.Contains(v, "Open the pull request in GitHub ↗") {
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #901") || !strings.Contains(v, "example-org/api · sam") || !strings.Contains(v, "Open in GitHub ↗") {
 		t.Errorf("its menu opens it in GitHub:\n%s", v)
 	}
 	off := press(New(snap, false, r, ViewList), "2")
@@ -3231,13 +3368,13 @@ func TestPRMenusPutTheirDetailsOnASecondLine(t *testing.T) {
 	m := loaded(r).(Model)
 	m.menu = m.buildMenu(item{key: "#820", pr: &pr})
 	lines := strings.Split(stripANSI(m.menuView()), "\n")
-	if !strings.Contains(lines[1], "Pull request #820 · example-org/web") || !strings.Contains(lines[2], "alex · review requested") {
+	if !strings.Contains(lines[1], "Pull request #820") || !strings.Contains(lines[2], "example-org/web · alex · review requested") {
 		t.Fatalf("title then details:\n%s", strings.Join(lines, "\n"))
 	}
-	if w := lipgloss.Width(m.menuView()); w > lipgloss.Width("Pull request #820 · example-org/web")+12 {
-		t.Errorf("the menu should be as wide as its first line needs, got %d", w)
+	if w := lipgloss.Width(m.menuView()); w > menuMinWidth+2 {
+		t.Errorf("the details wrap rather than widen the menu, got %d", w)
 	}
-	y := lineIndex(m.View(), "Open the pull request in GitHub")
+	y := lineIndex(m.View(), "Open in GitHub")
 	_, cmd := m.Update(tea.MouseMsg{X: m.width / 2, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	if cmd == nil || cmd() != StatusMsg("open https://github.com/example-org/web/pull/820") {
 		t.Errorf("a click on the first item should still run it")
@@ -3321,8 +3458,8 @@ func TestScrolledListKeepsItsHeaderAndAGapAbove(t *testing.T) {
 			t.Errorf("filter %s: the selection should show under the header:\n%s", filter, strings.Join(lines, "\n"))
 		}
 		preview := len(lines) - lineCount(m.(Model).preview()+"\n"+m.(Model).footer())
-		if strings.TrimSpace(lines[preview-1]) != "" || filter == "1" && strings.TrimSpace(lines[preview-2]) == "" {
-			t.Errorf("filter %s: one blank line should part the full list from the bottom:\n%s", filter, strings.Join(lines, "\n"))
+		if gap := strings.TrimSpace(lines[preview-1]); gap != "" && !strings.HasPrefix(gap, "↓ ") || filter == "1" && strings.TrimSpace(lines[preview-2]) == "" {
+			t.Errorf("filter %s: one line, blank or saying what is below, should part the full list from the bottom:\n%s", filter, strings.Join(lines, "\n"))
 		}
 		row := lineIndex(m.View(), "DEMO-")
 		if row > 0 {
@@ -3368,11 +3505,12 @@ func TestLegendFitsEachScreen(t *testing.T) {
 		v          string
 		want, dont []string
 	}{
-		{"columns", open(snapshot(), ViewColumns), []string{"←↑↓→ wasd move · ↑ to reviews", "click select · open review", "enter actions", "f send feedback", "i details", "v view", "z density", "t team", "R repos"},
-			[]string{"ticket pane", "fix CI", "fold group"}},
-		{"columns without reviews", open(noReviews, ViewColumns), []string{"←↑↓→ wasd move", "click select"}, []string{"↑ to reviews", "open review"}},
-		{"list", open(snapshot(), ViewList), []string{"↑↓ ws move · ↑ to reviews", "click select · open review", "v view", "t team"}, []string{"z density"}},
-		{"PRs", open(snapshot(), ViewColumns, "2"), []string{"↑↓ ws move", "click select", "enter actions · fold group", "f send feedback", "t requested", "R repos"}, []string{"v view", "z density", "open review"}},
+		{"columns", open(snapshot(), ViewColumns), []string{"←↑↓→ wasd move · ↑ to reviews", "click select · review menu", "enter actions", "f send feedback", "i details", "v view", "z density", "t team"},
+			[]string{"ticket pane", "fix CI", "fold group", "R repos", "B boards"}},
+		{"boards", open(boardsSnapshot(), ViewColumns), []string{"t team", "B boards"}, []string{"R repos"}},
+		{"columns without reviews", open(noReviews, ViewColumns), []string{"←↑↓→ wasd move", "click select"}, []string{"↑ to reviews", "review menu"}},
+		{"list", open(snapshot(), ViewList), []string{"↑↓ ws move · ↑ to reviews", "click select · review menu", "v view", "t team"}, []string{"z density"}},
+		{"PRs", open(snapshot(), ViewColumns, "2"), []string{"↑↓ ws move", "click select", "enter actions · fold group", "f send feedback", "t requested", "R repos"}, []string{"v view", "z density", "review menu", "B boards"}},
 		{"no repositories", open(noRepos, ViewColumns), []string{"t team"}, []string{"R repos"}},
 	}
 	for _, c := range cases {
@@ -3401,7 +3539,7 @@ func TestTeamToggleIsPerView(t *testing.T) {
 	}
 	before := stripANSI(m.View())
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
-	if !strings.Contains(before, "2 PRs 5") || !strings.Contains(stripANSI(m.View()), "2 PRs 6") {
+	if !strings.Contains(before, "2 PRs  5 ") || !strings.Contains(stripANSI(m.View()), "2 PRs  6 ") {
 		t.Errorf("the PRs counter should count the team's pull requests while they show:\n%s", stripANSI(m.View()))
 	}
 	if v := stripANSI(m.View()); !strings.Contains(v, "▾ example-org/api") || !strings.Contains(v, "showing every open pull request in your repositories · t shows only requests") {
@@ -3447,7 +3585,7 @@ func TestPRMenuNamesTheTicketsStatus(t *testing.T) {
 	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#815"); i++ {
 		m = press(m, "s")
 	}
-	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #815 · DEMO-4  ") || !strings.Contains(v, "  "+tk.Status+"  ") {
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Pull request #815") || !strings.Contains(v, "DEMO-4 · "+tk.Status) {
 		t.Errorf("the PR menu should name its ticket's status %q:\n%s", tk.Status, v)
 	}
 }
@@ -3781,5 +3919,557 @@ func TestUserSearchScrollsToTheSelection(t *testing.T) {
 	}
 	if v := stripANSI(send(m, tea.KeyMsg{Type: tea.KeyDown}).View()); !strings.Contains(v, "▸ Person 12") {
 		t.Errorf("down on the last user should stay on it:\n%s", v)
+	}
+}
+
+func backlogData() board.Backlog {
+	nov := func(d int) time.Time { return time.Date(2026, 11, d, 9, 0, 0, 0, time.UTC) }
+	uac, ac := "User Access Center", "Authorization Center"
+	tk := func(key, typ, summary string, cat ticket.Category, points float64, assignee, b string) ticket.Ticket {
+		status := map[ticket.Category]string{ticket.ToDo: "To Do", ticket.InProgress: "In Progress", ticket.Done: "Done"}[cat]
+		return ticket.Ticket{Key: ticket.Key(key), Type: typ, Summary: summary, Status: status, Category: cat, Points: points, Assignee: assignee, Board: b,
+			URL: "https://example.atlassian.net/browse/" + key}
+	}
+	return board.Backlog{
+		FetchedAt: time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC),
+		HasPoints: true,
+		Me:        "Ana López",
+		Sprints: []board.BacklogSprint{
+			{Sprint: jira.Sprint{ID: 40, Name: "UAC S42", State: "active", Start: time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC), End: nov(2)}, BoardName: uac, Tickets: []ticket.Ticket{
+				tk("DEMO-200", "Story", "Lock idle sessions", ticket.InProgress, 3, "Ana López", uac),
+			}},
+			{Sprint: jira.Sprint{ID: 43, Name: "UAC S43", State: "future", Start: nov(3), End: nov(17)}, BoardName: uac, Tickets: []ticket.Ticket{
+				tk("DEMO-210", "Story", "Export users to CSV", ticket.ToDo, 5, "Ana López", uac),
+				tk("DEMO-214", "Bug", "Fix session timeout", ticket.InProgress, 3, "Pablo Vera", uac),
+				tk("DEMO-219", "Story", "Audit log filters", ticket.ToDo, 0, "", uac),
+			}},
+			{Sprint: jira.Sprint{ID: 12, Name: "AC S12", State: "future", Start: nov(6)}, BoardName: ac, Tickets: []ticket.Ticket{
+				tk("DEMO-301", "Story", "Role matrix", ticket.ToDo, 5, "", ac),
+			}},
+			{Sprint: jira.Sprint{ID: 44, Name: "UAC S44", State: "future"}, BoardName: uac, Tickets: []ticket.Ticket{
+				tk("DEMO-220", "Task", "Archive sessions", ticket.ToDo, 8, "", uac),
+			}},
+			{Sprint: jira.Sprint{ID: 45, Name: "UAC S44", State: "future"}, BoardName: ac, Tickets: []ticket.Ticket{
+				tk("DEMO-302", "Task", "Grant audit", ticket.Done, 1, "", ac),
+			}},
+		},
+		Backlog: []ticket.Ticket{
+			tk("DEMO-180", "Task", "Clean old roles", ticket.ToDo, 2, "", uac),
+			tk("DEMO-305", "Story", "Rename roles", ticket.ToDo, 0, "", ac),
+		},
+	}
+}
+
+func backlogRecorder() *recorder {
+	return &recorder{cfg: config.Config{Spaces: []config.Space{{Key: "DEMO", TeamBoards: []config.TeamBoard{{ID: 418, Name: "User Access Center"}, {ID: 5205, Name: "Authorization Center"}}}}}}
+}
+
+func openBacklog(r *recorder, width int, state BoardState) tea.Model {
+	snap := snapshot()
+	snap.Sprints = []jira.Sprint{{Space: "DEMO", Name: "DEMO S42", End: snap.FetchedAt.Add(4 * 24 * time.Hour)}}
+	m := tea.Model(New(snap, true, r, ViewColumns).WithState(state))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+	m = press(m, "3")
+	m, _ = m.Update(BacklogMsg{Backlog: backlogData()})
+	return m
+}
+
+func TestBacklogLoadsWhenOpenedAndOnRefresh(t *testing.T) {
+	r := backlogRecorder()
+	m := tea.Model(New(snapshot(), true, r, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "3")
+	if v := stripANSI(m.View()); !strings.Contains(v, "loading backlog…") || !slices.Equal(r.calls, []string{"backlog"}) {
+		t.Fatalf("3 should ask for the backlog (calls %v):\n%s", r.calls, v)
+	}
+	m, _ = m.Update(BacklogMsg{Backlog: backlogData()})
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "3 Backlog  9 ") || strings.Contains(v, "loading backlog") {
+		t.Errorf("the button counts the backlog's tickets once loaded:\n%s", v)
+	}
+	m = press(m, "1", "3")
+	if !slices.Equal(r.calls, []string{"backlog"}) {
+		t.Errorf("coming back shows what was loaded: %v", r.calls)
+	}
+	press(m, "g")
+	if !slices.Equal(r.calls, []string{"backlog", "backlog"}) {
+		t.Errorf("g reloads the backlog: %v", r.calls)
+	}
+	m, _ = m.Update(BacklogMsg{Err: errors.New("jira: 500")})
+	if v := stripANSI(m.View()); !strings.Contains(v, "could not load the backlog: jira: 500") || !strings.Contains(v, "DEMO-210") {
+		t.Errorf("a failed reload keeps the last backlog and says why:\n%s", v)
+	}
+}
+
+func TestBacklogGroupsBySprintWithTheBoardOnEachRow(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 180, BoardState{})
+	v := stripANSI(m.View())
+	inOrder := func(v string, order ...string) {
+		t.Helper()
+		last := -1
+		for _, want := range order {
+			at := lineIndex(v, want)
+			if at <= last {
+				t.Fatalf("%q missing or out of order:\n%s", want, v)
+			}
+			last = at
+		}
+	}
+	inOrder(v, "▾ UAC S42  User Access Center  Oct 20 – Nov 2 · active  1", "DEMO-200",
+		"▾ UAC S43  User Access Center  Nov 3 – Nov 17  3", "DEMO-210", "DEMO-214", "DEMO-219",
+		"▾ AC S12  Authorization Center  from Nov 6  1", "DEMO-301",
+		"▾ UAC S44  User Access Center  1", "DEMO-220", "▾ UAC S44  Authorization Center  1", "DEMO-302", "▸ Backlog  2")
+	if strings.Contains(v, "DEMO-180") {
+		t.Errorf("the Backlog group starts folded:\n%s", v)
+	}
+	if !strings.Contains(v, "BOARD") || !strings.Contains(strings.Split(v, "\n")[lineIndex(v, "DEMO-301")], "Authorization Center") {
+		t.Errorf("each row names its board:\n%s", v)
+	}
+	row := strings.Split(v, "\n")[lineIndex(v, "DEMO-214")]
+	if !strings.Contains(row, "● DEMO-214") || !strings.Contains(row, "In Progress") || !strings.Contains(row, "Pablo V.") {
+		t.Errorf("the type's icon leads the key: %q", row)
+	}
+	for _, gone := range []string{"View", "Team", "TYPE", "PR / CI", "Review requested"} {
+		if strings.Contains(v, gone) {
+			t.Errorf("the backlog shows no %q:\n%s", gone, v)
+		}
+	}
+}
+
+func TestBacklogMergesSprintsByNameOnRequest(t *testing.T) {
+	r := backlogRecorder()
+	m := openBacklog(r, 180, BoardState{})
+	if v := stripANSI(m.View()); !strings.Contains(v, "Split") || !strings.Contains(v, "v merge") {
+		t.Fatalf("the header and legend offer the merged view:\n%s", v)
+	}
+	m = press(m, "v")
+	v := stripANSI(m.View())
+	for _, want := range []string{"▾ UAC S42  Oct 20 – Nov 2 · active  1", "▾ UAC S44  2", "Merged", "v split"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("merged view lacks %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "UAC S44  Authorization Center") {
+		t.Errorf("one group per name:\n%s", v)
+	}
+	if len(r.states) == 0 || !r.states[len(r.states)-1].BacklogMerged {
+		t.Fatalf("the choice is remembered: %+v", r.states)
+	}
+	again := openBacklog(backlogRecorder(), 180, r.states[len(r.states)-1])
+	if v := stripANSI(again.View()); !strings.Contains(v, "▾ UAC S44  2") {
+		t.Errorf("reopened merged:\n%s", v)
+	}
+	y := lineIndex(v, "Merged")
+	line := strings.Split(v, "\n")[y]
+	m = click(m, lipgloss.Width(line[:strings.Index(line, "Merged")])+1, y)
+	if v := stripANSI(m.View()); !strings.Contains(v, "UAC S44  Authorization Center") {
+		t.Errorf("a click on the switch splits again:\n%s", v)
+	}
+}
+
+func TestBacklogSprintHeadersShowPointsByStage(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 180, BoardState{})
+	v := stripANSI(m.View())
+	head := strings.Fields(strings.Split(v, "\n")[lineIndex(v, "UAC S43")])
+	if tail := strings.Join(head[len(head)-5:], " "); tail != "1 unestimated 5 3 0" {
+		t.Errorf("S43 badges = %q", tail)
+	}
+	head = strings.Fields(strings.Split(v, "\n")[lineIndex(v, "UAC S44")])
+	if tail := strings.Join(head[len(head)-3:], " "); tail != "8 0 0" {
+		t.Errorf("S44 badges = %q", tail)
+	}
+	plain := backlogData()
+	plain.HasPoints = false
+	m, _ = m.Update(BacklogMsg{Backlog: plain})
+	if v := stripANSI(m.View()); strings.HasSuffix(strings.TrimSpace(strings.Split(v, "\n")[lineIndex(v, "UAC S43")]), " 0") {
+		t.Errorf("no badges without a points field:\n%s", v)
+	}
+}
+
+func TestBacklogGroupsFoldAndAreRemembered(t *testing.T) {
+	r := backlogRecorder()
+	m := openBacklog(r, 180, BoardState{})
+	for i := 0; i < 30; i++ {
+		if it, _ := m.(Model).current(); it.heading() && strings.Contains(it.title, "Backlog") {
+			break
+		}
+		m = press(m, "s")
+	}
+	m = press(m, "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-180") || !strings.Contains(v, "▾ Backlog  2") {
+		t.Fatalf("enter should open the Backlog group:\n%s", v)
+	}
+	if len(r.states) == 0 || !slices.Contains(r.states[len(r.states)-1].Collapsed, "backlog:") {
+		t.Errorf("saved states = %+v", r.states)
+	}
+	again := openBacklog(backlogRecorder(), 180, r.states[len(r.states)-1])
+	if v := stripANSI(again.View()); !strings.Contains(v, "DEMO-180") {
+		t.Errorf("the open Backlog group is remembered:\n%s", v)
+	}
+}
+
+func TestBacklogBoardFilter(t *testing.T) {
+	r := backlogRecorder()
+	m := openBacklog(r, 180, BoardState{})
+	v := stripANSI(press(m, "B").View())
+	for _, want := range []string{"[x] Authorization Center", "3 tickets", "[x] User Access Center", "6 tickets"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("filter lacks %q:\n%s", want, v)
+		}
+	}
+	m = press(m, "B", " ", "enter")
+	v = stripANSI(m.View())
+	if strings.Contains(v, "DEMO-301") || strings.Contains(v, "DEMO-302") || strings.Contains(v, "AC S12") || !strings.Contains(v, "▾ UAC S44  User Access Center  1") || !strings.Contains(v, "▸ Backlog  1") || !strings.Contains(v, "Showing 1 of 2 boards") {
+		t.Errorf("a hidden board hides its sprints and backlog tickets:\n%s", v)
+	}
+	if !strings.Contains(v, "3 Backlog  6 ") {
+		t.Errorf("the button counts what shows:\n%s", v)
+	}
+}
+
+func TestBacklogWithoutTeamBoardsSaysWhereToAddThem(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(snapshot(), true, r, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	v := stripANSI(press(m, "3").View())
+	if !strings.Contains(v, "no team boards yet · add team boards in Settings (,)") || slices.Contains(r.calls, "backlog") {
+		t.Errorf("calls %v:\n%s", r.calls, v)
+	}
+}
+
+func TestBacklogFitsTheTrayPanel(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 56, BoardState{})
+	v := stripANSI(m.View())
+	for _, l := range strings.Split(v, "\n") {
+		if lipgloss.Width(l) > 56 {
+			t.Errorf("wider than the tray panel: %q", l)
+		}
+	}
+	if strings.Contains(v, "BOARD") || !strings.Contains(v, "DEMO-214") || !strings.Contains(v, "UAC S43") {
+		t.Errorf("the tray drops the board column first:\n%s", v)
+	}
+	if line := strings.Split(v, "\n")[lineIndex(v, "UAC S43")]; !strings.Contains(line, "▾ UAC S43  User Access Center  3") || strings.Contains(line, "unestimated") {
+		t.Errorf("a narrow title gives up the unestimated count and the dates, keeping its count:\n%s", v)
+	}
+}
+
+func TestBacklogTicketMenuAndLegend(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 180, BoardState{})
+	v := stripANSI(m.View())
+	for _, want := range []string{"enter actions · fold group", "B boards", "g refresh", "tab 1-3 switch tab"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("legend lacks %q:\n%s", want, v)
+		}
+	}
+	for _, gone := range []string{"v view", "t team", "z density", "f send feedback"} {
+		if strings.Contains(v, gone) {
+			t.Errorf("legend offers %q:\n%s", gone, v)
+		}
+	}
+	if !strings.Contains(v, "3 points · Ana López · enter for actions") {
+		t.Errorf("the preview says what enter does here:\n%s", v)
+	}
+	m = press(m, "enter")
+	v = stripANSI(m.View())
+	if !strings.Contains(v, "Actions for DEMO-200") || !strings.Contains(v, "Open in Jira ↗") || !strings.Contains(v, "Assign to…") {
+		t.Errorf("a backlog ticket's menu:\n%s", v)
+	}
+}
+
+func TestBacklogAssignKnowsTheAssigneeAndReloads(t *testing.T) {
+	r := backlogRecorder()
+	m := openBacklog(r, 180, BoardState{})
+	m = pick(t, press(m, "enter"), "Assign to")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Assign DEMO-200 · now Ana López") || !strings.Contains(v, "Unassign") {
+		t.Fatalf("the assignee comes from the backlog:\n%s", v)
+	}
+	m, _ = m.Update(AssignedMsg{Key: "DEMO-200", Who: Assignee{Me: true}})
+	if n := slices.Index(r.calls, "backlog"); n < 0 || !slices.Contains(r.calls[n+1:], "backlog") {
+		t.Errorf("an assignment from the backlog reloads it: %v", r.calls)
+	}
+}
+
+func TestBacklogBadgesStayAlignedWhateverTheUnestimatedCount(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 180, BoardState{})
+	v := stripANSI(m.View())
+	end := func(key string) int {
+		line := strings.TrimRight(strings.Split(v, "\n")[lineIndex(v, key)], " ")
+		return lipgloss.Width(line)
+	}
+	if end("UAC S43") != end("UAC S42") {
+		t.Errorf("the badges end in the same column:\n%s", v)
+	}
+}
+
+func TestListKeepsTheSectionTitleOnTopWhileScrolling(t *testing.T) {
+	r := backlogRecorder()
+	m := tea.Model(New(snapshot(), true, r, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 22})
+	m = press(m, "3")
+	m, _ = m.Update(BacklogMsg{Backlog: backlogData()})
+	for i := 0; i < 30; i++ {
+		if it, _ := m.(Model).current(); it.key == "DEMO-219" {
+			break
+		}
+		m = press(m, "s")
+	}
+	v := stripANSI(m.View())
+	rows := strings.Split(v, "\n")
+	first := lineIndex(v, "KEY") + 2
+	if !strings.Contains(rows[first], "▾ UAC S42") || strings.Contains(v, "DEMO-200") {
+		t.Fatalf("with DEMO-200 scrolled out, its group's title stays on top:\n%s", v)
+	}
+	m = click(m, 4, first)
+	if v := stripANSI(m.View()); !strings.Contains(v, "▸ UAC S42") {
+		t.Errorf("a click on the kept title folds its group:\n%s", v)
+	}
+}
+
+func TestListSaysWhatIsAboveAndBelow(t *testing.T) {
+	r := backlogRecorder()
+	m := tea.Model(New(snapshot(), true, r, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 22})
+	m = press(m, "3")
+	m, _ = m.Update(BacklogMsg{Backlog: backlogData()})
+	v := stripANSI(m.View())
+	if strings.Contains(v, "↑ 1 more") || !strings.Contains(v, "↓ 2 more") {
+		t.Fatalf("at the top, only what is below:\n%s", v)
+	}
+	for i := 0; i < 30; i++ {
+		if it, _ := m.(Model).current(); it.key == "DEMO-219" {
+			break
+		}
+		m = press(m, "s")
+	}
+	v = stripANSI(m.View())
+	if !strings.Contains(v, "↑ 1 more") || !strings.Contains(v, "↓ 2 more") {
+		t.Errorf("scrolled, both ways:\n%s", v)
+	}
+	full := openBacklog(backlogRecorder(), 160, BoardState{})
+	if v := stripANSI(full.View()); strings.Contains(v, " more") {
+		t.Errorf("a list that fits says nothing:\n%s", v)
+	}
+}
+
+func TestHeaderStaysPutAcrossTabs(t *testing.T) {
+	for _, width := range []int{180, 56} {
+		m := openBacklog(backlogRecorder(), width, BoardState{})
+		type shape struct{ tabsAt, header, footer int }
+		measure := func(m tea.Model) shape {
+			v := stripANSI(m.View())
+			return shape{strings.Index(strings.Split(v, "\n")[lineIndex(v, "Sprint")], "Sprint"), lineCount(m.(Model).header()), lineCount(m.(Model).footer())}
+		}
+		want := measure(press(m, "1"))
+		for _, tab := range []string{"2", "3"} {
+			if got := measure(press(m, tab)); got != want {
+				t.Errorf("width %d, tab %s: tabs, header or legend moved: %+v, want %+v\n%s", width, tab, got, want, stripANSI(press(m, tab).View()))
+			}
+		}
+	}
+}
+
+func TestContextLineSaysWhatEachTabIsAbout(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 180, BoardState{})
+	sprint := stripANSI(press(m, "1").View())
+	if top := strings.Split(sprint, "\n")[lineIndex(sprint, "tkt")]; strings.Contains(top, "DEMO S42") {
+		t.Errorf("the title row holds no sprint: %q", top)
+	}
+	if !strings.Contains(sprint, "DEMO · DEMO S42 · 4d left") {
+		t.Errorf("Sprint names its sprint:\n%s", sprint)
+	}
+	prs := stripANSI(press(m, "2").View())
+	if !strings.Contains(prs, "2 open · 1 needs you · 1 review request") || strings.Contains(prs, "DEMO S42") {
+		t.Errorf("PRs sums up its pull requests:\n%s", prs)
+	}
+	backlog := stripANSI(press(m, "3").View())
+	if !strings.Contains(backlog, "2 boards · 5 sprints · 2 in backlog") || strings.Contains(backlog, "DEMO S42 · 4d") {
+		t.Errorf("Backlog sums up its sprints:\n%s", backlog)
+	}
+}
+
+func TestTabsShowTheirKeyAndCountApart(t *testing.T) {
+	m := tea.Model(New(snapshot(), true, backlogRecorder(), ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 180, Height: 40})
+	v := stripANSI(m.View())
+	for _, want := range []string{"1 Sprint  3 ", "2 PRs  3 ", "3 Backlog  – "} {
+		if !strings.Contains(v, want) {
+			t.Errorf("tabs lack %q:\n%s", want, v)
+		}
+	}
+}
+
+// backlogMenu opens the menu of the backlog ticket key.
+func backlogMenu(t *testing.T, m tea.Model, key ticket.Key) tea.Model {
+	t.Helper()
+	for i := 0; i < 30; i++ {
+		if it, _ := m.(Model).current(); it.key == key {
+			return press(m, "enter")
+		}
+		m = press(m, "s")
+	}
+	t.Fatalf("%s not in the backlog", key)
+	return m
+}
+
+func TestBacklogMenuTitleTakesTwoLines(t *testing.T) {
+	m := backlogMenu(t, openBacklog(backlogRecorder(), 180, BoardState{}), "DEMO-214")
+	v := stripANSI(m.View())
+	title, sub, board := lineIndex(v, "Actions for DEMO-214"), lineIndex(v, "In Progress · Pablo Vera"), lineIndex(v, "│  User Access Center")
+	if title < 0 || sub != title+1 || board != title+2 || lipgloss.Width(m.(Model).menuView()) > menuMinWidth+2 {
+		t.Errorf("the details go under the title, wrapped to a narrow box:\n%s", v)
+	}
+}
+
+func TestBacklogStartsTheUsersTicketAtOnce(t *testing.T) {
+	r := backlogRecorder()
+	m := backlogMenu(t, openBacklog(r, 180, BoardState{}), "DEMO-210")
+	if v := stripANSI(m.View()); !strings.Contains(v, "▸ Start · open the agent") {
+		t.Fatalf("Start comes first:\n%s", v)
+	}
+	_, msg := run(m, "enter")
+	if _, ok := msg.(StartChoicesMsg); !ok || !slices.Contains(r.calls, "choices DEMO-210") || slices.ContainsFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, "assign") }) {
+		t.Errorf("the user's own ticket starts without asking: %v", r.calls)
+	}
+}
+
+func TestBacklogOffersToAssignBeforeStarting(t *testing.T) {
+	r := backlogRecorder()
+	m := backlogMenu(t, openBacklog(r, 180, BoardState{}), "DEMO-214")
+	m = press(m, "enter")
+	v := stripANSI(m.View())
+	for _, want := range []string{"DEMO-214 is not yours", "now Pablo Vera", "Assign it to me, then start", "Start without assigning", "Cancel"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("the offer lacks %q:\n%s", want, v)
+		}
+	}
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	drain(cmd)
+	if n := slices.Index(r.calls, "assign DEMO-214 me"); n < 0 || !slices.Contains(r.calls[n:], "choices DEMO-214") {
+		t.Errorf("assign first, then start: %v", r.calls)
+	}
+	r2 := backlogRecorder()
+	m = backlogMenu(t, openBacklog(r2, 180, BoardState{}), "DEMO-219")
+	m = press(m, "enter", "s", "enter")
+	if !slices.Contains(r2.calls, "choices DEMO-219") || slices.ContainsFunc(r2.calls, func(c string) bool { return strings.HasPrefix(c, "assign") }) {
+		t.Errorf("starting without assigning leaves Jira alone: %v", r2.calls)
+	}
+}
+
+func TestBacklogMovesATicketToItsBoardsCurrentSprint(t *testing.T) {
+	r := backlogRecorder()
+	m := backlogMenu(t, openBacklog(r, 180, BoardState{}), "DEMO-210")
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "Move to current sprint") {
+		t.Fatalf("a future sprint's ticket can move to the board's active sprint:\n%s", v)
+	}
+	m = pick(t, m, "Move to current sprint")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Move DEMO-210 to UAC S42?") {
+		t.Fatalf("moving asks first:\n%s", v)
+	}
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !slices.Contains(r.calls, "sprint DEMO-210 40") {
+		t.Fatalf("calls %v", r.calls)
+	}
+	m, _ = m.Update(cmd())
+	reloads := 0
+	for _, c := range r.calls {
+		if c == "backlog" {
+			reloads++
+		}
+	}
+	if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-210 moved to UAC S42") || reloads != 2 {
+		t.Errorf("a move says so and reloads the backlog (calls %v):\n%s", r.calls, v)
+	}
+	for _, key := range []ticket.Key{"DEMO-200", "DEMO-301"} {
+		m := backlogMenu(t, openBacklog(backlogRecorder(), 180, BoardState{}), key)
+		if v := stripANSI(m.View()); strings.Contains(v, "Move to current sprint") {
+			t.Errorf("%s: already in it, or its board has none:\n%s", key, v)
+		}
+	}
+}
+
+func TestBacklogAsksWhichSprintWhenItsBoardRunsSeveral(t *testing.T) {
+	data := backlogData()
+	data.Sprints = append([]board.BacklogSprint{{Sprint: jira.Sprint{ID: 41, Name: "UAC S42b", State: "active"}, BoardName: "User Access Center"}}, data.Sprints...)
+	r := backlogRecorder()
+	m := tea.Model(New(snapshot(), true, r, ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 180, Height: 40})
+	m = press(m, "3")
+	m, _ = m.Update(BacklogMsg{Backlog: data})
+	m = backlogMenu(t, m, "DEMO-210")
+	v := stripANSI(pick(t, m, "Move to current sprint").View())
+	if !strings.Contains(v, "UAC S42b") || !strings.Contains(v, "UAC S42") || !strings.Contains(v, "Move DEMO-210 to which sprint?") {
+		t.Errorf("several active sprints ask which:\n%s", v)
+	}
+}
+
+// pick moves the open menu's cursor to the item whose label starts with label and runs it.
+func pick(t *testing.T, m tea.Model, label string) tea.Model {
+	t.Helper()
+	mn := m.(Model).menu
+	if mn == nil {
+		t.Fatalf("no menu open to pick %q", label)
+	}
+	for i := 0; i < len(mn.items); i++ {
+		if strings.HasPrefix(m.(Model).menu.items[m.(Model).menu.sel].label, label) {
+			return press(m, "enter")
+		}
+		m = press(m, "s")
+	}
+	t.Fatalf("menu has no %q", label)
+	return m
+}
+
+func TestBacklogColumnsStayWhenEveryGroupIsFolded(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 180, BoardState{})
+	head := func(m tea.Model) string {
+		v := stripANSI(m.View())
+		return strings.Split(v, "\n")[lineIndex(v, "KEY")]
+	}
+	open := head(m)
+	for i := 0; i < 30; i++ {
+		if it, ok := m.(Model).current(); ok && it.heading() && !m.(Model).folded(it.group) {
+			m = press(m, "enter")
+		}
+		m = press(m, "s")
+	}
+	if got := head(m); got != open || !strings.Contains(got, "SP") {
+		t.Errorf("folding every group keeps the columns:\n%q\n%q", open, got)
+	}
+}
+
+func TestHeaderControlsSitAgainstTheRightEdge(t *testing.T) {
+	for _, width := range []int{180, 56} {
+		m := openBacklog(backlogRecorder(), width, BoardState{})
+		for _, tab := range []string{"1", "2", "3"} {
+			rows, spans := press(m, tab).(Model).headerLayout()
+			end := 0
+			for _, sp := range spans {
+				if sp.filter == "" {
+					end = max(end, sp.x+sp.width)
+				}
+			}
+			if w := press(m, tab).(Model).width; end != w {
+				t.Errorf("width %d, tab %s: the controls end at %d, not at the edge %d:\n%s", width, tab, end, w, strings.Join(rows, "\n"))
+			}
+		}
+	}
+}
+
+func TestSprintMenuShowsALongStatusWhole(t *testing.T) {
+	snap := snapshot()
+	snap.Tickets[0].Status = "Ready to be Released by the release train"
+	snap.Tickets[0].Key = "DEMO-170446"
+	m := tea.Model(New(snap, true, &recorder{}, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	for i := 0; i < 5; i++ {
+		if it, _ := m.(Model).current(); it.key == "DEMO-170446" {
+			break
+		}
+		m = press(m, "s")
+	}
+	lines := strings.Split(stripANSI(press(m, "enter").(Model).menuView()), "\n")
+	if !strings.Contains(lines[1], "Actions for DEMO-170446") || !strings.Contains(lines[2]+" "+lines[3], "Ready to be Released by the release train") || strings.Contains(lines[2], "…") {
+		t.Errorf("the status goes whole under the title:\n%s", strings.Join(lines, "\n"))
 	}
 }

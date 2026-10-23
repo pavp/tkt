@@ -247,13 +247,13 @@ func TestFieldText(t *testing.T) {
 func TestSprintFieldIsDiscoveredAndParsed(t *testing.T) {
 	c, calls := server(t, map[string]string{
 		"GET /rest/api/3/field":       `[{"id":"summary","schema":{}},{"id":"customfield_10020","schema":{"custom":"com.pyxis.greenhopper.jira:gh-sprint"}}]`,
-		"POST /rest/api/3/search/jql": `{"issues":[{"key":"DEMO-1","fields":{"summary":"x","customfield_10020":[{"name":"DEMO S41","state":"closed","endDate":"2026-10-09T17:00:00.000Z"},{"id":42,"name":"DEMO S42","state":"active","endDate":"2026-10-23T17:00:00.000Z"}]}}],"isLast":true}`,
+		"POST /rest/api/3/search/jql": `{"issues":[{"key":"DEMO-1","fields":{"summary":"x","customfield_10020":[{"name":"DEMO S41","state":"closed","endDate":"2026-10-09T17:00:00.000Z"},{"id":42,"name":"DEMO S42","state":"active","boardId":5205,"endDate":"2026-10-23T17:00:00.000Z"}]}}],"isLast":true}`,
 	})
 	got, err := c.Search(context.Background(), "x", ListFields)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got[0].Sprints) != 2 || got[0].Sprints[1] != (Sprint{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active", End: time.Date(2026, 10, 23, 17, 0, 0, 0, time.UTC)}) {
+	if len(got[0].Sprints) != 2 || got[0].Sprints[1] != (Sprint{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active", Board: 5205, End: time.Date(2026, 10, 23, 17, 0, 0, 0, time.UTC)}) {
 		t.Errorf("sprints = %+v", got[0].Sprints)
 	}
 	fields := fmt.Sprint((*calls)[1].body["fields"])
@@ -449,6 +449,61 @@ func TestActiveSprints(t *testing.T) {
 	}
 	if !strings.Contains((*calls)[0].query, "state=active") {
 		t.Errorf("query = %s", (*calls)[0].query)
+	}
+}
+
+func TestOpenSprintsArePagedWithTheirDates(t *testing.T) {
+	c, calls := server(t, map[string]string{
+		"GET /rest/agile/1.0/board/418/sprint":   `{"isLast":false,"values":[{"id":42,"name":"UAC S42","state":"active"},{"id":43,"name":"UAC S43","state":"future","startDate":"2026-11-03T09:00:00.000Z","endDate":"2026-11-17T17:00:00.000Z","originBoardId":418}]}`,
+		"GET /rest/agile/1.0/board/418/sprint#2": `{"isLast":true,"values":[{"id":44,"name":"UAC S44","state":"future"}]}`,
+	})
+	got, err := c.OpenSprints(context.Background(), 418)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Sprint{
+		{ID: 42, Name: "UAC S42", State: "active", Board: 418},
+		{ID: 43, Name: "UAC S43", State: "future", Board: 418, Start: time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC), End: time.Date(2026, 11, 17, 17, 0, 0, 0, time.UTC)},
+		{ID: 44, Name: "UAC S44", State: "future", Board: 418},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("sprints = %+v", got)
+	}
+	if !strings.Contains((*calls)[0].query, "state=active%2Cfuture") {
+		t.Errorf("query = %s", (*calls)[0].query)
+	}
+}
+
+func TestBacklogIssuesArePagedWithTheFieldsAsked(t *testing.T) {
+	c, calls := server(t, map[string]string{
+		"GET /rest/agile/1.0/board/418/backlog":   `{"startAt":0,"maxResults":1,"total":2,"issues":[{"id":"1","key":"DEMO-180","fields":{"summary":"Clean old roles","issuetype":{"name":"Task"},"status":{"name":"To Do","statusCategory":{"key":"new"}}}}]}`,
+		"GET /rest/agile/1.0/board/418/backlog#1": `{"startAt":1,"maxResults":1,"total":2,"issues":[{"id":"2","key":"DEMO-181","fields":{"summary":"Rename roles","status":{"name":"To Do","statusCategory":{"key":"new"}}}}]}`,
+	})
+	got, err := c.BacklogIssues(context.Background(), 418, ListFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Key != "DEMO-180" || got[0].Type != "Task" || got[1].Summary != "Rename roles" {
+		t.Errorf("issues = %+v", got)
+	}
+	if q := (*calls)[0].query; !strings.Contains(q, "fields=") || !strings.Contains(q, "summary") {
+		t.Errorf("query = %s", q)
+	}
+}
+
+func TestSprintsJQLKeepsTheBacklogOrder(t *testing.T) {
+	if got := SprintsJQL([]int{43, 44}); got != "sprint in (43, 44) AND issuetype not in subTaskIssueTypes() ORDER BY Rank ASC" {
+		t.Errorf("jql = %s", got)
+	}
+}
+
+func TestMoveToSprintPostsTheIssue(t *testing.T) {
+	c, calls := server(t, map[string]string{"POST /rest/agile/1.0/sprint/42/issue": ""})
+	if err := c.MoveToSprint(context.Background(), 42, "DEMO-210"); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint((*calls)[0].body["issues"]); got != "[DEMO-210]" {
+		t.Errorf("issues sent = %s", got)
 	}
 }
 

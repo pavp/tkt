@@ -287,7 +287,7 @@ type Ticket struct {
 	Assignee string `json:"assignee,omitempty"`
 	// Team marks a teammate's or unassigned ticket, shown on request; it never needs the user.
 	Team bool `json:"team,omitempty"`
-	// Board names the team board a team ticket comes from.
+	// Board names the team board whose active sprint holds the ticket, empty when it is on no team board.
 	Board    string        `json:"board,omitempty"`
 	Parent   Key           `json:"parent,omitempty"`
 	URL      string        `json:"url"`

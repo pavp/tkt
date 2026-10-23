@@ -227,6 +227,31 @@ func (b *boardActions) JiraBoards(space string) tea.Cmd {
 	}
 }
 
+func (b *boardActions) Backlog() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(b.ctx, time.Minute)
+		defer cancel()
+		js, err := b.a.jiraClient(b.cfg())
+		if err != nil {
+			return tui.BacklogMsg{Err: err}
+		}
+		bl, err := board.FetchBacklog(ctx, b.cfg(), js, time.Now())
+		return tui.BacklogMsg{Backlog: bl, Err: err}
+	}
+}
+
+func (b *boardActions) MoveToSprint(key ticket.Key, sprint int, name string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+		defer cancel()
+		js, err := b.a.jiraClient(b.cfg())
+		if err == nil {
+			err = js.MoveToSprint(ctx, sprint, string(key))
+		}
+		return tui.SprintMovedMsg{Key: key, Sprint: name, Err: err}
+	}
+}
+
 func (b *boardActions) JiraStatuses(space string) tea.Cmd {
 	return func() tea.Msg {
 		js, err := b.a.jiraClient(b.cfg())
