@@ -2987,6 +2987,9 @@ func TestFinishedPullRequestsAreLavender(t *testing.T) {
 }
 
 func TestCardsShowTheLabelFieldOnItsOwnLine(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 	snap := snapshot()
 	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-7", Summary: "Second to do", Status: "To Do", Category: ticket.ToDo})
 	snap.Tickets[0].Label = "User Access Center"
@@ -3001,15 +3004,18 @@ func TestCardsShowTheLabelFieldOnItsOwnLine(t *testing.T) {
 	v := stripANSI(m.View())
 	lines := strings.Split(v, "\n")
 	key, label := lineIndex(v, "DEMO-3"), lineIndex(v, "User Access Center")
-	if label != key+5 || m.(Model).cardLines() != 8 {
-		t.Errorf("the label goes on its own line at the bottom of the card:\n%s", v)
+	if label != key+4 || m.(Model).cardLines() != 8 {
+		t.Errorf("the label goes on its own line above the type and assignee:\n%s", v)
 	}
-	if other := lineIndex(v, "DEMO-7"); other < 0 || strings.TrimSpace(strings.Trim(lines[other+5][:40], "│ ")) != "" {
+	if other := lineIndex(v, "DEMO-7"); other < 0 || strings.TrimSpace(strings.Trim(lines[other+4][:40], "│ ")) != "" {
 		t.Errorf("a ticket without a label leaves its line blank, so cards keep one size:\n%s", v)
 	}
 	x := lipgloss.Width(lines[lineIndex(v, "DEMO-7")][:strings.Index(lines[lineIndex(v, "DEMO-7")], "DEMO-7")])
 	if after := stripANSI(click(m, x, lineIndex(v, "DEMO-7")).View()); !strings.Contains(after, "▸ DEMO-7") {
 		t.Errorf("clicks should still find the card under a taller one:\n%s", after)
+	}
+	if raw := m.View(); !strings.Contains(raw, labelStyle.Render("User Access Center")) || labelStyle.GetForeground() == dim.GetForeground() {
+		t.Errorf("the label takes its own shade, apart from the dimmed type line")
 	}
 	if c := press(m, "z").(Model); c.cardLines() != 4 || strings.Contains(stripANSI(c.View()), "User Access Center") {
 		t.Errorf("compact cards leave the label out")

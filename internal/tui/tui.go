@@ -1864,10 +1864,10 @@ func card(t ticket.Ticket, outer int, sel, compact, labeled bool, agent string) 
 		if info != "" {
 			who = info + " · " + who
 		}
-		lines = append(lines, icon+dim.Render(truncate(who, inner-lipgloss.Width(icon))))
 		if labeled {
-			lines = append(lines, dim.Render(truncate(t.Label, inner)))
+			lines = append(lines, labelStyle.Render(truncate(t.Label, inner)))
 		}
+		lines = append(lines, icon+dim.Render(truncate(who, inner-lipgloss.Width(icon))))
 	}
 	for i, l := range lines {
 		lines[i] = " " + l
