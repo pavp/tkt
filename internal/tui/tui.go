@@ -1217,10 +1217,12 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	strip, spans := m.reviewChips()
 	if strip != "" {
 		if body < lineCount(strip) {
-			// A click on a review chip opens that pull request: following a link is harmless, unlike starting an agent.
-			for _, sp := range spans {
+			// A click on a review chip selects it and opens the menu the PRs filter gives the same request.
+			for i, sp := range spans {
 				if msg.X >= sp.start && msg.X < sp.start+sp.width {
-					return m, m.actions.Open(sp.pr.URL)
+					m.inStrip, m.stripSel = true, i
+					m.remember()
+					return m, m.openMenu()
 				}
 			}
 			return m, nil
@@ -3138,7 +3140,7 @@ func (m Model) legend() string {
 		move = "←↑↓→ wasd"
 	}
 	if strip {
-		moveHint, clickHint = "move · ↑ to reviews", "select · open review"
+		moveHint, clickHint = "move · ↑ to reviews", "select · review menu"
 	}
 	if m.filter != FilterAll {
 		enterHint = "actions · fold group"

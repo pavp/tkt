@@ -1241,25 +1241,25 @@ func TestPRColumnFitsItsContent(t *testing.T) {
 	t.Fatal("row not found")
 }
 
-func TestClickOnReviewChipOpensThePR(t *testing.T) {
+func TestClickOnReviewChipOpensItsMenu(t *testing.T) {
 	r := &recorder{}
 	m := loaded(r)
 	v := m.View()
 	y := lineIndex(v, "! #820")
 	line := strings.Split(stripANSI(v), "\n")[y]
 	x := lipgloss.Width(line[:strings.Index(line, "#820")])
-	_, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	if cmd == nil {
-		t.Fatal("click on the chip did nothing")
+	m, _ = m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	v = stripANSI(m.View())
+	for _, want := range []string{"Pull request #820 · example-org/web", "alex · review requested", "Open the pull request in GitHub ↗", "Copy the PR link"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("a click on a chip opens the menu the PRs filter gives it, lacking %q:\n%s", want, v)
+		}
 	}
-	cmd()
-	if r.last() != "open https://github.com/example-org/web/pull/820" {
-		t.Errorf("click ran %v", r.calls)
+	if slices.ContainsFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, "open ") }) {
+		t.Errorf("the click itself opens nothing: %v", r.calls)
 	}
-	before := len(r.calls)
-	m, cmd = m.Update(tea.MouseMsg{X: 2, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	if cmd != nil || len(r.calls) != before {
-		t.Error("click on the strip label should do nothing")
+	if m = press(m, "esc"); !m.(Model).inStrip {
+		t.Error("the clicked chip stays selected")
 	}
 }
 
@@ -1372,9 +1372,9 @@ func TestListShowsReviewRequestsInTheStrip(t *testing.T) {
 	}
 	y := lineIndex(m.View(), "#820 │")
 	x := strings.Index(strings.Split(stripANSI(m.View()), "\n")[y], "#820")
-	_, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
-	if cmd == nil || cmd() != StatusMsg("open https://github.com/example-org/web/pull/820") {
-		t.Errorf("a click on a chip opens its pull request")
+	m, _ = m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if v := stripANSI(m.View()); !strings.Contains(v, "Pull request #820") {
+		t.Errorf("a click on a chip opens its menu:\n%s", v)
 	}
 }
 
@@ -3505,12 +3505,12 @@ func TestLegendFitsEachScreen(t *testing.T) {
 		v          string
 		want, dont []string
 	}{
-		{"columns", open(snapshot(), ViewColumns), []string{"←↑↓→ wasd move · ↑ to reviews", "click select · open review", "enter actions", "f send feedback", "i details", "v view", "z density", "t team"},
+		{"columns", open(snapshot(), ViewColumns), []string{"←↑↓→ wasd move · ↑ to reviews", "click select · review menu", "enter actions", "f send feedback", "i details", "v view", "z density", "t team"},
 			[]string{"ticket pane", "fix CI", "fold group", "R repos", "B boards"}},
 		{"boards", open(boardsSnapshot(), ViewColumns), []string{"t team", "B boards"}, []string{"R repos"}},
-		{"columns without reviews", open(noReviews, ViewColumns), []string{"←↑↓→ wasd move", "click select"}, []string{"↑ to reviews", "open review"}},
-		{"list", open(snapshot(), ViewList), []string{"↑↓ ws move · ↑ to reviews", "click select · open review", "v view", "t team"}, []string{"z density"}},
-		{"PRs", open(snapshot(), ViewColumns, "2"), []string{"↑↓ ws move", "click select", "enter actions · fold group", "f send feedback", "t requested", "R repos"}, []string{"v view", "z density", "open review", "B boards"}},
+		{"columns without reviews", open(noReviews, ViewColumns), []string{"←↑↓→ wasd move", "click select"}, []string{"↑ to reviews", "review menu"}},
+		{"list", open(snapshot(), ViewList), []string{"↑↓ ws move · ↑ to reviews", "click select · review menu", "v view", "t team"}, []string{"z density"}},
+		{"PRs", open(snapshot(), ViewColumns, "2"), []string{"↑↓ ws move", "click select", "enter actions · fold group", "f send feedback", "t requested", "R repos"}, []string{"v view", "z density", "review menu", "B boards"}},
 		{"no repositories", open(noRepos, ViewColumns), []string{"t team"}, []string{"R repos"}},
 	}
 	for _, c := range cases {
