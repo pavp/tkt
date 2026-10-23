@@ -632,12 +632,15 @@ func TestRefreshingSpinsUntilTheBoardArrives(t *testing.T) {
 }
 
 func TestPreviewStartsWithTheTicketsLabel(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 	snap := snapshot()
 	snap.Tickets[0].Label = "User Access Center"
 	m := tea.Model(New(snap, true, &recorder{}, ViewColumns))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	if v := stripANSI(m.View()); !strings.Contains(v, "\n User Access Center · unassigned · ") {
-		t.Errorf("preview lacks the label first:\n%s", v)
+	if v := m.View(); !strings.Contains(v, labelBadge.Render(" User Access Center ")+" "+dim.Render("unassigned · ")[:len(fgCode(colorMuted))]+"unassigned · ") {
+		t.Errorf("preview should start with the label as a badge, the rest dimmed:\n%q", strings.Split(v, "\n")[lineIndex(v, "User Access Center")])
 	}
 }
 

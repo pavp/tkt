@@ -2527,9 +2527,6 @@ func (m Model) preview() string {
 	case t.Points != 0:
 		parts = append([]string{strconv.FormatFloat(t.Points, 'f', -1, 64) + " points"}, parts...)
 	}
-	if t.Label != "" {
-		parts = append([]string{t.Label}, parts...)
-	}
 	for _, r := range t.Attention() {
 		parts = append(parts, string(r))
 	}
@@ -2544,7 +2541,11 @@ func (m Model) preview() string {
 	if hint := actionHint(*t); hint != "" {
 		parts = append(parts, hint)
 	}
-	return title + "\n" + dim.Render(truncate(strings.Join(parts, " · "), m.width))
+	if t.Label == "" {
+		return title + "\n" + dim.Render(truncate(strings.Join(parts, " · "), m.width))
+	}
+	badge := labelBadge.Render(" " + truncate(t.Label, m.width-2) + " ")
+	return title + "\n" + badge + " " + dim.Render(truncate(strings.Join(parts, " · "), max(0, m.width-lipgloss.Width(badge)-1)))
 }
 
 func ciWord(c ticket.CheckState) string {
