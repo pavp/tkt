@@ -82,6 +82,10 @@ func (r *recorder) NewAgentTask(task AgentTask) tea.Cmd {
 	return r.cmd("new agent " + task.String())
 }
 
+func (r *recorder) CloneAndStart(task AgentTask, repo string) tea.Cmd {
+	return r.cmd("clone and start " + task.String() + " " + repo)
+}
+
 func (r *recorder) CopyTaskPrompt(task AgentTask) tea.Cmd {
 	return r.cmd("copy prompt " + task.String())
 }
@@ -4667,5 +4671,49 @@ func TestAgentListPutsTheBranchUnderEachAgent(t *testing.T) {
 	}
 	if !slices.Contains(r.calls, "send review of #820 w3:p1") {
 		t.Errorf("a click on the branch line picks its agent: %v", r.calls)
+	}
+}
+
+func TestEveryPullRequestCanBeReviewed(t *testing.T) {
+	r := &recorder{}
+	m := withAgent(tea.Model(New(prsSnapshot(), false, r, ViewList)), "DEMO-4")
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#815"); i++ {
+		m = press(m, "s")
+	}
+	mine := press(m, "enter")
+	if v := stripANSI(mine.View()); !strings.Contains(v, "Review with ▸") {
+		t.Errorf("the user's own pull request can be reviewed:\n%s", v)
+	}
+	pick(t, pick(t, mine, "Review with"), "A new agent")
+	if !slices.Contains(r.calls, "new agent review of #815") {
+		t.Errorf("calls %v", r.calls)
+	}
+	snap := prsSnapshot()
+	snap.Others = []ticket.PullRequest{{Repo: "example-org/api", Number: 901, Author: "sam", State: ticket.PROpen, URL: "https://github.com/example-org/api/pull/901"}}
+	o := tea.Model(New(snap, false, &recorder{}, ViewList).WithState(BoardState{Team: true}))
+	o, _ = o.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	o = press(o, "2")
+	for i := 0; i < 20 && !strings.Contains(selectedLine(o.View()), "#901"); i++ {
+		o = press(o, "s")
+	}
+	if v := stripANSI(press(o, "enter").View()); !strings.Contains(v, "Review with ▸") {
+		t.Errorf("someone else's pull request can be reviewed:\n%s", v)
+	}
+}
+
+func TestAFixWithoutACloneAsksToCloneIt(t *testing.T) {
+	r := &recorder{}
+	m := loaded(r)
+	task := AgentTask{Key: "DEMO-1"}
+	m, _ = m.Update(CloneNeededMsg{Task: task, Repo: "example-org/api", Into: "/home/dev/src"})
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "Clone example-org/api?") || !strings.Contains(v, "into /home/dev/src") || !strings.Contains(v, "Yes, clone it and start") {
+		t.Fatalf("the board asks before cloning:\n%s", v)
+	}
+	pick(t, m, "Yes, clone it and start")
+	if !slices.Contains(r.calls, "clone and start DEMO-1's feedback example-org/api") {
+		t.Errorf("calls %v", r.calls)
 	}
 }

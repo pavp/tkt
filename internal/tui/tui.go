@@ -90,6 +90,8 @@ type Actions interface {
 	// NewAgentTask hands task to an agent where its work belongs: a free agent already there, else a new one in a
 	// pane beside that folder's or in a new workspace.
 	NewAgentTask(task AgentTask) tea.Cmd
+	// CloneAndStart clones repo into the first repository root, then hands task to a new agent there.
+	CloneAndStart(task AgentTask, repo string) tea.Cmd
 	// CopyTaskPrompt puts task's prompt on the clipboard, for an agent outside Herdr.
 	CopyTaskPrompt(task AgentTask) tea.Cmd
 }
@@ -1092,6 +1094,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.assigned(msg)
 	case AgentsListedMsg:
 		return m.agentsListed(msg)
+	case CloneNeededMsg:
+		m.menu = m.cloneMenu(msg)
 	case SprintMovedMsg:
 		if msg.Err != nil {
 			m.status = "could not move " + string(msg.Key) + " to " + msg.Sprint + ": " + msg.Err.Error()

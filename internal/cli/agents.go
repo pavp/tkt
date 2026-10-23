@@ -3,7 +3,9 @@ package cli
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/repos"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
 	"github.com/pavp/tkt/internal/workspace"
@@ -140,32 +143,76 @@ func (b *boardActions) NewAgentTask(task tui.AgentTask) tea.Cmd {
 		if err != nil {
 			return tui.StatusMsg(err.Error())
 		}
-		dir, note, label, err := b.taskPlace(task)
+		dir, note, label, err := b.taskPlace(task, "")
+		var missing noClone
+		if errors.As(err, &missing) {
+			if roots := b.cfg().RepoRoots; len(roots) > 0 {
+				return tui.CloneNeededMsg{Task: task, Repo: missing.repo, Into: roots[0]}
+			}
+			return tui.StatusMsg(missing.repo + " is not cloned locally: set repo_roots in the config so tkt knows where to clone it")
+		}
 		if err != nil {
 			return tui.StatusMsg(err.Error())
 		}
-		if note != "" {
-			prompt += "\n\n" + note
-		}
-		h := b.a.NewHerdr()
-		pane, err := b.a.startTaskAgent(b.ctx, h, dir, label, prompt)
-		if err != nil {
-			return tui.StatusMsg("could not start an agent for the " + task.String() + ": " + err.Error())
-		}
-		_ = h.FocusPane(b.ctx, pane)
-		return tea.QuitMsg{}
+		return b.startTask(task, prompt, dir, note, label)
 	}
+}
+
+// CloneAndStart clones repo for a fix the user agreed to clone, then starts its agent in the new clone.
+func (b *boardActions) CloneAndStart(task tui.AgentTask, repo string) tea.Cmd {
+	return func() tea.Msg {
+		prompt, err := b.taskPrompt(task)
+		if err != nil {
+			return tui.StatusMsg(err.Error())
+		}
+		dest, err := b.a.Resolver(b.cfg()).Clone(b.ctx, config.Repo{Name: repo})
+		if err != nil {
+			return tui.StatusMsg(err.Error())
+		}
+		dir, note, label, err := b.taskPlace(task, dest)
+		if err != nil {
+			return tui.StatusMsg(err.Error())
+		}
+		return b.startTask(task, prompt, dir, note, label)
+	}
+}
+
+// noClone is a fix whose repository has no local clone yet.
+type noClone struct{ repo string }
+
+func (e noClone) Error() string { return e.repo + " is not cloned locally" }
+
+// startTask hands the task to an agent in dir, the note added to its prompt, and closes the board on its pane.
+func (b *boardActions) startTask(task tui.AgentTask, prompt, dir, note, label string) tea.Msg {
+	if note != "" {
+		prompt += "\n\n" + note
+	}
+	h := b.a.NewHerdr()
+	pane, err := b.a.startTaskAgent(b.ctx, h, dir, label, prompt)
+	if err != nil {
+		return tui.StatusMsg("could not start an agent for the " + task.String() + ": " + err.Error())
+	}
+	_ = h.FocusPane(b.ctx, pane)
+	return tea.QuitMsg{}
 }
 
 // taskPlace is the folder a new agent works on a task in, and what it is told about it. A review runs in the
 // repository's clone and the agent picks its own tools. A fix runs in the ticket's worktree, else in a checkout
 // already on its pull request's branch, else in the clone: checking the branch out there when the clone is free,
-// creating a worktree for it otherwise, since tkt never creates worktrees itself.
-func (b *boardActions) taskPlace(task tui.AgentTask) (dir, note, label string, err error) {
+// creating a worktree for it otherwise, since tkt never creates worktrees itself. A review needs no clone: without
+// one it runs in the data directory's reviews folder, the same every time; a fix without one returns noClone. clone,
+// when set, is the clone just made for the fix.
+func (b *boardActions) taskPlace(task tui.AgentTask, clone string) (dir, note, label string, err error) {
 	if task.Review != nil {
 		_, name, _ := strings.Cut(task.Review.Repo, "/")
+		label = fmt.Sprintf("review · %s#%d", name, task.Review.Number)
 		dir, err = b.cloneOf(task.Review.Repo)
-		return dir, "", fmt.Sprintf("review · %s#%d", name, task.Review.Number), err
+		if errors.Is(err, repos.ErrNotFound) {
+			dir = filepath.Join(b.a.Env.DataDir(), "reviews")
+			note = "There is no local clone of " + task.Review.Repo + ": read the pull request with gh from its URL, and clone it into a temporary folder only if you need to run it."
+			err = os.MkdirAll(dir, 0o700)
+		}
+		return dir, note, label, err
 	}
 	t, err := b.taskTicket(task)
 	if err != nil {
@@ -191,8 +238,13 @@ func (b *boardActions) taskPlace(task tui.AgentTask) (dir, note, label string, e
 			return w.Path, "", label, nil
 		}
 	}
-	if dir, err = b.cloneOf(pr.Repo); err != nil {
-		return "", "", "", err
+	dir = clone
+	if dir == "" {
+		if dir, err = b.cloneOf(pr.Repo); errors.Is(err, repos.ErrNotFound) {
+			return "", "", "", noClone{pr.Repo}
+		} else if err != nil {
+			return "", "", "", err
+		}
 	}
 	note = fmt.Sprintf("Work in this checkout: check out its branch %s first.", pr.Branch)
 	if !b.a.checkoutFree(b.ctx, dir) {

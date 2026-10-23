@@ -2,6 +2,9 @@ package cli
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -162,5 +165,53 @@ func TestNewAgentWorksOnTheFixWhereItCan(t *testing.T) {
 		if !strings.Contains(text, `CI check "unit-tests" failed`) || !strings.Contains(text, want) || f.Last("workspace.create")["cwd"] != api {
 			t.Errorf("dirty %v: prompt %q in %v", dirty, text, f.Last("workspace.create"))
 		}
+	}
+}
+
+func TestNewAgentReviewsWithoutAClone(t *testing.T) {
+	b, h, f := agentsHarness(t)
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[]}`
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+	pr := ticket.PullRequest{Repo: "example-org/cli", Number: 7, URL: "https://github.com/example-org/cli/pull/7"}
+	if msg := b.NewAgentTask(tui.AgentTask{Review: &pr})(); msg != (tea.QuitMsg{}) {
+		t.Fatalf("msg %v", msg)
+	}
+	want := filepath.Join(h.app.Env.DataDir(), "reviews")
+	if got := f.Last("workspace.create")["cwd"]; got != want {
+		t.Errorf("a review without a clone runs in %v, want %s", got, want)
+	}
+	if fi, err := os.Stat(want); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
+		t.Errorf("reviews folder: %v %v", fi, err)
+	}
+	if text, _ := f.Last("agent.prompt")["text"].(string); !strings.Contains(text, "no local clone of example-org/cli") {
+		t.Errorf("prompt %q", text)
+	}
+}
+
+func TestNewAgentAsksToCloneForAFix(t *testing.T) {
+	b, h, f := agentsHarness(t)
+	h.clone(t, "web")
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[]}`
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+	got, ok := b.NewAgentTask(tui.AgentTask{Key: "DEMO-1"})().(tui.CloneNeededMsg)
+	root := b.cfg().RepoRoots[0]
+	if !ok || got.Repo != "example-org/api" || got.Into != root {
+		t.Fatalf("msg %+v", got)
+	}
+	if count(f, "workspace.create") != 0 {
+		t.Error("nothing starts before the clone")
+	}
+	dest := filepath.Join(root, "api")
+	h.run.out["gh repo clone example-org/api "+dest] = ""
+	h.run.out["git status --porcelain"] = ""
+	h.run.out["git rev-parse --abbrev-ref HEAD"] = "main"
+	h.run.out["git symbolic-ref --short refs/remotes/origin/HEAD"] = "origin/main"
+	if msg := b.CloneAndStart(got.Task, got.Repo)(); msg != (tea.QuitMsg{}) {
+		t.Fatalf("msg %v", msg)
+	}
+	if !slices.Contains(h.run.calls, "gh repo clone example-org/api "+dest) || f.Last("workspace.create")["cwd"] != dest {
+		t.Errorf("calls %v, create %v", h.run.calls, f.Last("workspace.create"))
 	}
 }

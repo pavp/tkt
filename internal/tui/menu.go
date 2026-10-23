@@ -65,10 +65,7 @@ func (m Model) buildMenu(it item) *menu {
 		if it.review() {
 			subtitle += " · review requested"
 		}
-		items := []menuItem{{label: "Open in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}}
-		if it.review() {
-			items = append(items, m.reviewItem(pr))
-		}
+		items := []menuItem{{label: "Open in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}, m.reviewItem(pr)}
 		items = append(items, menuItem{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
 		return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: cmp.Or(pr.Repo, "unknown repository") + " · " + subtitle, items: items}
 	}
@@ -116,6 +113,7 @@ func (m Model) prMenu(it item) *menu {
 	if reasons := pr.Attention(); len(reasons) > 0 {
 		items = append(items, m.feedbackItems(t, reasons[0])...)
 	}
+	items = append(items, m.reviewItem(pr))
 	items = append(items,
 		menuItem{label: m.startLabel(t.Key), run: func() tea.Cmd { return a.StartChoices(t.Key) }},
 		menuItem{label: "Open the ticket pane next to its agent", run: func() tea.Cmd { return a.TicketPane(t.Key) }},

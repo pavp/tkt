@@ -44,6 +44,20 @@ type OpenAgent struct {
 	SameRepo bool
 }
 
+// CloneNeededMsg says a fix needs a clone of Repo, which the folder Into would hold, before an agent can take it.
+type CloneNeededMsg struct {
+	Task       AgentTask
+	Repo, Into string
+}
+
+// cloneMenu asks before cloning, as the clone lands on the user's disk.
+func (m Model) cloneMenu(msg CloneNeededMsg) *menu {
+	return &menu{title: "Clone " + msg.Repo + "?", subtitle: "into " + msg.Into + " · then an agent takes " + msg.Task.phrase(), items: []menuItem{
+		{label: "Yes, clone it and start", run: func() tea.Cmd { return m.actions.CloneAndStart(msg.Task, msg.Repo) }},
+		{label: "Cancel", run: func() tea.Cmd { return nil }},
+	}}
+}
+
 // AgentsListedMsg delivers the open agents a task can go to, or why they could not be listed.
 type AgentsListedMsg struct {
 	Task   AgentTask
@@ -122,7 +136,7 @@ func anyAgentLabel(r ticket.Reason) string {
 	return "Send the CI failure to an agent ▸"
 }
 
-// reviewItem asks an agent to review a review request; outside Herdr its prompt is copied instead.
+// reviewItem asks an agent to review a pull request, anyone's; outside Herdr its prompt is copied instead.
 func (m Model) reviewItem(pr ticket.PullRequest) menuItem {
 	task := AgentTask{Review: &pr}
 	if !m.actions.InHerdr() {
