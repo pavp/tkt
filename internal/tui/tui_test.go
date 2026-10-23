@@ -568,7 +568,7 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 Sprint 3", "2 PRs 3", "│ ◫ View │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 Sprint  3 ", "2 PRs  3 ", "│ ◫ View │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens Claude Code"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
@@ -1400,7 +1400,7 @@ func TestPRsFilterTogglesBots(t *testing.T) {
 	snap.Reviews = append(snap.Reviews, ticket.PullRequest{Repo: "example-org/web", Number: 830, Title: "Bump vite", Author: "dependabot", AuthorBot: true})
 	m := tea.Model(New(snap, false, &recorder{}, ViewColumns))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	if v := stripANSI(m.View()); strings.Contains(v, "#830") || !strings.Contains(v, "2 PRs 3") || !strings.Contains(v, "1 Sprint 3") {
+	if v := stripANSI(m.View()); strings.Contains(v, "#830") || !strings.Contains(v, "2 PRs  3 ") || !strings.Contains(v, "1 Sprint  3 ") {
 		t.Fatalf("bot review shown by default:\n%s", v)
 	}
 	if v := stripANSI(press(m, "b").View()); strings.Contains(v, "#830") {
@@ -1412,7 +1412,7 @@ func TestPRsFilterTogglesBots(t *testing.T) {
 		t.Fatalf("reviews filter before b:\n%s", v)
 	}
 	shown := press(m, "b")
-	if v := stripANSI(shown.View()); !strings.Contains(v, "#830") || !strings.Contains(v, "b hide bots") || !strings.Contains(v, "2 PRs 4") {
+	if v := stripANSI(shown.View()); !strings.Contains(v, "#830") || !strings.Contains(v, "b hide bots") || !strings.Contains(v, "2 PRs  4 ") {
 		t.Errorf("b did not show bots:\n%s", v)
 	}
 	if v := stripANSI(press(shown, "b").View()); strings.Contains(v, "#830") {
@@ -1535,7 +1535,7 @@ func TestPRsFilterListsMyOpenPRsThenReviews(t *testing.T) {
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 		m = press(m, "2")
 		v := stripANSI(m.View())
-		if !strings.Contains(v, "2 PRs 5") || strings.Contains(v, "Reviews 1") || strings.Contains(v, "Needs you") {
+		if !strings.Contains(v, "2 PRs  5 ") || strings.Contains(v, "Reviews 1") || strings.Contains(v, "Needs you") {
 			t.Fatalf("%s: header:\n%s", view, v)
 		}
 		mine, reviews := strings.Index(v, "Mine"), strings.Index(v, "Review requested · example-org/web  1")
@@ -1784,7 +1784,7 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	m := loaded(&recorder{})
 	lines := strings.Split(stripANSI(m.View()), "\n")
 	first := lines[1]
-	for _, want := range []string{"tkt", "│ 1 Sprint 3 │", "│ 2 PRs 3 │", "│ ◫ View │"} {
+	for _, want := range []string{"tkt", "│ 1 Sprint  3  │", "│ 2 PRs  3  │", "│ ◫ View │"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("title row lacks %q: %q", want, first)
 		}
@@ -1795,8 +1795,8 @@ func TestHeaderControlsShareTheTitleRow(t *testing.T) {
 	if strings.Index(first, "1 Sprint") < strings.Index(first, "tkt") || strings.Contains(first, "synced") || strings.Contains(first, "refreshing") {
 		t.Errorf("controls should sit right of the title, the sync state at the bottom: %q", first)
 	}
-	if !strings.HasPrefix(strings.TrimSpace(lines[3]), "──────") {
-		t.Errorf("no rule under the header: %q", lines[3])
+	if !strings.HasPrefix(strings.TrimSpace(lines[4]), "──────") {
+		t.Errorf("no rule under the header and its context line: %q", lines[4])
 	}
 
 	tray, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 40})
@@ -1945,8 +1945,8 @@ func TestBoardShowsSnapshotWarningsUnderTheHeader(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	lines := strings.Split(stripANSI(next.View()), "\n")
-	if !strings.HasPrefix(strings.TrimSpace(lines[4]), "! DEMO has no repositories yet") {
-		t.Errorf("warning not under the header rule:\n%s", strings.Join(lines[:6], "\n"))
+	if !strings.HasPrefix(strings.TrimSpace(lines[5]), "! DEMO has no repositories yet") {
+		t.Errorf("warning not under the header rule:\n%s", strings.Join(lines[:7], "\n"))
 	}
 	y := lineIndex(next.View(), "DEMO-2")
 	x := lipgloss.Width(lines[y][:strings.Index(lines[y], "DEMO-2")])
@@ -2398,7 +2398,7 @@ func TestRepoFilterAppliesOnlyToThePRsFilter(t *testing.T) {
 		m := tea.Model(New(prsSnapshot(), false, &recorder{}, view).WithState(BoardState{HiddenRepos: []string{"example-org/web", "example-org/api"}}))
 		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 		v := stripANSI(m.View())
-		if !strings.Contains(v, "DEMO-4") || !strings.Contains(v, "#820") || strings.Contains(v, "Showing") || !strings.Contains(v, "1 Sprint 4") {
+		if !strings.Contains(v, "DEMO-4") || !strings.Contains(v, "#820") || strings.Contains(v, "Showing") || !strings.Contains(v, "1 Sprint  4 ") {
 			t.Errorf("%s: Sprint ignores the repository filter, review strip included:\n%s", view, v)
 		}
 		if strings.Contains(v, "Repos") || strings.Contains(v, "R repos") {
@@ -2417,17 +2417,31 @@ func TestRepoFilterAppliesOnlyToThePRsFilter(t *testing.T) {
 
 func TestRepoFilterNoticeOpensTheModalAndFitsTheTrayPanel(t *testing.T) {
 	m := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenRepos: []string{"example-org/api"}}))
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
 	m = press(m, "2")
 	v := stripANSI(m.View())
 	y := lineIndex(v, "Showing 1 of 2")
 	if y < 0 {
 		t.Fatalf("no notice:\n%s", v)
 	}
-	m = click(m, 5, y)
-	v = stripANSI(m.View())
-	if !strings.Contains(v, "[ ] example-org/api") {
+	line := strings.Split(v, "\n")[y]
+	if v := stripANSI(click(m, lipgloss.Width(line[:strings.Index(line, "Showing")])+1, y).View()); !strings.Contains(v, "[ ] example-org/api") {
 		t.Fatalf("a click on the notice should open the filter:\n%s", v)
+	}
+	if v := stripANSI(click(m, 2, y).View()); strings.Contains(v, "[ ] example-org/api") {
+		t.Errorf("a click on the context's own words opens nothing:\n%s", v)
+	}
+	tray := tea.Model(New(prsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenRepos: []string{"example-org/api"}}))
+	tray, _ = tray.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
+	v = stripANSI(press(tray, "2").View())
+	y = lineIndex(v, "Repos 1/2")
+	if y < 0 || strings.Contains(v, "Showing") {
+		t.Fatalf("where the notice does not fit beside the context, the button counts:\n%s", v)
+	}
+	line = strings.Split(v, "\n")[y]
+	v = stripANSI(click(press(tray, "2"), lipgloss.Width(line[:strings.Index(line, "Repos")])+1, y).View())
+	if !strings.Contains(v, "[ ] example-org/api") {
+		t.Fatalf("a click on the button should open the filter:\n%s", v)
 	}
 	for _, l := range strings.Split(v, "\n") {
 		if lipgloss.Width(l) > 56 {
@@ -2571,7 +2585,7 @@ func TestBoardFilterHidesTicketsOfHiddenBoards(t *testing.T) {
 		}
 		m = press(m, " ", "enter")
 		v = stripANSI(m.View())
-		if strings.Contains(v, "DEMO-3") || !strings.Contains(v, "DEMO-1") || !strings.Contains(v, "DEMO-2") || !strings.Contains(v, "Showing 1 of 2 boards · B change") || !strings.Contains(v, "1 Sprint 3") {
+		if strings.Contains(v, "DEMO-3") || !strings.Contains(v, "DEMO-1") || !strings.Contains(v, "DEMO-2") || !strings.Contains(v, "Showing 1 of 2 boards · B change") || !strings.Contains(v, "1 Sprint  3 ") {
 			t.Errorf("%s: Accounts should hide, tickets without a board stay, with a notice:\n%s", view, v)
 		}
 		if len(r.states) == 0 || !slices.Equal(r.states[len(r.states)-1].HiddenBoards, []string{"Accounts"}) {
@@ -2640,8 +2654,8 @@ func TestBoardsButtonAndNoticeOpenTheFilterAndFitTheTrayPanel(t *testing.T) {
 	}
 	narrow := tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList))
 	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
-	if v := stripANSI(narrow.View()); !strings.Contains(v, "│ Team │") {
-		t.Errorf("where Boards does not fit, the tray panel keeps the Team button:\n%s", v)
+	if v := stripANSI(narrow.View()); !strings.Contains(v, "│ Team │") || !strings.Contains(v, "│ Boards │") {
+		t.Errorf("the tray panel keeps every control:\n%s", v)
 	}
 	narrow = tea.Model(New(boardsSnapshot(), false, &recorder{}, ViewList).WithState(BoardState{HiddenBoards: []string{"Accounts"}}))
 	narrow, _ = narrow.Update(tea.WindowSizeMsg{Width: 56, Height: 30})
@@ -2650,7 +2664,8 @@ func TestBoardsButtonAndNoticeOpenTheFilterAndFitTheTrayPanel(t *testing.T) {
 	if y < 0 {
 		t.Fatalf("no notice:\n%s", v)
 	}
-	narrow = click(narrow, 5, y)
+	line = strings.Split(v, "\n")[y]
+	narrow = click(narrow, lipgloss.Width(line[:strings.Index(line, "Showing")])+1, y)
 	v = stripANSI(narrow.View())
 	if !strings.Contains(v, "[ ] Accounts") {
 		t.Fatalf("a click on the notice should open the filter:\n%s", v)
@@ -3519,7 +3534,7 @@ func TestTeamToggleIsPerView(t *testing.T) {
 	}
 	before := stripANSI(m.View())
 	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
-	if !strings.Contains(before, "2 PRs 5") || !strings.Contains(stripANSI(m.View()), "2 PRs 6") {
+	if !strings.Contains(before, "2 PRs  5 ") || !strings.Contains(stripANSI(m.View()), "2 PRs  6 ") {
 		t.Errorf("the PRs counter should count the team's pull requests while they show:\n%s", stripANSI(m.View()))
 	}
 	if v := stripANSI(m.View()); !strings.Contains(v, "▾ example-org/api") || !strings.Contains(v, "showing every open pull request in your repositories · t shows only requests") {
@@ -3944,7 +3959,9 @@ func backlogRecorder() *recorder {
 }
 
 func openBacklog(r *recorder, width int, state BoardState) tea.Model {
-	m := tea.Model(New(snapshot(), true, r, ViewColumns).WithState(state))
+	snap := snapshot()
+	snap.Sprints = []jira.Sprint{{Space: "DEMO", Name: "DEMO S42", End: snap.FetchedAt.Add(4 * 24 * time.Hour)}}
+	m := tea.Model(New(snap, true, r, ViewColumns).WithState(state))
 	m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
 	m = press(m, "3")
 	m, _ = m.Update(BacklogMsg{Backlog: backlogData()})
@@ -3961,7 +3978,7 @@ func TestBacklogLoadsWhenOpenedAndOnRefresh(t *testing.T) {
 	}
 	m, _ = m.Update(BacklogMsg{Backlog: backlogData()})
 	v := stripANSI(m.View())
-	if !strings.Contains(v, "3 Backlog 9") || strings.Contains(v, "loading backlog") {
+	if !strings.Contains(v, "3 Backlog  9 ") || strings.Contains(v, "loading backlog") {
 		t.Errorf("the button counts the backlog's tickets once loaded:\n%s", v)
 	}
 	m = press(m, "1", "3")
@@ -4099,7 +4116,7 @@ func TestBacklogBoardFilter(t *testing.T) {
 	if strings.Contains(v, "DEMO-301") || strings.Contains(v, "DEMO-302") || strings.Contains(v, "AC S12") || !strings.Contains(v, "▾ UAC S44  User Access Center  1") || !strings.Contains(v, "▸ Backlog  1") || !strings.Contains(v, "Showing 1 of 2 boards") {
 		t.Errorf("a hidden board hides its sprints and backlog tickets:\n%s", v)
 	}
-	if !strings.Contains(v, "3 Backlog 6") {
+	if !strings.Contains(v, "3 Backlog  6 ") {
 		t.Errorf("the button counts what shows:\n%s", v)
 	}
 }
@@ -4226,5 +4243,52 @@ func TestListSaysWhatIsAboveAndBelow(t *testing.T) {
 	full := openBacklog(backlogRecorder(), 160, BoardState{})
 	if v := stripANSI(full.View()); strings.Contains(v, " more") {
 		t.Errorf("a list that fits says nothing:\n%s", v)
+	}
+}
+
+func TestHeaderStaysPutAcrossTabs(t *testing.T) {
+	for _, width := range []int{180, 56} {
+		m := openBacklog(backlogRecorder(), width, BoardState{})
+		type shape struct{ tabsAt, header, footer int }
+		measure := func(m tea.Model) shape {
+			v := stripANSI(m.View())
+			return shape{strings.Index(strings.Split(v, "\n")[lineIndex(v, "Sprint")], "Sprint"), lineCount(m.(Model).header()), lineCount(m.(Model).footer())}
+		}
+		want := measure(press(m, "1"))
+		for _, tab := range []string{"2", "3"} {
+			if got := measure(press(m, tab)); got != want {
+				t.Errorf("width %d, tab %s: tabs, header or legend moved: %+v, want %+v\n%s", width, tab, got, want, stripANSI(press(m, tab).View()))
+			}
+		}
+	}
+}
+
+func TestContextLineSaysWhatEachTabIsAbout(t *testing.T) {
+	m := openBacklog(backlogRecorder(), 180, BoardState{})
+	sprint := stripANSI(press(m, "1").View())
+	if top := strings.Split(sprint, "\n")[lineIndex(sprint, "tkt")]; strings.Contains(top, "DEMO S42") {
+		t.Errorf("the title row holds no sprint: %q", top)
+	}
+	if !strings.Contains(sprint, "DEMO · DEMO S42 · 4d left") {
+		t.Errorf("Sprint names its sprint:\n%s", sprint)
+	}
+	prs := stripANSI(press(m, "2").View())
+	if !strings.Contains(prs, "2 open · 1 needs you · 1 review request") || strings.Contains(prs, "DEMO S42") {
+		t.Errorf("PRs sums up its pull requests:\n%s", prs)
+	}
+	backlog := stripANSI(press(m, "3").View())
+	if !strings.Contains(backlog, "2 boards · 5 sprints · 2 in backlog") || strings.Contains(backlog, "DEMO S42 · 4d") {
+		t.Errorf("Backlog sums up its sprints:\n%s", backlog)
+	}
+}
+
+func TestTabsShowTheirKeyAndCountApart(t *testing.T) {
+	m := tea.Model(New(snapshot(), true, backlogRecorder(), ViewColumns))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 180, Height: 40})
+	v := stripANSI(m.View())
+	for _, want := range []string{"1 Sprint  3 ", "2 PRs  3 ", "3 Backlog  – "} {
+		if !strings.Contains(v, want) {
+			t.Errorf("tabs lack %q:\n%s", want, v)
+		}
 	}
 }

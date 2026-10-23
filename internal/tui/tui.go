@@ -1176,11 +1176,17 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	headerLines := lineCount(m.header())
-	if _, _, x, y, h, _ := m.headerLayout(); msg.Y >= y && msg.Y < y+h {
-		return m, m.clickHeader(msg.X - x)
-	}
-	if m.scopeNotice() != "" && msg.Y == headerLines-1 {
-		m.picker = m.scopeFilter()
+	if rows, spans := m.headerLayout(); msg.Y < len(rows) {
+		for _, sp := range spans {
+			if msg.X >= sp.x && msg.X < sp.x+sp.width && msg.Y >= sp.y && msg.Y < sp.y+sp.height {
+				return m, m.clickHeader(sp)
+			}
+		}
+		return m, nil
+	} else if msg.Y == len(rows) {
+		if m.noticeAt(msg.X) {
+			m.picker = m.scopeFilter()
+		}
 		return m, nil
 	}
 	body := msg.Y - headerLines
@@ -1280,35 +1286,25 @@ func (m *Model) openMenu() tea.Cmd {
 	return nil
 }
 
-// clickHeader switches filter or view when x, relative to where the controls start, falls on a button.
-func (m *Model) clickHeader(x int) tea.Cmd {
-	_, _, _, _, _, spans := m.headerLayout()
-	for _, sp := range spans {
-		if x >= sp.start && x < sp.start+sp.width {
-			if sp.scope {
-				m.picker = m.scopeFilter()
-				return nil
-			}
-			if sp.team {
-				return m.toggleTeam()
-			}
-			if sp.grouping {
-				return m.toggleBacklogMerged()
-			}
-			if sp.filter != "" {
-				m.filter = sp.filter
-			} else {
-				m.view = sp.view
-			}
-			m.reselect()
-			m.explainList()
-			if sp.view != "" {
-				return m.actions.SaveState(m.state())
-			}
-			return m.enterFilter()
-		}
+// clickHeader acts on the header button sp.
+func (m *Model) clickHeader(sp headerSpan) tea.Cmd {
+	switch {
+	case sp.scope:
+		m.picker = m.scopeFilter()
+		return nil
+	case sp.team:
+		return m.toggleTeam()
+	case sp.grouping:
+		return m.toggleBacklogMerged()
+	case sp.filter != "":
+		m.filter = sp.filter
+		m.reselect()
+		return m.enterFilter()
 	}
-	return nil
+	m.view = sp.view
+	m.reselect()
+	m.explainList()
+	return m.actions.SaveState(m.state())
 }
 
 // columnWidth is the width of one column box without its border, so four boxes fill the pane.
@@ -1626,29 +1622,89 @@ func windowStart(lines []string, n int) int {
 }
 
 func (m Model) header() string {
-	title, controls, x, y, h, _ := m.headerLayout()
-	var top string
-	switch {
-	case y == 0 && h == 1:
-		top = title + strings.Repeat(" ", x-lipgloss.Width(title)) + controls
-	case y == 0:
-		top = lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().PaddingTop(1).Render(title), strings.Repeat(" ", x-lipgloss.Width(title)), controls)
-	default:
-		top = title + "\n" + controls
-	}
-	top += "\n" + dim.Render(strings.Repeat("─", m.width))
+	rows, _ := m.headerLayout()
+	top := strings.Join(rows, "\n") + "\n" + m.contextLine() + "\n" + dim.Render(strings.Repeat("─", m.width))
 	if len(m.snap.Warnings) > 0 {
 		top += "\n" + notice.Render(truncate("! "+strings.Join(m.snap.Warnings, " · "), m.width))
-	}
-	// The notice is the header's last line, where a click opens the filter it describes.
-	if notice := m.scopeNotice(); notice != "" {
-		top += "\n" + truncate(notice, m.width)
 	}
 	return top
 }
 
+// contextLine sums up the tab in view and, on its right where it fits, the notice of the tab's filter, which a
+// click opens; every tab has one, so the header keeps its height.
+func (m Model) contextLine() string {
+	left := lipgloss.NewStyle().Foreground(colorSubtle).Render(m.contextText())
+	right := m.scopeNotice()
+	if right == "" || lipgloss.Width(left)+2+lipgloss.Width(right) > m.width {
+		return truncate(left, m.width)
+	}
+	return left + strings.Repeat(" ", m.width-lipgloss.Width(left)-lipgloss.Width(right)) + right
+}
+
+// noticeAt reports whether x on the context line falls on the filter's notice.
+func (m Model) noticeAt(x int) bool {
+	right := m.scopeNotice()
+	return right != "" && strings.HasSuffix(m.contextLine(), right) && x >= m.width-lipgloss.Width(right)
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// contextText is what the context line says of each tab: Sprint its open sprints, PRs how many pull requests
+// are open and ask for the user, the Backlog how many boards, sprints and sprintless tickets it shows.
+func (m Model) contextText() string {
+	switch m.filter {
+	case FilterPRs:
+		mine, needs := m.myPRs(), 0
+		for _, it := range mine {
+			if needsYou(*it.pr) {
+				needs++
+			}
+		}
+		parts := []string{fmt.Sprintf("%d open", len(mine))}
+		if needs > 0 {
+			parts = append(parts, fmt.Sprintf("%d needs you", needs))
+		}
+		n := len(m.reviews())
+		return strings.Join(append(parts, fmt.Sprintf("%d review %s", n, plural(n, "request", "requests"))), " · ")
+	case FilterBacklog:
+		if m.backlog == nil {
+			if m.backlogLoading {
+				return "loading backlog…"
+			}
+			return ""
+		}
+		sprints, rest := 0, 0
+		for _, it := range m.backlogItems() {
+			switch {
+			case it.group == backlogGroup:
+				rest = it.count
+			case it.heading():
+				sprints++
+			}
+		}
+		boards := 0
+		for b := range m.boardTickets() {
+			if !m.hiddenBoards[b] {
+				boards++
+			}
+		}
+		return fmt.Sprintf("%d %s · %d %s · %d in backlog", boards, plural(boards, "board", "boards"), sprints, plural(sprints, "sprint", "sprints"), rest)
+	}
+	var parts []string
+	for _, sp := range m.snap.Sprints {
+		parts = append(parts, sp.Space+" · "+board.SprintLabel(sp, m.snap.FetchedAt))
+	}
+	return strings.Join(parts, "   ")
+}
+
+// headerSpan is where a header button sits, in the header's own lines.
 type headerSpan struct {
-	start, width          int
+	x, y, width, height   int
 	filter, view          string
 	scope, team, grouping bool
 }
@@ -1658,82 +1714,159 @@ var (
 	filterOn  = boxSel.Foreground(colorActive).Bold(true)
 )
 
-// headerLayout places the filter and view buttons, boxed as in the prototype, right of the title; on a
-// narrower pane they move to their own row, and unboxed when even that is too narrow.
-// x and y say where the controls start, h how many rows they take, spans where each button sits from x.
-func (m Model) headerLayout() (title, controls string, x, y, h int, spans []headerSpan) {
-	parts := []string{bold.Render("tkt")}
-	for _, sp := range m.snap.Sprints {
-		parts = append(parts, sp.Space+" · "+board.SprintLabel(sp, m.snap.FetchedAt))
-	}
-	title = strings.Join(parts, " · ")
-	// The Repos or Boards button shows only where the boxed buttons still fit with it; otherwise its key and
-	// the notice open the filter.
-	var team []headerItem
-	if m.filter != FilterBacklog {
-		team = append(team, headerItem{team: true, label: " " + m.teamButton() + " "})
-	}
-	// The Team button rather moves the controls to their own row than leaves the header.
-	type attempt struct {
-		spec []headerItem
-		own  bool
-	}
-	withTeam := append(m.headerSpec(), team...)
-	attempts := []attempt{{withTeam, false}, {withTeam, true}, {m.headerSpec(), false}, {m.headerSpec(), true}}
-	if it, ok := m.scopeButton(); ok {
-		attempts = slices.Insert(attempts, 0, attempt{append(append(m.headerSpec(), it), team...), false})
-	}
-	for _, a := range attempts {
-		spec := a.spec
-		var row []string
-		pos := 0
-		spans = nil
-		for i, it := range spec {
-			gap := map[bool]int{true: 1, false: 0}[i > 0]
-			if i == len(filterOrder) || it.scope || (it.team && !spec[i-1].scope) {
-				gap = 2
-			}
-			row = append(row, strings.Repeat(" ", gap))
-			pos += gap
-			st := filterOff
-			if (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView()) || (it.scope && m.scopeNotice() != "") || (it.team && m.teamButtonOn()) {
-				st = filterOn
-			}
-			chip := st.Render(strings.TrimSpace(it.label))
-			spans = append(spans, headerSpan{start: pos, width: lipgloss.Width(chip), filter: it.filter, view: it.view, scope: it.scope, team: it.team, grouping: it.grouping})
-			row = append(row, chip)
-			pos += lipgloss.Width(chip)
-		}
-		controls = lipgloss.JoinHorizontal(lipgloss.Top, row...)
-		cw := lipgloss.Width(controls)
-		switch {
-		case !a.own && lipgloss.Width(title)+2+cw <= m.width:
-			return title, controls, m.width - cw, 0, 3, spans
-		case a.own && cw <= m.width:
-			return truncate(title, m.width), controls, 0, 1, 3, spans
+// tabLabel names a tab with its key dimmed and its count in a filled badge, lit on the tab in view, so the two
+// numbers do not read alike; the backlog counts "–" until loaded.
+func (m Model) tabLabel(f string) string {
+	var name, count string
+	switch f {
+	case FilterAll:
+		name, count = "Sprint", strconv.Itoa(len(m.shownTickets()))
+	case FilterPRs:
+		name, count = "PRs", strconv.Itoa(m.prCount())
+	case FilterBacklog:
+		name, count = "Backlog", "–"
+		if m.backlog != nil {
+			count = strconv.Itoa(m.backlogCount())
 		}
 	}
-	items := m.headerItems()
-	spans = spans[:0]
-	pos := 0
-	for i, it := range m.headerSpec() {
-		w := lipgloss.Width(it.label)
-		if i < len(filterOrder) {
-			w = lipgloss.Width(items[i])
-		}
-		if pos+w > m.width {
-			break
-		}
-		spans = append(spans, headerSpan{start: pos, width: w, filter: it.filter, view: it.view})
-		pos += w
-		if i < len(filterOrder)-1 {
-			pos += 2
-		} else if i == len(filterOrder)-1 {
-			pos += 3
-		}
+	nameStyle, badge := lipgloss.NewStyle().Foreground(colorSubtle), lipgloss.NewStyle().Background(colorBorder).Foreground(colorText)
+	if f == m.filter {
+		nameStyle, badge = nameStyle.Foreground(colorActive).Bold(true), badge.Background(colorAccent).Foreground(colorOnBadge)
 	}
-	return truncate(title, m.width), wrap(items, m.width), 0, 1, 1, spans
+	return dim.Render(strconv.Itoa(slices.Index(filterOrder, f)+1)) + " " + nameStyle.Render(name) + " " + badge.Render(" "+count+" ")
 }
+
+// slotItems are the tab's controls, one per slot: its view (View, or Split / Merged in the Backlog), its filter
+// (Boards or Repos) and its toggle (Team or Requested); a tab without one leaves the zero item.
+func (m Model) slotItems() [3]headerItem {
+	var out [3]headerItem
+	switch {
+	case m.filter == FilterAll && m.width >= narrowWidth:
+		out[0] = m.viewSwitch()
+	case m.filter == FilterBacklog:
+		// Both words take the same width, so the button does not change size when the grouping changes.
+		out[0] = headerItem{grouping: true, label: " Split  "}
+		if m.backlogMerged {
+			out[0].label = " Merged "
+		}
+	}
+	if it, ok := m.scopeButton(); ok {
+		out[1] = it
+	}
+	if m.filter != FilterBacklog {
+		out[2] = headerItem{team: true, label: " " + m.teamButton() + " "}
+	}
+	return out
+}
+
+func (m Model) chip(it headerItem) string {
+	st := filterOff
+	if (it.view != "" && it.view == m.effectiveView()) || (it.scope && m.scopeNotice() != "") || (it.team && m.teamButtonOn()) {
+		st = filterOn
+	}
+	return st.Render(strings.TrimSpace(it.label))
+}
+
+// headerLayout lays out "tkt", the tabs and the tab's controls, boxed as in the prototype. The tabs stay left and
+// the controls sit in slots as wide as any tab's, so switching tabs moves nothing; the pane's width alone decides
+// whether they share one row, the controls take a second row, "tkt" a line of its own too, or, too narrow for
+// boxes, the tabs go plain on one line.
+func (m Model) headerLayout() (rows []string, spans []headerSpan) {
+	title := bold.Render("tkt")
+	var tabs []string
+	var tabSpans []headerSpan
+	x := 0
+	for i, f := range filterOrder {
+		st := filterOff
+		if f == m.filter {
+			st = filterOn
+		}
+		chip := st.Render(m.tabLabel(f))
+		if i > 0 {
+			tabs, x = append(tabs, " "), x+1
+		}
+		tabSpans = append(tabSpans, headerSpan{x: x, width: lipgloss.Width(chip), height: 3, filter: f})
+		tabs, x = append(tabs, chip), x+lipgloss.Width(chip)
+	}
+	tabsW := x
+	var widths [3]int
+	for _, f := range filterOrder {
+		c := m
+		c.filter = f
+		for i, it := range c.slotItems() {
+			if it.label != "" {
+				widths[i] = max(widths[i], lipgloss.Width(c.chip(it)))
+			}
+		}
+	}
+	var ctrl []string
+	var ctrlSpans []headerSpan
+	x = 0
+	for i, it := range m.slotItems() {
+		if widths[i] == 0 {
+			continue
+		}
+		if x > 0 {
+			ctrl, x = append(ctrl, " "), x+1
+		}
+		cell := strings.TrimRight(strings.Repeat(strings.Repeat(" ", widths[i])+"\n", 3), "\n")
+		if it.label != "" {
+			chip := m.chip(it)
+			cell = lipgloss.NewStyle().Width(widths[i]).Render(chip)
+			ctrlSpans = append(ctrlSpans, headerSpan{x: x, width: lipgloss.Width(chip), height: 3, view: it.view, scope: it.scope, team: it.team, grouping: it.grouping})
+		}
+		ctrl, x = append(ctrl, cell), x+widths[i]
+	}
+	ctrlW := x
+	place := func(ss []headerSpan, dx, dy int) []headerSpan {
+		for _, sp := range ss {
+			sp.x, sp.y = sp.x+dx, sp.y+dy
+			spans = append(spans, sp)
+		}
+		return spans
+	}
+	block := func(parts []string) []string {
+		return strings.Split(lipgloss.JoinHorizontal(lipgloss.Top, parts...), "\n")
+	}
+	lead := lipgloss.Width("tkt") + 2
+	tabRow := block(append([]string{lipgloss.NewStyle().PaddingTop(1).Render(title), "  "}, tabs...))
+	switch {
+	case lead+tabsW+2+ctrlW <= m.width:
+		gap := m.width - lead - tabsW - ctrlW
+		rows = block(append(append([]string{lipgloss.NewStyle().PaddingTop(1).Render(title), "  "}, tabs...), append([]string{strings.Repeat(" ", gap)}, ctrl...)...))
+		place(tabSpans, lead, 0)
+		place(ctrlSpans, m.width-ctrlW, 0)
+	case lead+tabsW <= m.width && ctrlW <= m.width:
+		at := min(lead, m.width-ctrlW)
+		rows = append(tabRow, block(append([]string{strings.Repeat(" ", at)}, ctrl...))...)
+		place(tabSpans, lead, 0)
+		place(ctrlSpans, at, 3)
+	case tabsW <= m.width && ctrlW <= m.width:
+		rows = append(append([]string{title}, block(tabs)...), block(ctrl)...)
+		place(tabSpans, 0, 1)
+		place(ctrlSpans, 0, 4)
+	default:
+		rows = []string{title, ""}
+		x := 0
+		for _, f := range filterOrder {
+			label := " " + stripLabel(m.tabLabel(f)) + " "
+			if x > 0 && x+lipgloss.Width(label) > m.width {
+				rows, x = append(rows, ""), 0
+			}
+			r := dim.Render(label)
+			if f == m.filter {
+				r = selected.Render(label)
+			}
+			spans = append(spans, headerSpan{x: x, y: len(rows) - 1, width: lipgloss.Width(label), height: 1, filter: f})
+			rows[len(rows)-1] += r + " "
+			x += lipgloss.Width(label) + 1
+		}
+	}
+	return rows, spans
+}
+
+// stripLabel is a label without its styles, for the plain header of the narrowest panes.
+func stripLabel(s string) string { return ansi.Strip(s) }
 
 type headerItem struct {
 	filter, view string
@@ -1741,31 +1874,6 @@ type headerItem struct {
 	// scope marks the button that opens the repository or board filter, team the one that shows the team's
 	// tickets, grouping the backlog's switch between split and merged sprints.
 	scope, team, grouping bool
-}
-
-// headerSpec lists the filter buttons and, where the user can choose the view, the view switch: the PRs
-// filter and a pane too narrow for columns always show the list.
-func (m Model) headerSpec() []headerItem {
-	spec := []headerItem{
-		{filter: FilterAll, label: fmt.Sprintf(" 1 Sprint %d ", len(m.shownTickets()))},
-		{filter: FilterPRs, label: fmt.Sprintf(" 2 PRs %d ", m.prCount())},
-		{filter: FilterBacklog, label: " 3 Backlog "},
-	}
-	if m.backlog != nil {
-		spec[2].label = fmt.Sprintf(" 3 Backlog %d ", m.backlogCount())
-	}
-	if m.filter == FilterAll && m.width >= narrowWidth {
-		spec = append(spec, m.viewSwitch())
-	}
-	if m.filter == FilterBacklog {
-		// Both words take the same width, so the header does not shift when the grouping changes.
-		label := " Split  "
-		if m.backlogMerged {
-			label = " Merged "
-		}
-		spec = append(spec, headerItem{grouping: true, label: label})
-	}
-	return spec
 }
 
 // viewSwitch shows the view in use by its icon; a click switches to the other one, as v does. The word
@@ -1798,25 +1906,6 @@ func (m Model) scopeButton() (headerItem, bool) {
 		return headerItem{scope: true, label: fmt.Sprintf(" %s %d/%d ", name, shown, total)}, true
 	}
 	return headerItem{scope: true, label: " " + name + " "}, true
-}
-
-// headerItems renders the filter and view buttons; views sit together after a wider gap.
-func (m Model) headerItems() []string {
-	var out []string
-	views := ""
-	for _, it := range m.headerSpec() {
-		on := (it.filter != "" && it.filter == m.filter) || (it.view != "" && it.view == m.effectiveView())
-		r := dim.Render(it.label)
-		if on {
-			r = selected.Render(it.label)
-		}
-		if it.view != "" {
-			views += r
-			continue
-		}
-		out = append(out, r)
-	}
-	return append(out, " "+views+dim.Render(" v"))
 }
 
 // syncSlot is the width of the sync state's widest wording, "✓ synced 59 min ago".
@@ -2998,8 +3087,19 @@ func actionHint(t ticket.Ticket) string {
 
 var keyStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
 
-// footer is the key legend: each key highlighted, its meaning dimmed, with room between commands.
+// footer is the key legend, as tall as the tallest tab's so the rows above keep their place when the tab changes.
 func (m Model) footer() string {
+	legend, tallest := m.legend(), 0
+	for _, f := range filterOrder {
+		c := m
+		c.filter = f
+		tallest = max(tallest, lineCount(c.legend()))
+	}
+	return strings.Repeat("\n", tallest-lineCount(legend)) + legend
+}
+
+// legend lists the keys: each key highlighted, its meaning dimmed, with room between commands.
+func (m Model) legend() string {
 	// Each screen lists only the keys that do something there: the review strip only exists in columns,
 	// density only changes cards, the view only toggles where columns can show.
 	columns := m.effectiveView() == ViewColumns
