@@ -1594,7 +1594,7 @@ func (m Model) cardLines() int {
 	case m.compact:
 		return 4
 	case m.snap.LabelField != "":
-		return 9
+		return 8
 	}
 	return 7
 }
@@ -1869,7 +1869,7 @@ func card(t ticket.Ticket, outer int, sel, compact, labeled bool, agent string) 
 			if t.Label != "" {
 				label = labelBadge.Render(" " + truncate(t.Label, inner-2) + " ")
 			}
-			lines = append(lines, label, "")
+			lines = append(lines, label)
 		}
 		lines = append(lines, icon+dim.Render(truncate(who, inner-lipgloss.Width(icon))))
 	}
