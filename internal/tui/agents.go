@@ -26,8 +26,8 @@ func (t AgentTask) String() string {
 	return string(t.Key) + "'s feedback"
 }
 
-// phrase names the task in a sentence, "the review of #820" or "DEMO-1's feedback".
-func (t AgentTask) phrase() string {
+// Phrase names the task in a sentence, "the review of #820" or "DEMO-1's feedback".
+func (t AgentTask) Phrase() string {
 	if t.Review != nil {
 		return "the " + t.String()
 	}
@@ -55,7 +55,7 @@ type CloneNeededMsg struct {
 
 // cloneMenu asks before cloning, as the clone lands on the user's disk.
 func (m Model) cloneMenu(msg CloneNeededMsg) *menu {
-	return &menu{title: "Clone " + msg.Repo + "?", subtitle: "into " + msg.Into + " · then an agent takes " + msg.Task.phrase(), items: []menuItem{
+	return &menu{title: "Clone " + msg.Repo + "?", subtitle: "into " + msg.Into + " · then an agent takes " + msg.Task.Phrase(), items: []menuItem{
 		{label: "Yes, clone it and start", run: func() tea.Cmd { return m.actions.CloneAndStart(msg.Task, msg.Repo) }},
 		{label: "Cancel", run: func() tea.Cmd { return nil }},
 	}}
@@ -101,7 +101,7 @@ func (m Model) agentsMenu(task AgentTask, agents []OpenAgent) *menu {
 		note := strings.TrimSpace(where + "\n" + ag.Branch)
 		items = append(items, menuItem{label: strings.Join(append(parts, status), " · "), note: note, run: func() tea.Cmd { return m.actions.SendTask(task, ag.Pane) }})
 	}
-	return &menu{title: "Send " + task.phrase() + " to", subtitle: "an agent open in Herdr", items: items}
+	return &menu{title: "Send " + task.Phrase() + " to", subtitle: "an agent open in Herdr", items: items}
 }
 
 // homeShort writes a folder under the user's home as "~/…".
@@ -116,7 +116,7 @@ func homeShort(dir string) string {
 
 // agentChoice asks which agent takes a task: a new one, placed where its work belongs, or one already open.
 func (m Model) agentChoice(task AgentTask) *menu {
-	return &menu{title: "Send " + task.phrase() + " to", items: []menuItem{
+	return &menu{title: "Send " + task.Phrase() + " to", items: []menuItem{
 		{label: "A new agent", run: func() tea.Cmd { return m.actions.NewAgentTask(task) }},
 		{label: "An open agent ▸", run: func() tea.Cmd { return m.actions.OpenAgents(task) }},
 	}}

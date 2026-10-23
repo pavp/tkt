@@ -100,7 +100,7 @@ func (b *boardActions) SendTask(task tui.AgentTask, pane string) tea.Cmd {
 			return tui.StatusMsg("could not send the " + task.String() + ": " + err.Error())
 		}
 		bringForward(b.ctx, h, pane)
-		return tea.QuitMsg{}
+		return b.handedOff("✓ sent " + task.Phrase() + " to the agent")
 	}
 }
 
@@ -210,7 +210,7 @@ func (b *boardActions) startTask(task tui.AgentTask, prompt, dir, note, label st
 		return tui.StatusMsg("could not start an agent for the " + task.String() + ": " + err.Error())
 	}
 	bringForward(b.ctx, h, pane)
-	return tea.QuitMsg{}
+	return b.handedOff("✓ an agent took " + task.Phrase())
 }
 
 // taskPlace is the folder a new agent works on a task in, and what it is told about it. A review runs in the

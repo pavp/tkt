@@ -13,8 +13,8 @@ Forecast (slice-plan, 2026-10-23): 370–640 authored changed lines; slice 1 240
 
 | ID | Specs | Slice | Route | Status | Commit |
 |---|---|---|---|---|---|
-| T1 | S1 | 1 | inline, no Writer reason | done (RED → GREEN; -race) | slice 1 commit |
-| T2 | S2 | 2 | inline, no Writer reason | pending | |
+| T1 | S1 | 1 | inline, no Writer reason | done (RED → GREEN; -race) | 20a137e |
+| T2 | S2 | 2 | inline, no Writer reason | done (RED → GREEN; -race) | slice 2 commit |
 
 Native grouping: not grouped; both PRs merge at once, in order.
 
@@ -27,3 +27,4 @@ Native grouping: not grouped; both PRs merge at once, in order.
 - L2: read-only probe on the user's three team boards: FetchBacklog 1.3–1.7 s, 8–9 HTTP calls; sprint sync's Jira part 1.8 s, 13 calls. The board is a Herdr popup (95%), one per workspace, `prefix+t`; it quits after handing work to an agent (SendTask, startTask, Fix), which a pane must not.
 - L3 (2026-10-23, user): "si, hazlos como dos slices. cuando esten listo subes y publicas"
 - L4: T1 done: board.BacklogCache (backlog.json, 0600; Cache and it share loadJSON/saveJSON) and BacklogEvery (5 min); daemon keepBacklog refreshes it every BacklogEvery when team boards exist (refreshBacklog asks nothing otherwise); Actions.Backlog(force): a copy fresher than BacklogEvery opens without Jira, an older one is sent at once (BacklogMsg.Cached, still loading) while Jira answers, every fetch is saved; g, an assignment and a move force; the open tab reloads the copy once it is BacklogEvery old.
+- L5: T2 done: manifest pane board-split (placement split, `tkt board --pane`) and action board-pane (`tkt herdr open-board-pane`, setup when unconfigured); DefaultBindings gains prefix+alt+t ("tkt board in a pane"; prefix+b and prefix+shift+t are Herdr defaults); `--pane` skips claimBoardPane (the popup shortcut closes the recorded board) and boardActions.handedOff returns "✓ sent …" / "✓ an agent took …" / f's message instead of quitting. Keybinding tests now expect three bindings.

@@ -88,6 +88,18 @@ func TestSendTaskPromptsTheAgentWithTheReview(t *testing.T) {
 	}
 }
 
+func TestABoardInAPaneStaysOpenAfterHandingWorkOver(t *testing.T) {
+	b, _, f := agentsHarness(t)
+	b.pane = true
+	pr := ticket.PullRequest{Repo: "example-org/web", Number: 820, URL: "https://github.com/example-org/web/pull/820"}
+	if got := b.SendTask(tui.AgentTask{Review: &pr}, "w3:p1")(); got != tui.StatusMsg("✓ sent the review of #820 to the agent") {
+		t.Errorf("msg %v", got)
+	}
+	if f.Last("pane.focus")["pane_id"] != "w3:p1" {
+		t.Error("the agent still comes forward")
+	}
+}
+
 func TestSendTaskPromptsTheAgentWithTheFeedback(t *testing.T) {
 	b, _, f := agentsHarness(t)
 	if _, ok := b.SendTask(tui.AgentTask{Key: "DEMO-1"}, "w2:p1")().(tea.QuitMsg); !ok {

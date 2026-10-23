@@ -20,7 +20,7 @@ Or with Go 1.27+:
 go install github.com/pavp/tkt/cmd/tkt@latest
 ```
 
-Then, inside Herdr, `tkt herdr install` adds the board and ticket panes, offers the `prefix+t` / `prefix+i` shortcuts, and offers sidebar rows that show each workspace's ticket (`ACTO-123 · ✕ CI · #812`). Herdr only shows those lines when its config lists them; `tkt herdr uninstall` removes both blocks. The board shows each ticket's agent with Herdr's own dots and colors: a dot on its card, and `● working`, `● needs you`, `● done` or `○ idle` in the AGENT column of the list view.
+Then, inside Herdr, `tkt herdr install` adds the board and ticket panes, offers the `prefix+t` / `prefix+alt+t` / `prefix+i` shortcuts, and offers sidebar rows that show each workspace's ticket (`ACTO-123 · ✕ CI · #812`). Herdr only shows those lines when its config lists them; `tkt herdr uninstall` removes both blocks. The board shows each ticket's agent with Herdr's own dots and colors: a dot on its card, and `● working`, `● needs you`, `● done` or `○ idle` in the AGENT column of the list view.
 
 ### Releasing
 
@@ -78,7 +78,7 @@ Every command accepts `--json` and `--config <path>`.
 tkt herdr install
 ```
 
-links the tkt plugin into the running Herdr (0.9.5 or later). Herdr plugins cannot bring their own keys, so install offers to add `prefix+t` (board) and `prefix+i` (ticket pane) to your Herdr config when those keys are free, backing it up first (`--keys` adds them without asking, `--no-keys` skips them). The plugin gives you:
+links the tkt plugin into the running Herdr (0.9.5 or later). Herdr plugins cannot bring their own keys, so install offers to add `prefix+t` (board, a popup), `prefix+alt+t` (the board in a split of the current workspace, which stays open after handing work to an agent) and `prefix+i` (ticket pane) to your Herdr config when those keys are free, backing it up first (`--keys` adds them without asking, `--no-keys` skips them). The plugin gives you:
 
 - a board popup (`tkt.board` action; offers setup when tkt is not configured); there is one board, so opening it from another workspace moves it there,
 - a live ticket pane for the current workspace (`tkt.ticket`),

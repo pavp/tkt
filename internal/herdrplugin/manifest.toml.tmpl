@@ -15,6 +15,11 @@ title = "tkt: board"
 command = [{{TKT}}, "herdr", "open-board"]
 
 [[actions]]
+id = "board-pane"
+title = "tkt: board in a pane"
+command = [{{TKT}}, "herdr", "open-board-pane"]
+
+[[actions]]
 id = "ticket"
 title = "tkt: ticket pane"
 contexts = ["workspace"]
@@ -46,6 +51,13 @@ placement = "popup"
 width = "95%"
 height = "95%"
 command = [{{TKT}}, "board"]
+
+# A board that stays: a split of the current workspace, which handing work to an agent leaves open.
+[[panes]]
+id = "board-split"
+title = "tkt board"
+placement = "split"
+command = [{{TKT}}, "board", "--pane"]
 
 [[panes]]
 id = "ticket"

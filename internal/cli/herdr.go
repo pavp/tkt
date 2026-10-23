@@ -115,6 +115,13 @@ func newHerdrCmd(a *App) *cobra.Command {
 			}
 			return a.removeHerdrSidebar(cmd)
 		}},
+		&cobra.Command{Use: "open-board-pane", Short: "Open the board in a split of the current workspace (setup when tkt is not configured)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+			entry := "board-split"
+			if _, err := os.Stat(a.ConfigPath()); err != nil {
+				entry = "setup"
+			}
+			return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: entry})
+		}},
 		&cobra.Command{Use: "open-board", Short: "Open the board popup (setup when tkt is not configured)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			if _, err := os.Stat(a.ConfigPath()); err != nil {
 				return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "setup"})

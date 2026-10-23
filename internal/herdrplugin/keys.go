@@ -16,6 +16,7 @@ type Binding struct {
 // DefaultBindings are the shortcuts `tkt herdr install` offers.
 var DefaultBindings = []Binding{
 	{Key: "prefix+t", Action: ID + ".board", Description: "tkt board"},
+	{Key: "prefix+alt+t", Action: ID + ".board-pane", Description: "tkt board in a pane"},
 	{Key: "prefix+i", Action: ID + ".ticket", Description: "tkt ticket pane"},
 }
 
