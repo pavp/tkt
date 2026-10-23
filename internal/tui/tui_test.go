@@ -1129,13 +1129,16 @@ func TestActionsMenu(t *testing.T) {
 	if strings.Contains(v, "Send the review comments") {
 		t.Error("offered review comments for a ticket without requested changes")
 	}
-	if strings.Contains(v, "Copy the Jira link") || strings.Contains(v, "link") && strings.Contains(v, "Copy the #812") {
-		t.Errorf("links are copied with c from their own row, not from extra rows:\n%s", v)
+	if strings.Contains(v, "Copy the Jira link") {
+		t.Errorf("the Jira link is copied with c from its own row, not from an extra row:\n%s", v)
 	}
 	m = press(m, "s", "s", "s", "s", "s")
 	_, msg := run(m, "enter")
 	if r.last() != "fix DEMO-1 known" || msg != StatusMsg("fix DEMO-1 known") {
 		t.Errorf("sixth item ran %v", r.calls)
+	}
+	if _, msg := run(selectMenuItem(t, press(loaded(r), "l", "enter"), "Copy the PR link"), "enter"); msg != StatusMsg("copy link https://github.com/example-org/web/pull/812") {
+		t.Errorf("the pull request's link should be copyable from a row: %v", r.calls)
 	}
 	m = press(loaded(r), "enter", "w")
 	run(m, "enter")
@@ -2572,6 +2575,12 @@ func TestTicketMenuGathersSeveralPullRequestsInASubmenu(t *testing.T) {
 	if _, msg := run(m, "enter"); msg != StatusMsg("open https://github.com/example-org/web/pull/815") {
 		t.Errorf("enter ran %v", r.calls)
 	}
+	if strings.Contains(v, "Copy the link of #816") {
+		t.Errorf("a pull request without a link offers nothing to copy:\n%s", v)
+	}
+	if _, msg := run(selectMenuItem(t, m, "Copy the link of #815"), "enter"); msg != StatusMsg("copy link https://github.com/example-org/web/pull/815") {
+		t.Errorf("each pull request's link should be copyable from a row: %v", r.calls)
+	}
 }
 
 func TestPOpensTheOnlyPullRequestOrTheSubmenu(t *testing.T) {
@@ -3042,6 +3051,11 @@ func TestPRMenusPutTheirDetailsOnASecondLine(t *testing.T) {
 	_, cmd := m.Update(tea.MouseMsg{X: m.width / 2, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
 	if cmd == nil || cmd() != StatusMsg("open https://github.com/example-org/web/pull/820") {
 		t.Errorf("a click on the first item should still run it")
+	}
+	y = lineIndex(m.View(), "Copy the PR link")
+	_, cmd = m.Update(tea.MouseMsg{X: m.width / 2, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	if cmd == nil || cmd() != StatusMsg("copy link https://github.com/example-org/web/pull/820") {
+		t.Errorf("another person's pull request link should be copyable with a click:\n%s", stripANSI(m.menuView()))
 	}
 }
 

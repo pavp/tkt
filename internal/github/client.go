@@ -80,13 +80,21 @@ func (c *Client) query(ctx context.Context, owner, q string, vars map[string]any
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.graphql, bytes.NewReader(body))
-	if err != nil {
-		return err
+	post := func() (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.graphql, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("Content-Type", "application/json")
+		return c.http.Do(req)
 	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
+	resp, err := post()
+	if err != nil && ctx.Err() == nil {
+		// Every query is a read, so one lost on a connection that died while the machine slept is sent again on a new one.
+		c.http.CloseIdleConnections()
+		resp, err = post()
+	}
 	if err != nil {
 		return fmt.Errorf("github graphql: %w", err)
 	}

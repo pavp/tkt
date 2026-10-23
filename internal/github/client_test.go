@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/pavp/tkt/internal/ticket"
@@ -204,6 +205,70 @@ func TestPullRequestsErrors(t *testing.T) {
 	c = New(staticTokens(nil)).WithEndpoints(base, h)
 	if _, err := c.PullRequests(context.Background(), []string{"example-org/web"}); err == nil || !strings.Contains(err.Error(), "no token for example-org") {
 		t.Errorf("token err = %v", err)
+	}
+}
+
+func TestQueryRetriesOnceAfterANetworkFailure(t *testing.T) {
+	tests := []struct {
+		name     string
+		drops    int
+		status   int
+		wantErr  string
+		attempts int
+	}{
+		{name: "dropped once then answered", drops: 1, status: 200, attempts: 2},
+		{name: "dropped twice", drops: 2, status: 200, wantErr: "github graphql:", attempts: 2},
+		{name: "server error is not retried", status: 502, wantErr: "github graphql: 502", attempts: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var attempts atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if int(attempts.Add(1)) <= tt.drops {
+					conn, _, _ := w.(http.Hijacker).Hijack()
+					conn.Close()
+					return
+				}
+				w.WriteHeader(tt.status)
+				_, _ = io.WriteString(w, `{"data":{"r0":{"open":{"nodes":[`+pr("example-org/web", 9, "feature/DEMO-1-x", "OPEN", "", "SUCCESS")+`]},"merged":{"nodes":[]}}}}`)
+			}))
+			defer srv.Close()
+			c := New(staticTokens(map[string]string{"example-org": "t"})).WithEndpoints(srv.URL, srv.Client())
+			got, err := c.PullRequests(context.Background(), []string{"example-org/web"})
+			if tt.wantErr == "" && (err != nil || len(got) != 1) {
+				t.Errorf("PRs = %+v, err = %v", got, err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Errorf("err = %v, want %q", err, tt.wantErr)
+			}
+			if n := int(attempts.Load()); n != tt.attempts {
+				t.Errorf("attempts = %d, want %d", n, tt.attempts)
+			}
+		})
+	}
+}
+
+func TestQueryDoesNotRetryACanceledRequest(t *testing.T) {
+	var attempts atomic.Int32
+	started, release := make(chan struct{}, 2), make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		started <- struct{}{}
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-started
+		cancel()
+	}()
+	c := New(staticTokens(map[string]string{"example-org": "t"})).WithEndpoints(srv.URL, srv.Client())
+	if _, err := c.PullRequests(ctx, []string{"example-org/web"}); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context canceled", err)
+	}
+	if n := attempts.Load(); n != 1 {
+		t.Errorf("attempts = %d, want 1", n)
 	}
 }
 
