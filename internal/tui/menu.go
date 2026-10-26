@@ -97,6 +97,9 @@ func (m Model) buildMenu(it item) *menu {
 		pr := t.PRs[0]
 		items = append(items, menuItem{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
 	}
+	if t.URL != "" {
+		items = append(items, menuItem{label: "Copy the Jira link", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
+	}
 	items = append(items,
 		menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }},
 		menuItem{label: "Copy the ticket context (.ticket.md)", run: func() tea.Cmd { return a.CopyContext(t.Key) }},
@@ -158,7 +161,11 @@ func (m Model) teamMenu(t ticket.Ticket) *menu {
 	if t.URL != "" {
 		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
 	}
-	items = append(items, m.assignItem(t.Key), menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
+	items = append(items, m.assignItem(t.Key))
+	if t.URL != "" {
+		items = append(items, menuItem{label: "Copy the Jira link", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
+	}
+	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
 	return &menu{title: "Actions for " + string(t.Key), subtitle: t.Status + " · " + cmp.Or(t.Assignee, "unassigned"), items: items}
 }
 
@@ -186,7 +193,11 @@ func (m Model) backlogMenu(t ticket.Ticket) *menu {
 	if t.URL != "" {
 		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
 	}
-	items = append(items, m.assignItem(t.Key), menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
+	items = append(items, m.assignItem(t.Key))
+	if t.URL != "" {
+		items = append(items, menuItem{label: "Copy the Jira link", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
+	}
+	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
 	sub := t.Status + " · " + cmp.Or(t.Assignee, "unassigned")
 	if t.Board != "" {
 		sub += " · " + t.Board
