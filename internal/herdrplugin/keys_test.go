@@ -21,10 +21,10 @@ func TestPlanKeys(t *testing.T) {
 		add, present []string
 		conflict     map[string]string
 	}{
-		{"fresh config", "", []string{"prefix+t", "prefix+alt+t", "prefix+i"}, nil, nil},
-		{"already bound by hand", "[[keys.command]]\nkey = \"prefix+t\"\ntype = \"plugin_action\"\ncommand = \"tkt.board\"\n", []string{"prefix+alt+t", "prefix+i"}, []string{"prefix+t"}, nil},
-		{"key taken by the user", "[keys]\nzoom = \"prefix+t\"\n", []string{"prefix+alt+t", "prefix+i"}, nil, map[string]string{"prefix+t": "zoom"}},
-		{"key taken by another plugin", "[[keys.command]]\nkey = \"prefix+i\"\ntype = \"plugin_action\"\ncommand = \"other.thing\"\n", []string{"prefix+t", "prefix+alt+t"}, nil, map[string]string{"prefix+i": "other.thing"}},
+		{"fresh config", "", []string{"prefix+t", "prefix+d", "prefix+i"}, nil, nil},
+		{"already bound by hand", "[[keys.command]]\nkey = \"prefix+t\"\ntype = \"plugin_action\"\ncommand = \"tkt.board\"\n", []string{"prefix+d", "prefix+i"}, []string{"prefix+t"}, nil},
+		{"key taken by the user", "[keys]\nzoom = \"prefix+t\"\n", []string{"prefix+d", "prefix+i"}, nil, map[string]string{"prefix+t": "zoom"}},
+		{"key taken by another plugin", "[[keys.command]]\nkey = \"prefix+i\"\ntype = \"plugin_action\"\ncommand = \"other.thing\"\n", []string{"prefix+t", "prefix+d"}, nil, map[string]string{"prefix+i": "other.thing"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -89,5 +89,27 @@ func TestAddAndRemoveBlock(t *testing.T) {
 	}
 	if got := AddBlock("", DefaultBindings[:1]); !strings.HasPrefix(got, blockStart) {
 		t.Errorf("empty config block = %q", got)
+	}
+}
+
+func TestDropRetiredTakesOnlyTktsOwnOldBindings(t *testing.T) {
+	old := AddBlock("[keys]\nzoom = \"prefix+z\"\n", []Binding{DefaultBindings[0], {Key: "prefix+alt+t", Action: "tkt.board-pane", Description: "tkt board in a pane"}})
+	lone := AddBlock(old, []Binding{{Key: "prefix+alt+t", Action: "tkt.board-pane", Description: "tkt board in a pane"}})
+	mine := "[[keys.command]]\nkey = \"prefix+alt+t\"\ntype = \"plugin_action\"\ncommand = \"tkt.board-pane\"\n\n" + lone
+	got, dropped := DropRetired(mine)
+	if len(dropped) != 2 || dropped[0].Key != "prefix+alt+t" {
+		t.Fatalf("dropped %v", dropped)
+	}
+	if !strings.HasPrefix(got, "[[keys.command]]\nkey = \"prefix+alt+t\"") || strings.Count(got, "prefix+alt+t") != 1 {
+		t.Errorf("the user's own binding outside tkt's blocks stays:\n%s", got)
+	}
+	if !strings.Contains(got, `command = "tkt.board"`) || strings.Count(got, blockStart) != 1 || !strings.Contains(got, `zoom = "prefix+z"`) {
+		t.Errorf("tkt's other bindings stay, and an emptied block goes:\n%s", got)
+	}
+	if _, err := toml.Decode(got, &struct{}{}); err != nil {
+		t.Errorf("not TOML: %v\n%s", err, got)
+	}
+	if same, dropped := DropRetired(got); same != got || len(dropped) != 0 {
+		t.Errorf("nothing left to drop: %v", dropped)
 	}
 }

@@ -286,7 +286,9 @@ func (a *App) addHerdrKeys(cmd *cobra.Command, yes bool) error {
 	if err != nil {
 		return fmt.Errorf("read Herdr's default keys: %w", err)
 	}
-	plan, err := herdrplugin.PlanKeys(string(current), string(defaults))
+	// A shortcut tkt has moved leaves its own block, so the new key takes its place.
+	kept, dropped := herdrplugin.DropRetired(string(current))
+	plan, err := herdrplugin.PlanKeys(kept, string(defaults))
 	if err != nil {
 		return err
 	}
@@ -296,10 +298,10 @@ func (a *App) addHerdrKeys(cmd *cobra.Command, yes bool) error {
 	for key, what := range plan.Conflict {
 		a.printf("! %s is taken by %q; bind tkt there yourself if you want another key\n", key, what)
 	}
-	if len(plan.Add) == 0 {
+	if len(plan.Add) == 0 && len(dropped) == 0 {
 		return nil
 	}
-	if !yes {
+	if !yes && len(plan.Add) > 0 {
 		ans, err := a.readLine(fmt.Sprintf("Add Herdr keybindings %s? [Y/n] ", herdrplugin.Describe(plan.Add)))
 		if err != nil || strings.HasPrefix(strings.ToLower(ans), "n") {
 			a.printf("Skipped keybindings; `tkt herdr install --keys` adds them later\n")
@@ -314,13 +316,22 @@ func (a *App) addHerdrKeys(cmd *cobra.Command, yes bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, []byte(herdrplugin.AddBlock(string(current), plan.Add)), 0o644); err != nil {
+	next := kept
+	if len(plan.Add) > 0 {
+		next = herdrplugin.AddBlock(kept, plan.Add)
+	}
+	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
 		return err
+	}
+	for _, d := range dropped {
+		a.printf("✓ Moved %s off %s\n", d.Description, d.Key)
 	}
 	if err := a.NewHerdr().ReloadConfig(cmd.Context()); err != nil {
 		a.printf("! keybindings saved; reload Herdr's config to use them (%v)\n", err)
 	}
-	a.printf("✓ Added %s to %s\n", herdrplugin.Describe(plan.Add), path)
+	if len(plan.Add) > 0 {
+		a.printf("✓ Added %s to %s\n", herdrplugin.Describe(plan.Add), path)
+	}
 	return nil
 }
 

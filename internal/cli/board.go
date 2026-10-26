@@ -242,8 +242,8 @@ func (b *boardActions) JiraBoards(space string) tea.Cmd {
 	}
 }
 
-// Backlog opens from the copy the daemon keeps while it is fresh, asking Jira only for an older copy or when
-// forced; an older copy shows at once while Jira answers, and every fetch is kept for the next opening.
+// Backlog opens from the last copy while it is fresh, asking Jira only for an older copy or when forced; an older
+// copy shows at once while Jira answers, and every fetch is kept for the next opening.
 func (b *boardActions) Backlog(force bool) tea.Cmd {
 	return func() tea.Msg {
 		cache := b.a.backlogCache()

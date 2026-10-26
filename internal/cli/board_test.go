@@ -746,28 +746,6 @@ func TestBoardActionsLoadTheBacklogFromItsCopy(t *testing.T) {
 	}
 }
 
-func TestDaemonRefreshesTheBacklogOnlyWithTeamBoards(t *testing.T) {
-	h, _ := listHarness(t)
-	c, err := h.app.LoadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := h.app.refreshBacklog(context.Background(), c); err != nil || h.jira.backlogCalls != 0 {
-		t.Fatalf("without team boards nothing is asked: %v, calls %d", err, h.jira.backlogCalls)
-	}
-	if _, ok, _ := h.app.backlogCache().Load(); ok {
-		t.Error("nothing to keep without team boards")
-	}
-	c.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 418, Name: "User Access Center"}}
-	h.jira.backlog = map[int][]jira.Issue{418: {{Key: "DEMO-180", Summary: "Clean old roles", Status: "To Do", StatusCategory: "new"}}}
-	if err := h.app.refreshBacklog(context.Background(), c); err != nil {
-		t.Fatal(err)
-	}
-	if cached, ok, _ := h.app.backlogCache().Load(); !ok || len(cached.Backlog) != 1 {
-		t.Errorf("the daemon keeps the backlog: %+v", cached)
-	}
-}
-
 func TestBoardActionsMoveTicketsToASprint(t *testing.T) {
 	h, _ := listHarness(t)
 	c, err := h.app.LoadConfig()

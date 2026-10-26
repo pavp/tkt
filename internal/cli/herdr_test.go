@@ -84,7 +84,7 @@ func TestHerdrInstallAddsAndUninstallRemovesKeys(t *testing.T) {
 	if count(f, "server.reload_config") != 1 {
 		t.Error("config not reloaded")
 	}
-	if !strings.Contains(h.errOut.String(), "Add Herdr keybindings prefix+alt+t (tkt board in a pane), prefix+i (tkt ticket pane), prefix+t (tkt board)?") {
+	if !strings.Contains(h.errOut.String(), "Add Herdr keybindings prefix+d (tkt board in a pane), prefix+i (tkt ticket pane), prefix+t (tkt board)?") {
 		t.Errorf("prompt = %q", h.errOut)
 	}
 
@@ -373,6 +373,25 @@ func TestHerdrOpenBoardOrSetup(t *testing.T) {
 	h.exec("herdr", "open-board")
 	if got := f.Last("plugin.pane.open"); got["entrypoint"] != "setup" || got["plugin_id"] != "tkt-dev" {
 		t.Errorf("unconfigured pane = %v", got)
+	}
+}
+
+func TestHerdrInstallMovesTheBoardPaneOffItsOldKey(t *testing.T) {
+	h, _, _ := herdrHarness(t)
+	cfg := filepath.Join(h.home, ".config", "herdr", "config.toml")
+	_ = os.MkdirAll(filepath.Dir(cfg), 0o755)
+	old := herdrplugin.AddBlock("", []herdrplugin.Binding{herdrplugin.DefaultBindings[0], herdrplugin.DefaultBindings[2], {Key: "prefix+alt+t", Action: "tkt.board-pane", Description: "tkt board in a pane"}})
+	_ = os.WriteFile(cfg, []byte(old), 0o644)
+	h.run.out["herdr --default-config"] = "[keys]\n"
+	if code := h.exec("herdr", "install", "--keys"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	got, _ := os.ReadFile(cfg)
+	if strings.Contains(string(got), "prefix+alt+t") || !strings.Contains(string(got), `key = "prefix+d"`) {
+		t.Errorf("config:\n%s", got)
+	}
+	if !strings.Contains(h.out.String(), "Moved tkt board in a pane off prefix+alt+t") {
+		t.Errorf("output %q", h.out)
 	}
 }
 
