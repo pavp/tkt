@@ -1169,8 +1169,8 @@ func TestActionsMenu(t *testing.T) {
 	if strings.Contains(v, "Send the review comments") {
 		t.Error("offered review comments for a ticket without requested changes")
 	}
-	if strings.Contains(v, "Copy the Jira link") {
-		t.Errorf("the Jira link is copied with c from its own row, not from an extra row:\n%s", v)
+	if !strings.Contains(v, "Copy the Jira link") {
+		t.Errorf("the Jira link can be copied with the mouse too:\n%s", v)
 	}
 	m = press(m, "s", "s", "s", "s", "s")
 	_, msg := run(m, "enter")
@@ -4821,5 +4821,27 @@ func TestBacklogMenuCopiesTheJiraLink(t *testing.T) {
 	pick(t, m, "Copy the Jira link")
 	if !slices.Contains(r.calls, "copy link https://example.atlassian.net/browse/DEMO-210") {
 		t.Errorf("a click copies the Jira link: %v", r.calls)
+	}
+}
+
+func TestSprintAndTeamMenusCopyTheJiraLink(t *testing.T) {
+	r := &recorder{}
+	m := press(loaded(r), "l", "enter")
+	pick(t, m, "Copy the Jira link")
+	if !slices.Contains(r.calls, "copy link https://example.atlassian.net/browse/DEMO-1") {
+		t.Errorf("a sprint ticket's menu copies its Jira link: %v", r.calls)
+	}
+	tr := &recorder{}
+	tm := tea.Model(New(teamSnapshot(), true, tr, ViewList).WithState(BoardState{Team: true}))
+	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	for i := 0; i < 10; i++ {
+		if it, _ := tm.(Model).current(); it.key == "DEMO-9" {
+			break
+		}
+		tm = press(tm, "s")
+	}
+	pick(t, press(tm, "enter"), "Copy the Jira link")
+	if !slices.Contains(tr.calls, "copy link https://example.atlassian.net/browse/DEMO-9") {
+		t.Errorf("a team ticket's menu copies its Jira link: %v", tr.calls)
 	}
 }
