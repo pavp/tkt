@@ -31,6 +31,7 @@ type HerdrAPI interface {
 	FocusWorkspace(ctx context.Context, id string) error
 	FocusPane(ctx context.Context, paneID string) error
 	ReportWorkspaceTokens(ctx context.Context, workspaceID, source string, tokens map[string]*string, ttl time.Duration) error
+	ReportPaneTokens(ctx context.Context, paneID, source string, tokens map[string]*string) error
 	Agents(ctx context.Context) ([]herdr.Agent, error)
 	Panes(ctx context.Context) ([]herdr.Pane, error)
 	StartAgent(ctx context.Context, paneID, kind, name string, args []string) error
@@ -384,13 +385,17 @@ func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) erro
 			}
 			return nil
 		}
-		return a.startInWorkspace(ctx, h, plan.Existing.Path, string(plan.Key), plan.Prompt, "", true)
+		pane, err := a.startInWorkspace(ctx, h, plan.Existing.Path, string(plan.Key), plan.Prompt, "", true)
+		markAgent(ctx, h, pane, plan.Key)
+		return err
 	}
 	plan.Prompt = workspace.HerdrStartPrompt(plan.Key, plan.Summary)
 	inPlace := workspace.HerdrBranchPrompt(plan.Key, plan.Summary)
 	for i, dir := range plan.Dirs {
 		label := string(plan.Key) + " · " + filepath.Base(dir)
-		if err := a.startInWorkspace(ctx, h, dir, label, plan.Prompt, inPlace, i == 0); err != nil {
+		pane, err := a.startInWorkspace(ctx, h, dir, label, plan.Prompt, inPlace, i == 0)
+		markAgent(ctx, h, pane, plan.Key)
+		if err != nil {
 			return err
 		}
 	}
@@ -403,30 +408,46 @@ func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) erro
 // An open workspace at dir with no agent is reused; when its pane is busy (an editor, a server), claude gets a
 // split next to it, and only when that fails a new workspace opens. A reused workspace whose checkout is free
 // gets inPlacePrompt (when set), so the agent branches there instead of creating a worktree.
-func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, dir, label, prompt, inPlacePrompt string, focus bool) error {
+// It returns the pane the agent started in, empty when none did.
+func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, dir, label, prompt, inPlacePrompt string, focus bool) (string, error) {
 	if p, ok := idlePaneAt(ctx, h, dir); ok {
 		if inPlacePrompt != "" && a.checkoutFree(ctx, dir) {
 			prompt = inPlacePrompt
 		}
-		name, err := startClaude(ctx, h, p.ID)
+		used := p.ID
+		name, err := startClaude(ctx, h, used)
 		if err != nil && !notReady(err) {
 			if split, serr := h.SplitPane(ctx, p.ID, dir); serr == nil {
-				name, err = startClaude(ctx, h, split.ID)
+				used = split.ID
+				name, err = startClaude(ctx, h, used)
 			}
 		}
 		if err == nil || notReady(err) {
 			if focus {
 				_ = h.FocusWorkspace(ctx, p.WorkspaceID)
 			}
-			return a.promptStarted(ctx, h, name, "open workspace "+p.WorkspaceID, prompt, err)
+			return used, a.promptStarted(ctx, h, name, "open workspace "+p.WorkspaceID, prompt, err)
 		}
 	}
 	ws, pane, err := h.CreateWorkspace(ctx, dir, label, focus)
 	if err != nil {
-		return err
+		return "", err
 	}
 	name, err := startClaude(ctx, h, pane.ID)
-	return a.promptStarted(ctx, h, name, fmt.Sprintf("workspace %s (%s)", label, ws.ID), prompt, err)
+	return pane.ID, a.promptStarted(ctx, h, name, fmt.Sprintf("workspace %s (%s)", label, ws.ID), prompt, err)
+}
+
+// ticketToken is the pane value naming the ticket an agent works on, which tkt reports as it hands the agent a
+// ticket, so the agent belongs to it before its branch names the ticket.
+const ticketToken = "tkt_key"
+
+// markAgent records on an agent's pane the ticket it was given.
+func markAgent(ctx context.Context, h HerdrAPI, pane string, key ticket.Key) {
+	if pane == "" || key == "" {
+		return
+	}
+	k := string(key)
+	_ = h.ReportPaneTokens(ctx, pane, sidebarSource, map[string]*string{ticketToken: &k})
 }
 
 // startClaude returns the agent's name, which later calls target: Herdr may not resolve the pane id to it yet.
@@ -774,10 +795,14 @@ func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Sn
 		return 0, nil, err
 	}
 	statuses := map[string][]string{}
+	marked := map[string]ticket.Key{}
 	if agents, err := h.Agents(ctx); err == nil {
 		for _, ag := range agents {
 			if ag.Agent != "" {
 				statuses[ag.WorkspaceID] = append(statuses[ag.WorkspaceID], ag.Status)
+			}
+			if key, ok := ticket.KeyInBranch(ag.Tokens[ticketToken], c.SpaceKeys()); ok {
+				marked[ag.WorkspaceID] = key
 			}
 		}
 	}
@@ -804,6 +829,10 @@ func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Sn
 			if key, ok = a.keyAt(ctx, c, dir); ok {
 				break
 			}
+		}
+		// An agent given a ticket before its branch names it still belongs to it.
+		if !ok {
+			key, ok = marked[ws.ID]
 		}
 		if !ok {
 			continue

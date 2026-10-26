@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -74,6 +75,9 @@ func TestSendTaskPromptsTheAgentWithTheReview(t *testing.T) {
 			t.Errorf("prompt lacks %q:\n%s", want, text)
 		}
 	}
+	if count(f, "pane.report_metadata") != 0 {
+		t.Error("a review belongs to no ticket of the user's")
+	}
 	if got["target"] != "w3:p1" || f.Last("pane.focus")["pane_id"] != "w3:p1" || f.Last("workspace.focus")["workspace_id"] != "w3" {
 		t.Errorf("prompt %v, focus %v %v", got, f.Last("workspace.focus"), f.Last("pane.focus"))
 	}
@@ -104,6 +108,9 @@ func TestSendTaskPromptsTheAgentWithTheFeedback(t *testing.T) {
 	b, _, f := agentsHarness(t)
 	if _, ok := b.SendTask(tui.AgentTask{Key: "DEMO-1"}, "w2:p1")().(tea.QuitMsg); !ok {
 		t.Fatal("sending focuses the agent and closes the board")
+	}
+	if mark := f.Last("pane.report_metadata"); mark["pane_id"] != "w2:p1" || fmt.Sprint(mark["tokens"]) != "map[tkt_key:DEMO-1]" {
+		t.Errorf("an agent given a ticket's feedback carries the ticket: %v", mark)
 	}
 	if text, _ := f.Last("agent.prompt")["text"].(string); !strings.Contains(text, `CI check "unit-tests" failed`) || f.Last("agent.prompt")["target"] != "w2:p1" {
 		t.Errorf("prompt %v", f.Last("agent.prompt"))
