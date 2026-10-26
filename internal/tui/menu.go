@@ -186,7 +186,11 @@ func (m Model) backlogMenu(t ticket.Ticket) *menu {
 	if t.URL != "" {
 		items = append(items, menuItem{label: "Open in Jira ↗", key: "o", link: t.URL, run: func() tea.Cmd { return a.Open(t.URL) }})
 	}
-	items = append(items, m.assignItem(t.Key), menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
+	items = append(items, m.assignItem(t.Key))
+	if t.URL != "" {
+		items = append(items, menuItem{label: "Copy the Jira link", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
+	}
+	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
 	sub := t.Status + " · " + cmp.Or(t.Assignee, "unassigned")
 	if t.Board != "" {
 		sub += " · " + t.Board

@@ -4814,3 +4814,12 @@ func TestBacklogRefreshShowsItsOwnState(t *testing.T) {
 		t.Errorf("Sprint keeps its own sync state:\n%s", v)
 	}
 }
+
+func TestBacklogMenuCopiesTheJiraLink(t *testing.T) {
+	r := backlogRecorder()
+	m := backlogMenu(t, openBacklog(r, 160, BoardState{}), "DEMO-210")
+	pick(t, m, "Copy the Jira link")
+	if !slices.Contains(r.calls, "copy link https://example.atlassian.net/browse/DEMO-210") {
+		t.Errorf("a click copies the Jira link: %v", r.calls)
+	}
+}
