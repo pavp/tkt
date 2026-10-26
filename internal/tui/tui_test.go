@@ -1618,6 +1618,36 @@ func TestPRsFilterListsAPullRequestOnceAcrossTickets(t *testing.T) {
 	}
 }
 
+func TestPRsFilterListsMyPullRequestsOutsideMyTickets(t *testing.T) {
+	snap := prsSnapshot()
+	snap.Others = []ticket.PullRequest{
+		{Repo: "example-org/web", Number: 830, Title: "Patch dependencies", Branch: "fix/demo-77-deps", State: ticket.PROpen, Checks: ticket.ChecksFail, Author: "dev", Yours: true},
+		{Repo: "example-org/web", Number: 831, Title: "Someone else's", State: ticket.PROpen, Author: "sam"},
+	}
+	for _, requested := range []bool{true, false} {
+		m := tea.Model(New(snap, false, &recorder{}, ViewList))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+		m = press(m, "2")
+		if !requested {
+			m = press(m, "t")
+		}
+		v := stripANSI(m.View())
+		if n := strings.Count(v, "#830 "); n != 1 {
+			t.Fatalf("requested %v: #830 listed %d times:\n%s", requested, n, v)
+		}
+		line := strings.Split(v, "\n")[lineIndex(v, "#830 ")]
+		if !strings.Contains(line, "CI failing") || !strings.HasPrefix(strings.TrimLeft(line, " "), "!") {
+			t.Errorf("requested %v: #830 shows its status and needs the user: %q", requested, line)
+		}
+		if mine, at := strings.Index(v, "Mine"), strings.Index(v, "#830 "); mine < 0 || at < mine || strings.Contains(v[mine:at], "Review requested") {
+			t.Errorf("requested %v: #830 is not under Mine:\n%s", requested, v)
+		}
+		if requested == strings.Contains(v, "#831 ") {
+			t.Errorf("requested %v: someone else's pull request shows only with Requested off:\n%s", requested, v)
+		}
+	}
+}
+
 func TestPRsFilterActsOnTheRowsTicket(t *testing.T) {
 	r := &recorder{}
 	m := withAgent(tea.Model(New(prsSnapshot(), false, r, ViewList)), "DEMO-4")

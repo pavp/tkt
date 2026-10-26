@@ -252,7 +252,7 @@ func (c *Client) PullRequests(ctx context.Context, repos []string) ([]ticket.Pul
 	var out []ticket.PullRequest
 	for _, owner := range owners {
 		var b strings.Builder
-		b.WriteString("query {\n")
+		b.WriteString("query {\n  viewer { login }\n")
 		for i, r := range byOwner[owner] {
 			o, name, _ := strings.Cut(r, "/")
 			fmt.Fprintf(&b, "  r%d: repository(owner: %q, name: %q) {\n", i, o, name)
@@ -261,20 +261,29 @@ func (c *Client) PullRequests(ctx context.Context, repos []string) ([]ticket.Pul
 			b.WriteString("  }\n")
 		}
 		b.WriteString("}")
-		var data map[string]*struct {
-			Open   struct{ Nodes []prNode } `json:"open"`
-			Merged struct{ Nodes []prNode } `json:"merged"`
-		}
+		var data map[string]json.RawMessage
 		if err := c.query(ctx, owner, b.String(), nil, &data); err != nil {
 			return nil, fmt.Errorf("pull requests of %s: %w", owner, err)
 		}
+		var viewer struct{ Login string }
+		_ = json.Unmarshal(data["viewer"], &viewer)
 		for i, r := range byOwner[owner] {
-			repo := data[fmt.Sprintf("r%d", i)]
+			var repo *struct {
+				Open   struct{ Nodes []prNode } `json:"open"`
+				Merged struct{ Nodes []prNode } `json:"merged"`
+			}
+			if raw, ok := data[fmt.Sprintf("r%d", i)]; ok {
+				if err := json.Unmarshal(raw, &repo); err != nil {
+					return nil, fmt.Errorf("pull requests of %s: %w", r, err)
+				}
+			}
 			if repo == nil {
 				return nil, fmt.Errorf("repository %s not found or not visible to the gh account", r)
 			}
 			for _, n := range append(repo.Open.Nodes, repo.Merged.Nodes...) {
-				out = append(out, n.toPR())
+				pr := n.toPR()
+				pr.Yours = viewer.Login != "" && n.Author != nil && strings.EqualFold(n.Author.Login, viewer.Login)
+				out = append(out, pr)
 			}
 		}
 	}

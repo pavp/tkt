@@ -251,8 +251,10 @@ type PullRequest struct {
 	Review ReviewDecision `json:"review"`
 	Author string         `json:"author,omitempty"`
 	// AuthorBot marks pull requests opened by a bot account, such as dependabot.
-	AuthorBot bool   `json:"author_bot,omitempty"`
-	HeadSHA   string `json:"head_sha,omitempty"`
+	AuthorBot bool `json:"author_bot,omitempty"`
+	// Yours marks a pull request the user's gh account opened, whichever ticket it belongs to.
+	Yours   bool   `json:"yours,omitempty"`
+	HeadSHA string `json:"head_sha,omitempty"`
 	// Approvals counts the reviewers whose latest review approves the pull request.
 	Approvals int        `json:"approvals,omitempty"`
 	Draft     bool       `json:"draft,omitempty"`

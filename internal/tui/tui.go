@@ -207,6 +207,9 @@ func (it item) review() bool  { return it.pr != nil && it.ticket == nil && !it.o
 func (it item) heading() bool { return it.group != "" }
 func (it item) mine() bool    { return it.pr != nil && it.ticket != nil }
 
+// own covers the user's pull requests, those of their tickets and those they opened for a ticket not theirs.
+func (it item) own() bool { return it.mine() || it.other && it.pr.Yours }
+
 type Model struct {
 	// lastClick and lastClickAt detect a double click, which the terminal does not report.
 	lastClick   ticket.Key
@@ -420,7 +423,7 @@ func (m Model) others() []ticket.PullRequest {
 	if !m.showBots {
 		others = m.snap.WithoutBots().Others
 	}
-	return slices.DeleteFunc(slices.Clone(others), func(pr ticket.PullRequest) bool { return m.repoHidden(pr.Repo) })
+	return slices.DeleteFunc(slices.Clone(others), func(pr ticket.PullRequest) bool { return pr.Yours || m.repoHidden(pr.Repo) })
 }
 
 // repoHidden reports whether the user hid repo; a pull request whose repository is unknown always shows.
@@ -595,6 +598,14 @@ func (m Model) myPRs() []item {
 			out = append(out, it)
 		}
 	}
+	for _, pr := range m.snap.Others {
+		id := fmt.Sprintf("%s#%d", strings.ToLower(pr.Repo), pr.Number)
+		if _, ok := at[id]; ok || !pr.Yours || pr.State != ticket.PROpen || m.repoHidden(pr.Repo) {
+			continue
+		}
+		at[id] = len(out)
+		out = append(out, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr, other: true})
+	}
 	urgent := map[string]bool{}
 	for _, it := range out {
 		urgent[it.pr.Repo] = urgent[it.pr.Repo] || needsYou(*it.pr)
@@ -622,7 +633,7 @@ func (m Model) prLayout(every bool) []item {
 	add := func(group, title string, rows []item) {
 		needs := 0
 		for _, it := range rows {
-			if it.review() || it.mine() && needsYou(*it.pr) {
+			if it.review() || it.own() && needsYou(*it.pr) {
 				needs++
 			}
 		}
@@ -3061,7 +3072,7 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		switch {
 		case i == m.row:
 			line = "▸ " + selected.Render(line)
-		case it.review(), it.mine() && needsYou(*it.pr):
+		case it.review(), it.own() && needsYou(*it.pr):
 			line = warn.Render("!") + " " + line
 		case it.mine(), it.other:
 			line = "  " + line

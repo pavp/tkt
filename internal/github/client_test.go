@@ -138,6 +138,23 @@ func TestPullRequestsCountApprovals(t *testing.T) {
 	}
 }
 
+func TestPullRequestsMarkTheOnesTheAccountOpened(t *testing.T) {
+	theirs := strings.Replace(pr("example-org/web", 8, "feature/DEMO-2-y", "OPEN", "", "SUCCESS"), `"login":"alex"`, `"login":"sam"`, 1)
+	base, h, calls := gqlServer(t, func(string) (int, string) {
+		return 200, `{"data":{"viewer":{"login":"alex"},"r0":{"open":{"nodes":[` + pr("example-org/web", 9, "feature/DEMO-1-x", "OPEN", "", "SUCCESS") + `,` + theirs + `]},"merged":{"nodes":[]}}}}`
+	})
+	got, err := New(staticTokens(map[string]string{"example-org": "work"})).WithEndpoints(base, h).PullRequests(context.Background(), []string{"example-org/web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || !got[0].Yours || got[1].Yours {
+		t.Errorf("PRs = %+v, want only #9 marked as the account's", got)
+	}
+	if !strings.Contains((*calls)[0].query, "viewer { login }") {
+		t.Errorf("query does not ask who the account is:\n%s", (*calls)[0].query)
+	}
+}
+
 func TestPullRequestsReadDraftsAndMergeState(t *testing.T) {
 	tests := []struct {
 		state, draft, merge string
