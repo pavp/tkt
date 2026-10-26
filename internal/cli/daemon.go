@@ -86,6 +86,7 @@ func (a *App) runDaemon(ctx context.Context) error {
 	}
 	a.printf("tkt daemon listening on %s\n", ln.Addr())
 	go a.watchAgents(ctx, s)
+	go a.syncHerdrPlugin(ctx)
 	return s.Serve(ctx, ln)
 }
 

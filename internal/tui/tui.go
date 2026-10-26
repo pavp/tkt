@@ -827,7 +827,7 @@ func (m *Model) enterFilter() tea.Cmd {
 
 func (m *Model) loadBacklog(force bool) tea.Cmd {
 	m.backlogLoading = true
-	return m.actions.Backlog(force)
+	return tea.Batch(m.actions.Backlog(force), m.startSpin())
 }
 
 func (m Model) teamButton() string {
@@ -1142,7 +1142,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.status = "could not refresh: " + msg.Message
 	case spinMsg:
-		if !m.loading {
+		if !m.loading && !m.backlogLoading {
 			m.spinning = false
 			return m, nil
 		}
@@ -1967,6 +1967,9 @@ var syncSlot = lipgloss.Width("✓ synced 59 min ago")
 // syncLabel says how fresh the board is: refreshing (with a spinner), synced N min ago, or cached when the
 // last refresh failed.
 func (m Model) syncLabel() string {
+	if m.filter == FilterBacklog {
+		return m.backlogLabel()
+	}
 	switch {
 	case m.loading && m.snap.Partial:
 		return spinFrames[m.spin%len(spinFrames)] + " updating PRs…"
@@ -1985,6 +1988,24 @@ func (m Model) syncLabel() string {
 		return fmt.Sprintf("✓ synced %d min ago", int(d.Minutes()))
 	}
 	return "✓ synced " + m.snap.FetchedAt.Local().Format("15:04")
+}
+
+// backlogLabel is the Backlog's own state in the sync corner, which `g` and its timer refresh apart from the sprint.
+func (m Model) backlogLabel() string {
+	switch {
+	case m.backlogLoading:
+		return spinFrames[m.spin%len(spinFrames)] + " refreshing backlog…"
+	case m.backlog == nil:
+		return "not loaded yet"
+	}
+	d := m.now().Sub(m.backlog.FetchedAt)
+	switch {
+	case d < time.Minute:
+		return "✓ loaded just now"
+	case d < time.Hour:
+		return fmt.Sprintf("✓ loaded %d min ago", int(d.Minutes()))
+	}
+	return "✓ loaded " + m.backlog.FetchedAt.Local().Format("15:04")
 }
 
 var reviewChip = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorReview).Padding(0, 1)

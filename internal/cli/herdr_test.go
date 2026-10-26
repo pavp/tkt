@@ -1079,3 +1079,60 @@ func (o takenOnce) StartAgent(ctx context.Context, paneID, kind, name string, ar
 	delete(o.f.Errors, "agent.start")
 	return err
 }
+
+func TestAReleaseBringsTheInstalledHerdrPluginUpToDate(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+	h, f, _ := herdrHarness(t)
+	dir := filepath.Join(h.app.Env.DataDir(), "herdr-plugin")
+	manifest := filepath.Join(dir, herdrplugin.FileName)
+	cfg := filepath.Join(h.home, ".config", "herdr", "config.toml")
+	_ = os.MkdirAll(filepath.Dir(cfg), 0o755)
+	_ = os.MkdirAll(dir, 0o700)
+	_ = os.WriteFile(manifest, []byte(herdrplugin.Render("/opt/tkt/bin/tkt", "0.12.0")), 0o600)
+	accepted := herdrplugin.AddBlock("", []herdrplugin.Binding{herdrplugin.DefaultBindings[0], {Key: "prefix+alt+t", Action: "tkt.board-pane", Description: "tkt board in a pane"}})
+	_ = os.WriteFile(cfg, []byte(accepted), 0o644)
+
+	Version = "dev"
+	h.app.syncHerdrPlugin(context.Background())
+	if got, _ := os.ReadFile(manifest); !strings.Contains(string(got), `version = "0.12.0"`) || count(f, "plugin.link") != 0 {
+		t.Fatalf("a dev build leaves the plugin alone")
+	}
+
+	Version = "0.12.3"
+	h.app.syncHerdrPlugin(context.Background())
+	if got, _ := os.ReadFile(manifest); !strings.Contains(string(got), `version = "0.12.3"`) || count(f, "plugin.link") != 1 {
+		t.Errorf("the manifest follows the release and Herdr reads it again: links %d", count(f, "plugin.link"))
+	}
+	got, _ := os.ReadFile(cfg)
+	if strings.Contains(string(got), "prefix+alt+t") || !strings.Contains(string(got), `key = "prefix+d"`) || strings.Contains(string(got), `key = "prefix+i"`) {
+		t.Errorf("the moved shortcut follows, a never accepted one is not added:\n%s", got)
+	}
+	if bak, _ := os.ReadFile(cfg + ".bak-tkt"); string(bak) != accepted {
+		t.Error("the config is backed up first")
+	}
+	if notice := h.app.takeHerdrNotice(); !strings.Contains(notice, "prefix+i (tkt ticket pane)") || !strings.Contains(notice, "tkt herdr install") {
+		t.Errorf("notice %q", notice)
+	}
+	if again := h.app.takeHerdrNotice(); again != "" {
+		t.Errorf("the notice shows once: %q", again)
+	}
+	h.app.syncHerdrPlugin(context.Background())
+	if count(f, "plugin.link") != 1 || h.app.takeHerdrNotice() != "" {
+		t.Error("an up to date plugin is left alone, and a shortcut is announced once")
+	}
+}
+
+func TestNoHerdrPluginNothingToSync(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+	Version = "0.12.3"
+	h, f, _ := herdrHarness(t)
+	h.app.syncHerdrPlugin(context.Background())
+	if count(f, "plugin.link") != 0 {
+		t.Error("tkt installs the plugin only when asked")
+	}
+	if _, err := os.Stat(filepath.Join(h.app.Env.DataDir(), "herdr-plugin")); err == nil {
+		t.Error("no plugin folder appears")
+	}
+}

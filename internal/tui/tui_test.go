@@ -4791,3 +4791,26 @@ func detailOf(msg tea.Msg) tea.Msg {
 	}
 	return msg
 }
+
+func TestBacklogRefreshShowsItsOwnState(t *testing.T) {
+	r := backlogRecorder()
+	now := time.Date(2026, 10, 23, 12, 3, 0, 0, time.UTC)
+	m := tea.Model(openBacklog(r, 160, BoardState{}).(Model).WithClock(func() time.Time { return now }))
+	m, _ = m.Update(SnapshotMsg{Snap: snapshot()})
+	if v := stripANSI(m.View()); !strings.Contains(v, "✓ loaded 3 min ago") || strings.Contains(v, "synced") {
+		t.Fatalf("the backlog's corner says when it loaded:\n%s", v)
+	}
+	m = press(m, "g")
+	if v := stripANSI(m.View()); !strings.Contains(v, "refreshing backlog…") || !slices.Contains(r.calls, "backlog force") {
+		t.Fatalf("g shows it is asking Jira:\n%s", v)
+	}
+	fresh := backlogData()
+	fresh.FetchedAt = now
+	m, _ = m.Update(BacklogMsg{Backlog: fresh})
+	if v := stripANSI(m.View()); !strings.Contains(v, "✓ loaded just now") {
+		t.Errorf("then when it loaded:\n%s", v)
+	}
+	if v := stripANSI(press(m, "1").View()); !strings.Contains(v, "synced") {
+		t.Errorf("Sprint keeps its own sync state:\n%s", v)
+	}
+}

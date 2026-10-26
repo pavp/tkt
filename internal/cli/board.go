@@ -66,6 +66,9 @@ func newBoardCmd(a *App) *cobra.Command {
 			actions := &boardActions{a: a, c: c, ctx: cmd.Context(), pane: pane}
 			prog := tea.NewProgram(tui.New(snap, have, actions, a.boardView(view)).WithState(a.loadBoardState()), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
 			actions.send = prog.Send
+			if notice := a.takeHerdrNotice(); notice != "" {
+				go prog.Send(tui.StatusMsg(notice))
+			}
 			follow, stop := context.WithCancel(cmd.Context())
 			defer stop()
 			go a.followDaemon(follow, actions, prog.Send)
