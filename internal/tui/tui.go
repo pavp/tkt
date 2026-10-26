@@ -571,15 +571,28 @@ func (m Model) tickets() []ticket.Ticket {
 // the user first, then by name, and within each repository those that need the user first.
 func (m Model) myPRs() []item {
 	var out []item
+	// Jira can link one pull request to several tickets; it is listed once, under the ticket its branch names.
+	at := map[string]int{}
+	named := func(it item) bool { return slices.Contains(ticket.BranchKeys(it.pr.Branch), it.ticket.Key) }
 	for _, t := range board.Sorted(m.snap.Tickets) {
 		if t.Team {
 			continue
 		}
 		for _, pr := range t.PRs {
-			if pr.State == ticket.PROpen && !m.repoHidden(pr.Repo) {
-				t, pr := t, pr
-				out = append(out, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), ticket: &t, pr: &pr})
+			if pr.State != ticket.PROpen || m.repoHidden(pr.Repo) {
+				continue
 			}
+			t, pr := t, pr
+			it := item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), ticket: &t, pr: &pr}
+			id := fmt.Sprintf("%s#%d", strings.ToLower(pr.Repo), pr.Number)
+			if i, ok := at[id]; ok {
+				if named(it) && !named(out[i]) {
+					out[i] = it
+				}
+				continue
+			}
+			at[id] = len(out)
+			out = append(out, it)
 		}
 	}
 	urgent := map[string]bool{}
