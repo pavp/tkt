@@ -256,11 +256,27 @@ type PullRequest struct {
 	Yours   bool   `json:"yours,omitempty"`
 	HeadSHA string `json:"head_sha,omitempty"`
 	// Approvals counts the reviewers whose latest review approves the pull request.
-	Approvals int        `json:"approvals,omitempty"`
-	Draft     bool       `json:"draft,omitempty"`
-	Merge     MergeState `json:"merge,omitempty"`
+	Approvals int `json:"approvals,omitempty"`
+	// ApprovedBy and ChangesRequestedBy name the reviewers whose latest review approves or asks for changes.
+	ApprovedBy         []string   `json:"approved_by,omitempty"`
+	ChangesRequestedBy []string   `json:"changes_requested_by,omitempty"`
+	Draft              bool       `json:"draft,omitempty"`
+	Merge              MergeState `json:"merge,omitempty"`
 	// Unresolved counts the review threads nobody has resolved yet.
 	Unresolved int `json:"unresolved,omitempty"`
+}
+
+// ReviewersText names who approved and who asked for changes, such as "Approved by ana · Changes requested by
+// luis"; it is empty when nobody did.
+func (pr PullRequest) ReviewersText() string {
+	var parts []string
+	if len(pr.ApprovedBy) > 0 {
+		parts = append(parts, "Approved by "+strings.Join(pr.ApprovedBy, ", "))
+	}
+	if len(pr.ChangesRequestedBy) > 0 {
+		parts = append(parts, "Changes requested by "+strings.Join(pr.ChangesRequestedBy, ", "))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // ApprovalsText words the approvals, such as "2 approvals"; it is empty without any.

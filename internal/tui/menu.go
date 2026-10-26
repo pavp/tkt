@@ -67,7 +67,7 @@ func (m Model) buildMenu(it item) *menu {
 		}
 		items := []menuItem{{label: "Open in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}, m.reviewItem(pr)}
 		items = append(items, menuItem{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
-		return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: cmp.Or(pr.Repo, "unknown repository") + " · " + subtitle, items: items}
+		return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: withReviewers(cmp.Or(pr.Repo, "unknown repository")+" · "+subtitle, pr), items: items}
 	}
 	t := *it.ticket
 	if t.Team {
@@ -133,7 +133,15 @@ func (m Model) prMenu(it item) *menu {
 		items = append(items, menuItem{label: "Copy the Jira link", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
 	}
 	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
-	return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: string(t.Key) + " · " + t.Status, items: items}
+	return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: withReviewers(string(t.Key)+" · "+t.Status, pr), items: items}
+}
+
+// withReviewers adds who approved a pull request and who asked for changes to its menu's details.
+func withReviewers(details string, pr ticket.PullRequest) string {
+	if r := pr.ReviewersText(); r != "" {
+		return details + " · " + r
+	}
+	return details
 }
 
 // moveItem opens where the ticket can move from its current status.
