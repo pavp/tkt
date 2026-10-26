@@ -555,6 +555,12 @@ func allRepos(bySpace map[string][]string) []string {
 	return out
 }
 
+// LinkedPRs are the pull requests Jira's development panel links to a ticket, for a ticket GitHub was not asked
+// about.
+func LinkedPRs(linked []jira.DevPullRequest) []ticket.PullRequest {
+	return mergeLinked(nil, linked, nil)
+}
+
 // mergeLinked adds the pull requests Jira links to a ticket, preferring the GitHub copy of each one
 // because only GitHub knows its checks and review state.
 func mergeLinked(attached []ticket.PullRequest, linked []jira.DevPullRequest, fromGitHub []ticket.PullRequest) []ticket.PullRequest {
@@ -595,6 +601,7 @@ func byRepoNumber(a, b ticket.PullRequest) int {
 // blocked ticket waits in To Do unless its status is overridden.
 func ToTicket(c *config.Config, is jira.Issue, url string) ticket.Ticket {
 	t := ticket.Ticket{
+		ID:       is.ID,
 		Assignee: is.Assignee,
 		Key:      ticket.Key(is.Key),
 		Type:     is.Type,

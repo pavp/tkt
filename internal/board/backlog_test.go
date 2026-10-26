@@ -77,7 +77,7 @@ func TestBacklogGroupsActiveSprintsThenFutureSoonestFirstThenTheBacklog(t *testi
 			{Key: "DEMO-301", Summary: "Role matrix", Status: "To Do", StatusCategory: "new", Sprints: []jira.Sprint{{ID: 12, State: "future"}}},
 		},
 		backlog: map[int][]jira.Issue{
-			418:  {{Key: "DEMO-180", Summary: "Clean old roles", Status: "To Do", StatusCategory: "new"}},
+			418:  {{ID: "180", Key: "DEMO-180", Summary: "Clean old roles", Status: "To Do", StatusCategory: "new"}},
 			5205: {{Key: "DEMO-180", Summary: "Clean old roles", Status: "To Do", StatusCategory: "new"}, {Key: "DEMO-305", Summary: "Rename roles", Status: "To Do", StatusCategory: "new"}},
 		},
 	}
@@ -105,6 +105,9 @@ func TestBacklogGroupsActiveSprintsThenFutureSoonestFirstThenTheBacklog(t *testi
 	got.Sprints = got.Sprints[1:]
 	if k := keys(got.Sprints[0].Tickets); !slices.Equal(k, []string{"DEMO-210@User Access Center", "DEMO-214@User Access Center"}) {
 		t.Errorf("S43 = %v", k)
+	}
+	if got.Backlog[0].ID != "180" {
+		t.Errorf("a backlog ticket keeps its Jira issue id: %+v", got.Backlog[0])
 	}
 	if got.Sprints[0].Tickets[1].Category != ticket.InReview || got.Sprints[0].Tickets[0].URL == "" {
 		t.Errorf("tickets are built as the board's: %+v", got.Sprints[0].Tickets)

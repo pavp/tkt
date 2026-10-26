@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -133,5 +134,43 @@ func TestFixFindsTheAgentInAWorkspaceWithoutAWorktree(t *testing.T) {
 	f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w3:p1","workspace_id":"w3","cwd":"/src/web-DEMO-1"}]}`
 	if code := h.exec("fix", "DEMO-1"); code != 0 {
 		t.Fatalf("an agent placed by its pane's folder: exit %d: %s", code, h.errOut)
+	}
+}
+
+func TestDetailOfAKnownTicketWithoutPullRequestsAsksJirasPanelNotGitHub(t *testing.T) {
+	h, gh, _ := fixHarness(t)
+	is := h.jira.details["DEMO-1"]
+	is.ID = "10001"
+	h.jira.details["DEMO-1"] = is
+	h.jira.devPRs = map[string][]jira.DevPullRequest{"10001": {{Repo: "example-org/web", Number: 31, Title: "Pager", URL: "https://github.com/example-org/web/pull/31", Status: "OPEN"}}}
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := h.app.loadDetail(context.Background(), c, "DEMO-1", &ticket.Ticket{Key: "DEMO-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gh.prCalls != 0 {
+		t.Errorf("a known ticket never lists every pull request: %d listings", gh.prCalls)
+	}
+	if len(d.Ticket.PRs) != 1 || d.Ticket.PRs[0].Number != 31 || d.Ticket.PRs[0].State != ticket.PROpen {
+		t.Errorf("Jira's development panel names its pull requests: %+v", d.Ticket.PRs)
+	}
+}
+
+func TestDetailAsksTheDevelopmentPanelWithTheKnownTicketsID(t *testing.T) {
+	h, gh, _ := fixHarness(t)
+	h.jira.devPRs = map[string][]jira.DevPullRequest{"10002": {{Repo: "example-org/web", Number: 32, Status: "MERGED"}}}
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := h.app.loadDetail(context.Background(), c, "DEMO-1", &ticket.Ticket{Key: "DEMO-1", ID: "10002"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gh.prCalls != 0 || len(d.Ticket.PRs) != 1 || d.Ticket.PRs[0].Number != 32 || d.Ticket.PRs[0].State != ticket.PRMerged {
+		t.Errorf("the known ID asks the panel beside the issue: listings %d, PRs %+v", gh.prCalls, d.Ticket.PRs)
 	}
 }

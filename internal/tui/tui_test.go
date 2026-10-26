@@ -1338,7 +1338,7 @@ func TestDetailViewInsideTheBoard(t *testing.T) {
 	if !strings.Contains(stripANSI(m.View()), "loading DEMO-1") || cmd == nil {
 		t.Fatalf("i should start loading the detail:\n%s", stripANSI(m.View()))
 	}
-	m, _ = m.Update(cmd())
+	m, _ = m.Update(detailOf(cmd()))
 	v := stripANSI(m.View())
 	if !strings.Contains(v, "DEMO-1 · Story · In Progress") || !strings.Contains(v, "back to the board") || strings.Contains(v, "To Do 1") {
 		t.Fatalf("detail view:\n%s", v)
@@ -1365,7 +1365,7 @@ func TestMenuShowDetailsOpensTheDetail(t *testing.T) {
 	if cmd == nil || r.last() != "detail DEMO-3" {
 		t.Fatalf("show details ran %v", r.calls)
 	}
-	m, _ = m.Update(cmd)
+	m, _ = m.Update(detailOf(cmd))
 	if !strings.Contains(stripANSI(m.View()), "DEMO-3 · Story") {
 		t.Errorf("detail not shown:\n%s", stripANSI(m.View()))
 	}
@@ -4733,4 +4733,61 @@ func TestBacklogRefreshesOnlyWhileInView(t *testing.T) {
 	if !m.(Model).backlogLoading {
 		t.Error("an older copy shown while Jira answers keeps the backlog loading")
 	}
+}
+
+// cmdTypes runs cmd, a batch included, and names the messages it gives.
+func cmdTypes(cmd tea.Cmd) []string {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if b, ok := msg.(tea.BatchMsg); ok {
+		var out []string
+		for _, c := range b {
+			out = append(out, cmdTypes(c)...)
+		}
+		return out
+	}
+	return []string{fmt.Sprintf("%T", msg)}
+}
+
+func TestBacklogDetailUsesTheBacklogsCopy(t *testing.T) {
+	r := backlogRecorder()
+	m := backlogMenu(t, openBacklog(r, 160, BoardState{}), "DEMO-210")
+	press(m, "esc", "i")
+	if r.known == nil || r.known.Key != "DEMO-210" || r.known.Board != "User Access Center" {
+		t.Errorf("the detail gets the backlog's ticket: %+v", r.known)
+	}
+}
+
+func TestDetailLetsTheMouseSelectAndCopies(t *testing.T) {
+	r := &recorder{}
+	m := loaded(r)
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	if got := strings.Join(cmdTypes(cmd), " "); !strings.Contains(got, "disableMouse") || !strings.Contains(got, "DetailMsg") {
+		t.Fatalf("the detail lets the terminal select text: %s", got)
+	}
+	m, _ = m.Update(detailOf(cmd()))
+	if v := stripANSI(m.View()); !strings.Contains(v, "c copy") || !strings.Contains(v, "select with the mouse") {
+		t.Errorf("the legend says how to copy:\n%s", v)
+	}
+	if _, msg := run(m, "c"); msg != StatusMsg("context DEMO-3") {
+		t.Errorf("c copies the ticket: %v", msg)
+	}
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if got := strings.Join(cmdTypes(cmd), " "); !strings.Contains(got, "enableMouse") {
+		t.Errorf("leaving the detail takes the mouse back: %s", got)
+	}
+}
+
+// detailOf picks the DetailMsg out of the batch that opening a detail gives.
+func detailOf(msg tea.Msg) tea.Msg {
+	if b, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range b {
+			if d, ok := c().(DetailMsg); ok {
+				return d
+			}
+		}
+	}
+	return msg
 }

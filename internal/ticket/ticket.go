@@ -288,7 +288,9 @@ type Ticket struct {
 	// Team marks a teammate's or unassigned ticket, shown on request; it never needs the user.
 	Team bool `json:"team,omitempty"`
 	// Board names the team board whose active sprint holds the ticket, empty when it is on no team board.
-	Board    string        `json:"board,omitempty"`
+	Board string `json:"board,omitempty"`
+	// ID is Jira's numeric issue id, which its development panel asks for.
+	ID       string        `json:"id,omitempty"`
 	Parent   Key           `json:"parent,omitempty"`
 	URL      string        `json:"url"`
 	PRs      []PullRequest `json:"prs,omitempty"`
