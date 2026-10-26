@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -114,7 +116,7 @@ func TestPullRequestsBatchesPerOwner(t *testing.T) {
 		t.Fatalf("got %d PRs: %+v", len(got), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("PR %d = %+v\nwant %+v", i, got[i], want[i])
 		}
 	}
@@ -152,6 +154,24 @@ func TestPullRequestsMarkTheOnesTheAccountOpened(t *testing.T) {
 	}
 	if !strings.Contains((*calls)[0].query, "viewer { login }") {
 		t.Errorf("query does not ask who the account is:\n%s", (*calls)[0].query)
+	}
+}
+
+func TestPullRequestsNameTheirReviewers(t *testing.T) {
+	reviews := `"latestOpinionatedReviews":{"nodes":[{"state":"APPROVED","author":{"login":"ana"}},{"state":"CHANGES_REQUESTED","author":{"login":"luis"}},{"state":"APPROVED","author":{"login":"sam"}}]}`
+	node := strings.Replace(pr("example-org/web", 9, "feature/DEMO-1-x", "OPEN", "CHANGES_REQUESTED", "SUCCESS"), `"latestOpinionatedReviews":{"nodes":[]}`, reviews, 1)
+	base, h, calls := gqlServer(t, func(string) (int, string) {
+		return 200, `{"data":{"r0":{"open":{"nodes":[` + node + `]},"merged":{"nodes":[]}}}}`
+	})
+	got, err := New(staticTokens(map[string]string{"example-org": "work"})).WithEndpoints(base, h).PullRequests(context.Background(), []string{"example-org/web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Approvals != 2 || !slices.Equal(got[0].ApprovedBy, []string{"ana", "sam"}) || !slices.Equal(got[0].ChangesRequestedBy, []string{"luis"}) {
+		t.Errorf("PRs = %+v", got)
+	}
+	if !strings.Contains((*calls)[0].query, "latestOpinionatedReviews(first: 100) { nodes { state author { login } } }") {
+		t.Errorf("query does not ask who reviewed:\n%s", (*calls)[0].query)
 	}
 }
 

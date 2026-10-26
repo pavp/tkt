@@ -3468,6 +3468,28 @@ func TestPRMenusPutTheirDetailsOnASecondLine(t *testing.T) {
 	}
 }
 
+func TestPRMenusNameWhoReviewed(t *testing.T) {
+	reviewed := ticket.PullRequest{Repo: "example-org/web", Number: 821, Author: "alex", State: ticket.PROpen, Approvals: 2, ApprovedBy: []string{"ana", "sam"}, ChangesRequestedBy: []string{"luis"}}
+	tk := ticket.Ticket{Key: "DEMO-4", Status: "In Review", PRs: []ticket.PullRequest{reviewed}}
+	for name, it := range map[string]item{
+		"someone else's": {key: "#821", pr: &reviewed, other: true},
+		"the user's":     {key: "#821", pr: &reviewed, ticket: &tk},
+	} {
+		m := loaded(&recorder{}).(Model)
+		m.menu = m.buildMenu(it)
+		v := stripANSI(m.menuView())
+		if !strings.Contains(v, "Approved by ana, sam") || !strings.Contains(v, "Changes requested by luis") {
+			t.Errorf("%s: the menu names who reviewed:\n%s", name, v)
+		}
+	}
+	m := loaded(&recorder{}).(Model)
+	plain := ticket.PullRequest{Repo: "example-org/web", Number: 822, Author: "alex"}
+	m.menu = m.buildMenu(item{key: "#822", pr: &plain})
+	if v := stripANSI(m.menuView()); strings.Contains(v, "Approved by") || strings.Contains(v, "requested by") {
+		t.Errorf("an unreviewed pull request names nobody:\n%s", v)
+	}
+}
+
 func TestStoryPointsShowOnCardsColumnsListAndPreview(t *testing.T) {
 	tk := ticket.Ticket{Key: "ACTO-170450", Summary: "Homogenize", Status: "En curso", Category: ticket.InProgress, Points: 3, Mark: ticket.MarkDiamond}
 	if head := ansi.Strip(strings.Split(card(tk, 40, false, false, false, "idle"), "\n")[1]); !strings.Contains(head, "ACTO-170450 3pt") || !strings.Contains(head, "○") {

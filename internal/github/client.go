@@ -129,7 +129,7 @@ const prFields = `number title url state isDraft mergeStateStatus headRefName he
   author { login __typename }
   repository { nameWithOwner }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-  latestOpinionatedReviews(first: 100) { nodes { state } }
+  latestOpinionatedReviews(first: 100) { nodes { state author { login } } }
   reviewThreads(first: 100) { nodes { isResolved } }`
 
 // mergedFields is what a merged pull request needs: the board shows it as merged, so its checks, reviews
@@ -166,7 +166,10 @@ type prNode struct {
 	} `json:"commits"`
 	LatestOpinionatedReviews struct {
 		Nodes []struct {
-			State string `json:"state"`
+			State  string `json:"state"`
+			Author *struct {
+				Login string `json:"login"`
+			} `json:"author"`
 		} `json:"nodes"`
 	} `json:"latestOpinionatedReviews"`
 	ReviewThreads struct {
@@ -215,8 +218,20 @@ func (n prNode) toPR() ticket.PullRequest {
 		}
 	}
 	for _, r := range n.LatestOpinionatedReviews.Nodes {
-		if r.State == "APPROVED" {
+		login := ""
+		if r.Author != nil {
+			login = r.Author.Login
+		}
+		switch r.State {
+		case "APPROVED":
 			pr.Approvals++
+			if login != "" {
+				pr.ApprovedBy = append(pr.ApprovedBy, login)
+			}
+		case "CHANGES_REQUESTED":
+			if login != "" {
+				pr.ChangesRequestedBy = append(pr.ChangesRequestedBy, login)
+			}
 		}
 	}
 	if n.Author != nil {
