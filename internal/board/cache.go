@@ -26,11 +26,12 @@ func (c Cache) Load() (snap Snapshot, ok bool, err error) { return loadJSON[Snap
 
 func (c Cache) Save(s Snapshot) error { return saveJSON(c.Path, s) }
 
-// BacklogEvery is how often the daemon refreshes the backlog, and how old a copy the board opens without asking
-// Jira: a backlog changes far less than a sprint, and each refresh costs a few calls per team board.
+// BacklogEvery is how often the Backlog refreshes while it is the board's screen in view, and how old a copy it
+// opens without asking Jira: a backlog changes far less than a sprint, and each refresh costs a few calls per team
+// board, so nothing refreshes it while nobody looks at it.
 const BacklogEvery = 5 * time.Minute
 
-// BacklogCache keeps the last backlog on disk, which the daemon refreshes and the board opens from.
+// BacklogCache keeps the last backlog on disk, which the board opens from at once.
 type BacklogCache struct {
 	Path string
 }

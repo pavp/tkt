@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pavp/tkt/internal/board"
-	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/daemon"
 	"github.com/pavp/tkt/internal/ticket"
 )
@@ -87,42 +86,7 @@ func (a *App) runDaemon(ctx context.Context) error {
 	}
 	a.printf("tkt daemon listening on %s\n", ln.Addr())
 	go a.watchAgents(ctx, s)
-	go a.keepBacklog(ctx)
 	return s.Serve(ctx, ln)
-}
-
-// keepBacklog refreshes the backlog's copy every board.BacklogEvery, reading the configuration afresh each time.
-func (a *App) keepBacklog(ctx context.Context) {
-	for {
-		c, err := a.LoadConfig()
-		if err == nil {
-			err = a.refreshBacklog(ctx, c)
-		}
-		if err != nil && ctx.Err() == nil {
-			fmt.Fprintf(a.Stderr, "%s backlog: %v\n", a.Now().UTC().Format(time.RFC3339), err)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(board.BacklogEvery):
-		}
-	}
-}
-
-// refreshBacklog fetches the team boards' backlog and keeps it for the board; without team boards it asks nothing.
-func (a *App) refreshBacklog(ctx context.Context, c *config.Config) error {
-	if !slices.ContainsFunc(c.Spaces, func(s config.Space) bool { return len(s.TeamBoards) > 0 }) {
-		return nil
-	}
-	js, err := a.jiraClient(c)
-	if err != nil {
-		return err
-	}
-	bl, err := board.FetchBacklog(ctx, c, js, a.Now())
-	if err != nil {
-		return err
-	}
-	return a.backlogCache().Save(bl)
 }
 
 // daemonDetail serves GET /v1/tickets/{key} with the configuration read afresh, like each sync.

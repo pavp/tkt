@@ -16,8 +16,62 @@ type Binding struct {
 // DefaultBindings are the shortcuts `tkt herdr install` offers.
 var DefaultBindings = []Binding{
 	{Key: "prefix+t", Action: ID + ".board", Description: "tkt board"},
-	{Key: "prefix+alt+t", Action: ID + ".board-pane", Description: "tkt board in a pane"},
+	{Key: "prefix+d", Action: ID + ".board-pane", Description: "tkt board in a pane"},
 	{Key: "prefix+i", Action: ID + ".ticket", Description: "tkt ticket pane"},
+}
+
+// RetiredBindings are shortcuts tkt once added and has since moved; install takes them out of its own blocks.
+var RetiredBindings = []Binding{
+	{Key: "prefix+alt+t", Action: ID + ".board-pane", Description: "tkt board in a pane"},
+}
+
+// DropRetired removes retired bindings from tkt's managed blocks, and a block they leave empty; bindings the user
+// wrote outside those blocks stay. It returns the bindings it removed.
+func DropRetired(config string) (string, []Binding) {
+	var out strings.Builder
+	var dropped []Binding
+	rest := config
+	for {
+		i := strings.Index(rest, blockStart)
+		j := strings.Index(rest[max(i, 0):], blockEnd)
+		if i < 0 || j < 0 {
+			out.WriteString(rest)
+			return out.String(), dropped
+		}
+		j += i
+		entries := strings.Split(rest[i+len(blockStart):j], "[[keys.command]]")
+		kept := []string{}
+		for _, e := range entries[1:] {
+			if r, ok := retired(e); ok {
+				dropped = append(dropped, r)
+				continue
+			}
+			kept = append(kept, e)
+		}
+		end := j + len(blockEnd)
+		if end < len(rest) && rest[end] == '\n' {
+			end++
+		}
+		if len(kept) == 0 && len(entries) > 1 {
+			out.WriteString(strings.TrimRight(rest[:i], "\n") + "\n")
+		} else {
+			out.WriteString(rest[:i] + blockStart + entries[0])
+			for _, e := range kept {
+				out.WriteString("[[keys.command]]" + e)
+			}
+			out.WriteString(rest[j:end])
+		}
+		rest = rest[end:]
+	}
+}
+
+func retired(entry string) (Binding, bool) {
+	for _, r := range RetiredBindings {
+		if strings.Contains(entry, "key = "+tomlString(r.Key)+"\n") && strings.Contains(entry, "command = "+tomlString(r.Action)+"\n") {
+			return r, true
+		}
+	}
+	return Binding{}, false
 }
 
 const (

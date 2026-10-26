@@ -4712,7 +4712,7 @@ func TestAFixWithoutACloneAsksToCloneIt(t *testing.T) {
 	}
 }
 
-func TestOpenBacklogFollowsTheDaemonsCopy(t *testing.T) {
+func TestBacklogRefreshesOnlyWhileInView(t *testing.T) {
 	r := backlogRecorder()
 	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 	m := tea.Model(openBacklog(r, 160, BoardState{}).(Model).WithClock(func() time.Time { return now }))
@@ -4721,9 +4721,13 @@ func TestOpenBacklogFollowsTheDaemonsCopy(t *testing.T) {
 		t.Fatalf("a fresh backlog stays: %v", r.calls)
 	}
 	now = now.Add(board.BacklogEvery)
+	press(m, "1").Update(tickMsg(now))
+	if slices.Contains(r.calls[1:], "backlog") {
+		t.Fatalf("on another screen the backlog is left alone: %v", r.calls)
+	}
 	m, _ = m.Update(tickMsg(now))
 	if !slices.Contains(r.calls[1:], "backlog") || slices.Contains(r.calls, "backlog force") {
-		t.Errorf("an old one asks for the daemon's copy, not Jira: %v", r.calls)
+		t.Errorf("in view, an old one refreshes: %v", r.calls)
 	}
 	m, _ = m.Update(BacklogMsg{Backlog: backlogData(), Cached: true})
 	if !m.(Model).backlogLoading {

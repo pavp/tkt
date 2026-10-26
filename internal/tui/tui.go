@@ -75,7 +75,7 @@ type Actions interface {
 	Assign(key ticket.Key, who Assignee) tea.Cmd
 	// Users lists the users assignable to key that match query; they arrive as a UsersListedMsg.
 	Users(key ticket.Key, query string) tea.Cmd
-	// Backlog delivers the team boards' open sprints and backlog as a BacklogMsg, from the daemon's copy while it is
+	// Backlog delivers the team boards' open sprints and backlog as a BacklogMsg, from the last copy while it is
 	// fresh; force asks Jira anyway.
 	Backlog(force bool) tea.Cmd
 	// MoveToSprint moves key into the sprint id named name; the outcome arrives as a SprintMovedMsg. The board
@@ -1128,7 +1128,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.loading && m.now().Sub(m.loadingSince) > loadingLimit {
 			m.loading = false
 		}
-		// The open Backlog follows the daemon's copy, which it refreshes every board.BacklogEvery.
+		// Only the Backlog in view refreshes itself; on another screen, or with the board closed, nothing asks Jira.
 		if m.filter == FilterBacklog && m.backlog != nil && !m.backlogLoading && m.now().Sub(m.backlog.FetchedAt) >= board.BacklogEvery {
 			return m, tea.Batch(m.loadBacklog(false), tick())
 		}
