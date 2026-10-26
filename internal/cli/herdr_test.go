@@ -400,8 +400,8 @@ func TestHerdrOpenBoardInAPane(t *testing.T) {
 	if code := h.exec("herdr", "open-board-pane"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	if got := f.Last("plugin.pane.open"); got["entrypoint"] != "board-split" || got["plugin_id"] != "tkt" {
-		t.Errorf("pane = %v", got)
+	if got := f.Last("plugin.pane.open"); got["entrypoint"] != "board-split" || got["plugin_id"] != "tkt" || got["focus"] != true {
+		t.Errorf("the board's pane opens focused: %v", got)
 	}
 	os.Remove(h.app.configPath)
 	h.exec("herdr", "open-board-pane")

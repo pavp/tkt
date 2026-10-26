@@ -207,6 +207,8 @@ type PaneOpen struct {
 	Height       string            `json:"height,omitempty"`
 	WorkspaceID  string            `json:"workspace_id,omitempty"`
 	TargetPaneID string            `json:"target_pane_id,omitempty"`
+	// Focus moves the focus to the new pane; Herdr leaves it where it was otherwise.
+	Focus bool `json:"focus,omitempty"`
 }
 
 func (c *Client) OpenPluginPane(ctx context.Context, p PaneOpen) error {
