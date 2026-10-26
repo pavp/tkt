@@ -99,6 +99,9 @@ func (b *boardActions) SendTask(task tui.AgentTask, pane string) tea.Cmd {
 		if err := h.Prompt(b.ctx, pane, prompt); err != nil {
 			return tui.StatusMsg("could not send the " + task.String() + ": " + err.Error())
 		}
+		if task.Review == nil {
+			markAgent(b.ctx, h, pane, task.Key)
+		}
 		bringForward(b.ctx, h, pane)
 		return b.handedOff("✓ sent " + task.Phrase() + " to the agent")
 	}
@@ -208,6 +211,9 @@ func (b *boardActions) startTask(task tui.AgentTask, prompt, dir, note, label st
 	pane, err := b.a.startTaskAgent(b.ctx, h, dir, label, prompt)
 	if err != nil {
 		return tui.StatusMsg("could not start an agent for the " + task.String() + ": " + err.Error())
+	}
+	if task.Review == nil {
+		markAgent(b.ctx, h, pane, task.Key)
 	}
 	bringForward(b.ctx, h, pane)
 	return b.handedOff("✓ an agent took " + task.Phrase())

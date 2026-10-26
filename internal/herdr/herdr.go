@@ -163,6 +163,13 @@ type Agent struct {
 	Name        string `json:"name"`
 	Status      string `json:"agent_status"`
 	Cwd         string `json:"cwd"`
+	// Tokens are the values plugins reported on the agent's pane, such as the ticket tkt gave it.
+	Tokens map[string]string `json:"tokens"`
+}
+
+// ReportPaneTokens sets or, with a nil value, clears named values on a pane; they last as long as the pane.
+func (c *Client) ReportPaneTokens(ctx context.Context, paneID, source string, tokens map[string]*string) error {
+	return c.Call(ctx, "pane.report_metadata", map[string]any{"pane_id": paneID, "source": source, "tokens": tokens}, nil)
 }
 
 func (c *Client) Agents(ctx context.Context) ([]Agent, error) {
