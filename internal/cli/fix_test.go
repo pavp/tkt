@@ -158,3 +158,19 @@ func TestDetailOfAKnownTicketWithoutPullRequestsAsksJirasPanelNotGitHub(t *testi
 		t.Errorf("Jira's development panel names its pull requests: %+v", d.Ticket.PRs)
 	}
 }
+
+func TestDetailAsksTheDevelopmentPanelWithTheKnownTicketsID(t *testing.T) {
+	h, gh, _ := fixHarness(t)
+	h.jira.devPRs = map[string][]jira.DevPullRequest{"10002": {{Repo: "example-org/web", Number: 32, Status: "MERGED"}}}
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := h.app.loadDetail(context.Background(), c, "DEMO-1", &ticket.Ticket{Key: "DEMO-1", ID: "10002"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gh.prCalls != 0 || len(d.Ticket.PRs) != 1 || d.Ticket.PRs[0].Number != 32 || d.Ticket.PRs[0].State != ticket.PRMerged {
+		t.Errorf("the known ID asks the panel beside the issue: listings %d, PRs %+v", gh.prCalls, d.Ticket.PRs)
+	}
+}

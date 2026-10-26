@@ -81,6 +81,20 @@ func (a *App) loadDetail(ctx context.Context, c *config.Config, key ticket.Key, 
 		defer wg.Done()
 		comments, commentsErr = js.Comments(ctx, string(key), c.Context.Comments)
 	}()
+	// A copy without pull requests, such as a backlog ticket's, asks Jira's development panel, beside the issue when
+	// the copy knows its id, rather than GitHub for every open pull request.
+	var (
+		linked    []jira.DevPullRequest
+		linkedErr error
+		panel     = known != nil && len(known.PRs) == 0
+	)
+	if panel && known.ID != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			linked, linkedErr = js.DevPullRequests(ctx, known.ID)
+		}()
+	}
 	if repos := c.Repos(); known == nil && len(repos) > 0 {
 		listed = true
 		names := make([]string, len(repos))
@@ -118,14 +132,15 @@ func (a *App) loadDetail(ctx context.Context, c *config.Config, key ticket.Key, 
 		d.Comments = append(d.Comments, commentView{Author: cm.Author, Created: cm.Created, Body: body})
 	}
 	switch {
-	case known != nil && len(known.PRs) > 0:
-		d.Ticket.PRs = known.PRs
-	case known != nil:
-		// A ticket the board knows without pull requests, such as a backlog's, asks Jira's development panel,
-		// one call, rather than GitHub for every open pull request.
-		if linked, err := js.DevPullRequests(ctx, is.ID); err == nil {
+	case panel:
+		if known.ID == "" {
+			linked, linkedErr = js.DevPullRequests(ctx, is.ID)
+		}
+		if linkedErr == nil {
 			d.Ticket.PRs = board.LinkedPRs(linked)
 		}
+	case known != nil:
+		d.Ticket.PRs = known.PRs
 	case listed:
 		if prsErr != nil {
 			d.Warnings = append(d.Warnings, "pull requests unavailable: "+prsErr.Error())

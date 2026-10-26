@@ -601,6 +601,7 @@ func byRepoNumber(a, b ticket.PullRequest) int {
 // blocked ticket waits in To Do unless its status is overridden.
 func ToTicket(c *config.Config, is jira.Issue, url string) ticket.Ticket {
 	t := ticket.Ticket{
+		ID:       is.ID,
 		Assignee: is.Assignee,
 		Key:      ticket.Key(is.Key),
 		Type:     is.Type,
