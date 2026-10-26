@@ -135,7 +135,10 @@ func newHerdrCmd(a *App) *cobra.Command {
 		&cobra.Command{Use: "open [URL]", Short: "Open the ticket behind a clicked Jira or pull request link", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return a.herdrOpen(cmd, args) }},
 		&cobra.Command{Use: "ticket-popup", Short: "Show the ticket in $TKT_KEY and offer to start it", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrTicketPopup(cmd) }},
 		&cobra.Command{Use: "refresh", Short: "Fetch fresh data and update the Herdr sidebar", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrSidebar(cmd, false) }},
-		&cobra.Command{Use: "restore", Short: "Update the Herdr sidebar from the cache (startup hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrSidebar(cmd, true) }},
+		&cobra.Command{Use: "restore", Short: "Update the Herdr sidebar from the cache (startup hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+			a.syncHerdrPlugin(cmd.Context())
+			return a.herdrSidebar(cmd, true)
+		}},
 		&cobra.Command{Use: "on-worktree", Short: "Link a worktree Herdr just created (event hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOnWorktree(cmd) }},
 	)
 	return cmd
