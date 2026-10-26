@@ -1136,3 +1136,33 @@ func TestNoHerdrPluginNothingToSync(t *testing.T) {
 		t.Error("no plugin folder appears")
 	}
 }
+
+func TestHerdrPluginSyncRetriesItsShortcutsAndRunsAtHerdrsStart(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+	Version = "0.12.4"
+	h, f, _ := herdrHarness(t)
+	dir := filepath.Join(h.app.Env.DataDir(), "herdr-plugin")
+	manifest := filepath.Join(dir, herdrplugin.FileName)
+	cfg := filepath.Join(h.home, ".config", "herdr", "config.toml")
+	_ = os.MkdirAll(filepath.Dir(cfg), 0o755)
+	_ = os.MkdirAll(dir, 0o700)
+	_ = os.WriteFile(manifest, []byte(herdrplugin.Render("/opt/tkt/bin/tkt", "0.12.0")), 0o600)
+	_ = os.WriteFile(cfg, []byte(herdrplugin.AddBlock("", []herdrplugin.Binding{{Key: "prefix+alt+t", Action: "tkt.board-pane", Description: "tkt board in a pane"}})), 0o644)
+	defaults := h.run.out["herdr --default-config"]
+	delete(h.run.out, "herdr --default-config")
+	h.app.syncHerdrPlugin(context.Background())
+	if got, _ := os.ReadFile(cfg); !strings.Contains(string(got), "prefix+alt+t") {
+		t.Fatal("Herdr's defaults unreadable, the shortcuts wait")
+	}
+	h.run.out["herdr --default-config"] = defaults
+	if code := h.exec("herdr", "restore"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if got, _ := os.ReadFile(cfg); strings.Contains(string(got), "prefix+alt+t") || !strings.Contains(string(got), `key = "prefix+d"`) {
+		t.Errorf("Herdr's start retries the shortcuts:\n%s", got)
+	}
+	if got, _ := os.ReadFile(manifest); !strings.Contains(string(got), `version = "0.12.4"`) || count(f, "plugin.link") != 1 {
+		t.Errorf("the manifest is rewritten once: links %d", count(f, "plugin.link"))
+	}
+}

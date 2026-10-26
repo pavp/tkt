@@ -18,6 +18,7 @@ import (
 // starts, so an upgrade needs no `tkt herdr install`: the manifest is rewritten and linked again, and a shortcut tkt
 // moved follows inside tkt's own block of the config, backed up first. A shortcut the user never accepted is only
 // announced, once, since adding it would write their config unasked. A dev build, or no plugin, changes nothing.
+// Herdr's startup hook runs it too, and the shortcuts are retried until they succeed for this release.
 func (a *App) syncHerdrPlugin(ctx context.Context) {
 	if _, ok := parseVersion(Version); !ok {
 		return
@@ -25,28 +26,39 @@ func (a *App) syncHerdrPlugin(ctx context.Context) {
 	dir := filepath.Join(a.Env.DataDir(), "herdr-plugin")
 	manifest := filepath.Join(dir, herdrplugin.FileName)
 	current, err := os.ReadFile(manifest)
-	if err != nil || strings.Contains(string(current), "version = "+strconv.Quote(Version)) {
+	if err != nil {
+		return
+	}
+	synced, _ := os.ReadFile(a.herdrSyncedFile())
+	fresh := strings.Contains(string(current), "version = "+strconv.Quote(Version))
+	if fresh && strings.TrimSpace(string(synced)) == Version {
 		return
 	}
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(a.Stderr, "%s herdr plugin: %s\n", a.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, args...))
 	}
-	exe, err := a.Executable()
-	if err != nil {
-		logf("locate the tkt binary: %v", err)
-		return
-	}
-	if err := paths.WritePrivateFile(manifest, []byte(herdrplugin.Render(exe, Version))); err != nil {
-		logf("%v", err)
-		return
-	}
-	if err := a.NewHerdr().LinkPlugin(ctx, dir); err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
-		logf("link: %v", err)
+	if !fresh {
+		exe, err := a.Executable()
+		if err != nil {
+			logf("locate the tkt binary: %v", err)
+			return
+		}
+		if err := paths.WritePrivateFile(manifest, []byte(herdrplugin.Render(exe, Version))); err != nil {
+			logf("%v", err)
+			return
+		}
+		if err := a.NewHerdr().LinkPlugin(ctx, dir); err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
+			logf("link: %v", err)
+		}
 	}
 	if err := a.syncHerdrKeys(ctx); err != nil {
-		logf("keybindings: %v", err)
+		logf("keybindings: %v (retried at the next start)", err)
+		return
 	}
+	_ = paths.WritePrivateFile(a.herdrSyncedFile(), []byte(Version+"\n"))
 }
+
+func (a *App) herdrSyncedFile() string { return filepath.Join(a.Env.DataDir(), "herdr-synced") }
 
 // syncHerdrKeys moves the shortcuts tkt retired inside its own block and announces the ones the user never added.
 func (a *App) syncHerdrKeys(ctx context.Context) error {

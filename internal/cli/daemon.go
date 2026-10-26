@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -87,7 +89,54 @@ func (a *App) runDaemon(ctx context.Context) error {
 	a.printf("tkt daemon listening on %s\n", ln.Addr())
 	go a.watchAgents(ctx, s)
 	go a.syncHerdrPlugin(ctx)
+	go a.watchUpgrade(ctx)
 	return s.Serve(ctx, ln)
+}
+
+// upgradeEvery is how often the daemon asks its binary whether an upgrade replaced it.
+const upgradeEvery = time.Minute
+
+// watchUpgrade hands the daemon over to the binary an upgrade put in its place, within a minute, so the new release
+// serves and updates the Herdr plugin without waiting for a board or a hook to start it.
+func (a *App) watchUpgrade(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(upgradeEvery):
+		}
+		if a.handOverIfUpgraded(ctx) {
+			return
+		}
+	}
+}
+
+// handOverIfUpgraded starts `tkt daemon start` from a binary newer than this release, which replaces this daemon
+// as any release replaces an older one; a dev build, or a binary that cannot say its version, is left alone.
+func (a *App) handOverIfUpgraded(ctx context.Context) bool {
+	ours, ok := parseVersion(Version)
+	if !ok {
+		return false
+	}
+	exe, err := a.Executable()
+	if err != nil {
+		return false
+	}
+	out, err := a.Run.Run(ctx, "", exe, []string{"--version"}, nil)
+	fields := strings.Fields(string(out))
+	if err != nil || len(fields) == 0 {
+		return false
+	}
+	theirs, ok := parseVersion(fields[len(fields)-1])
+	if !ok || slices.Compare(theirs, ours) <= 0 {
+		return false
+	}
+	if _, err := a.StartDetached(exe, []string{"daemon", "start"}, filepath.Join(a.Env.DataDir(), "daemon.log")); err != nil {
+		fmt.Fprintf(a.Stderr, "%s upgrade: %v\n", a.Now().UTC().Format(time.RFC3339), err)
+		return false
+	}
+	fmt.Fprintf(a.Stderr, "%s upgrade: handing over to %s\n", a.Now().UTC().Format(time.RFC3339), fields[len(fields)-1])
+	return true
 }
 
 // daemonDetail serves GET /v1/tickets/{key} with the configuration read afresh, like each sync.

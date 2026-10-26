@@ -78,7 +78,7 @@ Every command accepts `--json` and `--config <path>`.
 tkt herdr install
 ```
 
-links the tkt plugin into the running Herdr (0.9.5 or later); after an upgrade the new release's daemon updates the plugin by itself, moving any shortcut tkt changed and only announcing new ones. Herdr plugins cannot bring their own keys, so install offers to add `prefix+t` (board, a popup), `prefix+d` (the board docked in a split of the current workspace, which stays open after handing work to an agent; an earlier `prefix+alt+t` moves there on the next install) and `prefix+i` (ticket pane) to your Herdr config when those keys are free, backing it up first (`--keys` adds them without asking, `--no-keys` skips them). The plugin gives you:
+links the tkt plugin into the running Herdr (0.9.5 or later); after an upgrade the running daemon hands over to the new release within a minute, which updates the plugin by itself, moving any shortcut tkt changed and only announcing new ones. Herdr plugins cannot bring their own keys, so install offers to add `prefix+t` (board, a popup), `prefix+d` (the board docked in a split of the current workspace, which stays open after handing work to an agent; an earlier `prefix+alt+t` moves there on the next install) and `prefix+i` (ticket pane) to your Herdr config when those keys are free, backing it up first (`--keys` adds them without asking, `--no-keys` skips them). The plugin gives you:
 
 - a board popup (`tkt.board` action; offers setup when tkt is not configured); there is one board, so opening it from another workspace moves it there,
 - a live ticket pane for the current workspace (`tkt.ticket`),

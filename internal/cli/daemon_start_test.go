@@ -316,3 +316,39 @@ func TestADaemonAnsweringForAnotherPidIsNotOurs(t *testing.T) {
 	}
 	f.stopAll()
 }
+
+func TestDaemonHandsOverToTheNewerBinaryAnUpgradeLeft(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+	tests := []struct {
+		running, binary string
+		want            bool
+	}{
+		{"0.12.4", "tkt version 0.12.5\n", true},
+		{"0.12.4", "tkt version 0.12.4\n", false},
+		{"0.12.4", "tkt version 0.12.3\n", false},
+		{"0.12.4", "tkt version dev\n", false},
+		{"dev", "tkt version 0.12.5\n", false},
+		{"0.12.4", "", false},
+	}
+	for _, tt := range tests {
+		h := newHarness(t, "")
+		Version = tt.running
+		h.app.Executable = func() (string, error) { return "/opt/tkt/bin/tkt", nil }
+		h.app.Now = func() time.Time { return time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC) }
+		if tt.binary != "" {
+			h.run.out["/opt/tkt/bin/tkt --version"] = tt.binary
+		}
+		var started []string
+		h.app.StartDetached = func(name string, args []string, _ string) (int, error) {
+			started = append(started, name+" "+strings.Join(args, " "))
+			return 1, nil
+		}
+		if got := h.app.handOverIfUpgraded(context.Background()); got != tt.want || (len(started) == 1) != tt.want {
+			t.Errorf("running %s, binary %q: handed over %v, started %v", tt.running, tt.binary, got, started)
+		}
+		if tt.want && started[0] != "/opt/tkt/bin/tkt daemon start" {
+			t.Errorf("started %v", started)
+		}
+	}
+}
