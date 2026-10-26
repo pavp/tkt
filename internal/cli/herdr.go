@@ -120,7 +120,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 			if _, err := os.Stat(a.ConfigPath()); err != nil {
 				entry = "setup"
 			}
-			return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: entry})
+			return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: entry, Focus: true})
 		}},
 		&cobra.Command{Use: "open-board", Short: "Open the board popup (setup when tkt is not configured)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			if _, err := os.Stat(a.ConfigPath()); err != nil {
