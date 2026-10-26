@@ -118,8 +118,14 @@ func (a *App) loadDetail(ctx context.Context, c *config.Config, key ticket.Key, 
 		d.Comments = append(d.Comments, commentView{Author: cm.Author, Created: cm.Created, Body: body})
 	}
 	switch {
-	case known != nil:
+	case known != nil && len(known.PRs) > 0:
 		d.Ticket.PRs = known.PRs
+	case known != nil:
+		// A ticket the board knows without pull requests, such as a backlog's, asks Jira's development panel,
+		// one call, rather than GitHub for every open pull request.
+		if linked, err := js.DevPullRequests(ctx, is.ID); err == nil {
+			d.Ticket.PRs = board.LinkedPRs(linked)
+		}
 	case listed:
 		if prsErr != nil {
 			d.Warnings = append(d.Warnings, "pull requests unavailable: "+prsErr.Error())

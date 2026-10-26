@@ -25,13 +25,21 @@ type detailView struct {
 	loading bool
 }
 
+// openDetail shows a ticket for reading, handing the board's or the backlog's copy along so its pull requests
+// need no listing. The board lets go of the mouse meanwhile, so the terminal can select the text to copy.
 func (m Model) openDetail(key ticket.Key) (tea.Model, tea.Cmd) {
 	m.detail = &detailView{key: key, loading: true}
 	var known *ticket.Ticket
-	if t, ok := m.snap.Find(key); ok {
+	if t, ok := m.findTicket(key); ok {
 		known = &t
 	}
-	return m, m.actions.Detail(key, known)
+	return m, tea.Batch(tea.DisableMouse, m.actions.Detail(key, known))
+}
+
+// closeDetail leaves the detail and takes the mouse back.
+func (m *Model) closeDetail() tea.Cmd {
+	m.detail = nil
+	return tea.EnableMouseCellMotion
 }
 
 func (m Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -39,7 +47,9 @@ func (m Model) detailKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	page := max(1, m.detailHeight()-1)
 	switch k.String() {
 	case "esc", "q", "i", "backspace", "left", "a", "h":
-		m.detail = nil
+		return m, m.closeDetail()
+	case "c":
+		return m, m.actions.CopyContext(d.key)
 	case "up", "w", "k":
 		d.offset = max(0, d.offset-1)
 	case "down", "s", "j":
@@ -97,7 +107,7 @@ func (m Model) detailFooter() string {
 	if d := m.detail; !d.loading && len(d.lines) > m.detailHeight() {
 		pos = dim.Render(fmt.Sprintf("  ·  line %d of %d", d.offset+1, len(d.lines)))
 	}
-	legend := [][2]string{{"↑↓ ws", "scroll"}, {"space b", "page"}, {"enter", "actions"}, {"esc i", "back to the board"}}
+	legend := [][2]string{{"↑↓ ws", "scroll"}, {"space b", "page"}, {"enter", "actions"}, {"c", "copy"}, {"drag", "select with the mouse"}, {"esc i", "back to the board"}}
 	items := make([]string, len(legend))
 	for i, k := range legend {
 		items[i] = keyStyle.Render(k[0]) + " " + dim.Render(k[1])

@@ -1118,9 +1118,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.Err != nil {
-			m.detail = nil
+			cmd := m.closeDetail()
 			m.status = "could not load " + string(msg.Key) + ": " + msg.Err.Error()
-			return m, nil
+			return m, cmd
 		}
 		m.detail.loading = false
 		m.detail.lines = strings.Split(strings.TrimRight(msg.Text, "\n"), "\n")
@@ -1171,7 +1171,7 @@ func (m Model) mouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.detail.offset = min(m.maxOffset(), m.detail.offset+3)
 		case tea.MouseButtonLeft:
 			if msg.Action == tea.MouseActionPress && m.onBack(msg.X, msg.Y) {
-				m.detail = nil
+				return m, m.closeDetail()
 			}
 		}
 		return m, nil

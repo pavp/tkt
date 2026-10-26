@@ -555,6 +555,12 @@ func allRepos(bySpace map[string][]string) []string {
 	return out
 }
 
+// LinkedPRs are the pull requests Jira's development panel links to a ticket, for a ticket GitHub was not asked
+// about.
+func LinkedPRs(linked []jira.DevPullRequest) []ticket.PullRequest {
+	return mergeLinked(nil, linked, nil)
+}
+
 // mergeLinked adds the pull requests Jira links to a ticket, preferring the GitHub copy of each one
 // because only GitHub knows its checks and review state.
 func mergeLinked(attached []ticket.PullRequest, linked []jira.DevPullRequest, fromGitHub []ticket.PullRequest) []ticket.PullRequest {
