@@ -1593,6 +1593,31 @@ func TestPRsFilterListsMyOpenPRsThenReviews(t *testing.T) {
 	}
 }
 
+func TestPRsFilterListsAPullRequestOnceAcrossTickets(t *testing.T) {
+	snap := prsSnapshot()
+	snap.Tickets[len(snap.Tickets)-1].PRs[0].Branch = "fix/demo-4-login-redirect"
+	shared := snap.Tickets[len(snap.Tickets)-1].PRs[0]
+	snap.Tickets = append(snap.Tickets, ticket.Ticket{Key: "DEMO-3", Summary: "Normalize sessions", Status: "In Review", Category: ticket.InReview, PRs: []ticket.PullRequest{shared}})
+	r := &recorder{}
+	m := withAgent(tea.Model(New(snap, false, r, ViewList)), "DEMO-4")
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	v := stripANSI(m.View())
+	if n := strings.Count(v, "#815 "); n != 1 {
+		t.Fatalf("#815 listed %d times:\n%s", n, v)
+	}
+	if !strings.Contains(v, "2 PRs  5 ") {
+		t.Errorf("header counts the shared pull request once:\n%s", v)
+	}
+	for i := 0; i < 10 && !strings.Contains(selectedLine(m.View()), "#815"); i++ {
+		m = press(m, "s")
+	}
+	press(m, "f")
+	if !slices.Contains(r.calls, "fix DEMO-4 known") {
+		t.Errorf("the row belongs to the ticket its branch names, not DEMO-3 listed first: %v", r.calls)
+	}
+}
+
 func TestPRsFilterActsOnTheRowsTicket(t *testing.T) {
 	r := &recorder{}
 	m := withAgent(tea.Model(New(prsSnapshot(), false, r, ViewList)), "DEMO-4")
