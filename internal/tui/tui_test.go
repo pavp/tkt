@@ -3477,15 +3477,24 @@ func TestPRMenusNameWhoReviewed(t *testing.T) {
 	} {
 		m := loaded(&recorder{}).(Model)
 		m.menu = m.buildMenu(it)
-		v := stripANSI(m.menuView())
-		if !strings.Contains(v, "Approved by ana, sam") || !strings.Contains(v, "Changes requested by luis") {
-			t.Errorf("%s: the menu names who reviewed:\n%s", name, v)
+		lines := strings.Split(stripANSI(m.menuView()), "\n")
+		if !strings.Contains(lines[3], "✓ ana  ✓ sam  ✗ luis") || strings.Contains(lines[2], "ana") {
+			t.Errorf("%s: the reviewers get a line of their own under the details:\n%s", name, strings.Join(lines, "\n"))
+		}
+		if !strings.Contains(m.menuView(), ok.Render("✓ ana")) || !strings.Contains(m.menuView(), warn.Render("✗ luis")) {
+			t.Errorf("%s: approvals are drawn green and change requests as warnings:\n%q", name, m.menuView())
 		}
 	}
+	many := ticket.PullRequest{Repo: "example-org/web", Number: 823, Author: "alex", ApprovedBy: []string{"reviewer_one", "reviewer_two", "reviewer_three"}, ChangesRequestedBy: []string{"reviewer_four"}}
 	m := loaded(&recorder{}).(Model)
+	m.menu = m.buildMenu(item{key: "#823", pr: &many, other: true})
+	lines := strings.Split(stripANSI(m.menuView()), "\n")
+	if !strings.Contains(lines[3], "✓ reviewer_one  ✓ reviewer_two") || !strings.Contains(lines[4], "✓ reviewer_three  ✗ reviewer_four") || lipgloss.Width(m.menuView()) > menuMinWidth+2 {
+		t.Errorf("reviewers that do not fit go on to the next line:\n%s", strings.Join(lines, "\n"))
+	}
 	plain := ticket.PullRequest{Repo: "example-org/web", Number: 822, Author: "alex"}
 	m.menu = m.buildMenu(item{key: "#822", pr: &plain})
-	if v := stripANSI(m.menuView()); strings.Contains(v, "Approved by") || strings.Contains(v, "requested by") {
+	if v := stripANSI(m.menuView()); strings.Contains(v, "✓") || strings.Contains(v, "✗") {
 		t.Errorf("an unreviewed pull request names nobody:\n%s", v)
 	}
 }
