@@ -38,6 +38,8 @@ type menu struct {
 	title string
 	// subtitle, when set, is a dimmed second line under the title, so long details do not widen the box.
 	subtitle string
+	// reviewed, on a pull request's menu, is the pull request whose reviewers show under the details.
+	reviewed *ticket.PullRequest
 	items    []menuItem
 	sel      int
 	// back is the menu esc returns to; nil closes.
@@ -67,7 +69,7 @@ func (m Model) buildMenu(it item) *menu {
 		}
 		items := []menuItem{{label: "Open in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}, m.reviewItem(pr)}
 		items = append(items, menuItem{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
-		return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: withReviewers(cmp.Or(pr.Repo, "unknown repository")+" · "+subtitle, pr), items: items}
+		return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: cmp.Or(pr.Repo, "unknown repository") + " · " + subtitle, reviewed: &pr, items: items}
 	}
 	t := *it.ticket
 	if t.Team {
@@ -133,15 +135,35 @@ func (m Model) prMenu(it item) *menu {
 		items = append(items, menuItem{label: "Copy the Jira link", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
 	}
 	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
-	return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: withReviewers(string(t.Key)+" · "+t.Status, pr), items: items}
+	return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: string(t.Key) + " · " + t.Status, reviewed: &pr, items: items}
 }
 
-// withReviewers adds who approved a pull request and who asked for changes to its menu's details.
-func withReviewers(details string, pr ticket.PullRequest) string {
-	if r := pr.ReviewersText(); r != "" {
-		return details + " · " + r
+// reviewerLines draws who approved a pull request (✓, green) and who asked for changes (✗, as a warning), as
+// many to a line as width holds.
+func reviewerLines(pr ticket.PullRequest, width int) []string {
+	var marks []string
+	for _, n := range pr.ApprovedBy {
+		marks = append(marks, ok.Render("✓ "+n))
 	}
-	return details
+	for _, n := range pr.ChangesRequestedBy {
+		marks = append(marks, warn.Render("✗ "+n))
+	}
+	var lines []string
+	line := ""
+	for _, mk := range marks {
+		switch {
+		case line == "":
+			line = mk
+		case lipgloss.Width(line)+2+lipgloss.Width(mk) <= width:
+			line += "  " + mk
+		default:
+			lines, line = append(lines, line), mk
+		}
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 // moveItem opens where the ticket can move from its current status.
@@ -379,6 +401,11 @@ func (m Model) menuLines() (lines []string, rows []int) {
 	if mn.subtitle != "" {
 		for _, l := range wrapped(mn.subtitle) {
 			lines = append(lines, dim.Render(ansi.Truncate(l, width-4, "…")))
+		}
+	}
+	if mn.reviewed != nil {
+		for _, l := range reviewerLines(*mn.reviewed, width-4) {
+			lines = append(lines, ansi.Truncate(l, width-4, "…"))
 		}
 	}
 	lines = append(lines, "")
