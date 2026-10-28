@@ -202,6 +202,24 @@ func TestStartOpensExistingWorktree(t *testing.T) {
 	}
 }
 
+func TestStartForgetsALinkWhoseWorktreeAndBranchAreGone(t *testing.T) {
+	h, calls := workHarness(t)
+	web := h.clone(t, "web")
+	gone := workspace.Work{Key: "DEMO-1", Repo: "example-org/web", Branch: "feature/DEMO-1-filter", Path: filepath.Join(h.home, "src", "web-DEMO-1"), Source: workspace.SourceAgent}
+	if err := h.app.links().Add(gone); err != nil {
+		t.Fatal(err)
+	}
+	if code := h.exec("start", "DEMO-1"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if len(*calls) != 1 || (*calls)[0].dir != web || strings.Contains(h.run.stdin["wl-copy"], "Continue work") {
+		t.Errorf("launches = %+v, prompt %q", *calls, h.run.stdin["wl-copy"])
+	}
+	if links, _ := h.app.links().Load(); len(links) != 1 {
+		t.Errorf("the stale link was deleted from disk: %+v", links)
+	}
+}
+
 func TestStartOffersClone(t *testing.T) {
 	h, calls := workHarness(t)
 	h.app.Stdin = strings.NewReader("1\nn\n")
@@ -380,5 +398,59 @@ func TestCachedBoardDropsIgnoredRepositories(t *testing.T) {
 	}
 	if len(got.Reviews) != 1 || got.Reviews[0].Number != 8 {
 		t.Errorf("reviews = %+v", got.Reviews)
+	}
+}
+
+func TestUnlinkForgetsTheCurrentWorktree(t *testing.T) {
+	h, _ := workHarness(t)
+	at := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	for _, w := range []workspace.Work{
+		{Key: "DEMO-7", Repo: "example-org/web", Branch: "feature/DEMO-7-export", Path: "/src/web-DEMO-7", LinkedAt: at},
+		{Key: "DEMO-8", Repo: "example-org/web", Branch: "feature/DEMO-8", Path: "/src/web-DEMO-8", LinkedAt: at},
+	} {
+		if err := h.app.links().Add(w); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.inCheckout("feature/DEMO-7-export", "/src/web-DEMO-7", "git@github.com:example-org/web.git")
+	if code := h.exec("unlink"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if !strings.Contains(h.out.String(), "✓ DEMO-7 ✗ feature/DEMO-7-export (example-org/web)") {
+		t.Errorf("output = %q", h.out)
+	}
+	if links, _ := h.app.links().Load(); len(links) != 1 || links[0].Key != "DEMO-8" {
+		t.Errorf("links = %+v", links)
+	}
+	if code := h.exec("unlink"); code == 0 || !strings.Contains(h.errOut.String(), `nothing is linked to branch "feature/DEMO-7-export" (example-org/web)`) {
+		t.Errorf("exit %d, %q", code, h.errOut)
+	}
+}
+
+func TestUnlinkKeyForgetsEveryLinkOfTheTicket(t *testing.T) {
+	h, _ := workHarness(t)
+	at := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	for _, w := range []workspace.Work{
+		{Key: "DEMO-7", Repo: "example-org/web", Branch: "feature/DEMO-7", Path: "/src/web-DEMO-7", LinkedAt: at},
+		{Key: "DEMO-7", Repo: "example-org/api", Branch: "feature/DEMO-7", Path: "/src/api-DEMO-7", LinkedAt: at},
+		{Key: "DEMO-8", Repo: "example-org/web", Branch: "feature/DEMO-8", Path: "/src/web-DEMO-8", LinkedAt: at},
+	} {
+		if err := h.app.links().Add(w); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code := h.exec("unlink", "demo-7"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	for _, want := range []string{"✓ DEMO-7 ✗ feature/DEMO-7 (example-org/api)", "✓ DEMO-7 ✗ feature/DEMO-7 (example-org/web)"} {
+		if !strings.Contains(h.out.String(), want) {
+			t.Errorf("output missing %q: %q", want, h.out)
+		}
+	}
+	if links, _ := h.app.links().Load(); len(links) != 1 || links[0].Key != "DEMO-8" {
+		t.Errorf("links = %+v", links)
+	}
+	if code := h.exec("unlink", "DEMO-7"); code == 0 || !strings.Contains(h.errOut.String(), "no work is linked to DEMO-7") {
+		t.Errorf("exit %d, %q", code, h.errOut)
 	}
 }

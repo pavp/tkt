@@ -87,6 +87,63 @@ func (l Links) Add(w Work) error {
 	return paths.WritePrivateFile(l.Path, b)
 }
 
+// Remove drops the links match selects and returns them; it writes nothing when none matches.
+func (l Links) Remove(match func(Work) bool) ([]Work, error) {
+	all, err := l.Load()
+	if err != nil {
+		return nil, err
+	}
+	var kept, removed []Work
+	for _, w := range all {
+		if match(w) {
+			removed = append(removed, w)
+		} else {
+			kept = append(kept, w)
+		}
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	b, err := json.MarshalIndent(kept, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return removed, paths.WritePrivateFile(l.Path, b)
+}
+
+// Prune leaves out links to a worktree that no longer exists in a repository discovery scanned: the link is
+// forgotten when the branch is gone too, and keeps only its branch while git still has it. Links to repositories
+// without a local clone stay, since nothing here can tell they are stale.
+func Prune(links, discovered []Work, clones []Clone, exists func(path string) bool) []Work {
+	scanned := func(repo string) bool {
+		for _, c := range clones {
+			if strings.EqualFold(c.Repo, repo) {
+				return true
+			}
+		}
+		return false
+	}
+	found := func(w Work) bool {
+		for _, d := range discovered {
+			if strings.EqualFold(d.Repo, w.Repo) && d.Branch == w.Branch {
+				return true
+			}
+		}
+		return false
+	}
+	var out []Work
+	for _, w := range links {
+		if w.Path != "" && scanned(w.Repo) && !exists(w.Path) {
+			if !found(w) {
+				continue
+			}
+			w.Path = ""
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
 // Clone is a local checkout of a configured repository.
 type Clone struct {
 	Repo string

@@ -41,6 +41,10 @@ func (a *App) allWork(ctx context.Context, c *config.Config) ([]workspace.Work, 
 	if err != nil {
 		return nil, err
 	}
+	links = workspace.Prune(links, discovered, clones, func(p string) bool {
+		_, err := os.Stat(p)
+		return !errors.Is(err, fs.ErrNotExist)
+	})
 	return workspace.Merge(links, discovered), nil
 }
 
@@ -123,6 +127,51 @@ func newLinkCmd(a *App) *cobra.Command {
 	cmd.Flags().StringVar(&dir, "dir", "", "worktree to register (default: current directory)")
 	cmd.Flags().StringVar(&source, "source", "agent", "who registers the work: agent or hook")
 	_ = cmd.Flags().MarkHidden("source")
+	return cmd
+}
+
+func newUnlinkCmd(a *App) *cobra.Command {
+	var dir string
+	cmd := &cobra.Command{
+		Use:   "unlink [KEY]",
+		Short: "Forget the work registered on a ticket",
+		Long: "Forget the work `tkt link` registered: the current worktree's branch, or with KEY every link of that ticket.\n" +
+			"A branch git still has keeps showing on the board through discovery until it is deleted.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var match func(workspace.Work) bool
+			var none error
+			if len(args) == 1 {
+				key := ticket.Key(strings.ToUpper(args[0]))
+				match = func(w workspace.Work) bool { return w.Key == key }
+				none = fmt.Errorf("no work is linked to %s", key)
+			} else {
+				co, err := a.inspectCheckout(cmd.Context(), dir)
+				if err != nil {
+					return err
+				}
+				match = func(w workspace.Work) bool {
+					return strings.EqualFold(w.Repo, co.repo) && w.Branch == co.branch
+				}
+				none = fmt.Errorf("nothing is linked to branch %q (%s)", co.branch, co.repo)
+			}
+			removed, err := a.links().Remove(match)
+			if err != nil {
+				return err
+			}
+			if len(removed) == 0 {
+				return none
+			}
+			if a.jsonOut {
+				return a.printJSON(removed)
+			}
+			for _, w := range removed {
+				a.printf("✓ %s ✗ %s (%s)\n", w.Key, w.Branch, w.Repo)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&dir, "dir", "", "worktree to forget (default: current directory)")
 	return cmd
 }
 
