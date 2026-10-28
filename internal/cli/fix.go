@@ -24,7 +24,7 @@ func newFixCmd(a *App) *cobra.Command {
 		Use:   "fix [KEY]",
 		Short: "Send a ticket's failing CI, review comments and merge conflicts to its agent",
 		Long: "Collect the failing check logs, the requested-change reviews, the unresolved review comments and\n" +
-			"the merge conflicts of a ticket's open pull requests, and send them to the ticket's Claude Code agent\n" +
+			"the merge conflicts of a ticket's open pull requests, and send them to the ticket's agent\n" +
 			"in Herdr as a prompt. Outside Herdr, or with --print, the prompt is printed instead. Nothing is written\n" +
 			"to Jira or GitHub.",
 		Args: cobra.MaximumNArgs(1),

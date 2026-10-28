@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -76,8 +77,7 @@ func (a *App) doctor(cmd *cobra.Command) []check {
 	}{
 		{"git", true, "needed to find worktrees and branches"},
 		{"gh", true, "needed for GitHub access (`gh auth login`)"},
-		{"claude", true, "needed by `tkt start` to open the agent"},
-		{"herdr", false, "optional: enables the Herdr plugin"},
+		{"herdr", false, "optional: enables the Herdr plugin, and tells tkt which agents it can open"},
 	} {
 		if p, err := a.Run.LookPath(tool.name); err == nil {
 			checks = append(checks, check{tool.name, statusOK, p, ""})
@@ -86,6 +86,12 @@ func (a *App) doctor(cmd *cobra.Command) []check {
 		} else {
 			checks = append(checks, check{tool.name, statusWarn, "not found in PATH", tool.why})
 		}
+	}
+
+	if kinds, err := a.agentKinds(cmd.Context()); err != nil {
+		checks = append(checks, check{"agents", statusFail, err.Error(), "needed by `tkt start` to open an agent"})
+	} else {
+		checks = append(checks, check{"agents", statusOK, strings.Join(kinds, ", "), ""})
 	}
 
 	if c == nil {

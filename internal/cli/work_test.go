@@ -48,6 +48,7 @@ func workHarness(t *testing.T) (*harness, *[]launchCall) {
 	}
 	h.run.out["git worktree list --porcelain"] = ""
 	h.run.out["git for-each-ref --format=%(refname:short) refs/heads refs/remotes/origin"] = "main\n"
+	h.run.out["wl-copy"] = ""
 	var calls []launchCall
 	h.app.Launch = func(dir, name string, args []string) error {
 		calls = append(calls, launchCall{dir, name, args})
@@ -149,7 +150,7 @@ func TestStartPicksReposAndLaunchesAgent(t *testing.T) {
 		t.Fatalf("launches = %+v", *calls)
 	}
 	c := (*calls)[0]
-	if c.dir != api || c.name != "claude" || !strings.Contains(c.args[0], "Work on Jira ticket DEMO-7: Export users") || strings.Contains(c.args[0], "herdr") {
+	if prompt := h.run.stdin["wl-copy"]; c.dir != api || c.name != "claude" || !strings.Contains(prompt, "Work on Jira ticket DEMO-7: Export users") || strings.Contains(prompt, "herdr") {
 		t.Errorf("launch = %+v", c)
 	}
 	out := h.out.String()
@@ -193,7 +194,7 @@ func TestStartOpensExistingWorktree(t *testing.T) {
 	if code := h.exec("start", "DEMO-1"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	if len(*calls) != 1 || (*calls)[0].dir != "/src/web-DEMO-1" || !strings.Contains((*calls)[0].args[0], "Continue work on Jira ticket DEMO-1") {
+	if len(*calls) != 1 || (*calls)[0].dir != "/src/web-DEMO-1" || !strings.Contains(h.run.stdin["wl-copy"], "Continue work on Jira ticket DEMO-1") {
 		t.Errorf("launches = %+v", *calls)
 	}
 	if strings.Contains(h.out.String(), "Suggested") {
