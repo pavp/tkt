@@ -42,6 +42,8 @@ type HerdrAPI interface {
 	Watch(ctx context.Context, subs []herdr.Subscription, on func(herdr.Event)) error
 	FocusPluginPane(ctx context.Context, paneID string) error
 	ClosePluginPane(ctx context.Context, paneID string) error
+	ClosePane(ctx context.Context, paneID string) error
+	CloseWorkspace(ctx context.Context, id string) error
 	Notify(ctx context.Context, title, body string) error
 	LinkPlugin(ctx context.Context, path string) error
 	UnlinkPlugin(ctx context.Context, id string) error
@@ -919,6 +921,9 @@ func (a *App) herdrOnWorktree(cmd *cobra.Command) error {
 		return err
 	}
 	a.printf("✓ %s ← %s (%s)\n", key, co.branch, co.repo)
+	if ho, ok := a.takeHandoff(key, co.repo); ok {
+		a.handOff(cmd.Context(), ho, eventWorkspace(a.Env.Getenv("HERDR_PLUGIN_EVENT_JSON")))
+	}
 	if snap, ok, _ := a.cache().Load(); ok {
 		_, _, _ = a.updateSidebar(cmd.Context(), c, snap, true)
 	}

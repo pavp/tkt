@@ -205,6 +205,8 @@ type state struct {
 	LastRepos map[string][]string `json:"last_repos,omitempty"`
 	// LastAgent is the agent kind last chosen to open, offered first next time.
 	LastAgent string `json:"last_agent,omitempty"`
+	// Handoffs are the Starts waiting for their setup agent's worktree.
+	Handoffs []handoff `json:"handoffs,omitempty"`
 	// JiraSite and JiraEmail remember which account `tkt auth jira` stored a token for, so setup need not ask.
 	JiraSite  string `json:"jira_site,omitempty"`
 	JiraEmail string `json:"jira_email,omitempty"`

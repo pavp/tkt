@@ -296,6 +296,19 @@ This checkout is free (no other agent, no local changes), so work in it and do n
 4. Then implement the ticket.`, key, summary)
 }
 
+// HandoffPrompt is the first message for the agent tkt starts in a worktree a setup agent just created from the
+// main checkout at clone, whose ignored files (such as .env.local) the worktree lacks.
+func HandoffPrompt(key ticket.Key, summary, clone string) string {
+	return fmt.Sprintf(`Work on Jira ticket %[1]s: %[2]s
+
+This worktree was just created for the ticket from the main checkout at %[3]s, and tkt already registered it.
+1. Save the ticket context and read it: tkt context %[1]s --images .ticket-assets > .ticket.md
+   Keep .ticket.md and .ticket-assets/ out of git by adding them to .git/info/exclude.
+2. When this repository's rules call for it, copy from %[3]s the files git ignores that the project needs to run (such as .env.local).
+3. Confirm the registration: tkt link %[1]s
+4. Then implement the ticket.`, key, summary, clone)
+}
+
 // ContinuePrompt is the first message when the agent opens in an existing worktree.
 func ContinuePrompt(key ticket.Key, summary string) string {
 	return fmt.Sprintf("Continue work on Jira ticket %s: %s. Refresh the context with `tkt context %s --images .ticket-assets > .ticket.md` and read .ticket.md first.", key, summary, key)
