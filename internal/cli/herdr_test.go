@@ -310,16 +310,17 @@ func TestStartChoices(t *testing.T) {
 		lastRepos               []string
 		want                    tui.StartChoices
 	}{
-		{"one worktree", "worktree /src/web-DEMO-1-a\nHEAD a\nbranch refs/heads/feature/DEMO-1-a\n", `[]`, nil, tui.StartChoices{}},
+		{"one worktree", "worktree /src/web-DEMO-1-a\nHEAD a\nbranch refs/heads/feature/DEMO-1-a\n", `[]`, nil, tui.StartChoices{Opens: true}},
+		{"one worktree, its agent runs", "worktree /src/web-DEMO-1-a\nHEAD a\nbranch refs/heads/feature/DEMO-1-a\n", `[` + agent("w5", "/src/web-DEMO-1-a") + `]`, nil, tui.StartChoices{}},
 		{"the agent tells", twoWorktrees, `[` + agent("w6", "/src/web-DEMO-1-b") + `]`, nil, tui.StartChoices{}},
 		{"no agent tells", twoWorktrees, `[]`, nil, tui.StartChoices{Worktrees: []tui.WorktreeChoice{
 			{Repo: "example-org/web", Branch: "feature/DEMO-1-a", Path: "/src/web-DEMO-1-a"}, {Repo: "example-org/web", Branch: "feature/DEMO-1-b", Path: "/src/web-DEMO-1-b"}}}},
 		{"both have agents", twoWorktrees, `[` + agent("w5", "/src/web-DEMO-1-a") + `,` + agent("w6", "/src/web-DEMO-1-b") + `]`, nil, tui.StartChoices{Worktrees: []tui.WorktreeChoice{
 			{Repo: "example-org/web", Branch: "feature/DEMO-1-a", Path: "/src/web-DEMO-1-a", Agent: "working"}, {Repo: "example-org/web", Branch: "feature/DEMO-1-b", Path: "/src/web-DEMO-1-b", Agent: "working"}}}},
 		{"repositories, last used checked", "", `[]`, []string{"example-org/api"}, tui.StartChoices{Repos: []tui.RepoChoice{
-			{Name: "example-org/web"}, {Name: "example-org/api", LastUsed: true, Checked: true}}}},
+			{Name: "example-org/web"}, {Name: "example-org/api", LastUsed: true, Checked: true}}, Opens: true}},
 		{"repositories, first checked when none was used", "", `[]`, nil, tui.StartChoices{Repos: []tui.RepoChoice{
-			{Name: "example-org/web", Checked: true}, {Name: "example-org/api"}}}},
+			{Name: "example-org/web", Checked: true}, {Name: "example-org/api"}}, Opens: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

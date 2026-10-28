@@ -28,6 +28,8 @@ type Actions interface {
 	// StartChoicesMsg, what Start would ask.
 	Start(key ticket.Key, opts StartOptions) tea.Cmd
 	StartChoices(key ticket.Key) tea.Cmd
+	// AgentKinds reports, as an AgentKindsMsg, the agents installed that Herdr can start.
+	AgentKinds() tea.Cmd
 	TicketPane(key ticket.Key) tea.Cmd
 	Open(url string) tea.Cmd
 	// Fix sends a ticket's feedback to its agent; known, when set, is the board's copy of the ticket, whose
@@ -219,6 +221,9 @@ type Model struct {
 	stale   error
 	loading bool
 	actions Actions
+	// agentKinds are the agents installed that Herdr can start, lastAgent the one last chosen.
+	agentKinds []string
+	lastAgent  string
 
 	view, filter string
 	col, row     int
@@ -322,7 +327,7 @@ func New(snap board.Snapshot, haveSnap bool, actions Actions, view string) Model
 
 // Init reads the cached board's agent states apart from the refresh, which waits on Jira and GitHub.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.actions.Refresh(), tick(), tea.Tick(spinEvery, func(time.Time) tea.Msg { return spinMsg{} })}
+	cmds := []tea.Cmd{m.actions.Refresh(), m.actions.AgentKinds(), tick(), tea.Tick(spinEvery, func(time.Time) tea.Msg { return spinMsg{} })}
 	if !m.snap.FetchedAt.IsZero() {
 		cmds = append(cmds, m.actions.Agents(m.snap))
 	}
@@ -1113,6 +1118,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = string(msg)
 	case StartChoicesMsg:
 		return m.startChoices(msg)
+	case AgentKindsMsg:
+		m.agentKinds, m.lastAgent = msg.Kinds, msg.Last
+		return m, nil
 	case TransitionsMsg:
 		return m.transitions(msg)
 	case movesFetchedMsg:
@@ -2855,14 +2863,13 @@ func agentCell(status string, agentW int, plain bool) string {
 	return agentStyle(status).Render(cell)
 }
 
-// agentShort words an agent status without the agent's name, as the list and cards have little room;
-// it is empty when no agent runs.
+// agentShort words an agent status; it is empty when no agent runs.
 func agentShort(status string) (string, board.AgentKind) {
 	line, kind := board.AgentLine(status)
 	if kind == board.AgentNone {
 		return "", kind
 	}
-	return strings.Replace(line, "claude ", "", 1), kind
+	return line, kind
 }
 
 var columnColors = map[ticket.Category]lipgloss.Color{ticket.ToDo: ctpGray, ticket.InProgress: ctpBlue, ticket.InReview: ctpMauve, ticket.Done: ctpGreen}
@@ -3184,7 +3191,7 @@ func actionHint(t ticket.Ticket) string {
 	case len(reasons) > 0:
 		return "f sends the review comments to the agent"
 	case len(t.PRs) == 0 && t.Category == ticket.ToDo:
-		return "enter asks for repos and opens Claude Code"
+		return "enter asks for repos and opens an agent"
 	case len(t.PRs) == 0:
 		return "enter opens the agent"
 	}

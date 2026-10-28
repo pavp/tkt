@@ -15,8 +15,8 @@ Forecast: 476–755 authored changed lines → 2 slices (CLI 260–390, board 21
 
 | ID | Specs | Route | Status | Commit |
 |---|---|---|---|---|
-| T1 | S1 (CLI: `--agent`, terminal ask), S2, S3, S4, S5 (CLI) | inline, no Writer reason | done (RED: build failed on `LastAgent` → GREEN; `go test ./...`, vet, gofmt clean; live `tkt doctor` → "pi, claude, opencode, copilot") | slice 1 |
-| T2 | S1 (board: Start agent picker, "A new agent ▸"), S5 (board) | inline, no Writer reason | pending | |
+| T1 | S1 (CLI: `--agent`, terminal ask), S2, S3, S4, S5 (CLI) | inline, no Writer reason | done (RED: build failed on `LastAgent` → GREEN; `go test ./...`, vet, gofmt clean; live `tkt doctor` → "pi, claude, opencode, copilot") | slice 1, PR #117 |
+| T2 | S1 (board: Start agent picker, "A new agent ▸"), S5 (board) | inline, no Writer reason | done (RED: build failed on `AgentTask.Kind` → GREEN; `go test ./...`, vet, gofmt clean; 277 lines) | slice 2 |
 
 ## Log
 

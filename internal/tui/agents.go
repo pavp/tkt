@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -17,6 +18,15 @@ type AgentTask struct {
 	Key    ticket.Key
 	// Known is the board's copy of the ticket, whose pull requests need no fetching.
 	Known *ticket.Ticket
+	// Kind is the agent to open for it when a new one opens, empty for the last one chosen.
+	Kind string
+}
+
+// AgentKindsMsg delivers the agents installed that Herdr can start, with the last one chosen, or why they are unknown.
+type AgentKindsMsg struct {
+	Kinds []string
+	Last  string
+	Err   error
 }
 
 func (t AgentTask) String() string {
@@ -116,10 +126,35 @@ func homeShort(dir string) string {
 
 // agentChoice asks which agent takes a task: a new one, placed where its work belongs, or one already open.
 func (m Model) agentChoice(task AgentTask) *menu {
+	newAgent := menuItem{label: "A new agent", run: func() tea.Cmd { return m.actions.NewAgentTask(task) }}
+	if len(m.agentKinds) > 1 {
+		newAgent = menuItem{label: "A new agent ▸", sub: func() *menu { return m.kindChoice(task) }}
+	}
 	return &menu{title: "Send " + task.Phrase() + " to", items: []menuItem{
-		{label: "A new agent", run: func() tea.Cmd { return m.actions.NewAgentTask(task) }},
+		newAgent,
 		{label: "An open agent ▸", run: func() tea.Cmd { return m.actions.OpenAgents(task) }},
 	}}
+}
+
+// kindChoice asks which of the installed agents a new agent is, the last one chosen first.
+func (m Model) kindChoice(task AgentTask) *menu {
+	kinds := slices.Clone(m.agentKinds)
+	if i := slices.Index(kinds, m.lastAgent); i > 0 {
+		kinds = slices.Insert(slices.Delete(kinds, i, i+1), 0, m.lastAgent)
+	}
+	var items []menuItem
+	for _, k := range kinds {
+		note := ""
+		if k == m.lastAgent {
+			note = "last used"
+		}
+		items = append(items, menuItem{label: k, note: note, run: func() tea.Cmd {
+			t := task
+			t.Kind = k
+			return m.actions.NewAgentTask(t)
+		}})
+	}
+	return &menu{title: "Send " + task.Phrase() + " to", subtitle: "a new agent", items: items}
 }
 
 // feedbackItems send a ticket's feedback: to its own agent when it has one, with another agent a step away;

@@ -104,6 +104,7 @@ func TestBoardStartClearsTheScreenAndPassesTheChoices(t *testing.T) {
 		{"plain", false, tui.StartOptions{}, []string{"start", "DEMO-1"}},
 		{"worktree in Herdr", true, tui.StartOptions{Worktree: "/src/web-DEMO-1-b"}, []string{"herdr", "start", "DEMO-1", "--worktree", "/src/web-DEMO-1-b"}},
 		{"repositories", true, tui.StartOptions{Repos: []string{"example-org/web", "example-org/api"}}, []string{"herdr", "start", "DEMO-1", "--repo", "example-org/web", "--repo", "example-org/api"}},
+		{"agent", true, tui.StartOptions{Agent: "opencode"}, []string{"herdr", "start", "DEMO-1", "--agent", "opencode"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

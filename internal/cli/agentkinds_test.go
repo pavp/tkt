@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -178,5 +179,41 @@ func TestDoctorNamesTheInstalledAgents(t *testing.T) {
 	h.exec("doctor")
 	if out := h.out.String(); !strings.Contains(out, "✓ agents") || !strings.Contains(out, "pi, claude") || strings.Contains(out, "codex") {
 		t.Errorf("doctor output:\n%s", out)
+	}
+}
+
+func TestBoardLearnsTheInstalledAgents(t *testing.T) {
+	b, h, _ := agentsHarness(t)
+	h.run.out["herdr agent start --help"] = herdrHelp("pi", "claude", "codex")
+	h.run.missing["codex"] = true
+	st := h.app.loadState()
+	st.LastAgent = "claude"
+	h.app.saveState(st)
+	got := b.AgentKinds()()
+	if want := (tui.AgentKindsMsg{Kinds: []string{"pi", "claude"}, Last: "claude"}); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+	h.run.missing["herdr"] = true
+	if got, _ := b.AgentKinds()().(tui.AgentKindsMsg); got.Err == nil || got.Kinds != nil {
+		t.Errorf("without Herdr: %+v", got)
+	}
+}
+
+func TestNewAgentOpensTheAgentChosenAndRemembersIt(t *testing.T) {
+	b, h, f := agentsHarness(t)
+	h.clone(t, "web")
+	h.run.out["herdr agent start --help"] = herdrHelp("claude", "opencode")
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[]}`
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+	pr := ticket.PullRequest{Repo: "example-org/web", Number: 820, URL: "https://github.com/example-org/web/pull/820"}
+	if msg := b.NewAgentTask(tui.AgentTask{Review: &pr, Kind: "opencode"})(); msg != (tea.QuitMsg{}) {
+		t.Fatalf("msg %v", msg)
+	}
+	if start := f.Last("agent.start"); start["kind"] != "opencode" {
+		t.Errorf("agent.start = %v", start)
+	}
+	if got := h.app.loadState().LastAgent; got != "opencode" {
+		t.Errorf("last agent = %q", got)
 	}
 }

@@ -498,7 +498,18 @@ func (b *boardActions) startCommand(key ticket.Key, opts tui.StartOptions) (*exe
 	for _, r := range opts.Repos {
 		args = append(args, "--repo", r)
 	}
+	if opts.Agent != "" {
+		args = append(args, "--agent", opts.Agent)
+	}
 	return exec.Command("sh", append([]string{"-c", `printf '\033[H\033[2J'; exec "$0" "$@"`, exe}, args...)...), nil
+}
+
+// AgentKinds learns the agents installed that Herdr can start, which the board offers when it opens one.
+func (b *boardActions) AgentKinds() tea.Cmd {
+	return func() tea.Msg {
+		kinds, err := b.a.agentKinds(b.ctx)
+		return tui.AgentKindsMsg{Kinds: kinds, Last: b.a.loadState().LastAgent, Err: err}
+	}
 }
 
 // StartChoices reads what a Start of key would ask, with the agents' states when the board runs in Herdr.

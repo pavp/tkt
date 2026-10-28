@@ -79,7 +79,7 @@ func (r *recorder) SendTask(task AgentTask, pane string) tea.Cmd {
 }
 
 func (r *recorder) NewAgentTask(task AgentTask) tea.Cmd {
-	return r.cmd("new agent " + task.String())
+	return r.cmd(strings.TrimSpace("new agent " + task.String() + " " + task.Kind))
 }
 
 func (r *recorder) CloneAndStart(task AgentTask, repo string) tea.Cmd {
@@ -220,8 +220,12 @@ func (r *recorder) Start(k ticket.Key, o StartOptions) tea.Cmd {
 	if o.Worktree != "" {
 		call += " worktree=" + o.Worktree
 	}
+	if o.Agent != "" {
+		call += " agent=" + o.Agent
+	}
 	return r.cmd(call)
 }
+func (r *recorder) AgentKinds() tea.Cmd { return nil }
 func (r *recorder) StartChoices(k ticket.Key) tea.Cmd {
 	r.calls = append(r.calls, "choices "+string(k))
 	choices := r.choices
@@ -600,7 +604,7 @@ func TestMatchesMockupDetails(t *testing.T) {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	next, _ = next.Update(SnapshotMsg{Snap: snap})
 	view := stripANSI(next.View())
-	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 Sprint  3 ", "2 PRs  3 ", "│ ◫ View │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens Claude Code"} {
+	for _, want := range []string{"DEMO · DEMO S42 · 4d left", "✓ synced 3 min ago", "1 Sprint  3 ", "2 PRs  3 ", "│ ◫ View │", "DEMO-3  To Do  · Export CSV\n unassigned · enter asks for repos and opens an agent"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
@@ -4593,7 +4597,12 @@ func openAgentsFixture() []OpenAgent {
 // reviewMenu opens the PRs filter's menu of the review request #820.
 func reviewMenu(t *testing.T, r *recorder) tea.Model {
 	t.Helper()
-	m := press(loaded(r), "2")
+	return reviewMenuOf(t, loaded(r))
+}
+
+func reviewMenuOf(t *testing.T, m tea.Model) tea.Model {
+	t.Helper()
+	m = press(m, "2")
 	for i := 0; i < 10; i++ {
 		if it, _ := m.(Model).current(); it.review() {
 			return press(m, "enter")
@@ -4929,5 +4938,71 @@ func TestSprintAndTeamMenusCopyTheJiraLink(t *testing.T) {
 	pick(t, press(tm, "enter"), "Copy the Jira link")
 	if !slices.Contains(tr.calls, "copy link https://example.atlassian.net/browse/DEMO-9") {
 		t.Errorf("a team ticket's menu copies its Jira link: %v", tr.calls)
+	}
+}
+
+func withKinds(m tea.Model, last string, kinds ...string) tea.Model {
+	m, _ = m.Update(AgentKindsMsg{Kinds: kinds, Last: last})
+	return m
+}
+
+func TestStartAsksWhichAgentWhenSeveralAreInstalled(t *testing.T) {
+	for _, width := range []int{160, 56} {
+		r := &recorder{choices: StartChoices{Opens: true}}
+		m := tea.Model(New(snapshot(), true, r, ViewList))
+		m, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+		m = startFromMenu(press(withKinds(m, "claude", "pi", "claude", "opencode"), "enter"))
+		v := stripANSI(m.View())
+		for _, want := range []string{"Start DEMO-1", "Which agent?", "pi", "claude", "last used", "opencode", "Open", "Cancel"} {
+			if !strings.Contains(v, want) {
+				t.Fatalf("width %d: modal lacks %q:\n%s", width, want, v)
+			}
+		}
+		if slices.ContainsFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, "start") }) {
+			t.Fatalf("started before choosing: %v", r.calls)
+		}
+		if press(m, "enter"); r.last() != "start DEMO-1 agent=claude" {
+			t.Errorf("width %d: the last agent is preselected: %v", width, r.calls)
+		}
+	}
+	r := &recorder{choices: twoRepos()}
+	r.choices.Opens = true
+	m := startFromMenu(press(withKinds(loaded(r), "", "claude", "opencode"), "l", "enter"))
+	m = press(m, "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Which agent?") {
+		t.Fatalf("the agent is asked after the repositories:\n%s", v)
+	}
+	if press(m, "s", "enter"); r.last() != "start DEMO-1 repos=example-org/api agent=opencode" {
+		t.Errorf("calls = %v", r.calls)
+	}
+}
+
+func TestStartAsksNoAgentWhenOneIsInstalledOrOneRuns(t *testing.T) {
+	r := &recorder{choices: StartChoices{Opens: true}}
+	startFromMenu(press(withKinds(loaded(r), "", "opencode"), "l", "enter"))
+	if r.last() != "start DEMO-1" {
+		t.Errorf("one agent installed: calls = %v", r.calls)
+	}
+	r = &recorder{choices: twoWorktrees()}
+	m := startFromMenu(press(withKinds(loaded(r), "", "claude", "opencode"), "l", "enter"))
+	if press(m, "s", "enter"); r.last() != "start DEMO-1 worktree=/src/web-DEMO-1-b" {
+		t.Errorf("the worktree whose agent runs opens it: calls = %v", r.calls)
+	}
+	m = startFromMenu(press(withKinds(loaded(r), "", "claude", "opencode"), "l", "enter"))
+	if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, "Which agent?") {
+		t.Errorf("a worktree with no agent asks which to open:\n%s", v)
+	}
+}
+
+func TestReviewRequestGoesToTheNewAgentChosen(t *testing.T) {
+	r := &recorder{}
+	m := pick(t, reviewMenuOf(t, withKinds(loaded(r), "opencode", "claude", "opencode")), "Review with")
+	m = pick(t, m, "A new agent ▸")
+	if v := stripANSI(m.View()); !strings.Contains(v, "claude") || !strings.Contains(v, "opencode") || !strings.Contains(v, "last used") {
+		t.Fatalf("the new agent's kind is asked:\n%s", v)
+	}
+	pick(t, m, "opencode")
+	if !slices.Contains(r.calls, "new agent review of #820 opencode") {
+		t.Errorf("calls %v", r.calls)
 	}
 }

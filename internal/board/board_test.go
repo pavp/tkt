@@ -545,10 +545,10 @@ func TestAgentLine(t *testing.T) {
 		status, want string
 		kind         AgentKind
 	}{
-		{"working", "● claude working", AgentWorking},
-		{"blocked", "● claude needs you", AgentNeedsYou},
-		{"idle", "○ claude idle", AgentIdle},
-		{"done", "● claude done", AgentIdle},
+		{"working", "● working", AgentWorking},
+		{"blocked", "● needs you", AgentNeedsYou},
+		{"idle", "○ idle", AgentIdle},
+		{"done", "● done", AgentIdle},
 		{"unknown", "no agent", AgentNone},
 		{"", "no agent", AgentNone},
 	}

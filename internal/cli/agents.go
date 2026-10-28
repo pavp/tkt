@@ -208,7 +208,7 @@ func (b *boardActions) startTask(task tui.AgentTask, prompt, dir, note, label st
 		prompt += "\n\n" + note
 	}
 	h := b.a.NewHerdr()
-	pane, err := b.a.startTaskAgent(b.ctx, h, dir, label, prompt)
+	pane, err := b.a.startTaskAgent(b.ctx, h, task.Kind, dir, label, prompt)
 	if err != nil {
 		return tui.StatusMsg("could not start an agent for the " + task.String() + ": " + err.Error())
 	}
@@ -289,7 +289,7 @@ func (b *boardActions) cloneOf(repo string) (string, error) {
 // startTaskAgent prompts a free agent already in dir, else starts one in a pane opened beside a pane of dir, else
 // in a new workspace; panes without an agent are never taken over, since tkt cannot tell what runs in them. It
 // returns the pane the task went to.
-func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, dir, label, prompt string) (string, error) {
+func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, kind, dir, label, prompt string) (string, error) {
 	same := func(p string) bool { return p != "" && filepath.Clean(p) == filepath.Clean(dir) }
 	agents, err := h.Agents(ctx)
 	if err != nil {
@@ -300,7 +300,11 @@ func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, dir, label, prompt
 			return ag.PaneID, h.Prompt(ctx, ag.PaneID, prompt)
 		}
 	}
-	kind, err := a.defaultAgent(ctx)
+	if kind == "" {
+		kind, err = a.defaultAgent(ctx)
+	} else {
+		kind, err = a.pickAgent(ctx, kind)
+	}
 	if err != nil {
 		return "", err
 	}

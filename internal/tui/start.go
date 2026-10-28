@@ -18,6 +18,8 @@ import (
 type StartChoices struct {
 	Worktrees []WorktreeChoice
 	Repos     []RepoChoice
+	// Opens says Start opens an agent rather than going to one already running, so it asks which.
+	Opens bool
 }
 
 // WorktreeChoice is one worktree of the ticket; Agent is the status of the agent working in it, if any.
@@ -35,6 +37,8 @@ type RepoChoice struct {
 type StartOptions struct {
 	Repos    []string
 	Worktree string
+	// Agent is the agent kind to open, empty for Start to pick the only one installed.
+	Agent string
 }
 
 // StartChoicesMsg carries what a Start of Key would ask; the board asks it in a modal before Start runs.
@@ -52,12 +56,16 @@ type picker struct {
 	multi           bool
 	// filter marks the repository or board filter, which applies the checked rows instead of starting.
 	filter string
-	sel    int
+	// start holds the answers given so far when the picker asks which agent Start opens.
+	start *StartOptions
+	sel   int
 }
 
 type pickerRow struct {
 	label, hint, value string
 	checked            bool
+	// opens marks a worktree with no agent running, where Start opens one.
+	opens bool
 }
 
 func worktreePicker(key ticket.Key, ws []WorktreeChoice) *picker {
@@ -76,7 +84,7 @@ func worktreePicker(key ticket.Key, ws []WorktreeChoice) *picker {
 		if w.Agent != "" {
 			hint = "● " + w.Agent
 		}
-		p.rows = append(p.rows, pickerRow{label: label, hint: hint, value: w.Path})
+		p.rows = append(p.rows, pickerRow{label: label, hint: hint, value: w.Path, opens: w.Agent == ""})
 	}
 	return p
 }
@@ -89,6 +97,19 @@ func repoPicker(key ticket.Key, rs []RepoChoice) *picker {
 			hint = "last used"
 		}
 		p.rows = append(p.rows, pickerRow{label: r.Name, hint: hint, value: r.Name, checked: r.Checked})
+	}
+	return p
+}
+
+// agentPicker asks which of the installed agents Start opens, the last one chosen preselected.
+func agentPicker(key ticket.Key, opts StartOptions, kinds []string, last string) *picker {
+	p := &picker{key: key, title: "Start " + string(key), question: "Which agent?", start: &opts, sel: max(slices.Index(kinds, last), 0)}
+	for _, k := range kinds {
+		hint := ""
+		if k == last {
+			hint = "last used"
+		}
+		p.rows = append(p.rows, pickerRow{label: k, hint: hint, value: k})
 	}
 	return p
 }
@@ -153,16 +174,31 @@ func (m Model) startChoices(msg StartChoicesMsg) (tea.Model, tea.Cmd) {
 	case len(msg.Choices.Repos) > 1:
 		m.picker = repoPicker(msg.Key, msg.Choices.Repos)
 	default:
-		return m, m.actions.Start(msg.Key, StartOptions{})
+		return m.start(msg.Key, StartOptions{}, msg.Choices.Opens)
 	}
 	return m, nil
+}
+
+// start runs Start, first asking which agent it opens when it opens one and several are installed.
+func (m Model) start(key ticket.Key, opts StartOptions, opens bool) (tea.Model, tea.Cmd) {
+	if opens && len(m.agentKinds) > 1 {
+		m.picker = agentPicker(key, opts, m.agentKinds, m.lastAgent)
+		return m, nil
+	}
+	return m, m.actions.Start(key, opts)
 }
 
 func (m Model) finishPicker() (tea.Model, tea.Cmd) {
 	p := m.picker
 	if !p.multi {
 		m.picker = nil
-		return m, m.actions.Start(p.key, StartOptions{Worktree: p.rows[p.sel].value})
+		row := p.rows[p.sel]
+		if p.start != nil {
+			opts := *p.start
+			opts.Agent, m.lastAgent = row.value, row.value
+			return m, m.actions.Start(p.key, opts)
+		}
+		return m.start(p.key, StartOptions{Worktree: row.value}, row.opens)
 	}
 	var repos []string
 	for _, r := range p.rows {
@@ -181,7 +217,7 @@ func (m Model) finishPicker() (tea.Model, tea.Cmd) {
 	if p.filter != "" {
 		return m.applyFilter(p)
 	}
-	return m, m.actions.Start(p.key, StartOptions{Repos: repos})
+	return m.start(p.key, StartOptions{Repos: repos}, true)
 }
 
 func (m Model) pickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {

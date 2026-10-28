@@ -257,12 +257,14 @@ func (a *App) startChoices(ctx context.Context, c *config.Config, key ticket.Key
 		worktrees = append(worktrees, choice)
 	}
 	switch {
-	case len(worktrees) == 1, len(worktrees) > 1 && withAgent == 1:
+	case len(worktrees) == 1:
+		return tui.StartChoices{Opens: worktrees[0].Agent == ""}, nil
+	case len(worktrees) > 1 && withAgent == 1:
 		return tui.StartChoices{}, nil
 	case len(worktrees) > 1:
 		return tui.StartChoices{Worktrees: worktrees}, nil
 	case len(space.Repos) <= 1:
-		return tui.StartChoices{}, nil
+		return tui.StartChoices{Opens: true}, nil
 	}
 	last := map[string]bool{}
 	for _, n := range a.loadState().LastRepos[space.Key] {
@@ -277,7 +279,7 @@ func (a *App) startChoices(ctx context.Context, c *config.Config, key ticket.Key
 	if !anyLast {
 		repos[0].Checked = true
 	}
-	return tui.StartChoices{Repos: repos}, nil
+	return tui.StartChoices{Repos: repos, Opens: true}, nil
 }
 
 // pickRepos resolves --repo flags, or asks which of the space's repositories to use.
