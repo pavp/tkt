@@ -145,3 +145,50 @@ func TestPrompts(t *testing.T) {
 		t.Error("continue prompt")
 	}
 }
+
+func TestPruneForgetsLinksWhoseWorktreeAndBranchAreGone(t *testing.T) {
+	clones := []Clone{{Repo: "example-org/web", Dir: "/src/web"}}
+	discovered := []Work{
+		{Key: "DEMO-2", Repo: "example-org/web", Branch: "fix/DEMO-2", Source: SourceDiscovered},
+	}
+	links := []Work{
+		{Key: "DEMO-1", Repo: "example-org/web", Branch: "feature/DEMO-1", Path: "/wt/gone", Source: SourceAgent},
+		{Key: "DEMO-2", Repo: "example-org/web", Branch: "fix/DEMO-2", Path: "/wt/removed", Source: SourceAgent},
+		{Key: "DEMO-3", Repo: "example-org/web", Branch: "feature/DEMO-3", Path: "/wt/here", Source: SourceAgent},
+		{Key: "DEMO-4", Repo: "example-org/api", Branch: "feature/DEMO-4", Path: "/wt/elsewhere", Source: SourceAgent},
+	}
+	exists := func(p string) bool { return p == "/wt/here" }
+	got := Prune(links, discovered, clones, exists)
+	want := []Work{
+		{Key: "DEMO-2", Repo: "example-org/web", Branch: "fix/DEMO-2", Source: SourceAgent},
+		links[2],
+		links[3],
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Prune = %+v\nwant %+v", got, want)
+	}
+}
+
+func TestLinksRemove(t *testing.T) {
+	l := NewLinks(filepath.Join(t.TempDir(), "data"))
+	at := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	for _, w := range []Work{
+		{Key: "DEMO-1", Repo: "example-org/web", Branch: "feature/DEMO-1", Path: "/a", LinkedAt: at},
+		{Key: "DEMO-2", Repo: "example-org/web", Branch: "fix/DEMO-2", Path: "/b", LinkedAt: at},
+		{Key: "DEMO-2", Repo: "example-org/api", Branch: "fix/DEMO-2", Path: "/c", LinkedAt: at},
+	} {
+		if err := l.Add(w); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, err := l.Remove(func(w Work) bool { return w.Key == "DEMO-2" })
+	if err != nil || len(removed) != 2 {
+		t.Fatalf("removed = %+v, %v", removed, err)
+	}
+	if got, _ := l.Load(); len(got) != 1 || got[0].Key != "DEMO-1" {
+		t.Errorf("left = %+v", got)
+	}
+	if removed, err := l.Remove(func(Work) bool { return false }); err != nil || removed != nil {
+		t.Errorf("nothing to remove = %+v, %v", removed, err)
+	}
+}
