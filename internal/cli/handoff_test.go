@@ -161,3 +161,49 @@ func TestStartThenWorktreeLeavesOneAgentInTheWorktree(t *testing.T) {
 		t.Errorf("workspace.close = %v", f.Last("workspace.close"))
 	}
 }
+
+func TestOnWorktreeKeepsTheSetupAgentWhenTheNewAgentGetsNoPrompt(t *testing.T) {
+	h, f := handoffHarness(t, setupAgent())
+	f.Errors["agent.prompt"] = "agent_not_ready: agent claude is not an active named agent"
+	if code := h.exec("herdr", "on-worktree"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if count(f, "agent.start") != 1 || count(f, "workspace.close") != 0 || count(f, "pane.close") != 0 {
+		t.Errorf("closed the setup agent: %v", f.Requests)
+	}
+	if body, _ := f.Last("notification.show")["body"].(string); !strings.Contains(body, "w9:p1 did not get its prompt") || !strings.Contains(body, "w1:p2") {
+		t.Errorf("notification = %v", f.Last("notification.show"))
+	}
+}
+
+func TestOnWorktreeClosesTheSetupPaneWhenHerdrKeepsItsWorkspace(t *testing.T) {
+	h, f := handoffHarness(t, setupAgent())
+	f.Errors["workspace.close"] = "workspace_group_close_required"
+	if code := h.exec("herdr", "on-worktree"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if f.Last("pane.close")["pane_id"] != "w1:p2" || count(f, "notification.show") != 0 {
+		t.Errorf("pane.close = %v, notifications %d", f.Last("pane.close"), count(f, "notification.show"))
+	}
+}
+
+func TestOnWorktreeTellsTheUserWhenTheSetupAgentCannotBeClosed(t *testing.T) {
+	h, f := handoffHarness(t, setupAgent())
+	f.Errors["workspace.close"] = "workspace_group_close_required"
+	f.Errors["pane.close"] = "pane_busy"
+	if code := h.exec("herdr", "on-worktree"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if body, _ := f.Last("notification.show")["body"].(string); !strings.Contains(body, "could not close the setup agent of DEMO-7 in pane w1:p2") {
+		t.Errorf("notification = %v", f.Last("notification.show"))
+	}
+}
+
+func TestEventWorkspaceIsTheWorkspaceTheEventOpened(t *testing.T) {
+	raw := `{"event":"worktree.created","data":{"worktree":{"source":{"workspace":{"workspace_id":"w1"}},"checkout_path":"/x"},"workspace":{"workspace_id":"w9"}}}`
+	for range 50 {
+		if got := eventWorkspace(raw); got != "w9" {
+			t.Fatalf("eventWorkspace = %q", got)
+		}
+	}
+}

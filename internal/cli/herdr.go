@@ -508,21 +508,27 @@ func startAgent(ctx context.Context, h HerdrAPI, paneID, kind string) (string, e
 // Claude Code's folder trust prompt) gets the prompt after the user answers; the wait stays under the socket
 // deadline. When the prompt cannot be sent, the user gets it to paste, since the agent is already open.
 func (a *App) promptStarted(ctx context.Context, h HerdrAPI, agent, where, prompt string, startErr error) error {
+	_, err := a.promptAgent(ctx, h, agent, where, prompt, startErr)
+	return err
+}
+
+// promptAgent is promptStarted reporting whether the prompt reached the agent; when it did not, it was printed.
+func (a *App) promptAgent(ctx context.Context, h HerdrAPI, agent, where, prompt string, startErr error) (bool, error) {
 	if notReady(startErr) {
 		a.printf("! %s in %s is asking a question; answer it there and the prompt follows…\n", agent, where)
 		if err := h.WaitAgent(ctx, agent, "idle", 4*time.Minute); err != nil {
 			a.printf("! It did not get ready in time; give it this prompt:\n\n%s\n", prompt)
-			return nil
+			return false, nil
 		}
 	} else if startErr != nil {
-		return startErr
+		return false, startErr
 	}
 	if err := a.promptWhenNamed(ctx, h, agent, prompt); err != nil {
 		a.printf("! %s started in %s but did not get its first prompt (%v); give it this prompt:\n\n%s\n", agent, where, err, prompt)
-		return nil
+		return false, nil
 	}
 	a.printf("✓ %s started in %s\n", agent, where)
-	return nil
+	return true, nil
 }
 
 // promptWhenNamed retries while Herdr has not yet made the started agent's name active, which on WSL lags
