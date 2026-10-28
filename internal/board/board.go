@@ -771,13 +771,13 @@ const (
 func AgentLine(status string) (string, AgentKind) {
 	switch status {
 	case "working":
-		return "● claude working", AgentWorking
+		return "● working", AgentWorking
 	case "blocked":
-		return "● claude needs you", AgentNeedsYou
+		return "● needs you", AgentNeedsYou
 	case "done":
-		return "● claude done", AgentIdle
+		return "● done", AgentIdle
 	case "idle":
-		return "○ claude idle", AgentIdle
+		return "○ idle", AgentIdle
 	}
 	return "no agent", AgentNone
 }
