@@ -300,6 +300,10 @@ func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, dir, label, prompt
 			return ag.PaneID, h.Prompt(ctx, ag.PaneID, prompt)
 		}
 	}
+	kind, err := a.defaultAgent(ctx)
+	if err != nil {
+		return "", err
+	}
 	pane := ""
 	if panes, err := h.Panes(ctx); err == nil {
 		if i := slices.IndexFunc(panes, func(p herdr.Pane) bool { return same(p.Cwd) }); i >= 0 {
@@ -315,7 +319,7 @@ func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, dir, label, prompt
 		}
 		pane = root.ID
 	}
-	name, err := startClaude(ctx, h, pane)
+	name, err := startAgent(ctx, h, pane, kind)
 	if notReady(err) {
 		err = h.WaitAgent(ctx, name, "idle", 4*time.Minute)
 	}

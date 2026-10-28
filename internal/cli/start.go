@@ -24,15 +24,18 @@ import (
 func newStartCmd(a *App) *cobra.Command {
 	var repoFlags []string
 	var clone bool
-	var worktree string
+	var worktree, agent string
 	cmd := &cobra.Command{
 		Use:   "start KEY",
-		Short: "Open Claude Code to work on a ticket",
-		Long: "Open Claude Code to work on a ticket. When the ticket already has a worktree, the agent opens there.\n" +
+		Short: "Open an agent to work on a ticket",
+		Long: "Open an agent to work on a ticket. When the ticket already has a worktree, the agent opens there.\n" +
 			"Otherwise you pick the repositories (the last ones used for the space are preselected), and the\n" +
 			"agent opens in each local clone with instructions to create the branch and worktree following that\n" +
 			"project's rules, save the ticket context, and register the work with `tkt link`. tkt itself never\n" +
-			"creates branches or changes Jira.",
+			"creates branches or changes Jira.\n" +
+			"The agents offered are those Herdr can start (`herdr agent start --help`) that are installed; with\n" +
+			"several, you pick one (the last one used is preselected) or name it with --agent. Agents take their\n" +
+			"first prompt differently, so it goes on the clipboard to paste.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if a.jsonOut {
@@ -42,20 +45,31 @@ func newStartCmd(a *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			kind, err := a.pickAgent(cmd.Context(), agent)
+			if err != nil {
+				return err
+			}
+			var dir, where string
 			if plan.Existing != nil {
-				a.printf("Opening Claude Code in %s (%s)\n", plan.Existing.Path, plan.Existing.Branch)
-				return a.Launch(plan.Existing.Path, "claude", []string{plan.Prompt})
+				dir, where = plan.Existing.Path, fmt.Sprintf("%s (%s)", plan.Existing.Path, plan.Existing.Branch)
+			} else {
+				dir, where = plan.Dirs[0], plan.Dirs[0]
+				for _, d := range plan.Dirs[1:] {
+					a.printf("Also start it in %s:\n  cd %q && %s\n", d, d, kind)
+				}
 			}
-			for _, d := range plan.Dirs[1:] {
-				a.printf("Also start it in %s:\n  cd %q && claude %q\n", d, d, plan.Prompt)
+			if err := a.copyText(cmd.Context(), plan.Prompt); err != nil {
+				a.printf("Opening %s in %s; copy its first prompt (the clipboard failed: %v) and paste it there\n\n%s\n\n", kind, where, err, plan.Prompt)
+			} else {
+				a.printf("Opening %s in %s; its first prompt is on the clipboard: paste it there\n\n%s\n\n", kind, where, plan.Prompt)
 			}
-			a.printf("Opening Claude Code in %s\n", plan.Dirs[0])
-			return a.Launch(plan.Dirs[0], "claude", []string{plan.Prompt})
+			return a.Launch(dir, kind, nil)
 		},
 	}
 	cmd.Flags().StringArrayVar(&repoFlags, "repo", nil, "repository to start in (owner/name or name); repeat for several")
 	cmd.Flags().BoolVar(&clone, "clone", false, "clone missing repositories without asking")
 	cmd.Flags().StringVar(&worktree, "worktree", "", "open the ticket's worktree at this path instead of asking which one")
+	cmd.Flags().StringVar(&agent, "agent", "", "agent to open, such as claude or opencode, instead of asking")
 	cmd.MarkFlagsMutuallyExclusive("worktree", "repo")
 	return cmd
 }
@@ -76,7 +90,9 @@ type startOpts struct {
 	repos    []string
 	clone    bool
 	worktree string
-	prefer   func([]workspace.Work) (workspace.Work, bool)
+	// agent is the agent kind asked for, empty to pick one.
+	agent  string
+	prefer func([]workspace.Work) (workspace.Work, bool)
 }
 
 func (a *App) planStart(cmd *cobra.Command, args []string, opts startOpts) (startPlan, error) {

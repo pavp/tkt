@@ -605,11 +605,16 @@ func (b *boardActions) Fix(key ticket.Key, known *ticket.Ticket) tea.Cmd {
 // copy puts text on the user's clipboard: over SSH through their own terminal, since the remote
 // machine's clipboard is not theirs.
 func (b *boardActions) copy(text string) error {
-	if b.a.overSSH() {
-		b.a.copyOverTerminal(text)
+	return b.a.copyText(b.ctx, text)
+}
+
+// copyText copies text to the clipboard of the user's own machine, through the terminal over SSH.
+func (a *App) copyText(ctx context.Context, text string) error {
+	if a.overSSH() {
+		a.copyOverTerminal(text)
 		return nil
 	}
-	return b.a.copyToClipboard(b.ctx, text)
+	return a.copyToClipboard(ctx, text)
 }
 
 func (b *boardActions) Copy(text, what string) tea.Cmd {

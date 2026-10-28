@@ -894,7 +894,7 @@ func TestHerdrStartNamesAgentsClaudeAndNumbersTakenNames(t *testing.T) {
 	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
 	f.Errors["agent.start"] = "agent name claude is already used; candidates: pane_id=w1:p1"
 	h.app.NewHerdr = func() HerdrAPI { return takenOnce{HerdrAPI: herdr.New(f.Path), f: f} }
-	if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "prompt", "", true); err != nil {
+	if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "claude", "/src/web", "DEMO-7 · web", "prompt", "", true); err != nil {
 		t.Fatal(err)
 	}
 	var names []string
@@ -937,7 +937,7 @@ func TestHerdrStartReusesOpenWorkspaceWithoutAgent(t *testing.T) {
 				f.Errors["agent.start"] = tt.startErr
 				h.app.NewHerdr = func() HerdrAPI { return takenOnce{HerdrAPI: herdr.New(f.Path), f: f} }
 			}
-			if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", "", true); err != nil {
+			if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "claude", "/src/web", "DEMO-7 · web", "Work on DEMO-7", "", true); err != nil {
 				t.Fatal(err)
 			}
 			wantPane := tt.wantPane
@@ -986,7 +986,7 @@ func TestHerdrStartBranchesInPlaceOnlyInAFreeCheckout(t *testing.T) {
 			h.run.out["git status --porcelain"] = tt.status
 			h.run.out["git rev-parse --abbrev-ref HEAD"] = tt.head + "\n"
 			h.run.out["git symbolic-ref --short refs/remotes/origin/HEAD"] = "origin/main\n"
-			if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "worktree prompt", "branch prompt", true); err != nil {
+			if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "claude", "/src/web", "DEMO-7 · web", "worktree prompt", "branch prompt", true); err != nil {
 				t.Fatal(err)
 			}
 			want := "worktree prompt"
@@ -1012,13 +1012,13 @@ func TestHerdrStartRetriesPromptUntilAgentNameIsActive(t *testing.T) {
 		}
 		return nil
 	}
-	if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", "", true); err != nil {
+	if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "claude", "/src/web", "DEMO-7 · web", "Work on DEMO-7", "", true); err != nil {
 		t.Fatal(err)
 	}
 	if n := count(f, "agent.prompt"); n != 4 || len(slept) != 3 {
 		t.Errorf("prompts = %d, sleeps = %v", n, slept)
 	}
-	if out := h.out.String(); !strings.Contains(out, "✓ Claude Code started in workspace DEMO-7 · web (w9)") {
+	if out := h.out.String(); !strings.Contains(out, "✓ claude started in workspace DEMO-7 · web (w9)") {
 		t.Errorf("output = %q", out)
 	}
 }
@@ -1027,7 +1027,7 @@ func TestHerdrStartHandsPromptToUserWhenHerdrRefusesIt(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
 	f.Errors["agent.prompt"] = "agent_not_ready: agent claude is not an active named agent"
-	if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", "", true); err != nil {
+	if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "claude", "/src/web", "DEMO-7 · web", "Work on DEMO-7", "", true); err != nil {
 		t.Fatal(err)
 	}
 	if out := h.out.String(); !strings.Contains(out, "did not get its first prompt") || !strings.Contains(out, "give it this prompt:\n\nWork on DEMO-7") {
@@ -1052,7 +1052,7 @@ func TestHerdrStartWaitsForBlockedAgentBeforePrompting(t *testing.T) {
 			if tt.waitErr != "" {
 				f.Errors["agent.wait"] = tt.waitErr
 			}
-			if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "/src/web", "DEMO-7 · web", "Work on DEMO-7", "", true); err != nil {
+			if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "claude", "/src/web", "DEMO-7 · web", "Work on DEMO-7", "", true); err != nil {
 				t.Fatal(err)
 			}
 			if got := f.Last("agent.wait"); got["target"] != "claude" || got["until"].([]any)[0] != "idle" {

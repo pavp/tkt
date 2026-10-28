@@ -108,7 +108,15 @@ func newHarness(t *testing.T, configTOML string) *harness {
 		},
 		configPath: cfgPath,
 	}
+	h.run.out["herdr agent start --help"] = herdrHelp("claude")
 	return h
+}
+
+// herdrHelp is `herdr agent start --help` offering kinds, the only place Herdr lists the agents it can start.
+func herdrHelp(kinds ...string) string {
+	return "Usage: herdr agent start <NAME> --kind <KIND> --pane <ID>\n\nOptions:\n      --kind <KIND>\n" +
+		"          Supported agent kind and canonical executable\n          \n          [possible values: " +
+		strings.Join(kinds, ", ") + "]\n\n      --pane <ID>\n          Existing pane at an interactive shell prompt\n"
 }
 
 func (h *harness) exec(args ...string) int {
@@ -265,17 +273,17 @@ func TestAuthStatus(t *testing.T) {
 
 func TestDoctorReportsProblemsAndFails(t *testing.T) {
 	h := newHarness(t, baseConfig)
-	h.run.missing["claude"] = true
 	h.run.missing["herdr"] = true
 	code := h.exec("doctor")
 	if code == 0 {
-		t.Fatal("doctor passed with missing token and claude")
+		t.Fatal("doctor passed with missing token and agents")
 	}
 	out := h.out.String()
 	for _, want := range []string{
 		"✓ config",
-		"✗ claude",
-		"needed by `tkt start`",
+		"✗ agents",
+		"cannot tell which agents are installed",
+		"needed by `tkt start` to open an agent",
 		"! herdr",
 		"✗ jira",
 		"✗ github",
