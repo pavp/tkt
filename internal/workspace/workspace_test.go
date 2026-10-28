@@ -132,14 +132,14 @@ func TestPrompts(t *testing.T) {
 	if strings.Contains(p, "herdr") {
 		t.Error("plain start prompt mentions herdr")
 	}
-	if hp := HerdrStartPrompt("DEMO-1", "Filter accounts"); !strings.HasPrefix(hp, p) || !strings.Contains(hp, "herdr worktree create") || !strings.Contains(hp, "git worktree add") {
-		t.Errorf("herdr start prompt = %q", hp)
-	}
-	bp := HerdrBranchPrompt("DEMO-1", "Filter accounts")
-	for _, want := range []string{"Work on Jira ticket DEMO-1: Filter accounts", "do not create a worktree", "must contain DEMO-1", "tkt context DEMO-1 --images .ticket-assets > .ticket.md", ".git/info/exclude", "tkt link DEMO-1"} {
-		if !strings.Contains(bp, want) {
-			t.Errorf("branch prompt missing %q", want)
+	sp := SetupPrompt("DEMO-1", "Filter accounts")
+	for _, want := range []string{"Prepare Jira ticket DEMO-1: Filter accounts", "must contain DEMO-1", "base branch", "herdr worktree create --cwd <this repository> --branch <branch> --base <base>", "Stop there"} {
+		if !strings.Contains(sp, want) {
+			t.Errorf("setup prompt missing %q", want)
 		}
+	}
+	if strings.Contains(sp, "tkt link") || strings.Contains(sp, "tkt context") {
+		t.Errorf("setup prompt asks for the new agent's steps: %q", sp)
 	}
 	if !strings.Contains(ContinuePrompt("DEMO-1", "Filter"), "Continue work on Jira ticket DEMO-1") {
 		t.Error("continue prompt")

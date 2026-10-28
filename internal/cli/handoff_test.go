@@ -136,3 +136,28 @@ func TestOnWorktreeOnlyLinksWithoutAMatchingHandoff(t *testing.T) {
 		})
 	}
 }
+
+func TestStartThenWorktreeLeavesOneAgentInTheWorktree(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	web := h.clone(t, "web")
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w1","label":"x"},"root_pane":{"pane_id":"w1:p1"}}`
+	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p1","workspace_id":"w1","name":"claude"}]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w1:p1","workspace_id":"w1"},{"pane_id":"w9:p1","workspace_id":"w9"}]}`
+	h.inCheckout("feature/DEMO-7-export", "/src/web-DEMO-7", "git@github.com:example-org/web.git")
+	h.env["HERDR_PLUGIN_EVENT_JSON"] = worktreeEvent
+	if code := h.exec("herdr", "on-worktree"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if start := f.Last("agent.start"); start["pane_id"] != "w9:p1" {
+		t.Errorf("agent.start = %v", start)
+	}
+	if text, _ := f.Last("agent.prompt")["text"].(string); !strings.Contains(text, "copy from "+web) {
+		t.Errorf("prompt = %q", text)
+	}
+	if f.Last("workspace.close")["workspace_id"] != "w1" {
+		t.Errorf("workspace.close = %v", f.Last("workspace.close"))
+	}
+}

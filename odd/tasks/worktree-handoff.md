@@ -16,8 +16,8 @@ Branch: tracker `feat/worktree-handoff` (draft), slices `feat/worktree-handoff-1
 
 ## Tasks
 
-- [ ] T1 (S4, S5, S6, S7) Relay in `on-worktree`, handoff state, Herdr `ClosePane`/`CloseWorkspace`, work prompt, tests — slice 1 — inline, no Writer reason.
-- [ ] T2 (S1, S2, S3, S4, S8) Start runs the setup agent in a pane tkt creates and records the handoff; in-place path removed; docs, tests — slice 2 — inline, no Writer reason.
+- [x] T1 (S4, S5, S6, S7) Relay in `on-worktree`, handoff state, Herdr `ClosePane`/`CloseWorkspace`, work prompt, tests — slice 1 — inline, no Writer reason. Commit 69e2c07 (346 lines). RED: build failed on `handoff` undefined; GREEN: `go test ./...` ok.
+- [x] T2 (S1, S2, S3, S4, S8) Start runs the setup agent in a pane tkt creates and records the handoff; in-place path removed; docs, tests — slice 2 — inline, no Writer reason. Commit on feat/worktree-handoff-2-start (218 lines). RED: build failed on `SetupPrompt` undefined; GREEN: `go test ./...` ok, including the end-to-end `TestStartThenWorktreeLeavesOneAgentInTheWorktree`.
 
 Risk: item 1 (closing an agent's pane or workspace is irreversible) → one independent verifier at the feature's end.
 
