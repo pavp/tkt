@@ -1284,3 +1284,19 @@ func TestHerdrStartTellsTheUserWhenTheSetupAgentDoesNotStart(t *testing.T) {
 		})
 	}
 }
+
+func TestHerdrStartClosesItsWorkspaceWhenTheSetupAgentDoesNotStart(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.clone(t, "web")
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+	f.Results["pane.split"] = `{"type":"pane_info","pane":{"pane_id":"w9:p2","workspace_id":"w9"}}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[]}`
+	f.Errors["agent.start"] = "agent_pane_busy: agent target pane w9:p2 is not an available shell"
+	h.app.Sleep = func(context.Context, time.Duration) error { return nil }
+	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web"); code == 0 {
+		t.Fatal("exit 0")
+	}
+	if f.Last("workspace.close")["workspace_id"] != "w9" || count(f, "pane.close") != 0 || count(f, "agent.start") != 21 {
+		t.Errorf("workspace.close = %v, pane.close %d, agent.start %d", f.Last("workspace.close"), count(f, "pane.close"), count(f, "agent.start"))
+	}
+}
