@@ -138,7 +138,7 @@ Phase 3a builds the part of this contract the Herdr plugin, the board and `tkt l
 
 ### Board scope
 
-- Tickets assigned to the user in open sprints across configured projects, plus finished tickets the user once held (teams often reassign a ticket to QA or a reviewer when it is done), plus pull requests where the user's review is requested.
+- Tickets assigned to the user in open sprints across configured projects, plus finished tickets the user once held and worked (teams often reassign a ticket to QA or a reviewer when it is done): ones whose status the user changed (`status CHANGED BY currentUser()`), or, held but never moved, ones with a pull request the user's gh account opened (from the listing, so one with only old merged pull requests is missed); one only held a moment shows with the team's tickets instead, plus pull requests where the user's review is requested.
 - Each space has its own sprint; the Sprint tab's context line shows the active sprints the user's tickets belong to (for example `DEMO S42 · 4d left`), read from the tickets' own Sprint field. Listing every board of a space shows other teams' sprints and costs one request per board, so it is avoided.
 - `reviews` in the configuration selects review requests: `direct` (default; requests addressed to the user in configured repositories), `team` (also requests to the user's teams, which include CODEOWNERS and dependabot traffic), or `off`.
 - Review requests on pull requests opened by bots (GitHub reports the author as a `Bot`, e.g. dependabot or Aikido autofix) are hidden: `tkt list` never shows them, and the board's PRs filter shows them with `b` or a click on its "show bots" line. The board lists review requests grouped by repository.

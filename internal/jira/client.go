@@ -418,11 +418,20 @@ func (c *Client) Search(ctx context.Context, jql string, fields []string) ([]Iss
 	return nil, errors.New("jira search returned too many pages")
 }
 
+// heldAndMoved is a finished ticket the user once held and moved along, the trace of having worked it: teams
+// often reassign a ticket (to QA, to a reviewer) when it is done, while a ticket held a moment carries none.
+const heldAndMoved = "statusCategory = Done AND assignee WAS currentUser() AND status CHANGED BY currentUser()"
+
 // MySprintJQL selects the user's tickets in open sprints of the given spaces: assigned to the user, plus
-// finished tickets the user once held, since teams often reassign a ticket (to QA, to a reviewer) when
-// it is done.
+// finished tickets the user once held and moved along.
 func MySprintJQL(spaces []string) string {
-	return fmt.Sprintf("sprint in openSprints() AND project in (%s) AND (assignee = currentUser() OR (statusCategory = Done AND assignee WAS currentUser())) ORDER BY updated DESC", quotedSpaces(spaces))
+	return fmt.Sprintf("sprint in openSprints() AND project in (%s) AND (assignee = currentUser() OR (%s)) ORDER BY updated DESC", quotedSpaces(spaces), heldAndMoved)
+}
+
+// HandedOffSprintJQL selects the finished tickets in open sprints the user once held but never moved; they are
+// the user's only when one of their pull requests is.
+func HandedOffSprintJQL(spaces []string) string {
+	return fmt.Sprintf("sprint in openSprints() AND project in (%s) AND statusCategory = Done AND assignee WAS currentUser() AND NOT status CHANGED BY currentUser() ORDER BY updated DESC", quotedSpaces(spaces))
 }
 
 func quotedSpaces(spaces []string) string {
@@ -441,7 +450,7 @@ func TeamSprintJQL(spaces []string, sprintIDs []int) string {
 	for i, id := range sprintIDs {
 		ids[i] = strconv.Itoa(id)
 	}
-	return fmt.Sprintf("sprint in (%s) AND project in (%s) AND (assignee != currentUser() OR assignee IS EMPTY) AND NOT (statusCategory = Done AND assignee WAS currentUser()) ORDER BY updated DESC", strings.Join(ids, ", "), quotedSpaces(spaces))
+	return fmt.Sprintf("sprint in (%s) AND project in (%s) AND (assignee != currentUser() OR assignee IS EMPTY) AND NOT (%s) ORDER BY updated DESC", strings.Join(ids, ", "), quotedSpaces(spaces), heldAndMoved)
 }
 
 // Issue fetches one issue with the board fields, its description, attachments, and any extra fields.

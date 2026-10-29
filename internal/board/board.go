@@ -125,6 +125,15 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 			teamDone <- teamResult{is, sprints, err}
 		}()
 	}
+	type handedOffResult struct {
+		issues []jira.Issue
+		err    error
+	}
+	handedOffDone := make(chan handedOffResult, 1)
+	go func() {
+		is, err := js.Search(ctx, jira.HandedOffSprintJQL(c.SpaceKeys()), fields)
+		handedOffDone <- handedOffResult{is, err}
+	}()
 	issues, err := js.Search(ctx, jira.MySprintJQL(c.SpaceKeys()), fields)
 	if err != nil {
 		return snap, err
@@ -149,7 +158,7 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 			boardNames[b.ID] = b.Name
 		}
 	}
-	for _, is := range issues {
+	mineTicket := func(is jira.Issue) ticket.Ticket {
 		t := toTicket(is)
 		for _, sp := range is.Sprints {
 			if name, ok := boardNames[sp.Board]; ok && sp.State == "active" {
@@ -157,6 +166,10 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 				break
 			}
 		}
+		return t
+	}
+	for _, is := range issues {
+		t := mineTicket(is)
 		tickets = append(tickets, t)
 		ids[ticket.Key(is.Key)] = is.ID
 		updated[ticket.Key(is.Key)] = is.Updated
@@ -270,6 +283,26 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		attached[i].PRs = mergeLinked(attached[i].PRs, linked[attached[i].Key], prs)
 	}
 	tickets = attached
+	// A finished ticket the user held but never moved is theirs only when one of their pull requests is.
+	if r := <-handedOffDone; r.err != nil {
+		snap.Warnings = append(snap.Warnings, "finished tickets you held but never moved unavailable: "+r.err.Error())
+	} else {
+		held := map[ticket.Key]bool{}
+		for _, t := range tickets {
+			held[t.Key] = true
+		}
+		var candidates []ticket.Ticket
+		for _, is := range r.issues {
+			if !held[ticket.Key(is.Key)] {
+				candidates = append(candidates, mineTicket(is))
+			}
+		}
+		for _, t := range ticket.AttachPRs(candidates, prs) {
+			if slices.ContainsFunc(t.PRs, func(p ticket.PullRequest) bool { return p.Yours }) {
+				tickets = append(tickets, t)
+			}
+		}
+	}
 	for _, t := range tickets {
 		for _, p := range t.PRs {
 			addInferred(c, snap.Repos, t.Space(), strings.ToLower(p.Repo))
@@ -289,6 +322,11 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		snap.Warnings = append(snap.Warnings, s.Key+" has no repositories yet: "+why+", so CI and reviews are off; add one in the config")
 	}
 	joinTeam()
+	mine := map[ticket.Key]bool{}
+	for _, t := range tickets {
+		mine[t.Key] = true
+	}
+	team = slices.DeleteFunc(team, func(t ticket.Ticket) bool { return mine[t.Key] })
 	snap.Tickets = ticket.GroupSubtasks(append(tickets, ticket.AttachPRs(team, prs)...))
 
 	if reviewsDone != nil {

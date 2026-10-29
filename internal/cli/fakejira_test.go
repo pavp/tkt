@@ -67,6 +67,9 @@ func (f *fakeJira) Search(_ context.Context, jql string, _ []string) ([]jira.Iss
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.jqls = append(f.jqls, jql)
+	if strings.Contains(jql, "NOT status CHANGED BY currentUser()") {
+		return nil, nil
+	}
 	if strings.Contains(jql, "assignee != currentUser()") {
 		return f.team, nil
 	}
