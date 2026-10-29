@@ -1229,3 +1229,58 @@ func TestAnAgentMarkedWithATicketBelongsToItOnAnyBranch(t *testing.T) {
 		t.Errorf("the pane's mark names the ticket when the branch does not: %v", agents)
 	}
 }
+
+func TestHerdrStartWaitsForTheSetupSplitsShell(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	web := h.clone(t, "web")
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w4:p1","workspace_id":"w4","cwd":"` + web + `"}]}`
+	f.Results["pane.split"] = `{"type":"pane_info","pane":{"pane_id":"w4:p2","workspace_id":"w4","cwd":"` + web + `"}}`
+	f.FailOnce("agent.start", "agent_pane_busy: agent target pane w4:p2 is not an available shell")
+	var slept []time.Duration
+	h.app.Sleep = func(_ context.Context, d time.Duration) error {
+		slept = append(slept, d)
+		return nil
+	}
+	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if count(f, "agent.start") != 2 || len(slept) == 0 || f.Last("agent.start")["pane_id"] != "w4:p2" {
+		t.Errorf("agent.start %d, slept %v", count(f, "agent.start"), slept)
+	}
+	if hos := h.app.loadState().Handoffs; len(hos) != 1 || hos[0].Pane != "w4:p2" {
+		t.Errorf("handoffs = %+v", hos)
+	}
+}
+
+func TestHerdrStartTellsTheUserWhenTheSetupAgentDoesNotStart(t *testing.T) {
+	tests := []struct {
+		name      string
+		agents    string
+		wantClose bool
+	}{
+		{"the split stays empty", `[]`, true},
+		{"the agent opened anyway", `[{"pane_id":"w4:p2","workspace_id":"w4","agent":"claude"}]`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, f, _ := herdrHarness(t)
+			web := h.clone(t, "web")
+			f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w4:p1","workspace_id":"w4","cwd":"` + web + `"}]}`
+			f.Results["pane.split"] = `{"type":"pane_info","pane":{"pane_id":"w4:p2","workspace_id":"w4","cwd":"` + web + `"}}`
+			f.Results["agent.list"] = `{"type":"agent_list","agents":` + tt.agents + `}`
+			f.Errors["agent.start"] = "timeout: claude did not become ready"
+			if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web"); code == 0 {
+				t.Fatal("exit 0")
+			}
+			if closed := f.Last("pane.close")["pane_id"] == "w4:p2"; closed != tt.wantClose {
+				t.Errorf("pane.close = %v", f.Last("pane.close"))
+			}
+			if body, _ := f.Last("notification.show")["body"].(string); !strings.Contains(body, "could not start the setup agent of DEMO-7") || !strings.Contains(body, "did not become ready") {
+				t.Errorf("notification = %v", f.Last("notification.show"))
+			}
+			if hos := h.app.loadState().Handoffs; len(hos) != 0 {
+				t.Errorf("handoffs = %+v", hos)
+			}
+		})
+	}
+}

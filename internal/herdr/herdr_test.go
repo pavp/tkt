@@ -54,7 +54,7 @@ func TestCallsAndDecoding(t *testing.T) {
 	if err := c.StartAgent(ctx, "w2:p1", "claude", "DEMO-1", []string{"do it"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.Last("agent.start"); got["kind"] != "claude" || got["pane_id"] != "w2:p1" || got["args"].([]any)[0] != "do it" {
+	if got := f.Last("agent.start"); got["kind"] != "claude" || got["pane_id"] != "w2:p1" || got["args"].([]any)[0] != "do it" || got["timeout_ms"] != float64(120000) {
 		t.Errorf("start params = %v", got)
 	}
 	if err := c.WaitAgent(ctx, "w2:p1", "idle", 2*time.Minute); err != nil {

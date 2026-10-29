@@ -406,6 +406,8 @@ func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) erro
 	for i, dir := range plan.Dirs {
 		label := string(plan.Key) + " · " + filepath.Base(dir)
 		if err := a.startSetupAgent(ctx, h, plan, kind, dir, plan.Repos[i], label, i == 0); err != nil {
+			// Started from the board, this command's output is gone once it returns, so Herdr says it too.
+			_ = h.Notify(ctx, "tkt", fmt.Sprintf("could not start the setup agent of %s in %s: %v", plan.Key, dir, err))
 			return err
 		}
 	}
@@ -459,8 +461,9 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 		}
 		_ = h.FocusPane(ctx, ho.Pane)
 	}
-	name, err := startAgent(ctx, h, ho.Pane, kind)
+	name, err := a.startAgent(ctx, h, ho.Pane, kind)
 	if err != nil && !notReady(err) {
+		dropUnusedPane(ctx, h, ho)
 		return err
 	}
 	markAgent(ctx, h, ho.Pane, plan.Key)
@@ -473,6 +476,20 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 	return a.promptStarted(ctx, h, name, where, workspace.SetupPrompt(plan.Key, plan.Summary), err)
 }
 
+// dropUnusedPane closes the split tkt opened for a setup agent that did not start, and the workspace it opened for
+// it, unless an agent came up there anyway, which the user may still want.
+func dropUnusedPane(ctx context.Context, h HerdrAPI, ho handoff) {
+	agents, err := h.Agents(ctx)
+	if err != nil || slices.ContainsFunc(agents, func(ag herdr.Agent) bool { return ag.PaneID == ho.Pane }) {
+		return
+	}
+	if ho.Workspace != "" {
+		_ = h.CloseWorkspace(ctx, ho.Workspace)
+		return
+	}
+	_ = h.ClosePane(ctx, ho.Pane)
+}
+
 // startInWorkspace names the agent after its kind ("claude"), as Herdr shows agents it detects itself; the workspace
 // above it already names the ticket. Herdr wants agent names unique, so a taken name gets a number.
 // The prompt goes through agent.prompt, not as an argument: Herdr refuses multi-line arguments for the shell.
@@ -482,11 +499,11 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, kind, dir, label, prompt string, focus bool) (string, error) {
 	if p, ok := idlePaneAt(ctx, h, dir); ok {
 		used := p.ID
-		name, err := startAgent(ctx, h, used, kind)
+		name, err := a.startAgent(ctx, h, used, kind)
 		if err != nil && !notReady(err) {
 			if split, serr := h.SplitPane(ctx, p.ID, dir); serr == nil {
 				used = split.ID
-				name, err = startAgent(ctx, h, used, kind)
+				name, err = a.startAgent(ctx, h, used, kind)
 			}
 		}
 		if err == nil || notReady(err) {
@@ -500,7 +517,7 @@ func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, kind, dir, label
 	if err != nil {
 		return "", err
 	}
-	name, err := startAgent(ctx, h, pane.ID, kind)
+	name, err := a.startAgent(ctx, h, pane.ID, kind)
 	return pane.ID, a.promptStarted(ctx, h, name, fmt.Sprintf("workspace %s (%s)", label, ws.ID), prompt, err)
 }
 
@@ -518,14 +535,24 @@ func markAgent(ctx context.Context, h HerdrAPI, pane string, key ticket.Key) {
 }
 
 // startAgent returns the agent's name, which later calls target: Herdr may not resolve the pane id to it yet.
-func startAgent(ctx context.Context, h HerdrAPI, paneID, kind string) (string, error) {
+func (a *App) startAgent(ctx context.Context, h HerdrAPI, paneID, kind string) (string, error) {
 	name := kind
-	for n := 2; ; n++ {
+	busy := 0
+	for n := 2; ; {
 		err := h.StartAgent(ctx, paneID, kind, name, []string{})
-		if err == nil || n > 9 || !nameTaken(err) {
+		switch {
+		// A pane split a moment ago may still be starting its shell, which Herdr refuses as busy.
+		case paneBusy(err) && busy < 20:
+			busy++
+			if serr := a.Sleep(ctx, 500*time.Millisecond); serr != nil {
+				return name, err
+			}
+		case err != nil && nameTaken(err) && n <= 9:
+			name = fmt.Sprintf("%s-%d", kind, n)
+			n++
+		default:
 			return name, err
 		}
-		name = fmt.Sprintf("%s-%d", kind, n)
 	}
 }
 
@@ -1066,6 +1093,10 @@ func nameTaken(err error) bool {
 }
 
 // notReady means Herdr started the agent but it is showing a question, such as Claude Code's folder trust prompt.
+func paneBusy(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "agent_pane_busy")
+}
+
 func notReady(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "agent_not_ready")
 }

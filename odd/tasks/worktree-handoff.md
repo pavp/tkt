@@ -14,6 +14,7 @@ Branch: tracker `feat/worktree-handoff` (draft), slices `feat/worktree-handoff-1
 - S7. "Si algo falla en el relevo, el Agente A sigue vivo y todo queda como hoy": no root pane, or the agent does not start → A is left alone, tkt notifies, the handoff is cleared. A worktree with no matching handoff is only linked, as today. Stale handoffs (older than an hour) are ignored.
 - S8. Help text, README and `docs/design.md` describe the flow.
 - S9. A question the new agent asks before its first prompt (Claude's folder trust) does not lose the handoff: tkt waits for it to be answered and then prompts ("no hay manera de aceptar ese trust? que sea transparente para el usuario" → trust `~/.herdr/worktrees` once, documented; tkt waits on any question).
+- S11. A setup agent that does not start must not leave the user with an empty split and no word: "me abrio el split pero ya luego no hizo nada". Evidence-backed fix the user approved: two-minute `agent.start` timeout, retry `agent_pane_busy` while a new split's shell starts, notify on failure and close the split tkt opened when no agent is in it.
 - S10. The setup agent never runs in a workspace at the clone, which Herdr makes the head of the worktree's group and refuses to close: it runs as a split with its cwd at the clone, beside a pane open at the clone, else beside the pane Start runs in, else in a workspace tkt opens outside the clone; closing it leaves the worktree's workspace alone.
 
 ## Tasks
@@ -23,6 +24,7 @@ Branch: tracker `feat/worktree-handoff` (draft), slices `feat/worktree-handoff-1
 
 - [x] T3 (S9, S8) Wait on a blocked agent before the first prompt; README trust note — slice 3 — inline, no Writer reason. RED: `TestOnWorktreeWaitsForTheNewAgentsQuestionBeforeItsPrompt` failed (handoff dropped); GREEN after.
 - [x] T4 (S10, S3, S5) Setup agent as a split at the clone, never a workspace at the clone; close pane then tkt's host workspace — slice 3 — inline, no Writer reason. `go test ./...` ok.
+- [x] T5 (S11) Slow cold start and busy new shell — branch fix/agent-start-slow-shell — inline, no Writer reason. RED: three tests failed (timeout_ms missing, no retry, no notice); GREEN after.
 
 Risk: item 1 (closing an agent's pane or workspace is irreversible) → one independent verifier at the feature's end.
 
@@ -38,3 +40,4 @@ Risk: item 1 (closing an agent's pane or workspace is irreversible) → one inde
 - L8 (2026-10-29) User: "fallo 1. no hay manera de aceptar ese trust? que sea transparente para el usuario / fallo 2. ok"; then "si" to: trust `~/.herdr/worktrees` once + tkt waits on any question; setup split never in a workspace at the clone.
 - L9 (2026-10-29) Evidence: Herdr let a `worktree.created` hook run 5 minutes, so a 4-minute wait fits. Live rerun on the branch binary: B blocked on trust, hook printed "is asking a question", after answering B got its prompt and the setup split closed. Herdr opens a workspace at the clone by itself ("repo") as the worktree group's head when none is open; not tkt's, left as is.
 - L10 (2026-10-29) Independent verifier on c94326a: S3, S5, S7, S9, S10 met; no blockers. Probes committed as regression tests (replaced first pane, handoff without Host, question never answered). Advisories left as is: a not-ready then blocked agent can wait ~8 min, past the 5 min observed for a hook (setup agent kept, no notification); old-state or rearranged panes degrade to a notification; a clone whose parent folder is itself a repo is unconfirmed live.
+- L11 (2026-10-29) User (v0.17.0, WSL, from the board): "me abrio el split pero ya luego no hizo nada, le volvi a dar y esta vez si hizo el split y abrio el agente". `herdr agent list` there: the clone holds another ticket's working agent; B was claude-3 (A was claude-2), so naming was normal. Live probes here: `agent.start` past its timeout → error `timeout` while Claude keeps opening unnamed and unprompted; a pane not at its shell prompt → `agent_pane_busy` at once. Herdr frees an agent's name when its pane closes; a taken name → `agent_name_taken` and nothing starts.
