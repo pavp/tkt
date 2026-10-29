@@ -323,7 +323,7 @@ func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, kind, dir, label, 
 		}
 		pane = root.ID
 	}
-	name, err := startAgent(ctx, h, pane, kind)
+	name, err := a.startAgent(ctx, h, pane, kind)
 	if notReady(err) {
 		err = h.WaitAgent(ctx, name, "idle", 4*time.Minute)
 	}

@@ -181,8 +181,9 @@ func (c *Client) Agents(ctx context.Context) ([]Agent, error) {
 }
 
 // StartAgent starts an agent kind (such as "claude") in a pane sitting at its shell prompt.
+// StartAgent gives the agent two minutes to become ready, as a cold start on a busy machine outlasts Herdr's 30 s.
 func (c *Client) StartAgent(ctx context.Context, paneID, kind, name string, args []string) error {
-	return c.Call(ctx, "agent.start", map[string]any{"pane_id": paneID, "kind": kind, "name": name, "args": args}, nil)
+	return c.Call(ctx, "agent.start", map[string]any{"pane_id": paneID, "kind": kind, "name": name, "args": args, "timeout_ms": (2 * time.Minute).Milliseconds()}, nil)
 }
 
 // SplitPane opens a new pane at cwd to the right of paneID, without moving the focus.

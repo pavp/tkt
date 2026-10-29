@@ -94,7 +94,7 @@ func (a *App) startHandoff(ctx context.Context, h HerdrAPI, ho handoff, ws strin
 		return fmt.Errorf("workspace %s has no single empty pane to start the agent in", ws)
 	}
 	pane := root[0].ID
-	name, err := startAgent(ctx, h, pane, ho.Kind)
+	name, err := a.startAgent(ctx, h, pane, ho.Kind)
 	if err != nil && !notReady(err) {
 		return err
 	}
