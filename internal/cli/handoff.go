@@ -25,8 +25,9 @@ type handoff struct {
 	Pane    string     `json:"pane"`
 	Agent   string     `json:"agent"`
 	Kind    string     `json:"kind"`
-	// Workspace is set when tkt opened a workspace only for the setup agent.
+	// Workspace is set when tkt opened a workspace only for the setup agent, Host being the pane it opened with.
 	Workspace string    `json:"workspace,omitempty"`
+	Host      string    `json:"host,omitempty"`
 	At        time.Time `json:"at"`
 }
 
@@ -107,8 +108,8 @@ func (a *App) startHandoff(ctx context.Context, h HerdrAPI, ho handoff, ws strin
 	return err
 }
 
-// closeSetupAgent closes the workspace tkt opened for the setup agent while the agent's pane is all it holds, else
-// only that pane, and leaves a pane alone once another agent runs there.
+// closeSetupAgent closes the setup agent's pane, then the workspace tkt opened for it once nothing but the pane it
+// opened with is left, and leaves the pane alone once another agent runs there.
 func closeSetupAgent(ctx context.Context, h HerdrAPI, ho handoff) error {
 	agents, err := h.Agents(ctx)
 	if err != nil {
@@ -117,18 +118,24 @@ func closeSetupAgent(ctx context.Context, h HerdrAPI, ho handoff) error {
 	if slices.ContainsFunc(agents, func(ag herdr.Agent) bool { return ag.PaneID == ho.Pane && ag.Name != ho.Agent }) {
 		return fmt.Errorf("another agent runs there now")
 	}
-	if ho.Workspace != "" {
-		panes, err := h.Panes(ctx)
-		if err != nil {
-			return err
-		}
-		alone := !slices.ContainsFunc(panes, func(p herdr.Pane) bool { return p.WorkspaceID == ho.Workspace && p.ID != ho.Pane })
-		// Herdr refuses to close a workspace that heads a group of worktrees, which the clone's may now do.
-		if alone && h.CloseWorkspace(ctx, ho.Workspace) == nil {
-			return nil
-		}
+	if err := h.ClosePane(ctx, ho.Pane); err != nil {
+		return err
 	}
-	return h.ClosePane(ctx, ho.Pane)
+	if ho.Workspace == "" {
+		return nil
+	}
+	panes, err := h.Panes(ctx)
+	if err != nil {
+		return err
+	}
+	left := slices.DeleteFunc(panes, func(p herdr.Pane) bool { return p.WorkspaceID != ho.Workspace || p.ID == ho.Pane })
+	if len(left) != 1 || left[0].ID != ho.Host {
+		return nil
+	}
+	if err := h.CloseWorkspace(ctx, ho.Workspace); err != nil {
+		return fmt.Errorf("its workspace %s stays: %w", ho.Workspace, err)
+	}
+	return nil
 }
 
 // eventWorkspace is the id of the workspace a worktree event opened: the shallowest "workspace" in the payload,

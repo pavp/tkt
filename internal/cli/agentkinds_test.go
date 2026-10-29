@@ -133,6 +133,7 @@ func TestHerdrStartOpensTheAgentAsked(t *testing.T) {
 	h.clone(t, "web")
 	h.run.out["herdr agent start --help"] = herdrHelp("claude", "opencode")
 	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"},"tab":{}}`
+	f.Results["pane.split"] = `{"type":"pane_info","pane":{"pane_id":"w9:p2","workspace_id":"w9"}}`
 	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "opencode"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}

@@ -141,6 +141,7 @@ func TestHerdrStartCreatesWorkspacesWithAgents(t *testing.T) {
 	web := h.clone(t, "web")
 	api := h.clone(t, "api")
 	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"},"tab":{}}`
+	f.Results["pane.split"] = `{"type":"pane_info","pane":{"pane_id":"w9:p2","workspace_id":"w9"}}`
 	h.app.Stdin = strings.NewReader("1,2\n")
 	if code := h.exec("herdr", "start", "DEMO-7"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
@@ -155,11 +156,14 @@ func TestHerdrStartCreatesWorkspacesWithAgents(t *testing.T) {
 			cwds = append(cwds, p["cwd"].(string)+"|"+p["label"].(string))
 		}
 	}
-	if cwds[0] != web+"|DEMO-7 · web" || cwds[1] != api+"|DEMO-7 · api" {
+	if cwds[0] != filepath.Dir(web)+"|DEMO-7 · web" || cwds[1] != filepath.Dir(api)+"|DEMO-7 · api" {
 		t.Errorf("workspaces = %v", cwds)
 	}
+	if split := f.Last("pane.split"); split["target_pane_id"] != "w9:p1" || split["cwd"] != api {
+		t.Errorf("pane.split = %v", split)
+	}
 	start := f.Last("agent.start")
-	if start["kind"] != "claude" || start["name"] != "claude" || start["pane_id"] != "w9:p1" || len(start["args"].([]any)) != 0 {
+	if start["kind"] != "claude" || start["name"] != "claude" || start["pane_id"] != "w9:p2" || len(start["args"].([]any)) != 0 {
 		t.Errorf("agent.start = %v", start)
 	}
 	prompt := f.Last("agent.prompt")
@@ -170,13 +174,13 @@ func TestHerdrStartCreatesWorkspacesWithAgents(t *testing.T) {
 	if len(hos) != 2 || hos[0].Repo != "example-org/web" || hos[1].Repo != "example-org/api" || hos[0].Clone != web || hos[1].Clone != api {
 		t.Fatalf("handoffs = %+v", hos)
 	}
-	if ho := hos[0]; ho.Key != "DEMO-7" || ho.Summary != "Export users" || ho.Pane != "w9:p1" || ho.Agent != "claude" || ho.Kind != "claude" || ho.Workspace != "w9" || ho.At.IsZero() {
+	if ho := hos[0]; ho.Key != "DEMO-7" || ho.Summary != "Export users" || ho.Pane != "w9:p2" || ho.Agent != "claude" || ho.Kind != "claude" || ho.Workspace != "w9" || ho.Host != "w9:p1" || ho.At.IsZero() {
 		t.Errorf("handoff = %+v", ho)
 	}
 	if len(*calls) != 0 {
 		t.Error("launched a terminal agent instead of Herdr")
 	}
-	if mark := f.Last("pane.report_metadata"); mark["pane_id"] != "w9:p1" || fmt.Sprint(mark["tokens"]) != "map[tkt_key:DEMO-7]" {
+	if mark := f.Last("pane.report_metadata"); mark["pane_id"] != "w9:p2" || fmt.Sprint(mark["tokens"]) != "map[tkt_key:DEMO-7]" {
 		t.Errorf("the agent's pane carries its ticket: %v", mark)
 	}
 }
@@ -972,46 +976,69 @@ func TestHerdrStartReusesOpenWorkspaceWithoutAgent(t *testing.T) {
 	}
 }
 
-func TestHerdrStartRunsTheSetupAgentBesideAPaneOpenAtTheClone(t *testing.T) {
+func TestHerdrStartRunsTheSetupAgentInASplitAtTheClone(t *testing.T) {
 	tests := []struct {
-		name      string
-		splitErr  bool
-		wantPane  string
-		wantWS    string
-		wantSplit bool
+		name       string
+		clonePane  bool
+		caller     string
+		failSplit  bool
+		wantTarget string
+		wantWS     string
 	}{
-		{name: "split beside the clone's pane", wantPane: "w4:p9", wantSplit: true},
-		{name: "a new workspace when the split fails", splitErr: true, wantPane: "w9:p1", wantWS: "w9", wantSplit: true},
+		{name: "beside the clone's pane", clonePane: true, caller: "w3:p2", wantTarget: "w4:p1"},
+		{name: "beside the pane Start runs in", caller: "w3:p2", wantTarget: "w3:p2"},
+		{name: "beside the caller when the clone's split fails", clonePane: true, caller: "w3:p2", failSplit: true, wantTarget: "w3:p2"},
+		{name: "in a workspace tkt opens next to the clone", wantTarget: "w9:p1", wantWS: "w9"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, f, _ := herdrHarness(t)
 			web := h.clone(t, "web")
 			f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
-			f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w4:p1","workspace_id":"w4","cwd":"` + web + `"}]}`
-			f.Results["agent.list"] = `{"type":"agent_list","agents":[]}`
-			f.Results["pane.split"] = `{"type":"pane_info","pane":{"pane_id":"w4:p9","workspace_id":"w4","cwd":"` + web + `"}}`
-			if tt.splitErr {
-				f.Errors["pane.split"] = "split refused"
+			f.Results["pane.list"] = `{"type":"pane_list","panes":[]}`
+			if tt.clonePane {
+				f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w4:p1","workspace_id":"w4","cwd":"` + web + `"}]}`
 			}
-			h.run.out["git status --porcelain"] = ""
-			h.run.out["git symbolic-ref --short refs/remotes/origin/HEAD"] = "origin/main\n"
+			if tt.caller != "" {
+				h.env["HERDR_PANE_ID"], h.env["HERDR_WORKSPACE_ID"] = tt.caller, "w3"
+			}
+			if tt.failSplit {
+				f.FailOnce("pane.split", "split refused")
+			}
+			f.Results["agent.list"] = `{"type":"agent_list","agents":[]}`
+			f.Results["pane.split"] = `{"type":"pane_info","pane":{"pane_id":"w5:p7","cwd":"` + web + `"}}`
 			if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web"); code != 0 {
 				t.Fatalf("exit %d: %s", code, h.errOut)
 			}
-			if split := f.Last("pane.split"); (split != nil) != tt.wantSplit || (split != nil && split["target_pane_id"] != "w4:p1") {
+			if split := f.Last("pane.split"); split["target_pane_id"] != tt.wantTarget || split["cwd"] != web {
 				t.Errorf("pane.split = %v", split)
 			}
-			if start := f.Last("agent.start"); start["pane_id"] != tt.wantPane {
+			if created := f.Last("workspace.create"); (created != nil) != (tt.wantWS != "") || (created != nil && created["cwd"] != filepath.Dir(web)) {
+				t.Errorf("workspace.create = %v", created)
+			}
+			if start := f.Last("agent.start"); start["pane_id"] != "w5:p7" {
 				t.Errorf("agent.start = %v", start)
 			}
-			if text, _ := f.Last("agent.prompt")["text"].(string); !strings.Contains(text, "herdr worktree create") || strings.Contains(text, "do not create a worktree") {
-				t.Errorf("a free clone got %q", text)
+			if text, _ := f.Last("agent.prompt")["text"].(string); !strings.Contains(text, "herdr worktree create") {
+				t.Errorf("prompt = %q", text)
 			}
-			if hos := h.app.loadState().Handoffs; len(hos) != 1 || hos[0].Pane != tt.wantPane || hos[0].Workspace != tt.wantWS {
+			if hos := h.app.loadState().Handoffs; len(hos) != 1 || hos[0].Pane != "w5:p7" || hos[0].Workspace != tt.wantWS {
 				t.Errorf("handoffs = %+v", hos)
 			}
 		})
+	}
+}
+
+func TestHerdrStartClosesItsWorkspaceWhenTheSetupSplitFails(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	h.clone(t, "web")
+	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
+	f.Errors["pane.split"] = "split refused"
+	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web"); code == 0 {
+		t.Fatal("started without a pane for the setup agent")
+	}
+	if f.Last("workspace.close")["workspace_id"] != "w9" || count(f, "agent.start") != 0 || len(h.app.loadState().Handoffs) != 0 {
+		t.Errorf("requests = %v", f.Requests)
 	}
 }
 

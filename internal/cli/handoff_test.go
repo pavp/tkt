@@ -24,12 +24,12 @@ func handoffHarness(t *testing.T, ho handoff) (*harness, *herdrtest.FakeServer) 
 	h.inCheckout("feature/DEMO-7-export", "/src/web-DEMO-7", "git@github.com:example-org/web.git")
 	h.env["HERDR_PLUGIN_EVENT_JSON"] = worktreeEvent
 	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p2","workspace_id":"w1","name":"claude","agent":"claude","agent_status":"idle"}]}`
-	f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w1:p2","workspace_id":"w1"},{"pane_id":"w9:p1","workspace_id":"w9"}]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w1:p1","workspace_id":"w1"},{"pane_id":"w1:p2","workspace_id":"w1"},{"pane_id":"w9:p1","workspace_id":"w9"}]}`
 	return h, f
 }
 
 func setupAgent() handoff {
-	return handoff{Key: "DEMO-7", Summary: "Export users", Repo: "example-org/web", Clone: "/src/web", Pane: "w1:p2", Agent: "claude", Kind: "claude", Workspace: "w1"}
+	return handoff{Key: "DEMO-7", Summary: "Export users", Repo: "example-org/web", Clone: "/src/web", Pane: "w1:p2", Agent: "claude", Kind: "claude", Workspace: "w1", Host: "w1:p1"}
 }
 
 func TestOnWorktreeHandsTheTicketToAnAgentBornInTheWorktree(t *testing.T) {
@@ -49,8 +49,8 @@ func TestOnWorktreeHandsTheTicketToAnAgentBornInTheWorktree(t *testing.T) {
 	if f.Last("pane.focus")["pane_id"] != "w9:p1" {
 		t.Errorf("pane.focus = %v", f.Last("pane.focus"))
 	}
-	if f.Last("workspace.close")["workspace_id"] != "w1" || count(f, "pane.close") != 0 {
-		t.Errorf("workspace.close = %v, pane.close %d", f.Last("workspace.close"), count(f, "pane.close"))
+	if f.Last("pane.close")["pane_id"] != "w1:p2" || f.Last("workspace.close")["workspace_id"] != "w1" {
+		t.Errorf("pane.close = %v, workspace.close = %v", f.Last("pane.close"), f.Last("workspace.close"))
 	}
 	if st := h.app.loadState(); len(st.Handoffs) != 0 {
 		t.Errorf("handoff kept: %+v", st.Handoffs)
@@ -60,7 +60,7 @@ func TestOnWorktreeHandsTheTicketToAnAgentBornInTheWorktree(t *testing.T) {
 	}
 }
 
-func TestOnWorktreeClosesOnlyTheSetupPaneWhenItsWorkspaceIsNotTktsAlone(t *testing.T) {
+func TestOnWorktreeClosesOnlyTheSetupPaneWhenItsWorkspaceIsNotTkts(t *testing.T) {
 	tests := []struct {
 		name  string
 		ws    string
@@ -141,10 +141,11 @@ func TestStartThenWorktreeLeavesOneAgentInTheWorktree(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	web := h.clone(t, "web")
 	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w1","label":"x"},"root_pane":{"pane_id":"w1:p1"}}`
+	f.Results["pane.split"] = `{"type":"pane_info","pane":{"pane_id":"w1:p2","workspace_id":"w1"}}`
 	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p1","workspace_id":"w1","name":"claude"}]}`
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p2","workspace_id":"w1","name":"claude"}]}`
 	f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w1:p1","workspace_id":"w1"},{"pane_id":"w9:p1","workspace_id":"w9"}]}`
 	h.inCheckout("feature/DEMO-7-export", "/src/web-DEMO-7", "git@github.com:example-org/web.git")
 	h.env["HERDR_PLUGIN_EVENT_JSON"] = worktreeEvent
@@ -157,8 +158,8 @@ func TestStartThenWorktreeLeavesOneAgentInTheWorktree(t *testing.T) {
 	if text, _ := f.Last("agent.prompt")["text"].(string); !strings.Contains(text, "copy from "+web) {
 		t.Errorf("prompt = %q", text)
 	}
-	if f.Last("workspace.close")["workspace_id"] != "w1" {
-		t.Errorf("workspace.close = %v", f.Last("workspace.close"))
+	if f.Last("pane.close")["pane_id"] != "w1:p2" || f.Last("workspace.close")["workspace_id"] != "w1" {
+		t.Errorf("pane.close = %v, workspace.close = %v", f.Last("pane.close"), f.Last("workspace.close"))
 	}
 }
 
@@ -176,20 +177,20 @@ func TestOnWorktreeKeepsTheSetupAgentWhenTheNewAgentGetsNoPrompt(t *testing.T) {
 	}
 }
 
-func TestOnWorktreeClosesTheSetupPaneWhenHerdrKeepsItsWorkspace(t *testing.T) {
+func TestOnWorktreeTellsTheUserWhenTktsWorkspaceStays(t *testing.T) {
 	h, f := handoffHarness(t, setupAgent())
-	f.Errors["workspace.close"] = "workspace_group_close_required"
+	f.Errors["workspace.close"] = "workspace_busy"
 	if code := h.exec("herdr", "on-worktree"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	if f.Last("pane.close")["pane_id"] != "w1:p2" || count(f, "notification.show") != 0 {
-		t.Errorf("pane.close = %v, notifications %d", f.Last("pane.close"), count(f, "notification.show"))
+	body, _ := f.Last("notification.show")["body"].(string)
+	if f.Last("pane.close")["pane_id"] != "w1:p2" || !strings.Contains(body, "its workspace w1 stays") {
+		t.Errorf("pane.close = %v, notification = %q", f.Last("pane.close"), body)
 	}
 }
 
 func TestOnWorktreeTellsTheUserWhenTheSetupAgentCannotBeClosed(t *testing.T) {
 	h, f := handoffHarness(t, setupAgent())
-	f.Errors["workspace.close"] = "workspace_group_close_required"
 	f.Errors["pane.close"] = "pane_busy"
 	if code := h.exec("herdr", "on-worktree"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
@@ -205,5 +206,22 @@ func TestEventWorkspaceIsTheWorkspaceTheEventOpened(t *testing.T) {
 		if got := eventWorkspace(raw); got != "w9" {
 			t.Fatalf("eventWorkspace = %q", got)
 		}
+	}
+}
+
+func TestOnWorktreeWaitsForTheNewAgentsQuestionBeforeItsPrompt(t *testing.T) {
+	h, f := handoffHarness(t, setupAgent())
+	f.FailOnce("agent.prompt", "agent_blocked: agent claude is blocked and requires interactive input")
+	if code := h.exec("herdr", "on-worktree"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if wait := f.Last("agent.wait"); wait["target"] != "claude" {
+		t.Errorf("agent.wait = %v", wait)
+	}
+	if count(f, "agent.prompt") != 2 || count(f, "notification.show") != 0 {
+		t.Errorf("agent.prompt %d, notifications %d", count(f, "agent.prompt"), count(f, "notification.show"))
+	}
+	if f.Last("workspace.close")["workspace_id"] != "w1" {
+		t.Errorf("setup agent not closed: %v", f.Requests)
 	}
 }
