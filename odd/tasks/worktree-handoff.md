@@ -1,7 +1,7 @@
 # Worktree handoff
 
 Objective: inside Herdr, `tkt start` always ends with one agent in the ticket's worktree and the main clone free. A setup agent creates the worktree; tkt hands the work to a new agent born in it.
-Branch: tracker `feat/worktree-handoff` (draft), slices `feat/worktree-handoff-1-relay` → `feat/worktree-handoff-2-start`. Delivery: Chain (chosen 2026-10-28), never grouped natively (a stack would merge the draft tracker). Tests: `go test ./...`.
+Branch: tracker `feat/worktree-handoff` (draft), slices `feat/worktree-handoff-1-relay` → `feat/worktree-handoff-2-start` → `feat/worktree-handoff-3-live`. Delivery: Chain (chosen 2026-10-28), never grouped natively (a stack would merge the draft tracker). Tests: `go test ./...`.
 
 ## Specs
 
@@ -13,11 +13,16 @@ Branch: tracker `feat/worktree-handoff` (draft), slices `feat/worktree-handoff-1
 - S6. The work prompt asks the new agent to save the ticket context, confirm the link, copy from the main clone the files git ignores that the project needs to run (such as `.env.local`) when the project's rules call for it, and implement the ticket.
 - S7. "Si algo falla en el relevo, el Agente A sigue vivo y todo queda como hoy": no root pane, or the agent does not start → A is left alone, tkt notifies, the handoff is cleared. A worktree with no matching handoff is only linked, as today. Stale handoffs (older than an hour) are ignored.
 - S8. Help text, README and `docs/design.md` describe the flow.
+- S9. A question the new agent asks before its first prompt (Claude's folder trust) does not lose the handoff: tkt waits for it to be answered and then prompts ("no hay manera de aceptar ese trust? que sea transparente para el usuario" → trust `~/.herdr/worktrees` once, documented; tkt waits on any question).
+- S10. The setup agent never runs in a workspace at the clone, which Herdr makes the head of the worktree's group and refuses to close: it runs as a split with its cwd at the clone, beside a pane open at the clone, else beside the pane Start runs in, else in a workspace tkt opens outside the clone; closing it leaves the worktree's workspace alone.
 
 ## Tasks
 
 - [x] T1 (S4, S5, S6, S7) Relay in `on-worktree`, handoff state, Herdr `ClosePane`/`CloseWorkspace`, work prompt, tests — slice 1 — inline, no Writer reason. Commit 69e2c07 (346 lines). RED: build failed on `handoff` undefined; GREEN: `go test ./...` ok.
 - [x] T2 (S1, S2, S3, S4, S8) Start runs the setup agent in a pane tkt creates and records the handoff; in-place path removed; docs, tests — slice 2 — inline, no Writer reason. Commit on feat/worktree-handoff-2-start (218 lines). RED: build failed on `SetupPrompt` undefined; GREEN: `go test ./...` ok, including the end-to-end `TestStartThenWorktreeLeavesOneAgentInTheWorktree`.
+
+- [x] T3 (S9, S8) Wait on a blocked agent before the first prompt; README trust note — slice 3 — inline, no Writer reason. RED: `TestOnWorktreeWaitsForTheNewAgentsQuestionBeforeItsPrompt` failed (handoff dropped); GREEN after.
+- [x] T4 (S10, S3, S5) Setup agent as a split at the clone, never a workspace at the clone; close pane then tkt's host workspace — slice 3 — inline, no Writer reason. `go test ./...` ok.
 
 Risk: item 1 (closing an agent's pane or workspace is irreversible) → one independent verifier at the feature's end.
 
@@ -29,3 +34,7 @@ Risk: item 1 (closing an agent's pane or workspace is irreversible) → one inde
 - L4 Forecast 406–660 lines → two slices; user chose Chain.
 - L5 Independent verifier (whole feature, baseline b947ff2): S1–S6 and S8 met; S7 blocker B1 — the setup agent was closed when the new agent started but never got its prompt (Herdr refused `agent.prompt`, or a question outlasted the wait). Advisories: Herdr may refuse `workspace.close` on a workspace heading a worktree group; close failures went only to stderr; `eventWorkspace` walked a map in random order; no lock on `state.json` (left as is: degraded, not destructive).
 - L6 Correction batch: a handoff whose new agent got no prompt now counts as failed (setup agent kept, notification); a refused workspace close falls back to closing the setup pane; close failures notify; `eventWorkspace` takes the shallowest workspace, keys sorted. Recheck: `TestOnWorktreeKeepsTheSetupAgentWhenTheNewAgentGetsNoPrompt` reproduces B1 and passes; `go test ./...` ok.
+- L7 (2026-10-29) Live test (scratch repo, isolated XDG, hook on the branch binary): event `data.workspace.workspace_id` found, root pane found, agent started; then `agent.prompt` → `agent_blocked` (Claude trust dialog in the new folder) → handoff failed, A kept. A workspace tkt opened at the clone heads the worktree group: `workspace.close` → `workspace_group_close_required`, `pane.close` of its only pane → `confirmation_required`; a split beside another pane closes fine; a split with cwd at the clone inside a workspace elsewhere closes fine and the worktree stays. Claude inherits trust from a trusted parent folder.
+- L8 (2026-10-29) User: "fallo 1. no hay manera de aceptar ese trust? que sea transparente para el usuario / fallo 2. ok"; then "si" to: trust `~/.herdr/worktrees` once + tkt waits on any question; setup split never in a workspace at the clone.
+- L9 (2026-10-29) Evidence: Herdr let a `worktree.created` hook run 5 minutes, so a 4-minute wait fits. Live rerun on the branch binary: B blocked on trust, hook printed "is asking a question", after answering B got its prompt and the setup split closed. Herdr opens a workspace at the clone by itself ("repo") as the worktree group's head when none is open; not tkt's, left as is.
+- L10 (2026-10-29) Independent verifier on c94326a: S3, S5, S7, S9, S10 met; no blockers. Probes committed as regression tests (replaced first pane, handoff without Host, question never answered). Advisories left as is: a not-ready then blocked agent can wait ~8 min, past the 5 min observed for a hook (setup agent kept, no notification); old-state or rearranged panes degrade to a notification; a clone whose parent folder is itself a repo is unconfirmed live.

@@ -412,27 +412,52 @@ func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) erro
 	return nil
 }
 
-// startSetupAgent opens the agent that creates the ticket's worktree in dir, in a pane tkt opens for it so the
-// handoff can close it without closing anything of the user's: a split beside a pane open at dir, else a workspace.
+// startSetupAgent opens the agent that creates the ticket's worktree in dir, in a split tkt opens for it so the
+// handoff can close it without closing anything of the user's: beside a pane open at dir, else beside the pane Start
+// runs in, else in a workspace tkt opens next to dir. Never a workspace at dir: Herdr makes it the head of the
+// worktree's group and refuses to close it alone.
 // The handoff is saved before the agent gets its prompt, as the worktree event may follow right after.
 func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, kind, dir, repo, label string, focus bool) error {
 	ho := handoff{Key: plan.Key, Summary: plan.Summary, Repo: repo, Clone: dir, Kind: kind}
-	var where string
-	if p, ok := paneAt(ctx, h, dir); ok {
-		if split, err := h.SplitPane(ctx, p.ID, dir); err == nil {
-			ho.Pane, where = split.ID, "a pane beside workspace "+p.WorkspaceID
-			if focus {
-				_ = h.FocusWorkspace(ctx, p.WorkspaceID)
-				_ = h.FocusPane(ctx, split.ID)
-			}
+	var ws string
+	splitBeside := func(pane, workspace string) bool {
+		split, err := h.SplitPane(ctx, pane, dir)
+		if err != nil || split.ID == "" {
+			return false
 		}
+		ho.Pane, ws = split.ID, workspace
+		return true
 	}
-	if ho.Pane == "" {
-		ws, pane, err := h.CreateWorkspace(ctx, dir, label, focus)
+	opened := false
+	if p, ok := paneAt(ctx, h, dir); ok {
+		opened = splitBeside(p.ID, p.WorkspaceID)
+	}
+	if caller := a.Env.Getenv("HERDR_PANE_ID"); !opened && caller != "" {
+		opened = splitBeside(caller, a.Env.Getenv("HERDR_WORKSPACE_ID"))
+	}
+	if !opened {
+		host, root, err := h.CreateWorkspace(ctx, filepath.Dir(dir), label, focus)
 		if err != nil {
 			return err
 		}
-		ho.Pane, ho.Workspace, where = pane.ID, ws.ID, fmt.Sprintf("workspace %s (%s)", label, ws.ID)
+		if !splitBeside(root.ID, host.ID) {
+			_ = h.CloseWorkspace(ctx, host.ID)
+			return fmt.Errorf("could not open a pane at %s in workspace %s", dir, host.ID)
+		}
+		ho.Workspace, ho.Host = host.ID, root.ID
+	}
+	where := "pane " + ho.Pane
+	switch {
+	case ho.Workspace != "":
+		where = fmt.Sprintf("workspace %s (%s)", label, ho.Workspace)
+	case ws != "":
+		where = "a pane beside workspace " + ws
+	}
+	if focus {
+		if ws != "" {
+			_ = h.FocusWorkspace(ctx, ws)
+		}
+		_ = h.FocusPane(ctx, ho.Pane)
 	}
 	name, err := startAgent(ctx, h, ho.Pane, kind)
 	if err != nil && !notReady(err) {
@@ -514,16 +539,30 @@ func (a *App) promptStarted(ctx context.Context, h HerdrAPI, agent, where, promp
 
 // promptAgent is promptStarted reporting whether the prompt reached the agent; when it did not, it was printed.
 func (a *App) promptAgent(ctx context.Context, h HerdrAPI, agent, where, prompt string, startErr error) (bool, error) {
-	if notReady(startErr) {
+	waitAnswer := func() bool {
 		a.printf("! %s in %s is asking a question; answer it there and the prompt follows…\n", agent, where)
 		if err := h.WaitAgent(ctx, agent, "idle", 4*time.Minute); err != nil {
 			a.printf("! It did not get ready in time; give it this prompt:\n\n%s\n", prompt)
+			return false
+		}
+		return true
+	}
+	if notReady(startErr) {
+		if !waitAnswer() {
 			return false, nil
 		}
 	} else if startErr != nil {
 		return false, startErr
 	}
-	if err := a.promptWhenNamed(ctx, h, agent, prompt); err != nil {
+	err := a.promptWhenNamed(ctx, h, agent, prompt)
+	// A question can appear after agent.start returned, such as Claude Code's trust prompt in a folder it never saw.
+	if blocked(err) {
+		if !waitAnswer() {
+			return false, nil
+		}
+		err = a.promptWhenNamed(ctx, h, agent, prompt)
+	}
+	if err != nil {
 		a.printf("! %s started in %s but did not get its first prompt (%v); give it this prompt:\n\n%s\n", agent, where, err, prompt)
 		return false, nil
 	}
@@ -1029,4 +1068,8 @@ func nameTaken(err error) bool {
 // notReady means Herdr started the agent but it is showing a question, such as Claude Code's folder trust prompt.
 func notReady(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "agent_not_ready")
+}
+
+func blocked(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "agent_blocked")
 }
