@@ -234,6 +234,14 @@ func (c *Client) ClosePluginPane(ctx context.Context, paneID string) error {
 	return c.Call(ctx, "plugin.pane.close", map[string]any{"pane_id": paneID}, nil)
 }
 
+func (c *Client) ClosePane(ctx context.Context, paneID string) error {
+	return c.Call(ctx, "pane.close", map[string]any{"pane_id": paneID}, nil)
+}
+
+func (c *Client) CloseWorkspace(ctx context.Context, id string) error {
+	return c.Call(ctx, "workspace.close", map[string]any{"workspace_id": id}, nil)
+}
+
 func (c *Client) Notify(ctx context.Context, title, body string) error {
 	return c.Call(ctx, "notification.show", map[string]any{"title": title, "body": body}, nil)
 }

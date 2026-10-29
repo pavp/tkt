@@ -85,9 +85,9 @@ links the tkt plugin into the running Herdr (0.9.5 or later); after an upgrade t
 - a live ticket pane for the current workspace (`tkt.ticket`),
 - Ctrl-click on Jira and pull request links to open their ticket,
 - sidebar labels such as `DEMO-1 · ✕ CI · #812 · claude working`, refreshed by `tkt list`, the `tkt.refresh` action, and at Herdr startup from the cache,
-- automatic `tkt link` when an agent creates a worktree with `herdr worktree create`.
+- automatic `tkt link` when an agent creates a worktree with `herdr worktree create`, followed by the Start handoff to an agent in that worktree.
 
-`tkt herdr start KEY` opens the agent in a new Herdr workspace per repository instead of the current terminal; when the ticket already has a worktree with an agent working in it, it focuses that agent's workspace instead (the board's menu then reads "Go to the agent in Herdr"). `tkt herdr uninstall` removes the plugin and the keybindings it added.
+`tkt herdr start KEY` works in Herdr workspaces instead of the current terminal: for a ticket without a worktree, a setup agent creates one per repository with `herdr worktree create`, and tkt then hands the ticket to an agent started in that worktree's workspace and closes the setup agent, so the main checkout stays free (Claude Code asks whether to trust each new worktree's folder, and tkt waits for the answer; trust `~/.herdr/worktrees` once, by opening Claude Code there, and it never asks again); when the ticket already has a worktree with an agent working in it, it focuses that agent's workspace instead (the board's menu then reads "Go to the agent in Herdr"). `tkt herdr uninstall` removes the plugin and the keybindings it added.
 
 ## Develop
 

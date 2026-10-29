@@ -42,6 +42,8 @@ type HerdrAPI interface {
 	Watch(ctx context.Context, subs []herdr.Subscription, on func(herdr.Event)) error
 	FocusPluginPane(ctx context.Context, paneID string) error
 	ClosePluginPane(ctx context.Context, paneID string) error
+	ClosePane(ctx context.Context, paneID string) error
+	CloseWorkspace(ctx context.Context, id string) error
 	Notify(ctx context.Context, title, body string) error
 	LinkPlugin(ctx context.Context, path string) error
 	UnlinkPlugin(ctx context.Context, id string) error
@@ -74,7 +76,10 @@ func newHerdrCmd(a *App) *cobra.Command {
 	start := &cobra.Command{
 		Use:   "start KEY",
 		Short: "Open an agent on a ticket in Herdr workspaces",
-		Args:  cobra.ExactArgs(1),
+		Long: "Open an agent on a ticket in Herdr workspaces. A ticket with a worktree opens its agent there. Otherwise,\n" +
+			"per repository, a setup agent creates the worktree with `herdr worktree create`; tkt then starts an agent\n" +
+			"in the worktree's workspace and closes the setup agent, so the main checkout stays free.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.herdrStart(cmd, args, startOpts{repos: repoFlags, clone: clone, worktree: worktree, agent: agent})
 		},
@@ -141,7 +146,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 			a.syncHerdrPlugin(cmd.Context())
 			return a.herdrSidebar(cmd, true)
 		}},
-		&cobra.Command{Use: "on-worktree", Short: "Link a worktree Herdr just created (event hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOnWorktree(cmd) }},
+		&cobra.Command{Use: "on-worktree", Short: "Link a worktree Herdr just created and hand its ticket to an agent there (event hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOnWorktree(cmd) }},
 	)
 	return cmd
 }
@@ -390,7 +395,7 @@ func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) erro
 		if err != nil {
 			return err
 		}
-		pane, err := a.startInWorkspace(ctx, h, kind, plan.Existing.Path, string(plan.Key), plan.Prompt, "", true)
+		pane, err := a.startInWorkspace(ctx, h, kind, plan.Existing.Path, string(plan.Key), plan.Prompt, true)
 		markAgent(ctx, h, pane, plan.Key)
 		return err
 	}
@@ -398,31 +403,84 @@ func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) erro
 	if err != nil {
 		return err
 	}
-	plan.Prompt = workspace.HerdrStartPrompt(plan.Key, plan.Summary)
-	inPlace := workspace.HerdrBranchPrompt(plan.Key, plan.Summary)
 	for i, dir := range plan.Dirs {
 		label := string(plan.Key) + " · " + filepath.Base(dir)
-		pane, err := a.startInWorkspace(ctx, h, kind, dir, label, plan.Prompt, inPlace, i == 0)
-		markAgent(ctx, h, pane, plan.Key)
-		if err != nil {
+		if err := a.startSetupAgent(ctx, h, plan, kind, dir, plan.Repos[i], label, i == 0); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// startSetupAgent opens the agent that creates the ticket's worktree in dir, in a split tkt opens for it so the
+// handoff can close it without closing anything of the user's: beside a pane open at dir, else beside the pane Start
+// runs in, else in a workspace tkt opens next to dir. Never a workspace at dir: Herdr makes it the head of the
+// worktree's group and refuses to close it alone.
+// The handoff is saved before the agent gets its prompt, as the worktree event may follow right after.
+func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, kind, dir, repo, label string, focus bool) error {
+	ho := handoff{Key: plan.Key, Summary: plan.Summary, Repo: repo, Clone: dir, Kind: kind}
+	var ws string
+	splitBeside := func(pane, workspace string) bool {
+		split, err := h.SplitPane(ctx, pane, dir)
+		if err != nil || split.ID == "" {
+			return false
+		}
+		ho.Pane, ws = split.ID, workspace
+		return true
+	}
+	opened := false
+	if p, ok := paneAt(ctx, h, dir); ok {
+		opened = splitBeside(p.ID, p.WorkspaceID)
+	}
+	if caller := a.Env.Getenv("HERDR_PANE_ID"); !opened && caller != "" {
+		opened = splitBeside(caller, a.Env.Getenv("HERDR_WORKSPACE_ID"))
+	}
+	if !opened {
+		host, root, err := h.CreateWorkspace(ctx, filepath.Dir(dir), label, focus)
+		if err != nil {
+			return err
+		}
+		if !splitBeside(root.ID, host.ID) {
+			_ = h.CloseWorkspace(ctx, host.ID)
+			return fmt.Errorf("could not open a pane at %s in workspace %s", dir, host.ID)
+		}
+		ho.Workspace, ho.Host = host.ID, root.ID
+	}
+	where := "pane " + ho.Pane
+	switch {
+	case ho.Workspace != "":
+		where = fmt.Sprintf("workspace %s (%s)", label, ho.Workspace)
+	case ws != "":
+		where = "a pane beside workspace " + ws
+	}
+	if focus {
+		if ws != "" {
+			_ = h.FocusWorkspace(ctx, ws)
+		}
+		_ = h.FocusPane(ctx, ho.Pane)
+	}
+	name, err := startAgent(ctx, h, ho.Pane, kind)
+	if err != nil && !notReady(err) {
+		return err
+	}
+	markAgent(ctx, h, ho.Pane, plan.Key)
+	ho.Agent, ho.At = name, a.Now()
+	st := a.loadState()
+	st.Handoffs = append(slices.DeleteFunc(st.Handoffs, func(x handoff) bool {
+		return x.Key == ho.Key && strings.EqualFold(x.Repo, ho.Repo)
+	}), ho)
+	a.saveState(st)
+	return a.promptStarted(ctx, h, name, where, workspace.SetupPrompt(plan.Key, plan.Summary), err)
+}
+
 // startInWorkspace names the agent after its kind ("claude"), as Herdr shows agents it detects itself; the workspace
 // above it already names the ticket. Herdr wants agent names unique, so a taken name gets a number.
 // The prompt goes through agent.prompt, not as an argument: Herdr refuses multi-line arguments for the shell.
 // An open workspace at dir with no agent is reused; when its pane is busy (an editor, a server), the agent gets a
-// split next to it, and only when that fails a new workspace opens. A reused workspace whose checkout is free
-// gets inPlacePrompt (when set), so the agent branches there instead of creating a worktree.
+// split next to it, and only when that fails a new workspace opens.
 // It returns the pane the agent started in, empty when none did.
-func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, kind, dir, label, prompt, inPlacePrompt string, focus bool) (string, error) {
+func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, kind, dir, label, prompt string, focus bool) (string, error) {
 	if p, ok := idlePaneAt(ctx, h, dir); ok {
-		if inPlacePrompt != "" && a.checkoutFree(ctx, dir) {
-			prompt = inPlacePrompt
-		}
 		used := p.ID
 		name, err := startAgent(ctx, h, used, kind)
 		if err != nil && !notReady(err) {
@@ -475,21 +533,41 @@ func startAgent(ctx context.Context, h HerdrAPI, paneID, kind string) (string, e
 // Claude Code's folder trust prompt) gets the prompt after the user answers; the wait stays under the socket
 // deadline. When the prompt cannot be sent, the user gets it to paste, since the agent is already open.
 func (a *App) promptStarted(ctx context.Context, h HerdrAPI, agent, where, prompt string, startErr error) error {
-	if notReady(startErr) {
+	_, err := a.promptAgent(ctx, h, agent, where, prompt, startErr)
+	return err
+}
+
+// promptAgent is promptStarted reporting whether the prompt reached the agent; when it did not, it was printed.
+func (a *App) promptAgent(ctx context.Context, h HerdrAPI, agent, where, prompt string, startErr error) (bool, error) {
+	waitAnswer := func() bool {
 		a.printf("! %s in %s is asking a question; answer it there and the prompt follows…\n", agent, where)
 		if err := h.WaitAgent(ctx, agent, "idle", 4*time.Minute); err != nil {
 			a.printf("! It did not get ready in time; give it this prompt:\n\n%s\n", prompt)
-			return nil
+			return false
+		}
+		return true
+	}
+	if notReady(startErr) {
+		if !waitAnswer() {
+			return false, nil
 		}
 	} else if startErr != nil {
-		return startErr
+		return false, startErr
 	}
-	if err := a.promptWhenNamed(ctx, h, agent, prompt); err != nil {
+	err := a.promptWhenNamed(ctx, h, agent, prompt)
+	// A question can appear after agent.start returned, such as Claude Code's trust prompt in a folder it never saw.
+	if blocked(err) {
+		if !waitAnswer() {
+			return false, nil
+		}
+		err = a.promptWhenNamed(ctx, h, agent, prompt)
+	}
+	if err != nil {
 		a.printf("! %s started in %s but did not get its first prompt (%v); give it this prompt:\n\n%s\n", agent, where, err, prompt)
-		return nil
+		return false, nil
 	}
 	a.printf("✓ %s started in %s\n", agent, where)
-	return nil
+	return true, nil
 }
 
 // promptWhenNamed retries while Herdr has not yet made the started agent's name active, which on WSL lags
@@ -541,6 +619,20 @@ func idlePaneAt(ctx context.Context, h HerdrAPI, dir string) (herdr.Pane, bool) 
 	}
 	for _, p := range panes {
 		if !busy[p.WorkspaceID] && p.Cwd != "" && filepath.Clean(p.Cwd) == filepath.Clean(dir) {
+			return p, true
+		}
+	}
+	return herdr.Pane{}, false
+}
+
+// paneAt is a pane open at dir, whether or not an agent runs there.
+func paneAt(ctx context.Context, h HerdrAPI, dir string) (herdr.Pane, bool) {
+	panes, err := h.Panes(ctx)
+	if err != nil {
+		return herdr.Pane{}, false
+	}
+	for _, p := range panes {
+		if p.Cwd != "" && filepath.Clean(p.Cwd) == filepath.Clean(dir) {
 			return p, true
 		}
 	}
@@ -919,6 +1011,9 @@ func (a *App) herdrOnWorktree(cmd *cobra.Command) error {
 		return err
 	}
 	a.printf("✓ %s ← %s (%s)\n", key, co.branch, co.repo)
+	if ho, ok := a.takeHandoff(key, co.repo); ok {
+		a.handOff(cmd.Context(), ho, eventWorkspace(a.Env.Getenv("HERDR_PLUGIN_EVENT_JSON")))
+	}
 	if snap, ok, _ := a.cache().Load(); ok {
 		_, _, _ = a.updateSidebar(cmd.Context(), c, snap, true)
 	}
@@ -973,4 +1068,8 @@ func nameTaken(err error) bool {
 // notReady means Herdr started the agent but it is showing a question, such as Claude Code's folder trust prompt.
 func notReady(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "agent_not_ready")
+}
+
+func blocked(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "agent_blocked")
 }
