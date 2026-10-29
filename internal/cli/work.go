@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pavp/tkt/internal/config"
+	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/paths"
 	"github.com/pavp/tkt/internal/repos"
 	"github.com/pavp/tkt/internal/ticket"
@@ -136,13 +137,16 @@ func newUnlinkCmd(a *App) *cobra.Command {
 		Use:   "unlink [KEY]",
 		Short: "Forget the work registered on a ticket",
 		Long: "Forget the work `tkt link` registered: the current worktree's branch, or with KEY every link of that ticket.\n" +
+			"Inside Herdr it also clears the ticket from the agents tkt gave it to, which otherwise stay on it.\n" +
 			"A branch git still has keeps showing on the board through discovery until it is deleted.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var match func(workspace.Work) bool
 			var none error
+			keys := map[ticket.Key]bool{}
 			if len(args) == 1 {
 				key := ticket.Key(strings.ToUpper(args[0]))
+				keys[key] = true
 				match = func(w workspace.Work) bool { return w.Key == key }
 				none = fmt.Errorf("no work is linked to %s", key)
 			} else {
@@ -159,7 +163,11 @@ func newUnlinkCmd(a *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(removed) == 0 {
+			for _, w := range removed {
+				keys[w.Key] = true
+			}
+			unmarked := a.unmarkAgents(cmd.Context(), keys)
+			if len(removed) == 0 && len(unmarked) == 0 {
 				return none
 			}
 			if a.jsonOut {
@@ -168,11 +176,39 @@ func newUnlinkCmd(a *App) *cobra.Command {
 			for _, w := range removed {
 				a.printf("✓ %s ✗ %s (%s)\n", w.Key, w.Branch, w.Repo)
 			}
+			for _, ag := range unmarked {
+				a.printf("✓ %s ✗ agent %s (%s)\n", ag.Tokens[ticketToken], ag.Name, ag.PaneID)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&dir, "dir", "", "worktree to forget (default: current directory)")
 	return cmd
+}
+
+// unmarkAgents clears the ticket mark of every agent pane given one of keys, since the mark alone keeps an agent
+// on its ticket; without Herdr running there is nothing to clear.
+func (a *App) unmarkAgents(ctx context.Context, keys map[ticket.Key]bool) []herdr.Agent {
+	if a.NewHerdr == nil || len(keys) == 0 {
+		return nil
+	}
+	h := a.NewHerdr()
+	agents, err := h.Agents(ctx)
+	if err != nil {
+		return nil
+	}
+	var out []herdr.Agent
+	for _, ag := range agents {
+		if !keys[ticket.Key(ag.Tokens[ticketToken])] {
+			continue
+		}
+		if err := h.ReportPaneTokens(ctx, ag.PaneID, sidebarSource, map[string]*string{ticketToken: nil}); err != nil {
+			fmt.Fprintf(a.Stderr, "! could not clear %s from agent %s (%s): %v\n", ag.Tokens[ticketToken], ag.Name, ag.PaneID, err)
+			continue
+		}
+		out = append(out, ag)
+	}
+	return out
 }
 
 // linkKey enforces the one branch-naming invariant: the branch must contain the ticket key.
