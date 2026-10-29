@@ -28,8 +28,10 @@ type stubJira struct {
 	// development panel asked for.
 	team    []jira.Issue
 	teamErr error
-	jqls    []string
-	panels  []string
+	// handedOff answers the search for finished tickets the user held but never moved.
+	handedOff []jira.Issue
+	jqls      []string
+	panels    []string
 	// sprints answers ActiveSprints per board.
 	sprints map[int][]int
 	// teamGate, when set, holds the team search until the GitHub listing starts; teamStalled records a
@@ -49,6 +51,9 @@ func (s *stubJira) Search(_ context.Context, jql string, fields []string) ([]jir
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.jqls = append(s.jqls, jql)
+	if strings.Contains(jql, "NOT status CHANGED BY currentUser()") {
+		return s.handedOff, nil
+	}
 	if strings.Contains(jql, "assignee != currentUser()") {
 		gate := s.teamGate
 		s.mu.Unlock()
@@ -984,7 +989,7 @@ func TestTeamTicketsComeOnlyWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(js.jqls) != 1 || len(snap.Tickets) != 1 {
+	if len(js.jqls) != 2 || slices.ContainsFunc(js.jqls, func(q string) bool { return strings.Contains(q, "assignee != currentUser()") }) || len(snap.Tickets) != 1 {
 		t.Fatalf("off: searches %v, tickets %+v", js.jqls, snap.Tickets)
 	}
 	js.jqls, js.panels = nil, nil
@@ -1013,7 +1018,7 @@ func TestTeamTicketsComeOnlyWhenAsked(t *testing.T) {
 		t.Errorf("only the user's tickets ask for their development panel: %v", js.panels)
 	}
 	boardless := &stubJira{issues: js.issues, team: js.team, linked: js.linked}
-	if _, err := FetchWith(context.Background(), cfg(), boardless, gh, now, Snapshot{}, Options{Team: true}); err != nil || len(boardless.jqls) != 1 {
+	if _, err := FetchWith(context.Background(), cfg(), boardless, gh, now, Snapshot{}, Options{Team: true}); err != nil || slices.ContainsFunc(boardless.jqls, func(q string) bool { return strings.Contains(q, "assignee != currentUser()") }) {
 		t.Errorf("without team boards there is no team to look for: %v %v", err, boardless.jqls)
 	}
 	js.teamErr = errors.New("jira: 500")
@@ -1083,5 +1088,48 @@ func TestFetchPaintsJiraBeforeGitHub(t *testing.T) {
 	}
 	if snap.Partial || snap.Tickets[0].Key != "DEMO-1" || snap.Tickets[0].PRs[0].Checks != ticket.ChecksPass {
 		t.Errorf("the full board follows: %+v", snap.Tickets)
+	}
+}
+
+func TestAFinishedTicketHeldButNeverMovedIsTheUsersOnlyWithTheirPullRequest(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	done := func(id, key string) jira.Issue {
+		return jira.Issue{ID: id, Key: key, Summary: key, Status: "Ready to be Released", StatusCategory: "done",
+			Sprints: []jira.Sprint{{ID: 11807, Space: "DEMO", Name: "DEMO S42", State: "active"}}}
+	}
+	js := &stubJira{
+		issues:    []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate"}},
+		handedOff: []jira.Issue{done("2", "DEMO-2"), done("3", "DEMO-3"), {ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate"}},
+		team:      []jira.Issue{done("2", "DEMO-2"), done("3", "DEMO-3")},
+		linked:    map[string][]jira.DevPullRequest{},
+		sprints:   map[int][]int{5205: {11807}},
+	}
+	gh := &stubGitHub{prs: []ticket.PullRequest{
+		{Repo: "example-org/web", Number: 20, Branch: "feature/DEMO-2-mine", State: ticket.PRMerged, Yours: true},
+		{Repo: "example-org/web", Number: 30, Branch: "feature/DEMO-3-theirs", State: ticket.PRMerged},
+	}}
+	for _, team := range []bool{false, true} {
+		snap, err := FetchWith(context.Background(), teamCfg(), js, gh, now, Snapshot{}, Options{Team: team})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(js.jqls, jira.HandedOffSprintJQL(teamCfg().SpaceKeys())) {
+			t.Errorf("team %v: no handed-off search: %v", team, js.jqls)
+		}
+		seen := map[ticket.Key]int{}
+		byKey := map[ticket.Key]ticket.Ticket{}
+		for _, tk := range snap.Tickets {
+			seen[tk.Key]++
+			byKey[tk.Key] = tk
+		}
+		if seen["DEMO-1"] != 1 || seen["DEMO-2"] != 1 || byKey["DEMO-2"].Team || byKey["DEMO-1"].Team {
+			t.Errorf("team %v: a ticket with the user's PR is theirs, once: %+v", team, snap.Tickets)
+		}
+		if len(byKey["DEMO-2"].PRs) != 1 || byKey["DEMO-2"].PRs[0].Number != 20 {
+			t.Errorf("team %v: DEMO-2 PRs = %+v", team, byKey["DEMO-2"].PRs)
+		}
+		if team && (seen["DEMO-3"] != 1 || !byKey["DEMO-3"].Team) || !team && seen["DEMO-3"] != 0 {
+			t.Errorf("team %v: a ticket only held a moment is the team's: %+v", team, snap.Tickets)
+		}
 	}
 }

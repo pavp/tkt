@@ -105,7 +105,7 @@ func TestSearchPaginatesAndDecodes(t *testing.T) {
 		t.Errorf("second = %+v", got[1])
 	}
 	body := (*calls)[0].body
-	if body["jql"] != `sprint in openSprints() AND project in ("DEMO", "OPS") AND (assignee = currentUser() OR (statusCategory = Done AND assignee WAS currentUser())) ORDER BY updated DESC` {
+	if body["jql"] != `sprint in openSprints() AND project in ("DEMO", "OPS") AND (assignee = currentUser() OR (statusCategory = Done AND assignee WAS currentUser() AND status CHANGED BY currentUser())) ORDER BY updated DESC` {
 		t.Errorf("jql = %v", body["jql"])
 	}
 	if !strings.HasPrefix((*calls)[0].auth, "Basic ") {
@@ -415,8 +415,15 @@ func TestRequestsRetryWhenJiraThrottles(t *testing.T) {
 }
 
 func TestTeamSprintJQL(t *testing.T) {
-	want := `sprint in (42, 43) AND project in ("DEMO", "OPS") AND (assignee != currentUser() OR assignee IS EMPTY) AND NOT (statusCategory = Done AND assignee WAS currentUser()) ORDER BY updated DESC`
+	want := `sprint in (42, 43) AND project in ("DEMO", "OPS") AND (assignee != currentUser() OR assignee IS EMPTY) AND NOT (statusCategory = Done AND assignee WAS currentUser() AND status CHANGED BY currentUser()) ORDER BY updated DESC`
 	if got := TeamSprintJQL([]string{"DEMO", "OPS"}, []int{42, 43}); got != want {
+		t.Errorf("jql = %s", got)
+	}
+}
+
+func TestHandedOffSprintJQL(t *testing.T) {
+	want := `sprint in openSprints() AND project in ("DEMO", "OPS") AND statusCategory = Done AND assignee WAS currentUser() AND NOT status CHANGED BY currentUser() ORDER BY updated DESC`
+	if got := HandedOffSprintJQL([]string{"DEMO", "OPS"}); got != want {
 		t.Errorf("jql = %s", got)
 	}
 }
