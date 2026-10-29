@@ -81,7 +81,9 @@ type startPlan struct {
 	Summary  string
 	Existing *workspace.Work
 	Dirs     []string
-	Prompt   string
+	// Repos holds each of Dirs' repository, as owner/name.
+	Repos  []string
+	Prompt string
 }
 
 // startOpts are the choices a Start may arrive with; prefer, when set, picks among several worktrees
@@ -184,6 +186,7 @@ func (a *App) planStart(cmd *cobra.Command, args []string, opts startOpts) (star
 			continue
 		}
 		plan.Dirs = append(plan.Dirs, dir)
+		plan.Repos = append(plan.Repos, r.Name)
 	}
 	if len(plan.Dirs) == 0 {
 		return startPlan{}, errors.New("no repository to start in")

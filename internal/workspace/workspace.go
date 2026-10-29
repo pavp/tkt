@@ -278,22 +278,28 @@ func StartPrompt(key ticket.Key, summary string) string {
 4. Then implement the ticket.`, key, summary)
 }
 
-// HerdrStartPrompt is StartPrompt for an agent inside Herdr, which only shows worktrees it created as workspaces.
-func HerdrStartPrompt(key ticket.Key, summary string) string {
-	return StartPrompt(key, summary) + "\n\nYou are running inside Herdr: create the worktree with `herdr worktree create --cwd <this repository> --branch <branch> [--base <base>]` instead of `git worktree add`, so Herdr opens it as its own workspace."
+// SetupPrompt is the first message for the agent that only creates a ticket's worktree inside Herdr: it knows the
+// repository's rules for branch names and bases, and tkt hands the ticket to an agent born in the new worktree.
+func SetupPrompt(key ticket.Key, summary string) string {
+	return fmt.Sprintf(`Prepare Jira ticket %[1]s: %[2]s
+
+Another agent does the work; your only job is to create its worktree.
+1. Following this repository's own conventions for branch names, base branch and tooling, choose the branch and its base. The branch name must contain %[1]s.
+2. Create the worktree with Herdr: herdr worktree create --cwd <this repository> --branch <branch> --base <base>
+3. Stop there. tkt starts an agent in the worktree's new workspace and closes this one.`, key, summary)
 }
 
-// HerdrBranchPrompt is the first message for an agent that opens in a free checkout (no other agent, no local
-// changes, on its default branch): it works there on a new branch instead of a worktree.
-func HerdrBranchPrompt(key ticket.Key, summary string) string {
+// HandoffPrompt is the first message for the agent tkt starts in a worktree a setup agent just created from the
+// main checkout at clone, whose ignored files (such as .env.local) the worktree lacks.
+func HandoffPrompt(key ticket.Key, summary, clone string) string {
 	return fmt.Sprintf(`Work on Jira ticket %[1]s: %[2]s
 
-This checkout is free (no other agent, no local changes), so work in it and do not create a worktree.
-1. Create a branch for this ticket in this checkout, following this repository's own conventions for branch names, base branch and tooling. The branch name must contain %[1]s.
-2. Save the ticket context and read it: tkt context %[1]s --images .ticket-assets > .ticket.md
+This worktree was just created for the ticket from the main checkout at %[3]s, and tkt already registered it.
+1. Save the ticket context and read it: tkt context %[1]s --images .ticket-assets > .ticket.md
    Keep .ticket.md and .ticket-assets/ out of git by adding them to .git/info/exclude.
-3. Register the work: tkt link %[1]s
-4. Then implement the ticket.`, key, summary)
+2. When this repository's rules call for it, copy from %[3]s the files git ignores that the project needs to run (such as .env.local).
+3. Confirm the registration: tkt link %[1]s
+4. Then implement the ticket.`, key, summary, clone)
 }
 
 // ContinuePrompt is the first message when the agent opens in an existing worktree.
