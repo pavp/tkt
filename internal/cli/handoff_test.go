@@ -64,15 +64,18 @@ func TestOnWorktreeClosesOnlyTheSetupPaneWhenItsWorkspaceIsNotTkts(t *testing.T)
 	tests := []struct {
 		name  string
 		ws    string
+		host  string
 		panes string
 	}{
-		{"split beside the user's pane", "", `[{"pane_id":"w1:p1","workspace_id":"w1"},{"pane_id":"w1:p2","workspace_id":"w1"},{"pane_id":"w9:p1","workspace_id":"w9"}]`},
-		{"the user opened a pane in tkt's workspace", "w1", `[{"pane_id":"w1:p2","workspace_id":"w1"},{"pane_id":"w1:p3","workspace_id":"w1"},{"pane_id":"w9:p1","workspace_id":"w9"}]`},
+		{"split beside the user's pane", "", "", `[{"pane_id":"w1:p1","workspace_id":"w1"},{"pane_id":"w1:p2","workspace_id":"w1"},{"pane_id":"w9:p1","workspace_id":"w9"}]`},
+		{"the user opened a pane in tkt's workspace", "w1", "w1:p1", `[{"pane_id":"w1:p1","workspace_id":"w1"},{"pane_id":"w1:p2","workspace_id":"w1"},{"pane_id":"w1:p3","workspace_id":"w1"},{"pane_id":"w9:p1","workspace_id":"w9"}]`},
+		{"the user replaced tkt's first pane", "w1", "w1:p1", `[{"pane_id":"w1:p3","workspace_id":"w1"},{"pane_id":"w1:p2","workspace_id":"w1"},{"pane_id":"w9:p1","workspace_id":"w9"}]`},
+		{"a handoff saved without its first pane", "w1", "", `[{"pane_id":"w1:p1","workspace_id":"w1"},{"pane_id":"w1:p2","workspace_id":"w1"},{"pane_id":"w9:p1","workspace_id":"w9"}]`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ho := setupAgent()
-			ho.Workspace = tt.ws
+			ho.Workspace, ho.Host = tt.ws, tt.host
 			h, f := handoffHarness(t, ho)
 			f.Results["pane.list"] = `{"type":"pane_list","panes":` + tt.panes + `}`
 			if code := h.exec("herdr", "on-worktree"); code != 0 {
@@ -223,5 +226,23 @@ func TestOnWorktreeWaitsForTheNewAgentsQuestionBeforeItsPrompt(t *testing.T) {
 	}
 	if f.Last("workspace.close")["workspace_id"] != "w1" {
 		t.Errorf("setup agent not closed: %v", f.Requests)
+	}
+}
+
+func TestOnWorktreeKeepsTheSetupAgentWhenTheNewAgentsQuestionIsNeverAnswered(t *testing.T) {
+	h, f := handoffHarness(t, setupAgent())
+	f.Errors["agent.prompt"] = "agent_blocked: agent claude is blocked and requires interactive input"
+	f.Errors["agent.wait"] = "timeout"
+	if code := h.exec("herdr", "on-worktree"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if count(f, "pane.close") != 0 || count(f, "workspace.close") != 0 {
+		t.Errorf("closed the setup agent: %v", f.Requests)
+	}
+	if body, _ := f.Last("notification.show")["body"].(string); !strings.Contains(body, "w1:p2") {
+		t.Errorf("notification = %v", f.Last("notification.show"))
+	}
+	if st := h.app.loadState(); len(st.Handoffs) != 0 {
+		t.Errorf("handoff kept: %+v", st.Handoffs)
 	}
 }
