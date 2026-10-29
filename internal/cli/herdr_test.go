@@ -1300,3 +1300,64 @@ func TestHerdrStartClosesItsWorkspaceWhenTheSetupAgentDoesNotStart(t *testing.T)
 		t.Errorf("workspace.close = %v, pane.close %d, agent.start %d", f.Last("workspace.close"), count(f, "pane.close"), count(f, "agent.start"))
 	}
 }
+
+func TestUnlinkClearsTheTicketFromItsAgentsPanes(t *testing.T) {
+	cases := []struct {
+		name  string
+		links []workspace.Work
+		args  []string
+		out   []string
+	}{
+		{
+			name:  "links and a marked agent",
+			links: []workspace.Work{{Key: "DEMO-7", Repo: "example-org/web", Branch: "feature/DEMO-7", Path: "/src/web-DEMO-7"}},
+			args:  []string{"unlink", "DEMO-7"},
+			out:   []string{"✓ DEMO-7 ✗ feature/DEMO-7 (example-org/web)", "✓ DEMO-7 ✗ agent claude-2 (w1:p2)"},
+		},
+		{
+			name: "only a marked agent left",
+			args: []string{"unlink", "demo-7"},
+			out:  []string{"✓ DEMO-7 ✗ agent claude-2 (w1:p2)"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, f, _ := herdrHarness(t)
+			f.Results["agent.list"] = `{"type":"agent_list","agents":[` +
+				`{"pane_id":"w1:p2","name":"claude-2","agent":"claude","tokens":{"tkt_key":"DEMO-7"}},` +
+				`{"pane_id":"w1:p3","name":"claude-3","agent":"claude","tokens":{"tkt_key":"DEMO-8"}}]}`
+			for _, w := range tc.links {
+				if err := h.app.links().Add(w); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if code := h.exec(tc.args...); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.errOut)
+			}
+			for _, want := range tc.out {
+				if !strings.Contains(h.out.String(), want) {
+					t.Errorf("output missing %q: %q", want, h.out)
+				}
+			}
+			if count(f, "pane.report_metadata") != 1 {
+				t.Fatalf("report_metadata calls = %d", count(f, "pane.report_metadata"))
+			}
+			got := f.Last("pane.report_metadata")
+			tokens, _ := got["tokens"].(map[string]any)
+			if v, ok := tokens["tkt_key"]; got["pane_id"] != "w1:p2" || got["source"] != "plugin:tkt" || !ok || v != nil {
+				t.Errorf("report_metadata = %v", got)
+			}
+		})
+	}
+}
+
+func TestUnlinkWithoutLinksOrMarkedAgentsStillFails(t *testing.T) {
+	h, f, _ := herdrHarness(t)
+	f.Results["agent.list"] = `{"type":"agent_list","agents":[{"pane_id":"w1:p3","name":"claude-3","tokens":{"tkt_key":"DEMO-8"}}]}`
+	if code := h.exec("unlink", "DEMO-7"); code == 0 || !strings.Contains(h.errOut.String(), "no work is linked to DEMO-7") {
+		t.Errorf("exit %d, %q", code, h.errOut)
+	}
+	if count(f, "pane.report_metadata") != 0 {
+		t.Error("cleared another ticket's agent")
+	}
+}
