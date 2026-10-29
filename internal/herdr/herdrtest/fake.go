@@ -20,6 +20,7 @@ type FakeServer struct {
 	Requests []map[string]any
 	Results  map[string]string
 	Errors   map[string]string
+	once     map[string]string
 	// watchers are the connections that subscribed to events; Emit writes to them.
 	watchers []net.Conn
 }
@@ -63,6 +64,10 @@ func (f *FakeServer) serve(conn net.Conn) {
 	method, _ := req["method"].(string)
 	result, ok := f.Results[method]
 	errMsg, isErr := f.Errors[method]
+	if msg, once := f.once[method]; once && !isErr {
+		errMsg, isErr = msg, true
+		delete(f.once, method)
+	}
 	f.mu.Unlock()
 	id, _ := req["id"].(string)
 	if method == "events.subscribe" && !isErr {
@@ -85,6 +90,16 @@ func (f *FakeServer) serve(conn net.Conn) {
 	default:
 		_, _ = conn.Write([]byte(`{"id":"` + id + `","result":{"type":"ok"}}` + "\n"))
 	}
+}
+
+// FailOnce makes the next call to method fail with msg, and later calls answer as before.
+func (f *FakeServer) FailOnce(method, msg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.once == nil {
+		f.once = map[string]string{}
+	}
+	f.once[method] = msg
 }
 
 // SetResult changes a method's answer while the server runs.

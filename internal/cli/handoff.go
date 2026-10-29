@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -24,8 +25,9 @@ type handoff struct {
 	Pane    string     `json:"pane"`
 	Agent   string     `json:"agent"`
 	Kind    string     `json:"kind"`
-	// Workspace is set when tkt opened a workspace only for the setup agent.
+	// Workspace is set when tkt opened a workspace only for the setup agent, Host being the pane it opened with.
 	Workspace string    `json:"workspace,omitempty"`
+	Host      string    `json:"host,omitempty"`
 	At        time.Time `json:"at"`
 }
 
@@ -64,7 +66,9 @@ func (a *App) handOff(ctx context.Context, ho handoff, ws string) {
 		return
 	}
 	if err := closeSetupAgent(ctx, h, ho); err != nil {
-		fmt.Fprintf(a.Stderr, "tkt: could not close the setup agent in pane %s: %v\n", ho.Pane, err)
+		msg := fmt.Sprintf("could not close the setup agent of %s in pane %s: %v", ho.Key, ho.Pane, err)
+		fmt.Fprintf(a.Stderr, "tkt: %s\n", msg)
+		_ = h.Notify(ctx, "tkt", msg)
 	}
 }
 
@@ -97,11 +101,15 @@ func (a *App) startHandoff(ctx context.Context, h HerdrAPI, ho handoff, ws strin
 	markAgent(ctx, h, pane, ho.Key)
 	_ = h.FocusWorkspace(ctx, ws)
 	_ = h.FocusPane(ctx, pane)
-	return a.promptStarted(ctx, h, name, "workspace "+ws, workspace.HandoffPrompt(ho.Key, ho.Summary, ho.Clone), err)
+	prompted, err := a.promptAgent(ctx, h, name, "workspace "+ws, workspace.HandoffPrompt(ho.Key, ho.Summary, ho.Clone), err)
+	if err == nil && !prompted {
+		err = fmt.Errorf("the agent in %s did not get its prompt", pane)
+	}
+	return err
 }
 
-// closeSetupAgent closes the workspace tkt opened for the setup agent while the agent's pane is all it holds, else
-// only that pane, and leaves a pane alone once another agent runs there.
+// closeSetupAgent closes the setup agent's pane, then the workspace tkt opened for it once nothing but the pane it
+// opened with is left, and leaves the pane alone once another agent runs there.
 func closeSetupAgent(ctx context.Context, h HerdrAPI, ho handoff) error {
 	agents, err := h.Agents(ctx)
 	if err != nil {
@@ -110,42 +118,51 @@ func closeSetupAgent(ctx context.Context, h HerdrAPI, ho handoff) error {
 	if slices.ContainsFunc(agents, func(ag herdr.Agent) bool { return ag.PaneID == ho.Pane && ag.Name != ho.Agent }) {
 		return fmt.Errorf("another agent runs there now")
 	}
-	if ho.Workspace != "" {
-		panes, err := h.Panes(ctx)
-		if err != nil {
-			return err
-		}
-		alone := !slices.ContainsFunc(panes, func(p herdr.Pane) bool { return p.WorkspaceID == ho.Workspace && p.ID != ho.Pane })
-		if alone {
-			return h.CloseWorkspace(ctx, ho.Workspace)
-		}
+	if err := h.ClosePane(ctx, ho.Pane); err != nil {
+		return err
 	}
-	return h.ClosePane(ctx, ho.Pane)
+	if ho.Workspace == "" {
+		return nil
+	}
+	panes, err := h.Panes(ctx)
+	if err != nil {
+		return err
+	}
+	left := slices.DeleteFunc(panes, func(p herdr.Pane) bool { return p.WorkspaceID != ho.Workspace || p.ID == ho.Pane })
+	if len(left) != 1 || left[0].ID != ho.Host {
+		return nil
+	}
+	if err := h.CloseWorkspace(ctx, ho.Workspace); err != nil {
+		return fmt.Errorf("its workspace %s stays: %w", ho.Workspace, err)
+	}
+	return nil
 }
 
-// eventWorkspace is the id of the workspace a worktree event opened.
+// eventWorkspace is the id of the workspace a worktree event opened: the shallowest "workspace" in the payload,
+// since a worktree's own details may name its source checkout's workspace further down.
 func eventWorkspace(raw string) string {
 	var v any
 	if json.Unmarshal([]byte(raw), &v) != nil {
 		return ""
 	}
-	var walk func(any) string
-	walk = func(x any) string {
-		m, ok := x.(map[string]any)
-		if !ok {
-			return ""
-		}
-		if w, ok := m["workspace"].(map[string]any); ok {
-			if id, ok := w["workspace_id"].(string); ok && id != "" {
-				return id
+	level := []any{v}
+	for len(level) > 0 {
+		var next []any
+		for _, x := range level {
+			m, ok := x.(map[string]any)
+			if !ok {
+				continue
+			}
+			if w, ok := m["workspace"].(map[string]any); ok {
+				if id, ok := w["workspace_id"].(string); ok && id != "" {
+					return id
+				}
+			}
+			for _, k := range slices.Sorted(maps.Keys(m)) {
+				next = append(next, m[k])
 			}
 		}
-		for _, child := range m {
-			if id := walk(child); id != "" {
-				return id
-			}
-		}
-		return ""
+		level = next
 	}
-	return walk(v)
+	return ""
 }
