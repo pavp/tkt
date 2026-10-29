@@ -20,7 +20,9 @@ type FakeServer struct {
 	Requests []map[string]any
 	Results  map[string]string
 	Errors   map[string]string
-	once     map[string]string
+	// Codes sets the error code of a method's Errors entry; it is bad_request otherwise.
+	Codes map[string]string
+	once  map[string]string
 	// watchers are the connections that subscribed to events; Emit writes to them.
 	watchers []net.Conn
 }
@@ -64,6 +66,10 @@ func (f *FakeServer) serve(conn net.Conn) {
 	method, _ := req["method"].(string)
 	result, ok := f.Results[method]
 	errMsg, isErr := f.Errors[method]
+	code := "bad_request"
+	if c, ok := f.Codes[method]; ok {
+		code = c
+	}
 	if msg, once := f.once[method]; once && !isErr {
 		errMsg, isErr = msg, true
 		delete(f.once, method)
@@ -80,7 +86,7 @@ func (f *FakeServer) serve(conn net.Conn) {
 	}
 	switch {
 	case isErr:
-		_, _ = conn.Write([]byte(`{"id":"` + id + `","error":{"code":"bad_request","message":"` + errMsg + `"}}` + "\n"))
+		_, _ = conn.Write([]byte(`{"id":"` + id + `","error":{"code":"` + code + `","message":"` + errMsg + `"}}` + "\n"))
 	case ok:
 		var compact bytes.Buffer
 		if err := json.Compact(&compact, []byte(result)); err != nil {

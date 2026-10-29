@@ -200,9 +200,17 @@ func (c *Client) WaitAgent(ctx context.Context, target, status string, timeout t
 	return c.Call(ctx, "agent.wait", map[string]any{"target": target, "until": []string{status}, "timeout_ms": timeout.Milliseconds()}, nil)
 }
 
-// Prompt submits text to an agent; target is a pane id.
+// Prompt submits text to an agent; target is a pane id. On a slow terminal the agent can still be reading
+// a long paste when Herdr presses Enter, leaving the text unsent, so Enter is pressed again when the agent
+// neither works nor asks a question; a question is never answered by that Enter.
 func (c *Client) Prompt(ctx context.Context, target, text string) error {
-	return c.Call(ctx, "agent.prompt", map[string]any{"target": target, "text": text}, nil)
+	wait := map[string]any{"until": []string{"working", "blocked"}, "timeout_ms": (5 * time.Second).Milliseconds()}
+	err := c.Call(ctx, "agent.prompt", map[string]any{"target": target, "text": text, "wait": wait}, nil)
+	var re *RPCError
+	if !errors.As(err, &re) || re.Code != "timeout" {
+		return err
+	}
+	return c.Call(ctx, "pane.send_keys", map[string]any{"pane_id": target, "keys": []string{"enter"}}, nil)
 }
 
 type PaneOpen struct {

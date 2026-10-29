@@ -3,6 +3,7 @@ package herdr_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -88,8 +89,41 @@ func TestCallsAndDecoding(t *testing.T) {
 	if err := c.Prompt(ctx, "w1:p1", "fix CI"); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.Last("agent.prompt"); got["target"] != "w1:p1" || got["text"] != "fix CI" {
+	got = f.Last("agent.prompt")
+	wait, _ := got["wait"].(map[string]any)
+	if got["target"] != "w1:p1" || got["text"] != "fix CI" || wait["timeout_ms"] != float64(5000) || fmt.Sprint(wait["until"]) != "[working blocked]" {
 		t.Errorf("prompt params = %v", got)
+	}
+	if f.Last("pane.send_keys") != nil {
+		t.Error("Enter pressed again although the agent took its prompt")
+	}
+}
+
+func TestPromptPressesEnterAgainWhenTheAgentNeverTakesIt(t *testing.T) {
+	cases := []struct {
+		name, code, msg string
+		enter, fails    bool
+	}{
+		{"text left unsent", "timeout", "timed out waiting for agent status", true, false},
+		{"agent refused the prompt", "agent_blocked", "agent is blocked", false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := herdrtest.Start(t)
+			f.Errors["agent.prompt"] = tc.msg
+			f.Codes = map[string]string{"agent.prompt": tc.code}
+			err := herdr.New(f.Path).Prompt(context.Background(), "w1:p1", "fix CI")
+			if (err != nil) != tc.fails {
+				t.Fatalf("err = %v", err)
+			}
+			keys := f.Last("pane.send_keys")
+			if tc.enter && (keys["pane_id"] != "w1:p1" || fmt.Sprint(keys["keys"]) != "[enter]") {
+				t.Errorf("send_keys = %v", keys)
+			}
+			if !tc.enter && keys != nil {
+				t.Errorf("Enter pressed: %v", keys)
+			}
+		})
 	}
 }
 
