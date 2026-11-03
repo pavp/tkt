@@ -27,7 +27,8 @@ type StartFunc func(ctx context.Context, key ticket.Key, req StartRequest, settl
 var ErrHerdrUnavailable = errors.New("herdr unavailable")
 
 // NeedsAnswerError is a Start that needs an answer its request did not give: "clone", "worktree", "repos" or "agent".
-type NeedsAnswerError struct{ Need string }
+// A task's clone question also names the repository and the folder the clone would go into.
+type NeedsAnswerError struct{ Need, Repo, Into string }
 
 func (e NeedsAnswerError) Error() string { return "the start needs an answer for " + e.Need }
 
@@ -70,11 +71,7 @@ type StartRequest struct {
 // pathKey is the ticket key in the request's path, answering 400 when it is not one.
 func pathKey(w http.ResponseWriter, r *http.Request) (ticket.Key, bool) {
 	key := ticket.Key(r.PathValue("key"))
-	if keys := ticket.KeysIn(string(key)); len(keys) != 1 || keys[0] != key {
-		writeError(w, http.StatusBadRequest, "bad_key", fmt.Sprintf("%q is not a ticket key like DEMO-123", key))
-		return "", false
-	}
-	return key, true
+	return key, validKey(w, key)
 }
 
 func validHerdr(w http.ResponseWriter, name string) bool {
@@ -85,16 +82,20 @@ func validHerdr(w http.ResponseWriter, name string) bool {
 	return true
 }
 
-// writeStartError answers a Start, or its choices, that could not run.
-func writeStartError(w http.ResponseWriter, err error) {
+// writeJobError answers a job of kind, such as a Start, or its choices, that could not run.
+func writeJobError(w http.ResponseWriter, kind string, err error) {
 	var need NeedsAnswerError
 	switch {
 	case errors.As(err, &need):
-		writeJSON(w, http.StatusConflict, map[string]string{"type": "error", "code": "needs_answer", "needs": need.Need, "message": err.Error()})
+		body := map[string]string{"type": "error", "code": "needs_answer", "needs": need.Need, "message": err.Error()}
+		if need.Repo != "" {
+			body["repo"], body["into"] = need.Repo, need.Into
+		}
+		writeJSON(w, http.StatusConflict, body)
 	case errors.Is(err, ErrHerdrUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "herdr_unavailable", err.Error())
 	default:
-		writeError(w, http.StatusUnprocessableEntity, "start_failed", err.Error())
+		writeError(w, http.StatusUnprocessableEntity, kind+"_failed", err.Error())
 	}
 }
 
@@ -110,7 +111,7 @@ func (s *Server) startChoices(w http.ResponseWriter, r *http.Request) {
 	}
 	ch, err := s.opts.StartChoices(r.Context(), key, herdr)
 	if err != nil {
-		writeStartError(w, err)
+		writeJobError(w, "start", err)
 		return
 	}
 	ch.Herdr = herdr
@@ -165,17 +166,28 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "give a worktree or repositories, not both")
 		return
 	}
+	s.runJob(w, r, job{kind: "start", field: "key", subject: string(key)}, func(ctx context.Context, settled func()) error {
+		return s.opts.Start(ctx, key, req, settled)
+	})
+}
+
+// job is a slow action a POST runs: one per subject at a time, answering 202 once it asks nothing more and reporting
+// its end over the WebSocket as <kind>.finished or <kind>.failed with {id, <field>: subject, message}.
+type job struct{ kind, field, subject string }
+
+func (s *Server) runJob(w http.ResponseWriter, r *http.Request, j job, run func(ctx context.Context, settled func()) error) {
+	busy := j.kind + ":" + j.subject
 	s.mu.Lock()
-	if s.starting[key] {
+	if s.running[busy] {
 		s.mu.Unlock()
-		writeError(w, http.StatusConflict, "start_running", fmt.Sprintf("a start of %s is still running", key))
+		writeError(w, http.StatusConflict, j.kind+"_running", fmt.Sprintf("a %s of %s is still running", j.kind, j.subject))
 		return
 	}
-	s.starting[key] = true
+	s.running[busy] = true
 	s.mu.Unlock()
 
 	id := startID()
-	// The Start outlives this request once settled, so it ends with the daemon rather than with the request.
+	// The job outlives this request once settled, so it ends with the daemon rather than with the request.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
 	settled, done := make(chan struct{}), make(chan error, 1)
 	go func() {
@@ -190,16 +202,16 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 		var once sync.Once
 		defer func() {
 			if p := recover(); p != nil {
-				done <- fmt.Errorf("the start of %s failed: %v", key, p)
+				done <- fmt.Errorf("the %s of %s failed: %v", j.kind, j.subject, p)
 			}
 		}()
-		done <- s.opts.Start(ctx, key, req, func() { once.Do(func() { close(settled) }) })
+		done <- run(ctx, func() { once.Do(func() { close(settled) }) })
 	}()
 	select {
 	case err := <-done:
-		s.endStart(key)
+		s.endJob(busy)
 		if err != nil {
-			writeStartError(w, err)
+			writeJobError(w, j.kind, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"id": id, "state": "finished"})
@@ -209,20 +221,20 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 			err := <-done
 			s.mu.Lock()
 			defer s.mu.Unlock()
-			delete(s.starting, key)
+			delete(s.running, busy)
 			if err != nil {
-				s.publish("start.failed", map[string]string{"id": id, "key": string(key), "message": err.Error()})
+				s.publish(j.kind+".failed", map[string]string{"id": id, j.field: j.subject, "message": err.Error()})
 				return
 			}
-			s.publish("start.finished", map[string]string{"id": id, "key": string(key)})
+			s.publish(j.kind+".finished", map[string]string{"id": id, j.field: j.subject})
 		}()
 	}
 }
 
-func (s *Server) endStart(key ticket.Key) {
+func (s *Server) endJob(busy string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.starting, key)
+	delete(s.running, busy)
 }
 
 func startID() string {

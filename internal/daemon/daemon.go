@@ -66,6 +66,9 @@ type Options struct {
 	Transition  TransitionFunc
 	Users       UsersFunc
 	Assign      AssignFunc
+	// TaskAgents serves GET /v1/tasks/agents and Task POST /v1/tasks; nil answers them with not found.
+	TaskAgents TaskAgentsFunc
+	Task       TaskFunc
 }
 
 // Info is what daemon.json records for clients: where the daemon listens and which process it is.
@@ -87,8 +90,8 @@ type Server struct {
 	// syncing is true while a sync runs; syncErr is the last sync's failure, cleared by the next good one.
 	syncing bool
 	syncErr string
-	// starting holds the tickets whose Start still runs, so a second one waits for it.
-	starting map[ticket.Key]bool
+	// running holds the jobs still running by kind and subject, such as "start:DEMO-7", so a second one waits for it.
+	running map[string]bool
 	// backlogMu runs one backlog load at a time; staleBacklog makes the next one ask Jira, as after an assignment.
 	backlogMu    sync.Mutex
 	staleBacklog bool
@@ -108,7 +111,7 @@ func New(o Options) (*Server, error) {
 	if o.HelloTimeout == 0 {
 		o.HelloTimeout = 10 * time.Second
 	}
-	s := &Server{opts: o, token: tok, syncNow: make(chan struct{}, 1), clients: map[*client]struct{}{}, starting: map[ticket.Key]bool{}, quit: make(chan struct{})}
+	s := &Server{opts: o, token: tok, syncNow: make(chan struct{}, 1), clients: map[*client]struct{}{}, running: map[string]bool{}, quit: make(chan struct{})}
 	if o.Seed != nil {
 		s.snap, s.have = *o.Seed, true
 	}
@@ -314,6 +317,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/tickets/{key}/transitions", s.mutating(s.move))
 	mux.HandleFunc("GET /v1/tickets/{key}/users", s.authed(s.users))
 	mux.HandleFunc("PUT /v1/tickets/{key}/assignee", s.mutating(s.assign))
+	mux.HandleFunc("GET /v1/tasks/agents", s.authed(s.taskAgents))
+	mux.HandleFunc("POST /v1/tasks", s.mutating(s.task))
 	mux.HandleFunc("POST /v1/sync", s.authed(s.requestSync))
 	mux.HandleFunc("GET /v1/ws", s.ws)
 	return mux
