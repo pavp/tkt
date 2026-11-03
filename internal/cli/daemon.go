@@ -78,7 +78,7 @@ func (a *App) runDaemon(ctx context.Context) error {
 	if snap, ok, err := a.cache().Load(); err == nil && ok {
 		seed = &snap
 	}
-	s, err := daemon.New(daemon.Options{Dir: a.Env.DataDir(), Version: Version, Sync: a.daemonSync, Interval: syncEvery, Seed: seed, Detail: a.daemonDetail})
+	s, err := daemon.New(daemon.Options{Dir: a.Env.DataDir(), Version: Version, Sync: a.daemonSync, Interval: syncEvery, Seed: seed, Detail: a.daemonDetail, State: a.boardViewState})
 	if err != nil {
 		return err
 	}

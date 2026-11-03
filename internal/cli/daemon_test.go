@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pavp/tkt/internal/board"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/jira"
+	"github.com/pavp/tkt/internal/tui"
 )
 
 func daemonHarness(t *testing.T) *harness {
@@ -81,5 +83,19 @@ func TestDaemonSyncHandsThePartialBoardOn(t *testing.T) {
 	snap, err := h.app.daemonSync(context.Background(), func(p board.Snapshot) { partials = append(partials, p) })
 	if err != nil || snap.Partial || len(partials) != 1 || !partials[0].Partial || len(partials[0].Tickets) != 1 {
 		t.Errorf("sync = %+v, %v; partials %+v", snap, err, partials)
+	}
+}
+
+func TestDaemonBoardFollowsTheSavedBoardState(t *testing.T) {
+	h := newHarness(t, baseConfig)
+	if got := h.app.boardViewState(); got.Team || len(got.HiddenBoards) != 0 {
+		t.Errorf("without a saved state = %+v", got)
+	}
+	b := &boardActions{a: h.app}
+	if msg := b.SaveState(tui.BoardState{Team: true, HiddenBoards: []string{"Web"}, HiddenRepos: []string{"example-org/api"}})(); msg != nil {
+		t.Fatalf("save = %v", msg)
+	}
+	if got := h.app.boardViewState(); !got.Team || !slices.Equal(got.HiddenBoards, []string{"Web"}) {
+		t.Errorf("saved state = %+v", got)
 	}
 }

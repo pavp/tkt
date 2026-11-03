@@ -45,6 +45,8 @@ type Options struct {
 	HelloTimeout time.Duration
 	// Detail serves GET /v1/tickets/{key}; nil answers that route with not found.
 	Detail DetailFunc
+	// State is the board as the user last left it, which GET /v1/board shows unless its query says otherwise.
+	State func() board.ViewState
 }
 
 // Info is what daemon.json records for clients: where the daemon listens and which process it is.
@@ -63,6 +65,9 @@ type Server struct {
 	snap    board.Snapshot
 	have    bool
 	clients map[*client]struct{}
+	// syncing is true while a sync runs; syncErr is the last sync's failure, cleared by the next good one.
+	syncing bool
+	syncErr string
 
 	syncNow chan struct{}
 	// quit closes when Serve stops, so WebSocket handlers, which outlive the HTTP server's shutdown,
@@ -210,6 +215,7 @@ func (s *Server) syncLoop(ctx context.Context) {
 func (s *Server) syncOnce(ctx context.Context) {
 	s.mu.Lock()
 	s.publish("sync.started", struct{}{})
+	s.syncing = true
 	before, hadBefore := s.snap, s.have
 	s.mu.Unlock()
 	painted := false
@@ -224,7 +230,9 @@ func (s *Server) syncOnce(ctx context.Context) {
 	})
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.syncing = false
 	if err != nil {
+		s.syncErr = err.Error()
 		// A partial board must not outlive its failed sync: the last full one comes back.
 		if painted && hadBefore {
 			s.snap = before
@@ -233,6 +241,7 @@ func (s *Server) syncOnce(ctx context.Context) {
 		s.publish("sync.failed", map[string]string{"message": err.Error()})
 		return
 	}
+	s.syncErr = ""
 	old, had := s.snap, s.have
 	if snap.Agents == nil {
 		// The sync could not read Herdr; the agents it last reported still stand.
@@ -272,6 +281,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /v1/tickets", s.authed(s.tickets))
 	mux.HandleFunc("GET /v1/tickets/{key}", s.authed(s.ticket))
+	mux.HandleFunc("GET /v1/board", s.authed(s.board))
 	mux.HandleFunc("POST /v1/sync", s.authed(s.requestSync))
 	mux.HandleFunc("GET /v1/ws", s.ws)
 	return mux
