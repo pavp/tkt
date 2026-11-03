@@ -2,6 +2,7 @@ package herdrcore_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"reflect"
@@ -185,22 +186,28 @@ func TestWaitAgentCanceled(t *testing.T) {
 	}
 }
 
+func rpc(result string) string { return `{"jsonrpc":"2.0","id":1,"result":` + result + `}` }
+
+func rpcErr(kind string) string {
+	return `{"jsonrpc":"2.0","id":1,"error":{"code":1,"message":"` + kind + ` from hc","data":{"kind":"` + kind + `"}}}`
+}
+
 func TestPrompt(t *testing.T) {
-	send := []string{"send", "--json", "--", "claude", "- fix the DEMO-123 tests"}
+	send := []string{"connect"}
 	tests := []struct {
 		name    string
 		outs    []string
 		wantErr error
 		want    [][]string
 	}{
-		{"sent and started", []string{`{"started":true,"status":"idle","turn":3}`}, nil, [][]string{send}},
-		{"a program without status", []string{`{"started":null,"status":null,"turn":0}`}, nil, [][]string{send}},
-		{"a long paste left unsent gets Enter again", []string{`{"started":false,"status":"idle","turn":3}`, got("t12", status("idle"), "{}"), `{"status":"working","turn":3}`},
+		{"sent and started", []string{rpc(`{"started":true,"status":"idle","turn":3}`)}, nil, [][]string{send}},
+		{"a program without status", []string{rpc(`{"started":null,"status":null,"turn":0}`)}, nil, [][]string{send}},
+		{"a long paste left unsent gets Enter again", []string{rpc(`{"started":false,"status":"idle","turn":3}`), got("t12", status("idle"), "{}"), `{"status":"working","turn":3}`},
 			nil, [][]string{send, {"connect"}, {"keys", "--json", "t12", "enter"}}},
-		{"a question is never answered by that Enter", []string{`{"started":false,"status":"idle","turn":3}`, got("t12", status("blocked"), "{}")},
+		{"a question is never answered by that Enter", []string{rpc(`{"started":false,"status":"idle","turn":3}`), got("t12", status("blocked"), "{}")},
 			nil, [][]string{send, {"connect"}}},
-		{"a blocked agent refuses", []string{hcErr("blocked")}, herdrport.ErrBlocked, [][]string{send}},
-		{"a finished agent", []string{hcErr("finished")}, herdrcore.ErrExited, [][]string{send}},
+		{"a blocked agent refuses", []string{rpcErr("blocked")}, herdrport.ErrBlocked, [][]string{send}},
+		{"a finished agent", []string{rpcErr("finished")}, herdrcore.ErrExited, [][]string{send}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -215,6 +222,15 @@ func TestPrompt(t *testing.T) {
 			}
 			if !reflect.DeepEqual(args, tt.want) {
 				t.Errorf("calls = %q\nwant    %q", args, tt.want)
+			}
+			// Sent without a caller, the prompt arrives as typed, not wrapped as a report from tkt's terminal.
+			var req struct {
+				Method string         `json:"method"`
+				Params map[string]any `json:"params"`
+			}
+			if err := json.Unmarshal([]byte(f.calls[0].stdin), &req); err != nil || req.Method != "terminal.send" ||
+				!reflect.DeepEqual(req.Params, map[string]any{"terminal": "claude", "text": "- fix the DEMO-123 tests"}) {
+				t.Errorf("send request = %s", f.calls[0].stdin)
 			}
 		})
 	}

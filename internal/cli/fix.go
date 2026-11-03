@@ -77,7 +77,7 @@ func (a *App) deliverFeedback(ctx context.Context, c *config.Config, key ticket.
 	if err != nil {
 		return "", "", err
 	}
-	if printOnly || a.Env.Getenv("HERDR_ENV") != "1" {
+	if printOnly || !a.inHerdr() {
 		return prompt, "", nil
 	}
 	pane, err = a.agentPaneFor(ctx, c, key)
@@ -208,7 +208,7 @@ func (a *App) agentPaneFor(ctx context.Context, c *config.Config, key ticket.Key
 	}
 	ids := map[string]bool{}
 	for _, ws := range wss {
-		if ws.Worktree != nil && paths[filepath.Clean(ws.Worktree.CheckoutPath)] {
+		if d := workspaceDir(ws); d != "" && paths[filepath.Clean(d)] {
 			ids[ws.ID] = true
 		}
 	}

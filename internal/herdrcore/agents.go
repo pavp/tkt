@@ -173,15 +173,13 @@ func snapshotStatus(ts []terminal) (state string, gone, ok bool) {
 // paste when Enter arrives, leaving it unsent, so Enter is pressed again when the agent neither started
 // working nor is asking a question; a question is never answered by that Enter.
 func (c *Client) Prompt(ctx context.Context, target, text string) error {
-	out, err := c.run(ctx, nil, "send", "--json", "--", target, text)
-	if err != nil {
-		return err
-	}
 	var sent struct {
 		Started *bool `json:"started"`
 	}
-	if err := json.Unmarshal(out, &sent); err != nil {
-		return fmt.Errorf("hc send: decode: %w", err)
+	// Through the API with no caller: hc send names the terminal tkt runs in as the sender, and agents read a
+	// prompt wrapped as <hc from="t3"> as another agent's report, not as their task.
+	if err := c.call(ctx, "terminal.send", map[string]any{"terminal": target, "text": text}, &sent); err != nil {
+		return err
 	}
 	if sent.Started == nil || *sent.Started {
 		return nil
@@ -192,4 +190,10 @@ func (c *Client) Prompt(ctx context.Context, target, text string) error {
 	}
 	_, err = c.run(ctx, nil, "keys", "--json", t.Address, "enter")
 	return err
+}
+
+// AgentPane is the terminal of the agent named name, which StartAgent opened apart from the pane it was given.
+func (c *Client) AgentPane(ctx context.Context, name string) (string, error) {
+	t, err := c.get(ctx, name)
+	return t.Address, err
 }

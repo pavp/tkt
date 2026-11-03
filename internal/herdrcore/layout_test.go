@@ -86,7 +86,7 @@ func TestWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []herdrport.Workspace{{ID: "sp1", Label: "DEMO-123 login"}, {ID: "sp2", Label: "api"}}
+	want := []herdrport.Workspace{{ID: "sp1", Label: "DEMO-123 login", Folder: "/home/dev/code"}, {ID: "sp2", Label: "api", Folder: "/home/dev/code/api"}}
 	if !reflect.DeepEqual(wss, want) {
 		t.Errorf("Workspaces = %+v, want %+v", wss, want)
 	}

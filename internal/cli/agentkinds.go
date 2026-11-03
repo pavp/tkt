@@ -13,10 +13,19 @@ import (
 
 var kindValues = regexp.MustCompile(`(?s)--kind\b.*?\[possible values: ([^\]]*)\]`)
 
+// desktopKinds are the agents tkt offers on Herdr desktop, named after their executables. Herdr desktop keeps its
+// agent list inside the app, where only mods reach it (knownAgents), and hc lists only the user's own templates,
+// so tkt offers the kinds Herdr 0.9.5 lists.
+var desktopKinds = []string{"pi", "claude", "codex", "gemini", "cursor", "devin", "agy", "cline", "omp", "mastracode", "opencode",
+	"copilot", "kimi", "kiro", "droid", "amp", "grok", "hermes", "kilo", "qodercli", "qwen", "letta", "maki", "muse"}
+
 // agentKinds are the agents Herdr can start whose executable is in PATH, in Herdr's order. Herdr names each kind
-// after its executable and lists the kinds only in its help, so tkt keeps no list of its own and never falls back
-// to one agent.
+// after its executable and lists the kinds only in its help, so tkt keeps no list of its own for it and never falls
+// back to one agent.
 func (a *App) agentKinds(ctx context.Context) ([]string, error) {
+	if ch, err := a.whichHerdr(ctx); err == nil && ch.flavor == herdrDesktop {
+		return a.installedKinds(desktopKinds, herdrDesktop)
+	}
 	if _, err := a.Run.LookPath("herdr"); err != nil {
 		return nil, errors.New("cannot tell which agents are installed: tkt learns them from Herdr (`herdr agent start --help`), which is not in PATH")
 	}
@@ -32,6 +41,10 @@ func (a *App) agentKinds(ctx context.Context) ([]string, error) {
 	if len(all) == 0 {
 		return nil, errors.New("cannot tell which agents Herdr can start: `herdr agent start --help` lists none; update Herdr")
 	}
+	return a.installedKinds(all, herdrClassic)
+}
+
+func (a *App) installedKinds(all []string, flavor herdrFlavor) ([]string, error) {
 	var kinds []string
 	for _, k := range all {
 		if _, err := a.Run.LookPath(k); err == nil {
@@ -39,7 +52,7 @@ func (a *App) agentKinds(ctx context.Context) ([]string, error) {
 		}
 	}
 	if len(kinds) == 0 {
-		return nil, fmt.Errorf("no agent Herdr can start is installed; install one of: %s", strings.Join(all, ", "))
+		return nil, fmt.Errorf("no agent %s can start is installed; install one of: %s", flavor, strings.Join(all, ", "))
 	}
 	return kinds, nil
 }
