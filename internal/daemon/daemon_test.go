@@ -113,7 +113,7 @@ func TestTicketsServesTheSeedThenEachSync(t *testing.T) {
 func TestTicketDetail(t *testing.T) {
 	seed := &board.Snapshot{FetchedAt: fetched, Tickets: []ticket.Ticket{{Key: "DEMO-1", Summary: "Filter accounts"}}}
 	var gotKnown *ticket.Ticket
-	detail := func(_ context.Context, key ticket.Key, known *ticket.Ticket) (any, error) {
+	detail := func(_ context.Context, key ticket.Key, known *ticket.Ticket, _ string) (any, error) {
 		gotKnown = known
 		if key == "DEMO-9" {
 			return nil, errors.New("jira: DEMO-9 not found")

@@ -9,6 +9,7 @@ import (
 
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/paths"
 	"github.com/pavp/tkt/internal/tui"
 )
 
@@ -50,10 +51,7 @@ func (a *App) saveBoardState(s tui.BoardState) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(a.Env.DataDir(), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(a.boardStateFile(), b, 0o600)
+	return paths.WritePrivateFile(a.boardStateFile(), b)
 }
 
 // claimBoardPane records the Herdr pane the board runs in, so open-board can bring that board to another

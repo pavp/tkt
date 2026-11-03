@@ -100,31 +100,7 @@ type Actions interface {
 }
 
 // BoardState is what the board remembers between openings.
-type BoardState struct {
-	// HiddenRepos lists the repositories ("owner/name") whose pull requests the PRs filter hides.
-	HiddenRepos []string `json:"hidden_repos,omitempty"`
-	// HiddenBoards lists the team boards whose tickets the board hides outside the PRs filter.
-	HiddenBoards []string `json:"hidden_boards,omitempty"`
-	// Collapsed lists the PRs filter's collapsed groups, such as "mine:owner/name" or "review:owner/name".
-	Collapsed []string `json:"collapsed,omitempty"`
-	// View is the view the user last chose, ViewColumns or ViewList.
-	View string `json:"view,omitempty"`
-	// Team asks the sync for the team's tickets too, those assigned to others or to nobody.
-	Team bool `json:"team,omitempty"`
-	// TeamPRs shows everyone else's open pull requests in the PRs filter; unset, it follows Team, as
-	// one toggle did both before.
-	TeamPRs *bool `json:"team_prs,omitempty"`
-	// BacklogMerged groups the backlog's sprints by name instead of one group per sprint and board.
-	BacklogMerged bool `json:"backlog_merged,omitempty"`
-}
-
-// TeamPRsShown reports whether the PRs filter shows everyone else's pull requests, following Team while unset.
-func (s BoardState) TeamPRsShown() bool {
-	if s.TeamPRs != nil {
-		return *s.TeamPRs
-	}
-	return s.Team
-}
+type BoardState = board.SavedState
 
 type ClonesFoundMsg struct {
 	Repo  string
@@ -182,8 +158,8 @@ type AgentsMsg struct {
 type StatusMsg string
 
 const (
-	ViewColumns = "columns"
-	ViewList    = "list"
+	ViewColumns = board.ViewColumns
+	ViewList    = board.ViewList
 
 	FilterAll = "all"
 	// FilterPRs lists the user's own open pull requests, then the review requests.
