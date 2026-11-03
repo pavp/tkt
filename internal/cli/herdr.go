@@ -950,7 +950,10 @@ func (a *App) herdrSidebar(cmd *cobra.Command, cachedOnly bool) error {
 // updateSidebar returns the agent status shown for every workspace that holds a ticket and, when report
 // is set, labels that workspace in the sidebar.
 func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Snapshot, report bool) (int, map[string]string, error) {
-	h := a.NewHerdr()
+	return a.updateSidebarOn(ctx, a.NewHerdr(), c, snap, report)
+}
+
+func (a *App) updateSidebarOn(ctx context.Context, h HerdrAPI, c *config.Config, snap board.Snapshot, report bool) (int, map[string]string, error) {
 	all, err := h.Workspaces(ctx)
 	if err != nil {
 		return 0, nil, err
