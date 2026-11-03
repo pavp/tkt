@@ -264,7 +264,7 @@ func (a *App) runInit(cmd *cobra.Command) error {
 	if a.Env.Getenv("HERDR_PLUGIN_ID") != "" {
 		// Herdr closes a plugin pane as soon as its command exits, which would hide this summary.
 		if _, err := a.readLine("\nPress Enter to open the board "); err == nil {
-			_ = a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "board"})
+			_ = plugins(a.NewHerdr()).OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "board"})
 		}
 	}
 	return nil

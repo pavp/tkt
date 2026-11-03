@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/pavp/tkt/internal/herdrport"
 )
 
 var ErrNotRunning = errors.New("herdr is not running (no socket): start Herdr, or run this from inside it")
@@ -42,6 +44,24 @@ type RPCError struct {
 }
 
 func (e *RPCError) Error() string { return "herdr: " + e.Code + ": " + e.Message }
+
+// Is maps Herdr's error codes, and the messages that stand for them, to the port's errors.
+func (e *RPCError) Is(target error) bool {
+	msg := e.Error()
+	switch target {
+	case herdrport.ErrNameTaken:
+		return strings.Contains(msg, "agent_name_taken") || strings.Contains(msg, "is already used")
+	case herdrport.ErrPaneBusy:
+		return strings.Contains(msg, "agent_pane_busy")
+	case herdrport.ErrNotReady:
+		return strings.Contains(msg, "agent_not_ready")
+	case herdrport.ErrBlocked:
+		return strings.Contains(msg, "agent_blocked")
+	case herdrport.ErrNotNamed:
+		return strings.Contains(msg, "not an active named agent")
+	}
+	return false
+}
 
 // Call sends one request and decodes its result into out.
 func (c *Client) Call(ctx context.Context, method string, params, out any) error {
@@ -91,51 +111,73 @@ func (c *Client) Call(ctx context.Context, method string, params, out any) error
 	return json.Unmarshal(resp.Result, out)
 }
 
-type Worktree struct {
+type worktree struct {
 	CheckoutPath string `json:"checkout_path"`
 	RepoName     string `json:"repo_name"`
 	RepoRoot     string `json:"repo_root"`
 	Linked       bool   `json:"is_linked_worktree"`
 }
 
-type Workspace struct {
+type workspace struct {
 	ID       string            `json:"workspace_id"`
 	Label    string            `json:"label"`
 	Tokens   map[string]string `json:"tokens"`
-	Worktree *Worktree         `json:"worktree"`
+	Worktree *worktree         `json:"worktree"`
 }
 
-func (c *Client) Panes(ctx context.Context) ([]Pane, error) {
+func (w workspace) port() herdrport.Workspace {
+	p := herdrport.Workspace{ID: w.ID, Label: w.Label, Tokens: w.Tokens}
+	if w.Worktree != nil {
+		t := herdrport.Worktree(*w.Worktree)
+		p.Worktree = &t
+	}
+	return p
+}
+
+func ports[W, P any](ws []W, port func(W) P) []P {
+	if ws == nil {
+		return nil
+	}
+	out := make([]P, len(ws))
+	for i, w := range ws {
+		out[i] = port(w)
+	}
+	return out
+}
+
+func (c *Client) Panes(ctx context.Context) ([]herdrport.Pane, error) {
 	var r struct {
-		Panes []Pane `json:"panes"`
+		Panes []pane `json:"panes"`
 	}
 	err := c.Call(ctx, "pane.list", nil, &r)
-	return r.Panes, err
+	return ports(r.Panes, pane.port), err
 }
 
-func (c *Client) Workspaces(ctx context.Context) ([]Workspace, error) {
+func (c *Client) Workspaces(ctx context.Context) ([]herdrport.Workspace, error) {
 	var r struct {
-		Workspaces []Workspace `json:"workspaces"`
+		Workspaces []workspace `json:"workspaces"`
 	}
 	err := c.Call(ctx, "workspace.list", nil, &r)
-	return r.Workspaces, err
+	return ports(r.Workspaces, workspace.port), err
 }
 
-type Pane struct {
+type pane struct {
 	ID          string `json:"pane_id"`
 	WorkspaceID string `json:"workspace_id"`
 	Cwd         string `json:"cwd"`
 	Focused     bool   `json:"focused"`
 }
 
+func (p pane) port() herdrport.Pane { return herdrport.Pane(p) }
+
 // CreateWorkspace opens a workspace at cwd and returns it with its root pane.
-func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string, focus bool) (Workspace, Pane, error) {
+func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string, focus bool) (herdrport.Workspace, herdrport.Pane, error) {
 	var r struct {
-		Workspace Workspace `json:"workspace"`
-		RootPane  Pane      `json:"root_pane"`
+		Workspace workspace `json:"workspace"`
+		RootPane  pane      `json:"root_pane"`
 	}
 	err := c.Call(ctx, "workspace.create", map[string]any{"cwd": cwd, "label": label, "focus": focus}, &r)
-	return r.Workspace, r.RootPane, err
+	return r.Workspace.port(), r.RootPane.port(), err
 }
 
 func (c *Client) FocusWorkspace(ctx context.Context, id string) error {
@@ -156,28 +198,29 @@ func (c *Client) ReportWorkspaceTokens(ctx context.Context, workspaceID, source 
 	return c.Call(ctx, "workspace.report_metadata", params, nil)
 }
 
-type Agent struct {
-	PaneID      string `json:"pane_id"`
-	WorkspaceID string `json:"workspace_id"`
-	Agent       string `json:"agent"`
-	Name        string `json:"name"`
-	Status      string `json:"agent_status"`
-	Cwd         string `json:"cwd"`
-	// Tokens are the values plugins reported on the agent's pane, such as the ticket tkt gave it.
-	Tokens map[string]string `json:"tokens"`
+type agent struct {
+	PaneID      string            `json:"pane_id"`
+	WorkspaceID string            `json:"workspace_id"`
+	Agent       string            `json:"agent"`
+	Name        string            `json:"name"`
+	Status      string            `json:"agent_status"`
+	Cwd         string            `json:"cwd"`
+	Tokens      map[string]string `json:"tokens"`
 }
+
+func (a agent) port() herdrport.Agent { return herdrport.Agent(a) }
 
 // ReportPaneTokens sets or, with a nil value, clears named values on a pane; they last as long as the pane.
 func (c *Client) ReportPaneTokens(ctx context.Context, paneID, source string, tokens map[string]*string) error {
 	return c.Call(ctx, "pane.report_metadata", map[string]any{"pane_id": paneID, "source": source, "tokens": tokens}, nil)
 }
 
-func (c *Client) Agents(ctx context.Context) ([]Agent, error) {
+func (c *Client) Agents(ctx context.Context) ([]herdrport.Agent, error) {
 	var r struct {
-		Agents []Agent `json:"agents"`
+		Agents []agent `json:"agents"`
 	}
 	err := c.Call(ctx, "agent.list", nil, &r)
-	return r.Agents, err
+	return ports(r.Agents, agent.port), err
 }
 
 // StartAgent starts an agent kind (such as "claude") in a pane sitting at its shell prompt.
@@ -187,12 +230,12 @@ func (c *Client) StartAgent(ctx context.Context, paneID, kind, name string, args
 }
 
 // SplitPane opens a new pane at cwd to the right of paneID, without moving the focus.
-func (c *Client) SplitPane(ctx context.Context, paneID, cwd string) (Pane, error) {
+func (c *Client) SplitPane(ctx context.Context, paneID, cwd string) (herdrport.Pane, error) {
 	var r struct {
-		Pane Pane `json:"pane"`
+		Pane pane `json:"pane"`
 	}
 	err := c.Call(ctx, "pane.split", map[string]any{"target_pane_id": paneID, "direction": "right", "cwd": cwd}, &r)
-	return r.Pane, err
+	return r.Pane.port(), err
 }
 
 // WaitAgent blocks until the agent in target reaches status, or fails after timeout.
@@ -288,21 +331,19 @@ func (c *Client) ReloadConfig(ctx context.Context) error {
 	return nil
 }
 
-// Subscription names a Herdr event to follow; agent status changes are followed per pane.
-type Subscription struct {
+type subscription struct {
 	Type   string `json:"type"`
 	PaneID string `json:"pane_id,omitempty"`
 }
 
-// Event is one event Herdr streams after events.subscribe.
-type Event struct {
+type event struct {
 	Kind string          `json:"event"`
 	Data json.RawMessage `json:"data"`
 }
 
 // Watch subscribes to subs and calls on for each event until ctx ends, returning ctx's error, or Herdr
 // closes the connection.
-func (c *Client) Watch(ctx context.Context, subs []Subscription, on func(Event)) error {
+func (c *Client) Watch(ctx context.Context, subs []herdrport.Subscription, on func(herdrport.Event)) error {
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "unix", c.socket)
 	if err != nil {
@@ -311,7 +352,7 @@ func (c *Client) Watch(ctx context.Context, subs []Subscription, on func(Event))
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
 	defer stop()
-	req, err := json.Marshal(map[string]any{"id": "tkt-watch", "method": "events.subscribe", "params": map[string]any{"subscriptions": subs}})
+	req, err := json.Marshal(map[string]any{"id": "tkt-watch", "method": "events.subscribe", "params": map[string]any{"subscriptions": ports(subs, func(s herdrport.Subscription) subscription { return subscription(s) })}})
 	if err != nil {
 		return err
 	}
@@ -337,9 +378,9 @@ func (c *Client) Watch(ctx context.Context, subs []Subscription, on func(Event))
 		if err != nil {
 			return orCtx(ctx, fmt.Errorf("herdr events: %w", err))
 		}
-		var e Event
+		var e event
 		if json.Unmarshal(line, &e) == nil && e.Kind != "" {
-			on(e)
+			on(herdrport.Event(e))
 		}
 	}
 }

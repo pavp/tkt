@@ -19,36 +19,65 @@ import (
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/herdrplugin"
+	"github.com/pavp/tkt/internal/herdrport"
 	"github.com/pavp/tkt/internal/paths"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/workspace"
 )
 
-// HerdrAPI is the part of Herdr's socket API tkt uses.
+// HerdrAPI is what tkt needs from any Herdr.
 type HerdrAPI interface {
-	Workspaces(ctx context.Context) ([]herdr.Workspace, error)
-	CreateWorkspace(ctx context.Context, cwd, label string, focus bool) (herdr.Workspace, herdr.Pane, error)
+	Workspaces(ctx context.Context) ([]herdrport.Workspace, error)
+	CreateWorkspace(ctx context.Context, cwd, label string, focus bool) (herdrport.Workspace, herdrport.Pane, error)
 	FocusWorkspace(ctx context.Context, id string) error
 	FocusPane(ctx context.Context, paneID string) error
 	ReportWorkspaceTokens(ctx context.Context, workspaceID, source string, tokens map[string]*string, ttl time.Duration) error
 	ReportPaneTokens(ctx context.Context, paneID, source string, tokens map[string]*string) error
-	Agents(ctx context.Context) ([]herdr.Agent, error)
-	Panes(ctx context.Context) ([]herdr.Pane, error)
+	Agents(ctx context.Context) ([]herdrport.Agent, error)
+	Panes(ctx context.Context) ([]herdrport.Pane, error)
 	StartAgent(ctx context.Context, paneID, kind, name string, args []string) error
 	WaitAgent(ctx context.Context, target, status string, timeout time.Duration) error
-	SplitPane(ctx context.Context, paneID, cwd string) (herdr.Pane, error)
+	SplitPane(ctx context.Context, paneID, cwd string) (herdrport.Pane, error)
 	Prompt(ctx context.Context, target, text string) error
-	OpenPluginPane(ctx context.Context, p herdr.PaneOpen) error
-	Watch(ctx context.Context, subs []herdr.Subscription, on func(herdr.Event)) error
-	FocusPluginPane(ctx context.Context, paneID string) error
-	ClosePluginPane(ctx context.Context, paneID string) error
+	Watch(ctx context.Context, subs []herdrport.Subscription, on func(herdrport.Event)) error
 	ClosePane(ctx context.Context, paneID string) error
 	CloseWorkspace(ctx context.Context, id string) error
 	Notify(ctx context.Context, title, body string) error
+}
+
+// HerdrPlugins is what only a Herdr with plugins and a reloadable config file offers.
+type HerdrPlugins interface {
+	OpenPluginPane(ctx context.Context, p herdr.PaneOpen) error
+	FocusPluginPane(ctx context.Context, paneID string) error
+	ClosePluginPane(ctx context.Context, paneID string) error
 	LinkPlugin(ctx context.Context, path string) error
 	UnlinkPlugin(ctx context.Context, id string) error
 	ReloadConfig(ctx context.Context) error
 }
+
+var (
+	_ HerdrAPI     = (*herdr.Client)(nil)
+	_ HerdrPlugins = (*herdr.Client)(nil)
+)
+
+var errNoPlugins = errors.New("this Herdr has no plugins")
+
+// plugins returns h's plugin operations; on a Herdr without them each one fails with errNoPlugins.
+func plugins(h HerdrAPI) HerdrPlugins {
+	if p, ok := h.(HerdrPlugins); ok {
+		return p
+	}
+	return noPlugins{}
+}
+
+type noPlugins struct{}
+
+func (noPlugins) OpenPluginPane(context.Context, herdr.PaneOpen) error { return errNoPlugins }
+func (noPlugins) FocusPluginPane(context.Context, string) error        { return errNoPlugins }
+func (noPlugins) ClosePluginPane(context.Context, string) error        { return errNoPlugins }
+func (noPlugins) LinkPlugin(context.Context, string) error             { return errNoPlugins }
+func (noPlugins) UnlinkPlugin(context.Context, string) error           { return errNoPlugins }
+func (noPlugins) ReloadConfig(context.Context) error                   { return errNoPlugins }
 
 const (
 	sidebarSource = "plugin:tkt"
@@ -113,7 +142,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 		start,
 		installCmd,
 		&cobra.Command{Use: "uninstall", Short: "Unlink the tkt plugin from Herdr and remove its keybindings", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := a.NewHerdr().UnlinkPlugin(cmd.Context(), a.pluginID()); err != nil {
+			if err := plugins(a.NewHerdr()).UnlinkPlugin(cmd.Context(), a.pluginID()); err != nil {
 				return err
 			}
 			a.printf("✓ Unlinked the tkt plugin from Herdr\n")
@@ -127,16 +156,16 @@ func newHerdrCmd(a *App) *cobra.Command {
 			if _, err := os.Stat(a.ConfigPath()); err != nil {
 				entry = "setup"
 			}
-			return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: entry, Focus: true})
+			return plugins(a.NewHerdr()).OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: entry, Focus: true})
 		}},
 		&cobra.Command{Use: "open-board", Short: "Open the board popup (setup when tkt is not configured)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			if _, err := os.Stat(a.ConfigPath()); err != nil {
-				return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "setup"})
+				return plugins(a.NewHerdr()).OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "setup"})
 			}
 			return a.herdrOpenBoard(cmd.Context())
 		}},
 		&cobra.Command{Use: "setup", Short: "Open `tkt init` in a Herdr tab", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-			return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "setup"})
+			return plugins(a.NewHerdr()).OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "setup"})
 		}},
 		&cobra.Command{Use: "open-ticket", Short: "Open the live ticket pane for the current workspace", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOpenTicket(cmd) }},
 		&cobra.Command{Use: "open [URL]", Short: "Open the ticket behind a clicked Jira or pull request link", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return a.herdrOpen(cmd, args) }},
@@ -160,7 +189,7 @@ func (a *App) herdrInstall(cmd *cobra.Command, keys, noKeys, sidebar, noSidebar 
 	if err := paths.WritePrivateFile(filepath.Join(dir, herdrplugin.FileName), []byte(herdrplugin.Render(exe, Version))); err != nil {
 		return err
 	}
-	if err := a.NewHerdr().LinkPlugin(cmd.Context(), dir); err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
+	if err := plugins(a.NewHerdr()).LinkPlugin(cmd.Context(), dir); err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
 		return err
 	}
 	a.printf("✓ Linked the tkt plugin into Herdr (%s)\n", dir)
@@ -211,7 +240,7 @@ func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
 	// Warnings the config already causes are not tkt's doing; only new ones mean Herdr rejected the rows.
 	known := map[string]bool{}
 	var before *herdr.ReloadRejected
-	if errors.As(h.ReloadConfig(cmd.Context()), &before) {
+	if errors.As(plugins(h).ReloadConfig(cmd.Context()), &before) {
 		for _, d := range before.Diagnostics {
 			known[d] = true
 		}
@@ -222,7 +251,7 @@ func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
 	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
 		return err
 	}
-	err = h.ReloadConfig(cmd.Context())
+	err = plugins(h).ReloadConfig(cmd.Context())
 	var rejected *herdr.ReloadRejected
 	if errors.As(err, &rejected) {
 		var added []string
@@ -235,7 +264,7 @@ func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
 			if werr := os.WriteFile(path, current, 0o644); werr != nil {
 				return fmt.Errorf("restore %s after Herdr rejected it: %w", path, werr)
 			}
-			_ = h.ReloadConfig(cmd.Context())
+			_ = plugins(h).ReloadConfig(cmd.Context())
 			if len(added) == 0 {
 				added = rejected.Diagnostics
 			}
@@ -266,7 +295,7 @@ func (a *App) removeHerdrSidebar(cmd *cobra.Command) error {
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 		return err
 	}
-	_ = a.NewHerdr().ReloadConfig(cmd.Context())
+	_ = plugins(a.NewHerdr()).ReloadConfig(cmd.Context())
 	a.printf("✓ Removed tkt's sidebar lines from %s\n", path)
 	return nil
 }
@@ -336,7 +365,7 @@ func (a *App) addHerdrKeys(cmd *cobra.Command, yes bool) error {
 	for _, d := range dropped {
 		a.printf("✓ Moved %s off %s\n", d.Description, d.Key)
 	}
-	if err := a.NewHerdr().ReloadConfig(cmd.Context()); err != nil {
+	if err := plugins(a.NewHerdr()).ReloadConfig(cmd.Context()); err != nil {
 		a.printf("! keybindings saved; reload Herdr's config to use them (%v)\n", err)
 	}
 	if len(plan.Add) > 0 {
@@ -358,7 +387,7 @@ func (a *App) removeHerdrKeys(cmd *cobra.Command) error {
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 		return err
 	}
-	_ = a.NewHerdr().ReloadConfig(cmd.Context())
+	_ = plugins(a.NewHerdr()).ReloadConfig(cmd.Context())
 	a.printf("✓ Removed tkt's keybindings from %s\n", path)
 	return nil
 }
@@ -480,7 +509,7 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 // it, unless an agent came up there anyway, which the user may still want.
 func dropUnusedPane(ctx context.Context, h HerdrAPI, ho handoff) {
 	agents, err := h.Agents(ctx)
-	if err != nil || slices.ContainsFunc(agents, func(ag herdr.Agent) bool { return ag.PaneID == ho.Pane }) {
+	if err != nil || slices.ContainsFunc(agents, func(ag herdrport.Agent) bool { return ag.PaneID == ho.Pane }) {
 		return
 	}
 	if ho.Workspace != "" {
@@ -602,7 +631,7 @@ func (a *App) promptAgent(ctx context.Context, h HerdrAPI, agent, where, prompt 
 func (a *App) promptWhenNamed(ctx context.Context, h HerdrAPI, agent, prompt string) error {
 	var err error
 	for range 20 {
-		if err = h.Prompt(ctx, agent, prompt); err == nil || !strings.Contains(err.Error(), "not an active named agent") {
+		if err = h.Prompt(ctx, agent, prompt); !errors.Is(err, herdrport.ErrNotNamed) {
 			return err
 		}
 		if serr := a.Sleep(ctx, 500*time.Millisecond); serr != nil {
@@ -631,14 +660,14 @@ func (a *App) checkoutFree(ctx context.Context, dir string) bool {
 }
 
 // idlePaneAt finds a pane at dir in a workspace where no agent runs.
-func idlePaneAt(ctx context.Context, h HerdrAPI, dir string) (herdr.Pane, bool) {
+func idlePaneAt(ctx context.Context, h HerdrAPI, dir string) (herdrport.Pane, bool) {
 	panes, err := h.Panes(ctx)
 	if err != nil {
-		return herdr.Pane{}, false
+		return herdrport.Pane{}, false
 	}
 	agents, err := h.Agents(ctx)
 	if err != nil {
-		return herdr.Pane{}, false
+		return herdrport.Pane{}, false
 	}
 	busy := map[string]bool{}
 	for _, ag := range agents {
@@ -649,34 +678,34 @@ func idlePaneAt(ctx context.Context, h HerdrAPI, dir string) (herdr.Pane, bool) 
 			return p, true
 		}
 	}
-	return herdr.Pane{}, false
+	return herdrport.Pane{}, false
 }
 
 // paneAt is a pane open at dir, whether or not an agent runs there.
-func paneAt(ctx context.Context, h HerdrAPI, dir string) (herdr.Pane, bool) {
+func paneAt(ctx context.Context, h HerdrAPI, dir string) (herdrport.Pane, bool) {
 	panes, err := h.Panes(ctx)
 	if err != nil {
-		return herdr.Pane{}, false
+		return herdrport.Pane{}, false
 	}
 	for _, p := range panes {
 		if p.Cwd != "" && filepath.Clean(p.Cwd) == filepath.Clean(dir) {
 			return p, true
 		}
 	}
-	return herdr.Pane{}, false
+	return herdrport.Pane{}, false
 }
 
-func workspaceAt(ctx context.Context, h HerdrAPI, path string) (herdr.Workspace, bool) {
+func workspaceAt(ctx context.Context, h HerdrAPI, path string) (herdrport.Workspace, bool) {
 	all, err := h.Workspaces(ctx)
 	if err != nil {
-		return herdr.Workspace{}, false
+		return herdrport.Workspace{}, false
 	}
 	for _, ws := range all {
 		if ws.Worktree != nil && filepath.Clean(ws.Worktree.CheckoutPath) == filepath.Clean(path) {
 			return ws, true
 		}
 	}
-	return herdr.Workspace{}, false
+	return herdrport.Workspace{}, false
 }
 
 // workWithAgent picks the one worktree an agent works in; with none or several there is nothing to tell.
@@ -695,10 +724,10 @@ func workWithAgent(ctx context.Context, h HerdrAPI, ws []workspace.Work) (worksp
 
 // agentAt finds an agent working inside path, which Herdr reports as a worktree only when it created that
 // worktree itself; an agent without a folder is placed by its pane's.
-func agentAt(ctx context.Context, h HerdrAPI, path string) (herdr.Agent, bool) {
+func agentAt(ctx context.Context, h HerdrAPI, path string) (herdrport.Agent, bool) {
 	agents, err := h.Agents(ctx)
 	if err != nil {
-		return herdr.Agent{}, false
+		return herdrport.Agent{}, false
 	}
 	var cwd map[string]string
 	for _, ag := range agents {
@@ -718,7 +747,7 @@ func agentAt(ctx context.Context, h HerdrAPI, path string) (herdr.Agent, bool) {
 			return ag, true
 		}
 	}
-	return herdr.Agent{}, false
+	return herdrport.Agent{}, false
 }
 
 func within(dir, root string) bool {
@@ -749,7 +778,7 @@ func (a *App) herdrOpenTicket(cmd *cobra.Command) error {
 	}
 	for _, dir := range dirs {
 		if key, ok := a.keyAt(ctx, c, dir); ok {
-			return h.OpenPluginPane(ctx, herdr.PaneOpen{
+			return plugins(h).OpenPluginPane(ctx, herdr.PaneOpen{
 				PluginID: a.pluginID(), Entrypoint: "ticket", Cwd: dir,
 				Env: map[string]string{"TKT_KEY": string(key)}, WorkspaceID: id, TargetPaneID: targetPane(ctx, h, id),
 			})
@@ -861,7 +890,7 @@ func (a *App) herdrOpen(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
-	return h.OpenPluginPane(ctx, herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "ticket-popup", Env: map[string]string{"TKT_KEY": string(key)}})
+	return plugins(h).OpenPluginPane(ctx, herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "ticket-popup", Env: map[string]string{"TKT_KEY": string(key)}})
 }
 
 func (a *App) herdrTicketPopup(cmd *cobra.Command) error {
@@ -1088,19 +1117,17 @@ func sidebarTokens(t ticket.Ticket) map[string]*string {
 }
 
 func nameTaken(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "agent_name_taken") || strings.Contains(msg, "is already used")
+	return errors.Is(err, herdrport.ErrNameTaken)
 }
 
-// notReady means Herdr started the agent but it is showing a question, such as Claude Code's folder trust prompt.
 func paneBusy(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "agent_pane_busy")
+	return errors.Is(err, herdrport.ErrPaneBusy)
 }
 
 func notReady(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "agent_not_ready")
+	return errors.Is(err, herdrport.ErrNotReady)
 }
 
 func blocked(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "agent_blocked")
+	return errors.Is(err, herdrport.ErrBlocked)
 }

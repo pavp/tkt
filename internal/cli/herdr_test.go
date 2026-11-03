@@ -847,7 +847,7 @@ func TestHerdrInstallUndoesSidebarRowsThatAddWarnings(t *testing.T) {
 	original := "[toast]\nenabled = true\n"
 	cfg := herdrConfig(t, h, original)
 	f.Results["server.reload_config"] = `{"type":"config_reload","status":"partial","diagnostics":["[toast] is not a known section"]}`
-	h.app.NewHerdr = func() HerdrAPI { return reloadSequence{HerdrAPI: herdr.New(f.Path), f: f} }
+	h.app.NewHerdr = func() HerdrAPI { return reloadSequence{Client: herdr.New(f.Path), f: f} }
 	if code := h.exec("herdr", "install", "--no-keys", "--sidebar"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
@@ -861,7 +861,7 @@ func TestHerdrInstallUndoesSidebarRowsThatAddWarnings(t *testing.T) {
 
 // reloadSequence makes the second reload (after tkt writes its rows) report a new warning.
 type reloadSequence struct {
-	HerdrAPI
+	*herdr.Client
 	f *herdrtest.FakeServer
 }
 
@@ -869,7 +869,7 @@ func (r reloadSequence) ReloadConfig(ctx context.Context) error {
 	if count(r.f, "server.reload_config") == 1 {
 		r.f.Results["server.reload_config"] = `{"type":"config_reload","status":"partial","diagnostics":["[toast] is not a known section","ui.sidebar.spaces.rows: unknown style"]}`
 	}
-	return r.HerdrAPI.ReloadConfig(ctx)
+	return r.Client.ReloadConfig(ctx)
 }
 
 func TestHerdrRefreshLabelsWorkspacesOpenedOnAPlainCheckout(t *testing.T) {
@@ -905,7 +905,7 @@ func TestHerdrStartNamesAgentsClaudeAndNumbersTakenNames(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
 	f.Errors["agent.start"] = "agent name claude is already used; candidates: pane_id=w1:p1"
-	h.app.NewHerdr = func() HerdrAPI { return takenOnce{HerdrAPI: herdr.New(f.Path), f: f} }
+	h.app.NewHerdr = func() HerdrAPI { return takenOnce{Client: herdr.New(f.Path), f: f} }
 	if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "claude", "/src/web", "DEMO-7 · web", "prompt", true); err != nil {
 		t.Fatal(err)
 	}
@@ -947,7 +947,7 @@ func TestHerdrStartReusesOpenWorkspaceWithoutAgent(t *testing.T) {
 			h.app.NewHerdr = func() HerdrAPI { return herdr.New(f.Path) }
 			if tt.startErr != "" {
 				f.Errors["agent.start"] = tt.startErr
-				h.app.NewHerdr = func() HerdrAPI { return takenOnce{HerdrAPI: herdr.New(f.Path), f: f} }
+				h.app.NewHerdr = func() HerdrAPI { return takenOnce{Client: herdr.New(f.Path), f: f} }
 			}
 			if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "claude", "/src/web", "DEMO-7 · web", "Work on DEMO-7", true); err != nil {
 				t.Fatal(err)
@@ -1116,12 +1116,12 @@ func TestHerdrStartWaitsForBlockedAgentBeforePrompting(t *testing.T) {
 
 // takenOnce lets the first agent.start fail with agent_name_taken and the next ones succeed.
 type takenOnce struct {
-	HerdrAPI
+	*herdr.Client
 	f *herdrtest.FakeServer
 }
 
 func (o takenOnce) StartAgent(ctx context.Context, paneID, kind, name string, args []string) error {
-	err := o.HerdrAPI.StartAgent(ctx, paneID, kind, name, args)
+	err := o.Client.StartAgent(ctx, paneID, kind, name, args)
 	delete(o.f.Errors, "agent.start")
 	return err
 }
