@@ -119,3 +119,9 @@ func (a *App) defaultAgent(ctx context.Context) (string, error) {
 	}
 	return kinds[0], nil
 }
+
+// agentChoices are the agents a Start can open, with the one last chosen, which a board offers first.
+func (a *App) agentChoices(ctx context.Context) (kinds []string, last string, err error) {
+	kinds, err = a.agentKinds(ctx)
+	return kinds, a.loadState().LastAgent, err
+}
