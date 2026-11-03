@@ -73,6 +73,8 @@ func (e *Error) Is(target error) bool {
 		return e.Kind == "blocked"
 	case ErrNotFound:
 		return e.Kind == "not_found"
+	case ErrExited:
+		return e.Kind == "finished"
 	case ErrNotRunning:
 		return e.Kind == "unreachable" || e.Kind == "unavailable"
 	}

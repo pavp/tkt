@@ -76,7 +76,7 @@ func TestPanesAndAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantAgents := []herdrport.Agent{
-		{PaneID: "t7", WorkspaceID: "sp2", Agent: "claude-code", Name: "claude", Status: "working", Cwd: "/home/dev/code/web-DEMO-123",
+		{PaneID: "t7", WorkspaceID: "sp2", Agent: "claude", Name: "claude", Status: "working", Cwd: "/home/dev/code/web-DEMO-123",
 			Tokens: map[string]string{"herdr.space": "sp2", "herdr.tab": "tb2", "tkt_key": "DEMO-123"}},
 		{PaneID: "t9", Agent: "codex", Status: "blocked", Cwd: "/home/dev/code/api"},
 	}
