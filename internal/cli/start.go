@@ -17,7 +17,6 @@ import (
 	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/repos"
 	"github.com/pavp/tkt/internal/ticket"
-	"github.com/pavp/tkt/internal/tui"
 	"github.com/pavp/tkt/internal/workspace"
 )
 
@@ -41,7 +40,7 @@ func newStartCmd(a *App) *cobra.Command {
 			if a.jsonOut {
 				return errInteractive("start")
 			}
-			plan, err := a.planStart(cmd, args, startOpts{repos: repoFlags, clone: clone, worktree: worktree})
+			plan, err := a.planStart(cmd.Context(), args, startOpts{repos: repoFlags, clone: clone, worktree: worktree})
 			if err != nil {
 				return err
 			}
@@ -97,13 +96,13 @@ type startOpts struct {
 	prefer func([]workspace.Work) (workspace.Work, bool)
 }
 
-func (a *App) planStart(cmd *cobra.Command, args []string, opts startOpts) (startPlan, error) {
+func (a *App) planStart(ctx context.Context, args []string, opts startOpts) (startPlan, error) {
 	repoFlags, clone := opts.repos, opts.clone
 	c, err := a.LoadConfig()
 	if err != nil {
 		return startPlan{}, err
 	}
-	key, err := a.resolveKey(cmd.Context(), c, args)
+	key, err := a.resolveKey(ctx, c, args)
 	if err != nil {
 		return startPlan{}, err
 	}
@@ -115,13 +114,13 @@ func (a *App) planStart(cmd *cobra.Command, args []string, opts startOpts) (star
 	if err != nil {
 		return startPlan{}, err
 	}
-	is, err := js.Issue(cmd.Context(), string(key))
+	is, err := js.Issue(ctx, string(key))
 	if err != nil {
 		return startPlan{}, err
 	}
 	plan := startPlan{Key: key, Summary: is.Summary}
 	if len(space.Repos) == 0 {
-		if space.Repos, err = a.inferStartRepos(cmd.Context(), js, is, key, repoFlags, space.Ignores); err != nil {
+		if space.Repos, err = a.inferStartRepos(ctx, js, is, key, repoFlags, space.Ignores); err != nil {
 			return startPlan{}, err
 		}
 		for i := range c.Spaces {
@@ -132,7 +131,7 @@ func (a *App) planStart(cmd *cobra.Command, args []string, opts startOpts) (star
 	}
 
 	if len(repoFlags) == 0 {
-		all, err := a.allWork(cmd.Context(), c)
+		all, err := a.allWork(ctx, c)
 		if err != nil {
 			return startPlan{}, err
 		}
@@ -177,9 +176,9 @@ func (a *App) planStart(cmd *cobra.Command, args []string, opts startOpts) (star
 
 	res := a.Resolver(c)
 	for _, r := range selected {
-		dir, err := res.Resolve(cmd.Context(), r)
+		dir, err := res.Resolve(ctx, r)
 		if errors.Is(err, repos.ErrNotFound) {
-			dir, err = a.offerClone(cmd, res, r, clone)
+			dir, err = a.offerClone(ctx, res, r, clone)
 		}
 		if err != nil {
 			fmt.Fprintf(a.Stderr, "! skipping %s: %v\n", r.Name, err)
@@ -235,22 +234,22 @@ func (a *App) pickWork(ws []workspace.Work) (workspace.Work, error) {
 // startChoices says what a Start of key would ask, so the board can ask it first: the worktrees when
 // several remain and no single agent tells which, otherwise the space's repositories when there are
 // several. h is nil outside Herdr, where agents are unknown.
-func (a *App) startChoices(ctx context.Context, c *config.Config, key ticket.Key, h HerdrAPI) (tui.StartChoices, error) {
+func (a *App) startChoices(ctx context.Context, c *config.Config, key ticket.Key, h HerdrAPI) (workspace.StartChoices, error) {
 	space, ok := c.Space(key.Space())
 	if !ok {
-		return tui.StartChoices{}, fmt.Errorf("space %s is not configured", key.Space())
+		return workspace.StartChoices{}, fmt.Errorf("space %s is not configured", key.Space())
 	}
 	all, err := a.allWork(ctx, c)
 	if err != nil {
-		return tui.StartChoices{}, err
+		return workspace.StartChoices{}, err
 	}
-	var worktrees []tui.WorktreeChoice
+	var worktrees []workspace.WorktreeChoice
 	withAgent := 0
 	for _, w := range workspace.For(all, key) {
 		if w.Path == "" {
 			continue
 		}
-		choice := tui.WorktreeChoice{Repo: w.Repo, Branch: w.Branch, Path: w.Path}
+		choice := workspace.WorktreeChoice{Repo: w.Repo, Branch: w.Branch, Path: w.Path}
 		if h != nil {
 			if ag, ok := agentAt(ctx, h, w.Path); ok {
 				choice.Agent = cmp.Or(ag.Status, "unknown")
@@ -261,28 +260,28 @@ func (a *App) startChoices(ctx context.Context, c *config.Config, key ticket.Key
 	}
 	switch {
 	case len(worktrees) == 1:
-		return tui.StartChoices{Opens: worktrees[0].Agent == ""}, nil
+		return workspace.StartChoices{Opens: worktrees[0].Agent == ""}, nil
 	case len(worktrees) > 1 && withAgent == 1:
-		return tui.StartChoices{}, nil
+		return workspace.StartChoices{}, nil
 	case len(worktrees) > 1:
-		return tui.StartChoices{Worktrees: worktrees}, nil
+		return workspace.StartChoices{Worktrees: worktrees}, nil
 	case len(space.Repos) <= 1:
-		return tui.StartChoices{Opens: true}, nil
+		return workspace.StartChoices{Opens: true}, nil
 	}
 	last := map[string]bool{}
 	for _, n := range a.loadState().LastRepos[space.Key] {
 		last[n] = true
 	}
-	repos := make([]tui.RepoChoice, len(space.Repos))
+	repos := make([]workspace.RepoChoice, len(space.Repos))
 	anyLast := false
 	for i, r := range space.Repos {
-		repos[i] = tui.RepoChoice{Name: r.Name, LastUsed: last[r.Name], Checked: last[r.Name]}
+		repos[i] = workspace.RepoChoice{Name: r.Name, LastUsed: last[r.Name], Checked: last[r.Name]}
 		anyLast = anyLast || last[r.Name]
 	}
 	if !anyLast {
 		repos[0].Checked = true
 	}
-	return tui.StartChoices{Repos: repos, Opens: true}, nil
+	return workspace.StartChoices{Repos: repos, Opens: true}, nil
 }
 
 // pickRepos resolves --repo flags, or asks which of the space's repositories to use.
@@ -351,7 +350,7 @@ func findRepo(space config.Space, name string) (config.Repo, bool) {
 	return config.Repo{}, false
 }
 
-func (a *App) offerClone(cmd *cobra.Command, res repos.Resolver, r config.Repo, yes bool) (string, error) {
+func (a *App) offerClone(ctx context.Context, res repos.Resolver, r config.Repo, yes bool) (string, error) {
 	if len(res.Roots) == 0 {
 		return "", errors.New("not cloned locally and no repo_roots configured to clone into")
 	}
@@ -365,7 +364,7 @@ func (a *App) offerClone(cmd *cobra.Command, res repos.Resolver, r config.Repo, 
 		}
 	}
 	a.printf("Cloning %s…\n", r.Name)
-	return res.Clone(cmd.Context(), r)
+	return res.Clone(ctx, r)
 }
 
 // inferStartRepos finds repositories for a space that configures none: those of the ticket's Jira-linked

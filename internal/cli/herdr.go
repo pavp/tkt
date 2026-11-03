@@ -115,7 +115,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 			"the setup agent creates it with git and runs `tkt link`, which opens the agent in a new space there.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.herdrStart(cmd, args, startOpts{repos: repoFlags, clone: clone, worktree: worktree, agent: agent})
+			return a.herdrStart(cmd.Context(), args, startOpts{repos: repoFlags, clone: clone, worktree: worktree, agent: agent})
 		},
 	}
 	start.Flags().StringArrayVar(&repoFlags, "repo", nil, "repository to start in; repeat for several")
@@ -398,15 +398,19 @@ func (a *App) removeHerdrKeys(cmd *cobra.Command) error {
 	return nil
 }
 
+// startInHerdr runs a Herdr Start of key with the answers a board's pickers gave, as `tkt herdr start` does.
+func (a *App) startInHerdr(ctx context.Context, key ticket.Key, o workspace.StartOptions) error {
+	return a.herdrStart(ctx, []string{string(key)}, startOpts{repos: o.Repos, worktree: o.Worktree, agent: o.Agent})
+}
+
 // herdrStart opens one Herdr workspace with an agent per repository, or focuses the ticket's worktree.
-func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) error {
+func (a *App) herdrStart(ctx context.Context, args []string, opts startOpts) error {
 	h := a.NewHerdr()
-	opts.prefer = func(ws []workspace.Work) (workspace.Work, bool) { return workWithAgent(cmd.Context(), h, ws) }
-	plan, err := a.planStart(cmd, args, opts)
+	opts.prefer = func(ws []workspace.Work) (workspace.Work, bool) { return workWithAgent(ctx, h, ws) }
+	plan, err := a.planStart(ctx, args, opts)
 	if err != nil {
 		return err
 	}
-	ctx := cmd.Context()
 	if plan.Existing != nil {
 		ws, wsOK := workspaceAt(ctx, h, plan.Existing.Path)
 		ag, agOK := agentAt(ctx, h, plan.Existing.Path)
@@ -1028,7 +1032,7 @@ func (a *App) herdrTicketPopup(cmd *cobra.Command) error {
 	if !strings.HasPrefix(strings.ToLower(ans), "y") {
 		return nil
 	}
-	return a.herdrStart(cmd, []string{key}, startOpts{})
+	return a.herdrStart(cmd.Context(), []string{key}, startOpts{})
 }
 
 // herdrSidebar labels every workspace whose checkout carries a ticket key. cachedOnly is for the startup

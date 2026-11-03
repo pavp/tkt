@@ -507,8 +507,8 @@ func (b *boardActions) startCommand(key ticket.Key, opts tui.StartOptions) (*exe
 // AgentKinds learns the agents installed that Herdr can start, which the board offers when it opens one.
 func (b *boardActions) AgentKinds() tea.Cmd {
 	return func() tea.Msg {
-		kinds, err := b.a.agentKinds(b.ctx)
-		return tui.AgentKindsMsg{Kinds: kinds, Last: b.a.loadState().LastAgent, Err: err}
+		kinds, last, err := b.a.agentChoices(b.ctx)
+		return tui.AgentKindsMsg{Kinds: kinds, Last: last, Err: err}
 	}
 }
 
