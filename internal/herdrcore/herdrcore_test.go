@@ -260,3 +260,26 @@ func TestWatchStreamEnds(t *testing.T) {
 		t.Errorf("Watch = %v, want an error for the ended stream", err)
 	}
 }
+
+func TestRunning(t *testing.T) {
+	tests := []struct {
+		name string
+		code int
+		want bool
+	}{
+		{"server answers", 0, true},
+		{"no server", 3, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFake()
+			f.out = herdrcore.Output{Code: tt.code}
+			if got := herdrcore.NewWith(f).Running(context.Background()); got != tt.want {
+				t.Errorf("Running = %v, want %v", got, tt.want)
+			}
+			if len(f.calls) != 1 || strings.Join(f.calls[0].args, " ") != "server status" {
+				t.Errorf("calls = %v", f.calls)
+			}
+		})
+	}
+}

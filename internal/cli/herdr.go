@@ -99,7 +99,9 @@ func newHerdrCmd(a *App) *cobra.Command {
 		Use:   "herdr",
 		Short: "Herdr integration: install the plugin, and the commands it runs",
 		Long: "Herdr integration. `tkt herdr install` links the tkt plugin into a running Herdr; the other\n" +
-			"subcommands are what the plugin's actions, panes and hooks run.",
+			"subcommands are what the plugin's actions, panes and hooks run.\n\n" +
+			"With both Herdr and Herdr desktop installed, tkt uses the one whose terminal runs it, else the one\n" +
+			"running; when both run and nothing says which, it fails and asks to be run from a terminal inside one.",
 	}
 	var repoFlags []string
 	var clone bool
@@ -1091,7 +1093,7 @@ func (a *App) agentStatesQuietly(ctx context.Context, c *config.Config, snap boa
 }
 
 func (a *App) readSidebarQuietly(ctx context.Context, c *config.Config, snap board.Snapshot, report bool) map[string]string {
-	if a.Env.Getenv("HERDR_ENV") != "1" || a.NewHerdr == nil {
+	if !a.inHerdr() || a.NewHerdr == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)

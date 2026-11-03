@@ -392,3 +392,13 @@ func orCtx(ctx context.Context, err error) error {
 	}
 	return err
 }
+
+// Reachable reports whether a Herdr server accepts connections on socket.
+func Reachable(socket string) bool {
+	conn, err := net.DialTimeout("unix", socket, time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}

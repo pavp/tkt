@@ -244,3 +244,22 @@ func TestWatchEndsWhenHerdrCloses(t *testing.T) {
 		t.Fatal("watch kept running")
 	}
 }
+
+func TestReachable(t *testing.T) {
+	f := herdrtest.Start(t)
+	tests := []struct {
+		name   string
+		socket string
+		want   bool
+	}{
+		{"server listening", f.Path, true},
+		{"no socket", filepath.Join(t.TempDir(), "herdr.sock"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := herdr.Reachable(tt.socket); got != tt.want {
+				t.Errorf("Reachable = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
