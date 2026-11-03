@@ -59,7 +59,7 @@ func TestClientReadsTheBoardAndAsksForSyncs(t *testing.T) {
 }
 
 func TestClientReadsATicketDetail(t *testing.T) {
-	detail := func(_ context.Context, key ticket.Key, _ *ticket.Ticket) (any, error) {
+	detail := func(_ context.Context, key ticket.Key, _ *ticket.Ticket, _ string) (any, error) {
 		if key == "DEMO-9" {
 			return nil, errors.New("jira: DEMO-9 not found")
 		}

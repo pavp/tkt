@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/pavp/tkt/internal/workspace"
 )
 
 var kindValues = regexp.MustCompile(`(?s)--kind\b.*?\[possible values: ([^\]]*)\]`)
@@ -72,6 +74,15 @@ func (a *App) pickAgent(ctx context.Context, asked string) (string, error) {
 
 func (a *App) chooseAgent(ctx context.Context, asked string) (string, error) {
 	if asked != "" {
+		if _, ok := unattendedOf(ctx); ok {
+			kinds, err := a.agentKinds(ctx)
+			if err != nil {
+				return "", err
+			}
+			if !slices.Contains(kinds, asked) {
+				return "", fmt.Errorf("%q is not an agent kind: use one of %s", asked, strings.Join(kinds, ", "))
+			}
+		}
 		if _, err := a.Run.LookPath(asked); err != nil {
 			return "", fmt.Errorf("agent %s is not installed (not found in PATH)", asked)
 		}
@@ -83,6 +94,9 @@ func (a *App) chooseAgent(ctx context.Context, asked string) (string, error) {
 	}
 	if len(kinds) == 1 {
 		return kinds[0], nil
+	}
+	if err := needAnswer(ctx, workspace.NeedAgent); err != nil {
+		return "", err
 	}
 	last := a.loadState().LastAgent
 	def := max(slices.Index(kinds, last), 0)
@@ -118,4 +132,10 @@ func (a *App) defaultAgent(ctx context.Context) (string, error) {
 		return last, nil
 	}
 	return kinds[0], nil
+}
+
+// agentChoices are the agents a Start can open, with the one last chosen, which a board offers first.
+func (a *App) agentChoices(ctx context.Context) (kinds []string, last string, err error) {
+	kinds, err = a.agentKinds(ctx)
+	return kinds, a.loadState().LastAgent, err
 }

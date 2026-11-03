@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/paths"
 	"github.com/pavp/tkt/internal/tui"
 )
 
@@ -24,6 +26,18 @@ func (a *App) loadBoardState() tui.BoardState {
 	return s
 }
 
+// boardViewState is what the daemon's GET /v1/board shows unless asked otherwise: the board as the user left it.
+func (a *App) boardViewState() board.ViewState {
+	s := a.loadBoardState()
+	return board.ViewState{HiddenBoards: s.HiddenBoards, Team: s.Team}
+}
+
+// boardListState is what the daemon's GET /v1/prs and GET /v1/backlog show unless asked otherwise.
+func (a *App) boardListState() board.ListState {
+	s := a.loadBoardState()
+	return board.ListState{HiddenRepos: s.HiddenRepos, Collapsed: s.Collapsed, TeamPRs: s.TeamPRsShown(), BacklogMerged: s.BacklogMerged}
+}
+
 // boardView is the view the board opens in: --view when given, else the one the user last chose.
 func (a *App) boardView(flag string) string {
 	if flag != "" {
@@ -37,10 +51,7 @@ func (a *App) saveBoardState(s tui.BoardState) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(a.Env.DataDir(), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(a.boardStateFile(), b, 0o600)
+	return paths.WritePrivateFile(a.boardStateFile(), b)
 }
 
 // claimBoardPane records the Herdr pane the board runs in, so open-board can bring that board to another

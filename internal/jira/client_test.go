@@ -606,3 +606,25 @@ func TestAssignableUsersLeavesOutApps(t *testing.T) {
 		t.Errorf("query = %s", q)
 	}
 }
+
+func TestARejectedWriteNamesItsFields(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"errorMessages":["Fix the form"],"errors":{"customfield_10300":"Reason is required."}}`)
+	}))
+	defer srv.Close()
+	err := New(srv.URL, "ada@example.com", "tok").Transition(context.Background(), "DEMO-123", "51", nil, "")
+	if want := "jira POST /rest/api/3/issue/DEMO-123/transitions: 400 Fix the form; customfield_10300: Reason is required."; err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %s", err, want)
+	}
+	var rej interface {
+		Rejection() (int, []string, map[string]string)
+	}
+	if !errors.As(err, &rej) {
+		t.Fatalf("%T carries no rejection", err)
+	}
+	status, msgs, fields := rej.Rejection()
+	if status != http.StatusBadRequest || !slices.Equal(msgs, []string{"Fix the form"}) || !reflect.DeepEqual(fields, map[string]string{"customfield_10300": "Reason is required."}) {
+		t.Errorf("rejection = %d %q %v", status, msgs, fields)
+	}
+}

@@ -1,0 +1,1 @@
+{"herdr":"desktop","opens":false,"worktrees":[{"repo":"example-org/web","branch":"feature/DEMO-7-a","path":"/src/web-DEMO-7-a","agent":"idle"},{"repo":"example-org/web","branch":"feature/DEMO-7-b","path":"/src/web-DEMO-7-b"}],"repos":[],"agents":["claude","opencode"],"last_agent":"opencode"}

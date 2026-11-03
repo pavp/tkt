@@ -76,6 +76,12 @@ func TestV1RoutesNeedTheToken(t *testing.T) {
 		{"wrong token", http.MethodGet, "/v1/tickets", "nope", http.StatusUnauthorized},
 		{"sync without token", http.MethodPost, "/v1/sync", "", http.StatusUnauthorized},
 		{"right token", http.MethodGet, "/v1/tickets", s.token, http.StatusOK},
+		{"board without token", http.MethodGet, "/v1/board", "", http.StatusUnauthorized},
+		{"board with the token", http.MethodGet, "/v1/board", s.token, http.StatusOK},
+		{"pull requests without token", http.MethodGet, "/v1/prs", "", http.StatusUnauthorized},
+		{"pull requests with the token", http.MethodGet, "/v1/prs", s.token, http.StatusOK},
+		{"backlog without token", http.MethodGet, "/v1/backlog", "", http.StatusUnauthorized},
+		{"backlog with no loader", http.MethodGet, "/v1/backlog", s.token, http.StatusNotFound},
 		{"unknown route", http.MethodGet, "/v1/nothing", s.token, http.StatusNotFound},
 		{"wrong method", http.MethodPost, "/v1/tickets", s.token, http.StatusMethodNotAllowed},
 	}
@@ -107,7 +113,7 @@ func TestTicketsServesTheSeedThenEachSync(t *testing.T) {
 func TestTicketDetail(t *testing.T) {
 	seed := &board.Snapshot{FetchedAt: fetched, Tickets: []ticket.Ticket{{Key: "DEMO-1", Summary: "Filter accounts"}}}
 	var gotKnown *ticket.Ticket
-	detail := func(_ context.Context, key ticket.Key, known *ticket.Ticket) (any, error) {
+	detail := func(_ context.Context, key ticket.Key, known *ticket.Ticket, _ string) (any, error) {
 		gotKnown = known
 		if key == "DEMO-9" {
 			return nil, errors.New("jira: DEMO-9 not found")

@@ -25,7 +25,6 @@ import (
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/daemon"
 	"github.com/pavp/tkt/internal/herdr"
-	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
 	"github.com/pavp/tkt/internal/workspace"
@@ -164,8 +163,8 @@ func (b *boardActions) cfg() *config.Config {
 // Config returns the configuration as written on disk, with "~" unexpanded, so saving it keeps the
 // user's paths portable; the board itself runs on an expanded copy.
 func (b *boardActions) Config() config.Config {
-	if c, err := config.Load(b.a.ConfigPath()); err == nil {
-		return *c
+	if c, err := b.a.savedConfig(); err == nil {
+		return c
 	}
 	return b.cfg().Clone()
 }
@@ -236,39 +235,46 @@ func (b *boardActions) NativePicker() bool { return b.a.nativePicker() }
 
 func (b *boardActions) JiraBoards(space string) tea.Cmd {
 	return func() tea.Msg {
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.JiraBoardsListedMsg{Space: space, Err: err}
-		}
-		boards, err := b.a.teamBoardChoices(b.ctx, js, space)
+		boards, err := b.a.jiraBoards(b.ctx, b.cfg(), space)
 		return tui.JiraBoardsListedMsg{Space: space, Boards: boards, Err: err}
 	}
 }
 
 // Backlog opens from the last copy while it is fresh, asking Jira only for an older copy or when forced; an older
-// copy shows at once while Jira answers, and every fetch is kept for the next opening.
+// copy shows at once while Jira answers.
 func (b *boardActions) Backlog(force bool) tea.Cmd {
 	return func() tea.Msg {
-		cache := b.a.backlogCache()
-		cached, ok, _ := cache.Load()
-		if ok && !force && b.a.Now().Sub(cached.FetchedAt) < board.BacklogEvery {
-			return tui.BacklogMsg{Backlog: cached}
-		}
-		if ok && b.send != nil {
-			b.send(tui.BacklogMsg{Backlog: cached, Cached: true})
-		}
-		ctx, cancel := context.WithTimeout(b.ctx, time.Minute)
-		defer cancel()
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.BacklogMsg{Err: err}
-		}
-		bl, err := board.FetchBacklog(ctx, b.cfg(), js, b.a.Now())
-		if err == nil {
-			_ = cache.Save(bl)
-		}
+		bl, err := b.a.loadBacklog(b.ctx, b.cfg(), force, func(older board.Backlog) {
+			if b.send != nil {
+				b.send(tui.BacklogMsg{Backlog: older, Cached: true})
+			}
+		})
 		return tui.BacklogMsg{Backlog: bl, Err: err}
 	}
+}
+
+// loadBacklog returns the last copy of the backlog while it is fresh, asking Jira only for an older copy or when
+// forced, after handing that older copy to older; every fetch is kept for the next opening.
+func (a *App) loadBacklog(ctx context.Context, c *config.Config, force bool, older func(board.Backlog)) (board.Backlog, error) {
+	cache := a.backlogCache()
+	cached, ok, _ := cache.Load()
+	if ok && !force && a.Now().Sub(cached.FetchedAt) < board.BacklogEvery {
+		return cached, nil
+	}
+	if ok {
+		older(cached)
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	js, err := a.jiraClient(c)
+	if err != nil {
+		return board.Backlog{}, err
+	}
+	bl, err := board.FetchBacklog(ctx, c, js, a.Now())
+	if err == nil {
+		_ = cache.Save(bl)
+	}
+	return bl, err
 }
 
 func (b *boardActions) MoveToSprint(key ticket.Key, sprint int, name string) tea.Cmd {
@@ -285,93 +291,34 @@ func (b *boardActions) MoveToSprint(key ticket.Key, sprint int, name string) tea
 
 func (b *boardActions) JiraStatuses(space string) tea.Cmd {
 	return func() tea.Msg {
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.JiraStatusesListedMsg{Space: space, Err: err}
-		}
-		statuses, err := js.Statuses(b.ctx, space)
-		out := make([]tui.JiraStatus, len(statuses))
-		for i, st := range statuses {
-			out[i] = tui.JiraStatus{Name: st.Name, Category: st.Category}
-		}
-		return tui.JiraStatusesListedMsg{Space: space, Statuses: out, Err: err}
+		statuses, err := b.a.jiraStatuses(b.ctx, b.cfg(), space)
+		return tui.JiraStatusesListedMsg{Space: space, Statuses: statuses, Err: err}
 	}
 }
 
 func (b *boardActions) Transitions(key ticket.Key) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-		defer cancel()
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.TransitionsMsg{Key: key, Err: err}
-		}
-		trs, err := js.Transitions(ctx, string(key))
-		out := make([]tui.Transition, len(trs))
-		for i, t := range trs {
-			out[i] = tui.Transition{ID: t.ID, To: t.To, NeedsForm: t.NeedsForm}
-			for _, f := range t.Fields {
-				field := tui.Field{ID: f.ID, Name: f.Name, Kind: f.Kind, Required: f.Required}
-				for _, o := range f.Options {
-					field.Options = append(field.Options, tui.Option{ID: o.ID, Value: o.Value})
-				}
-				out[i].Fields = append(out[i].Fields, field)
-			}
-		}
-		return tui.TransitionsMsg{Key: key, Transitions: out, Err: err}
+		trs, err := b.a.transitions(b.ctx, b.cfg(), key)
+		return tui.TransitionsMsg{Key: key, Transitions: trs, Err: err}
 	}
 }
 
 func (b *boardActions) Users(key ticket.Key, query string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-		defer cancel()
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.UsersListedMsg{Key: key, Query: query, Err: err}
-		}
-		found, err := js.AssignableUsers(ctx, string(key), query)
-		users := make([]tui.User, len(found))
-		for i, u := range found {
-			users[i] = tui.User{ID: u.AccountID, Name: u.DisplayName}
-		}
+		users, err := b.a.assignableUsers(b.ctx, b.cfg(), key, query)
 		return tui.UsersListedMsg{Key: key, Query: query, Users: users, Err: err}
 	}
 }
 
 func (b *boardActions) Assign(key ticket.Key, who tui.Assignee) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-		defer cancel()
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.AssignedMsg{Key: key, Who: who, Err: err}
-		}
-		id := who.ID
-		if who.Me {
-			me, err := js.Myself(ctx)
-			if err != nil {
-				return tui.AssignedMsg{Key: key, Who: who, Err: err}
-			}
-			id = me.AccountID
-		}
-		return tui.AssignedMsg{Key: key, Who: who, Err: js.Assign(ctx, string(key), id)}
+		return tui.AssignedMsg{Key: key, Who: who, Err: b.a.assign(b.ctx, b.cfg(), key, who.Me, who.ID)}
 	}
 }
 
 func (b *boardActions) Transition(key ticket.Key, id, to string, values []tui.Value, comment string) tea.Cmd {
-	vs := make([]jira.Value, len(values))
-	for i, v := range values {
-		vs[i] = jira.Value{Field: v.Field, Kind: v.Kind, ID: v.ID}
-	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-		defer cancel()
-		js, err := b.a.jiraClient(b.cfg())
-		if err == nil {
-			err = js.Transition(ctx, string(key), id, vs, comment)
-		}
-		return tui.TransitionedMsg{Key: key, To: to, Err: err}
+		return tui.TransitionedMsg{Key: key, To: to, Err: b.a.transition(b.ctx, b.cfg(), key, id, values, comment)}
 	}
 }
 
@@ -386,13 +333,7 @@ func (b *boardActions) SaveState(s tui.BoardState) tea.Cmd {
 
 func (b *boardActions) JiraFields() tea.Cmd {
 	return func() tea.Msg {
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.JiraFieldsListedMsg{Err: err}
-		}
-		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-		defer cancel()
-		names, err := js.FieldNames(ctx)
+		names, err := b.a.jiraFieldNames(b.ctx, b.cfg())
 		return tui.JiraFieldsListedMsg{Names: names, Err: err}
 	}
 }
@@ -425,8 +366,8 @@ func listDirs(dir string) (names, broken []string, err error) {
 
 func (b *boardActions) SaveConfig(c config.Config) tea.Cmd {
 	return func() tea.Msg {
-		c = c.Clone()
-		if err := config.Save(b.a.ConfigPath(), &c); err != nil {
+		c, err := b.a.saveConfig(c)
+		if err != nil {
 			return tui.SettingsSavedMsg{Err: err}
 		}
 		inUse := c.Clone()
@@ -507,8 +448,8 @@ func (b *boardActions) startCommand(key ticket.Key, opts tui.StartOptions) (*exe
 // AgentKinds learns the agents installed that Herdr can start, which the board offers when it opens one.
 func (b *boardActions) AgentKinds() tea.Cmd {
 	return func() tea.Msg {
-		kinds, err := b.a.agentKinds(b.ctx)
-		return tui.AgentKindsMsg{Kinds: kinds, Last: b.a.loadState().LastAgent, Err: err}
+		kinds, last, err := b.a.agentChoices(b.ctx)
+		return tui.AgentKindsMsg{Kinds: kinds, Last: last, Err: err}
 	}
 }
 
@@ -639,11 +580,11 @@ func (b *boardActions) Copy(text, what string) tea.Cmd {
 
 func (b *boardActions) CopyContext(key ticket.Key) tea.Cmd {
 	return func() tea.Msg {
-		d, err := b.a.loadDetail(b.ctx, b.cfg(), key, nil)
+		text, err := b.a.contextText(b.ctx, b.cfg(), key)
 		if err != nil {
 			return tui.StatusMsg(err.Error())
 		}
-		if err := b.copy(renderContext(d, nil)); err != nil {
+		if err := b.copy(text); err != nil {
 			return tui.StatusMsg("could not copy: " + err.Error())
 		}
 		return tui.StatusMsg("✓ copied " + string(key) + "'s context as Markdown")

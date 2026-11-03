@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/ticket"
 )
 
@@ -30,8 +31,15 @@ const Protocol = 1
 type SyncFunc func(ctx context.Context, partial func(board.Snapshot)) (board.Snapshot, error)
 
 // DetailFunc loads one ticket with its description and comments; known is the board's copy of the ticket,
-// when the board holds it.
-type DetailFunc func(ctx context.Context, key ticket.Key, known *ticket.Ticket) (any, error)
+// when the board holds it, and agent the state of its agent in Herdr, empty when none runs.
+type DetailFunc func(ctx context.Context, key ticket.Key, known *ticket.Ticket, agent string) (any, error)
+
+// ContextFunc builds the Markdown the TUI's "copy context" puts on the clipboard.
+type ContextFunc func(ctx context.Context, key ticket.Key) (string, error)
+
+// BacklogFunc loads the team boards' backlog, from its cache while fresh unless forced. On an error it may return
+// the last copy it has, which is served with the error; a zero FetchedAt means it has none.
+type BacklogFunc func(ctx context.Context, force bool) (board.Backlog, error)
 
 type Options struct {
 	// Dir is the data directory holding the token and daemon.json.
@@ -45,6 +53,40 @@ type Options struct {
 	HelloTimeout time.Duration
 	// Detail serves GET /v1/tickets/{key}; nil answers that route with not found.
 	Detail DetailFunc
+	// Context serves GET /v1/tickets/{key}/context; nil answers it with not found.
+	Context ContextFunc
+	// State is the board as the user last left it, which GET /v1/board shows unless its query says otherwise.
+	State func() board.ViewState
+	// Lists is the PRs tab and the Backlog as the user last left them, which GET /v1/prs and GET /v1/backlog show
+	// unless their query says otherwise.
+	Lists func() board.ListState
+	// SavedState and SaveState read and write board-state.json for GET and PATCH /v1/board/state; nil answers
+	// them with not found.
+	SavedState func() board.SavedState
+	SaveState  func(board.SavedState) error
+	// Repos names the configured repositories, which the Repos filter offers beside those with pull requests.
+	Repos func() []string
+	// Backlog serves GET /v1/backlog; nil answers that route with not found.
+	Backlog BacklogFunc
+	// StartChoices serves GET /v1/tickets/{key}/start and Start POST to it; nil answers them with not found.
+	StartChoices StartChoicesFunc
+	Start        StartFunc
+	// Transitions, Transition, Users and Assign serve Move and Assign; nil answers their routes with not found.
+	Transitions TransitionsFunc
+	Transition  TransitionFunc
+	Users       UsersFunc
+	Assign      AssignFunc
+	// TaskAgents serves GET /v1/tasks/agents and Task POST /v1/tasks; nil answers them with not found.
+	TaskAgents TaskAgentsFunc
+	Task       TaskFunc
+	// Settings and SaveSettings read and write config.toml, "~" unexpanded as the TUI's Settings keeps it, for GET
+	// and PATCH /v1/settings; nil answers the settings routes with not found.
+	Settings     func() (config.Config, error)
+	SaveSettings func(config.Config) (config.Config, error)
+	// JiraStatuses, JiraBoards and JiraFields list what Settings offers from Jira.
+	JiraStatuses StatusesFunc
+	JiraBoards   BoardsFunc
+	JiraFields   FieldsFunc
 }
 
 // Info is what daemon.json records for clients: where the daemon listens and which process it is.
@@ -63,6 +105,18 @@ type Server struct {
 	snap    board.Snapshot
 	have    bool
 	clients map[*client]struct{}
+	// syncing is true while a sync runs; syncErr is the last sync's failure, cleared by the next good one.
+	syncing bool
+	syncErr string
+	// running holds the jobs still running by kind and subject, such as "start:DEMO-7", so a second one waits for it.
+	running map[string]bool
+	// backlogMu runs one backlog load at a time; staleBacklog makes the next one ask Jira, as after an assignment.
+	backlogMu    sync.Mutex
+	staleBacklog bool
+	// stateMu runs one board state change at a time, so two clients' changes both land; settingsMu does the same
+	// for config.toml.
+	stateMu    sync.Mutex
+	settingsMu sync.Mutex
 
 	syncNow chan struct{}
 	// quit closes when Serve stops, so WebSocket handlers, which outlive the HTTP server's shutdown,
@@ -79,7 +133,7 @@ func New(o Options) (*Server, error) {
 	if o.HelloTimeout == 0 {
 		o.HelloTimeout = 10 * time.Second
 	}
-	s := &Server{opts: o, token: tok, syncNow: make(chan struct{}, 1), clients: map[*client]struct{}{}, quit: make(chan struct{})}
+	s := &Server{opts: o, token: tok, syncNow: make(chan struct{}, 1), clients: map[*client]struct{}{}, running: map[string]bool{}, quit: make(chan struct{})}
 	if o.Seed != nil {
 		s.snap, s.have = *o.Seed, true
 	}
@@ -210,6 +264,7 @@ func (s *Server) syncLoop(ctx context.Context) {
 func (s *Server) syncOnce(ctx context.Context) {
 	s.mu.Lock()
 	s.publish("sync.started", struct{}{})
+	s.syncing = true
 	before, hadBefore := s.snap, s.have
 	s.mu.Unlock()
 	painted := false
@@ -224,7 +279,9 @@ func (s *Server) syncOnce(ctx context.Context) {
 	})
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.syncing = false
 	if err != nil {
+		s.syncErr = err.Error()
 		// A partial board must not outlive its failed sync: the last full one comes back.
 		if painted && hadBefore {
 			s.snap = before
@@ -233,6 +290,7 @@ func (s *Server) syncOnce(ctx context.Context) {
 		s.publish("sync.failed", map[string]string{"message": err.Error()})
 		return
 	}
+	s.syncErr = ""
 	old, had := s.snap, s.have
 	if snap.Agents == nil {
 		// The sync could not read Herdr; the agents it last reported still stand.
@@ -272,6 +330,25 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /v1/tickets", s.authed(s.tickets))
 	mux.HandleFunc("GET /v1/tickets/{key}", s.authed(s.ticket))
+	mux.HandleFunc("GET /v1/tickets/{key}/context", s.authed(s.ticketContext))
+	mux.HandleFunc("GET /v1/board", s.authed(s.board))
+	mux.HandleFunc("GET /v1/board/state", s.authed(s.boardState))
+	mux.HandleFunc("PATCH /v1/board/state", s.mutating(s.patchBoardState))
+	mux.HandleFunc("GET /v1/prs", s.authed(s.prs))
+	mux.HandleFunc("GET /v1/backlog", s.authed(s.backlog))
+	mux.HandleFunc("GET /v1/tickets/{key}/start", s.authed(s.startChoices))
+	mux.HandleFunc("POST /v1/tickets/{key}/start", s.mutating(s.start))
+	mux.HandleFunc("GET /v1/tickets/{key}/transitions", s.authed(s.moves))
+	mux.HandleFunc("POST /v1/tickets/{key}/transitions", s.mutating(s.move))
+	mux.HandleFunc("GET /v1/tickets/{key}/users", s.authed(s.users))
+	mux.HandleFunc("PUT /v1/tickets/{key}/assignee", s.mutating(s.assign))
+	mux.HandleFunc("GET /v1/tasks/agents", s.authed(s.taskAgents))
+	mux.HandleFunc("POST /v1/tasks", s.mutating(s.task))
+	mux.HandleFunc("GET /v1/settings", s.authed(s.settings))
+	mux.HandleFunc("PATCH /v1/settings", s.mutating(s.patchSettings))
+	mux.HandleFunc("GET /v1/settings/statuses", s.authed(s.settingsStatuses))
+	mux.HandleFunc("GET /v1/settings/boards", s.authed(s.settingsBoards))
+	mux.HandleFunc("GET /v1/settings/fields", s.authed(s.settingsFields))
 	mux.HandleFunc("POST /v1/sync", s.authed(s.requestSync))
 	mux.HandleFunc("GET /v1/ws", s.ws)
 	return mux
@@ -308,9 +385,8 @@ func (s *Server) ticket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "this daemon serves no ticket details")
 		return
 	}
-	key := ticket.Key(r.PathValue("key"))
-	if keys := ticket.KeysIn(string(key)); len(keys) != 1 || keys[0] != key {
-		writeError(w, http.StatusBadRequest, "bad_key", fmt.Sprintf("%q is not a ticket key like DEMO-123", key))
+	key, ok := pathKey(w, r)
+	if !ok {
 		return
 	}
 	s.mu.Lock()
@@ -320,12 +396,37 @@ func (s *Server) ticket(w http.ResponseWriter, r *http.Request) {
 	if t, ok := snap.Find(key); have && ok {
 		known = &t
 	}
-	d, err := s.opts.Detail(r.Context(), key, known)
+	d, err := s.opts.Detail(r.Context(), key, known, snap.Agents[string(key)])
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "detail_failed", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+func (s *Server) ticketContext(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Context == nil {
+		writeError(w, http.StatusNotFound, "not_found", "this daemon serves no ticket context")
+		return
+	}
+	key, ok := pathKey(w, r)
+	if !ok {
+		return
+	}
+	text, err := s.opts.Context(r.Context(), key)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "detail_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"key": string(key), "text": text})
+}
+
+// syncSoon asks the sync loop for a sync at once, unless one is already asked.
+func (s *Server) syncSoon() {
+	select {
+	case s.syncNow <- struct{}{}:
+	default:
+	}
 }
 
 // public leaves out the development-panel cache, which only the sync needs.
@@ -335,10 +436,7 @@ func public(snap board.Snapshot) board.Snapshot {
 }
 
 func (s *Server) requestSync(w http.ResponseWriter, _ *http.Request) {
-	select {
-	case s.syncNow <- struct{}{}:
-	default:
-	}
+	s.syncSoon()
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
 }
 
