@@ -18,6 +18,7 @@ import (
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/herdrcore"
 	"github.com/pavp/tkt/internal/herdrplugin"
 	"github.com/pavp/tkt/internal/herdrport"
 	"github.com/pavp/tkt/internal/paths"
@@ -58,6 +59,7 @@ type HerdrPlugins interface {
 var (
 	_ HerdrAPI     = (*herdr.Client)(nil)
 	_ HerdrPlugins = (*herdr.Client)(nil)
+	_ HerdrAPI     = (*herdrcore.Client)(nil)
 )
 
 var errNoPlugins = errors.New("this Herdr has no plugins")

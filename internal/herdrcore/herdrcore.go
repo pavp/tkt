@@ -35,19 +35,30 @@ type Runner interface {
 
 type Client struct {
 	hc Runner
+	// app is herdr-app, which arranges the window; nil when it is not installed, as on a headless core.
+	app Runner
 }
 
-// New finds hc on PATH.
+// New finds hc, and herdr-app when it is there, on PATH.
 func New() (*Client, error) {
 	path, err := exec.LookPath("hc")
 	if err != nil {
 		return nil, ErrNotInstalled
 	}
-	return NewWith(execRunner{path}), nil
+	c := NewWith(execRunner{path})
+	if app, err := exec.LookPath("herdr-app"); err == nil {
+		c.app = execRunner{app}
+	}
+	return c, nil
 }
 
 func NewWith(hc Runner) *Client {
 	return &Client{hc: hc}
+}
+
+// NewWithApp is NewWith plus the herdr-app that layout operations run.
+func NewWithApp(hc, app Runner) *Client {
+	return &Client{hc: hc, app: app}
 }
 
 // Error is a failure hc reported; its kinds are listed by `hc schema`.
