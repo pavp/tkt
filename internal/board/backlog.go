@@ -34,6 +34,8 @@ type Backlog struct {
 	HasPoints bool `json:"has_points,omitempty"`
 	// Me is the user's name as Jira gives it to assignees, to tell the user's tickets apart.
 	Me string `json:"me,omitempty"`
+	// NoTeamBoards says no space has a team board set, so the backlog is empty by configuration, not by Jira.
+	NoTeamBoards bool `json:"no_team_boards,omitempty"`
 }
 
 type BacklogSprint struct {
@@ -51,6 +53,7 @@ func FetchBacklog(ctx context.Context, c *config.Config, js BacklogSource, now t
 		boards = append(boards, s.TeamBoards...)
 	}
 	if len(boards) == 0 {
+		out.NoTeamBoards = true
 		return out, nil
 	}
 	fields, labelID, pointsID, warnings := issueFields(ctx, c, js)

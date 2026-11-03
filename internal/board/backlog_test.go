@@ -135,7 +135,7 @@ func TestBacklogGroupsActiveSprintsThenFutureSoonestFirstThenTheBacklog(t *testi
 func TestBacklogWithoutTeamBoardsAsksNothing(t *testing.T) {
 	js := &stubBacklog{}
 	got, err := FetchBacklog(context.Background(), cfg(), js, time.Now())
-	if err != nil || len(got.Sprints) != 0 || len(got.Backlog) != 0 || len(js.jqls) != 0 {
+	if err != nil || len(got.Sprints) != 0 || len(got.Backlog) != 0 || len(js.jqls) != 0 || !got.NoTeamBoards {
 		t.Errorf("got %+v, %v, searches %v", got, err, js.jqls)
 	}
 }

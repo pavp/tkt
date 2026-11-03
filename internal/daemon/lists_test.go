@@ -151,6 +151,20 @@ func TestBacklogLoads(t *testing.T) {
 	}
 }
 
+func TestBacklogSaysWhenNoTeamBoardIsSet(t *testing.T) {
+	for _, none := range []bool{true, false} {
+		s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour,
+			Backlog: func(context.Context, bool) (board.Backlog, error) { return board.Backlog{NoTeamBoards: none}, nil }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		code, body := get(t, s.Handler(), http.MethodGet, "/v1/backlog", s.token)
+		if got, _ := body["no_team_boards"].(bool); code != http.StatusOK || got != none {
+			t.Errorf("no team boards %v: GET = %d %v", none, code, body)
+		}
+	}
+}
+
 func TestBacklogLoadsOneAtATime(t *testing.T) {
 	var running, most atomic.Int32
 	s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour,
