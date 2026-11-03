@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/tui"
 )
@@ -22,6 +23,12 @@ func (a *App) loadBoardState() tui.BoardState {
 		return tui.BoardState{}
 	}
 	return s
+}
+
+// boardViewState is what the daemon's GET /v1/board shows unless asked otherwise: the board as the user left it.
+func (a *App) boardViewState() board.ViewState {
+	s := a.loadBoardState()
+	return board.ViewState{HiddenBoards: s.HiddenBoards, Team: s.Team}
 }
 
 // boardView is the view the board opens in: --view when given, else the one the user last chose.

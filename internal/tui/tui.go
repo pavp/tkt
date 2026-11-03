@@ -447,28 +447,13 @@ func (m Model) boardTickets() map[string]int {
 		}
 		return boards
 	}
-	for _, t := range m.snap.Tickets {
-		if t.Board != "" && (!t.Team || m.team) {
-			boards[t.Board]++
-		}
-	}
-	return boards
+	return board.BoardCounts(m.snap.Tickets, m.team)
 }
 
 // shownTickets are the user's tickets the board filter leaves.
 // Team tickets show only while the team is on, after the user's own.
 func (m Model) shownTickets() []ticket.Ticket {
-	var mine, team []ticket.Ticket
-	for _, t := range m.snap.Tickets {
-		switch {
-		case !m.ticketShown(t):
-		case t.Team && m.team:
-			team = append(team, t)
-		case !t.Team:
-			mine = append(mine, t)
-		}
-	}
-	return append(mine, team...)
+	return board.ShownTickets(m.snap.Tickets, m.hiddenBoards, m.team)
 }
 
 // boardRepos counts, per repository the board knows (the configured ones and any with pull requests), its
@@ -951,31 +936,29 @@ func prStatus(pr ticket.PullRequest) string {
 // columns places each ticket in its column and each subtask in its own, done ones included as Jira does:
 // right after its parent when they share a column, else after that column's tickets.
 func (m Model) columns() [][]item {
-	cols := make([][]item, len(ticket.Columns))
-	ts := m.tickets()
-	for ci, c := range ticket.Columns {
-		var elsewhere []item
-		for i := range ts {
-			t := ts[i]
-			if t.Category == c {
-				cols[ci] = append(cols[ci], item{key: t.Key, ticket: &t})
-			}
-			for j := range t.Subtasks {
-				st := t.Subtasks[j]
-				if st.Category != c {
-					continue
-				}
-				it := item{key: st.Key, ticket: &st, parent: t.Key}
-				if t.Category == c {
-					cols[ci] = append(cols[ci], it)
-				} else {
-					elsewhere = append(elsewhere, it)
-				}
-			}
-		}
-		cols[ci] = append(cols[ci], elsewhere...)
+	rows := board.Columns(m.tickets())
+	cols := make([][]item, len(rows))
+	for ci, col := range rows {
+		cols[ci] = rowItems(col)
 	}
 	return cols
+}
+
+func rowItems(rows []board.Row) []item {
+	var out []item
+	for _, r := range rows {
+		out = append(out, item{key: r.Key, ticket: r.Ticket, parent: r.Parent})
+	}
+	return out
+}
+
+// boardRows are the items as the board package sees them, to find where the list's sections start.
+func boardRows(items []item) []board.Row {
+	rows := make([]board.Row, len(items))
+	for i, it := range items {
+		rows[i] = board.Row{Key: it.key, Ticket: it.ticket, Parent: it.parent, Mine: it.mine()}
+	}
+	return rows
 }
 
 func (m Model) listItems() []item {
@@ -985,23 +968,7 @@ func (m Model) listItems() []item {
 	case FilterBacklog:
 		return m.backlogItems()
 	}
-	var out []item
-	ts := m.tickets()
-	team := slices.IndexFunc(ts, func(t ticket.Ticket) bool { return t.Team })
-	if team < 0 {
-		team = len(ts)
-	}
-	theirs := board.Sorted(ts[team:])
-	slices.SortStableFunc(theirs, func(a, b ticket.Ticket) int { return strings.Compare(a.Board, b.Board) })
-	for _, t := range append(board.Sorted(ts[:team]), theirs...) {
-		t := t
-		out = append(out, item{key: t.Key, ticket: &t})
-		for j := range t.Subtasks {
-			st := t.Subtasks[j]
-			out = append(out, item{key: st.Key, ticket: &st, parent: t.Key})
-		}
-	}
-	return out
+	return rowItems(board.ListRows(m.tickets()))
 }
 
 func (m Model) current() (item, bool) {
@@ -2213,13 +2180,7 @@ func (m Model) columnsView(height int) string {
 	inner := m.columnWidth()
 	rendered := make([]string, len(cols))
 	for ci, c := range ticket.Columns {
-		points := 0.0
-		for _, it := range cols[ci] {
-			if it.ticket != nil {
-				points += it.ticket.Points
-			}
-		}
-		parts := columnHead(c.Title(), len(cols[ci]), points, inner)
+		parts := columnHead(c.Title(), len(cols[ci]), board.Points(boardRows(cols[ci])), inner)
 		if len(cols[ci]) == 0 {
 			parts = append(parts, " "+dim.Render("— nothing here"))
 		}
@@ -2973,12 +2934,7 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		}
 		lines, at = append(lines, "  "+toggle), append(at, botToggleLine)
 	}
-	nTickets := 0
-	for _, it := range items {
-		if it.ticket != nil && !it.ticket.Team && !it.mine() && it.parent == "" {
-			nTickets++
-		}
-	}
+	rows := boardRows(items)
 	section := func(title string, n int) {
 		if len(lines) > 2 {
 			lines, at = append(lines, ""), append(at, -1)
@@ -3013,21 +2969,8 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 			lines, at = append(lines, truncate(title, m.width)), append(at, i)
 			continue
 		}
-		switch {
-		case it.ticket != nil && it.ticket.Team && !it.mine() && (i == 0 || items[i-1].ticket == nil || !items[i-1].ticket.Team || items[i-1].ticket.Board != it.ticket.Board):
-			n := 0
-			for _, o := range items[i:] {
-				if o.ticket != nil && o.ticket.Team && o.ticket.Board == it.ticket.Board {
-					n++
-				}
-			}
-			title := "Team"
-			if it.ticket.Board != "" {
-				title += " · " + it.ticket.Board
-			}
+		if title, n, ok := board.SectionAt(rows, i); ok {
 			section(title, n)
-		case i == 0 && it.ticket != nil:
-			section("My tickets", nTickets)
 		}
 		var line string
 		ci := prText(it)

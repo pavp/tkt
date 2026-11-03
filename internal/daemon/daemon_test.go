@@ -76,6 +76,8 @@ func TestV1RoutesNeedTheToken(t *testing.T) {
 		{"wrong token", http.MethodGet, "/v1/tickets", "nope", http.StatusUnauthorized},
 		{"sync without token", http.MethodPost, "/v1/sync", "", http.StatusUnauthorized},
 		{"right token", http.MethodGet, "/v1/tickets", s.token, http.StatusOK},
+		{"board without token", http.MethodGet, "/v1/board", "", http.StatusUnauthorized},
+		{"board with the token", http.MethodGet, "/v1/board", s.token, http.StatusOK},
 		{"unknown route", http.MethodGet, "/v1/nothing", s.token, http.StatusNotFound},
 		{"wrong method", http.MethodPost, "/v1/tickets", s.token, http.StatusMethodNotAllowed},
 	}

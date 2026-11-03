@@ -79,6 +79,7 @@ Resources (Draft):
 | GET | `/health` | liveness, version, protocol |
 | GET | `/v1/tickets` | sprint tickets across projects, with PR and CI summary |
 | GET | `/v1/tickets/{key}` | one ticket with description, comments, PRs, checks |
+| GET | `/v1/board` | the Sprint screen as the board lays it out: columns, list sections, Boards filter, sync state |
 | POST | `/v1/tickets/{key}/start` | open the agent in the selected repositories (via Herdr) |
 | POST | `/v1/tickets/{key}/links` | register a branch and worktree created by the agent |
 | POST | `/v1/sync` | request an immediate sync |
@@ -105,6 +106,13 @@ Phase 3a builds the part of this contract the Herdr plugin, the board and `tkt l
 - Board: a refresh (`g`, or the board's own every two minutes) asks the daemon to sync and shows the spinner from `sync.started` until `sync.finished` brings the board or `sync.failed` its error; the daemon's own minute syncs show the same way. A refresh that hears nothing for 90 seconds stops spinning.
 - Cache: the JSON snapshot cache the CLI already keeps, written only by the daemon while it runs; SQLite arrives with the web UI.
 - Without the daemon, every client works as before, straight against Jira and GitHub.
+
+### Herdr desktop mod: the board's layout
+
+The Herdr desktop mod is a thin client that shows the same board as the TUI, so the daemon serves the board already laid out by the code the TUI uses (`internal/board/view.go`), never a second copy of its rules.
+
+- `GET /v1/board` is the Sprint screen. It shows the board as the user last left it (`team` and `hidden_boards` from `board-state.json`); the query `?team=true|false` and `?hidden_boards=<name>` (repeated; an empty value means none) override it for that request. It answers `503 not_synced` before the first board, as `GET /v1/tickets` does. Fields: `fetched_at`, `partial`, `syncing` (a sync is running), `sync_error` (the last sync failed, with its message; the board is the last good one), `team`, `hidden_boards`, `boards` (each team board the Boards filter offers, by name: `name`, `tickets`, `hidden`), `columns` (To Do, In Progress, In Review, Done in order: `category`, `title`, `points`, `rows`), `sections` (the list's blocks in order, such as `My tickets` then `Team · <board>` per board: `title`, `count`, `rows`), `agents` (agent state by ticket key), `label_field`, `warnings`. A row is `{key, parent, ticket}`: a ticket, or a subtask (`parent` set) placed as the TUI places it, after its parent in the list and in its own column in Columns.
+- Contract fixtures: each endpoint the mod reads has its JSON response, for fictitious data, under `internal/daemon/testdata/contract/v1/`, compared by `go test ./internal/daemon -run Contract` and rewritten with `-update`; the mod's own tests read the same files, so a change of shape fails on both sides.
 
 ## 4. Configuration and data
 
