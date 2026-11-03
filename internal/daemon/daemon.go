@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/ticket"
 )
 
@@ -78,6 +79,14 @@ type Options struct {
 	// TaskAgents serves GET /v1/tasks/agents and Task POST /v1/tasks; nil answers them with not found.
 	TaskAgents TaskAgentsFunc
 	Task       TaskFunc
+	// Settings and SaveSettings read and write config.toml, "~" unexpanded as the TUI's Settings keeps it, for GET
+	// and PATCH /v1/settings; nil answers the settings routes with not found.
+	Settings     func() (config.Config, error)
+	SaveSettings func(config.Config) (config.Config, error)
+	// JiraStatuses, JiraBoards and JiraFields list what Settings offers from Jira.
+	JiraStatuses StatusesFunc
+	JiraBoards   BoardsFunc
+	JiraFields   FieldsFunc
 }
 
 // Info is what daemon.json records for clients: where the daemon listens and which process it is.
@@ -104,8 +113,10 @@ type Server struct {
 	// backlogMu runs one backlog load at a time; staleBacklog makes the next one ask Jira, as after an assignment.
 	backlogMu    sync.Mutex
 	staleBacklog bool
-	// stateMu runs one board state change at a time, so two clients' changes both land.
-	stateMu sync.Mutex
+	// stateMu runs one board state change at a time, so two clients' changes both land; settingsMu does the same
+	// for config.toml.
+	stateMu    sync.Mutex
+	settingsMu sync.Mutex
 
 	syncNow chan struct{}
 	// quit closes when Serve stops, so WebSocket handlers, which outlive the HTTP server's shutdown,
@@ -333,6 +344,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/tickets/{key}/assignee", s.mutating(s.assign))
 	mux.HandleFunc("GET /v1/tasks/agents", s.authed(s.taskAgents))
 	mux.HandleFunc("POST /v1/tasks", s.mutating(s.task))
+	mux.HandleFunc("GET /v1/settings", s.authed(s.settings))
+	mux.HandleFunc("PATCH /v1/settings", s.mutating(s.patchSettings))
+	mux.HandleFunc("GET /v1/settings/statuses", s.authed(s.settingsStatuses))
+	mux.HandleFunc("GET /v1/settings/boards", s.authed(s.settingsBoards))
+	mux.HandleFunc("GET /v1/settings/fields", s.authed(s.settingsFields))
 	mux.HandleFunc("POST /v1/sync", s.authed(s.requestSync))
 	mux.HandleFunc("GET /v1/ws", s.ws)
 	return mux

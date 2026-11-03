@@ -82,7 +82,8 @@ func (a *App) runDaemon(ctx context.Context) error {
 	s, err := daemon.New(daemon.Options{Dir: a.Env.DataDir(), Version: Version, Sync: a.daemonSync, Interval: syncEvery, Seed: seed, Detail: a.daemonDetail, Context: a.daemonContext, State: a.boardViewState,
 		Lists: a.boardListState, SavedState: a.loadBoardState, SaveState: a.saveBoardState, Repos: a.daemonRepos, Backlog: a.daemonBacklog, StartChoices: a.daemonStartChoices, Start: a.daemonStart,
 		Transitions: a.daemonTransitions, Transition: a.daemonTransition, Users: a.daemonUsers, Assign: a.daemonAssign,
-		TaskAgents: a.daemonTaskAgents, Task: a.daemonTask})
+		TaskAgents: a.daemonTaskAgents, Task: a.daemonTask,
+		Settings: a.savedConfig, SaveSettings: a.saveConfig, JiraStatuses: a.daemonStatuses, JiraBoards: a.daemonBoards, JiraFields: a.daemonFields})
 	if err != nil {
 		return err
 	}
