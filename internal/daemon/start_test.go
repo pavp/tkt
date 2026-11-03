@@ -161,6 +161,14 @@ func TestStartNamesTheMissingAnswer(t *testing.T) {
 	}
 }
 
+func TestAStartThatPanicsFailsWithoutStoppingTheDaemon(t *testing.T) {
+	s := startServer(t, nil, func(context.Context, ticket.Key, StartRequest, func()) error { panic("boom") })
+	code, body := post(t, s.Handler(), "/v1/tickets/DEMO-7/start", s.token, "application/json", "", `{"herdr":"classic"}`)
+	if code != http.StatusUnprocessableEntity || body["code"] != "start_failed" {
+		t.Errorf("POST = %d %v, want 422 start_failed", code, body)
+	}
+}
+
 func TestStartPassesTheAnswers(t *testing.T) {
 	var got StartRequest
 	var key ticket.Key

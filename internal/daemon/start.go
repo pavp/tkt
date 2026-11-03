@@ -188,6 +188,11 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 		var once sync.Once
+		defer func() {
+			if p := recover(); p != nil {
+				done <- fmt.Errorf("the start of %s failed: %v", key, p)
+			}
+		}()
 		done <- s.opts.Start(ctx, key, req, func() { once.Do(func() { close(settled) }) })
 	}()
 	select {

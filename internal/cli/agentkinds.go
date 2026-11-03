@@ -74,6 +74,15 @@ func (a *App) pickAgent(ctx context.Context, asked string) (string, error) {
 
 func (a *App) chooseAgent(ctx context.Context, asked string) (string, error) {
 	if asked != "" {
+		if _, ok := unattendedOf(ctx); ok {
+			kinds, err := a.agentKinds(ctx)
+			if err != nil {
+				return "", err
+			}
+			if !slices.Contains(kinds, asked) {
+				return "", fmt.Errorf("%q is not an agent kind: use one of %s", asked, strings.Join(kinds, ", "))
+			}
+		}
 		if _, err := a.Run.LookPath(asked); err != nil {
 			return "", fmt.Errorf("agent %s is not installed (not found in PATH)", asked)
 		}

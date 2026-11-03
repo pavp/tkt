@@ -113,6 +113,19 @@ func TestAnUnattendedStartOpensTheAgentInTheHerdrNamed(t *testing.T) {
 	}
 }
 
+func TestAnUnattendedStartOpensOnlyAnAgentKind(t *testing.T) {
+	for _, agent := range []string{"/bin/sh", "sh", "osascript", "--help", "$(id)"} {
+		t.Run(agent, func(t *testing.T) {
+			h, d := daemonDesktop(t)
+			h.clone(t, "web")
+			err := h.app.daemonStart(context.Background(), "DEMO-7", daemon.StartRequest{Herdr: "desktop", Repos: []string{"web"}, Agent: agent}, func() {})
+			if err == nil || !strings.Contains(err.Error(), "is not an agent kind") || strings.Contains(strings.Join(d.calls, "\n"), "start ") {
+				t.Errorf("daemonStart = %v, Herdr calls %q", err, d.calls)
+			}
+		})
+	}
+}
+
 func TestAnUnattendedStartFocusesARunningAgentWithoutSettling(t *testing.T) {
 	h, d := daemonDesktop(t)
 	h.clone(t, "web")
