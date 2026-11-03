@@ -33,6 +33,10 @@ type SyncFunc func(ctx context.Context, partial func(board.Snapshot)) (board.Sna
 // when the board holds it.
 type DetailFunc func(ctx context.Context, key ticket.Key, known *ticket.Ticket) (any, error)
 
+// BacklogFunc loads the team boards' backlog, from its cache while fresh unless forced. On an error it may return
+// the last copy it has, which is served with the error; a zero FetchedAt means it has none.
+type BacklogFunc func(ctx context.Context, force bool) (board.Backlog, error)
+
 type Options struct {
 	// Dir is the data directory holding the token and daemon.json.
 	Dir     string
@@ -47,6 +51,13 @@ type Options struct {
 	Detail DetailFunc
 	// State is the board as the user last left it, which GET /v1/board shows unless its query says otherwise.
 	State func() board.ViewState
+	// Lists is the PRs tab and the Backlog as the user last left them, which GET /v1/prs and GET /v1/backlog show
+	// unless their query says otherwise.
+	Lists func() board.ListState
+	// Repos names the configured repositories, which the Repos filter offers beside those with pull requests.
+	Repos func() []string
+	// Backlog serves GET /v1/backlog; nil answers that route with not found.
+	Backlog BacklogFunc
 }
 
 // Info is what daemon.json records for clients: where the daemon listens and which process it is.
@@ -68,6 +79,8 @@ type Server struct {
 	// syncing is true while a sync runs; syncErr is the last sync's failure, cleared by the next good one.
 	syncing bool
 	syncErr string
+	// backlogMu runs one backlog load at a time.
+	backlogMu sync.Mutex
 
 	syncNow chan struct{}
 	// quit closes when Serve stops, so WebSocket handlers, which outlive the HTTP server's shutdown,
@@ -282,6 +295,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/tickets", s.authed(s.tickets))
 	mux.HandleFunc("GET /v1/tickets/{key}", s.authed(s.ticket))
 	mux.HandleFunc("GET /v1/board", s.authed(s.board))
+	mux.HandleFunc("GET /v1/prs", s.authed(s.prs))
+	mux.HandleFunc("GET /v1/backlog", s.authed(s.backlog))
 	mux.HandleFunc("POST /v1/sync", s.authed(s.requestSync))
 	mux.HandleFunc("GET /v1/ws", s.ws)
 	return mux

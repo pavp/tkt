@@ -246,29 +246,40 @@ func (b *boardActions) JiraBoards(space string) tea.Cmd {
 }
 
 // Backlog opens from the last copy while it is fresh, asking Jira only for an older copy or when forced; an older
-// copy shows at once while Jira answers, and every fetch is kept for the next opening.
+// copy shows at once while Jira answers.
 func (b *boardActions) Backlog(force bool) tea.Cmd {
 	return func() tea.Msg {
-		cache := b.a.backlogCache()
-		cached, ok, _ := cache.Load()
-		if ok && !force && b.a.Now().Sub(cached.FetchedAt) < board.BacklogEvery {
-			return tui.BacklogMsg{Backlog: cached}
-		}
-		if ok && b.send != nil {
-			b.send(tui.BacklogMsg{Backlog: cached, Cached: true})
-		}
-		ctx, cancel := context.WithTimeout(b.ctx, time.Minute)
-		defer cancel()
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.BacklogMsg{Err: err}
-		}
-		bl, err := board.FetchBacklog(ctx, b.cfg(), js, b.a.Now())
-		if err == nil {
-			_ = cache.Save(bl)
-		}
+		bl, err := b.a.loadBacklog(b.ctx, b.cfg(), force, func(older board.Backlog) {
+			if b.send != nil {
+				b.send(tui.BacklogMsg{Backlog: older, Cached: true})
+			}
+		})
 		return tui.BacklogMsg{Backlog: bl, Err: err}
 	}
+}
+
+// loadBacklog returns the last copy of the backlog while it is fresh, asking Jira only for an older copy or when
+// forced, after handing that older copy to older; every fetch is kept for the next opening.
+func (a *App) loadBacklog(ctx context.Context, c *config.Config, force bool, older func(board.Backlog)) (board.Backlog, error) {
+	cache := a.backlogCache()
+	cached, ok, _ := cache.Load()
+	if ok && !force && a.Now().Sub(cached.FetchedAt) < board.BacklogEvery {
+		return cached, nil
+	}
+	if ok {
+		older(cached)
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	js, err := a.jiraClient(c)
+	if err != nil {
+		return board.Backlog{}, err
+	}
+	bl, err := board.FetchBacklog(ctx, c, js, a.Now())
+	if err == nil {
+		_ = cache.Save(bl)
+	}
+	return bl, err
 }
 
 func (b *boardActions) MoveToSprint(key ticket.Key, sprint int, name string) tea.Cmd {

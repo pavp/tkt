@@ -78,7 +78,8 @@ func (a *App) runDaemon(ctx context.Context) error {
 	if snap, ok, err := a.cache().Load(); err == nil && ok {
 		seed = &snap
 	}
-	s, err := daemon.New(daemon.Options{Dir: a.Env.DataDir(), Version: Version, Sync: a.daemonSync, Interval: syncEvery, Seed: seed, Detail: a.daemonDetail, State: a.boardViewState})
+	s, err := daemon.New(daemon.Options{Dir: a.Env.DataDir(), Version: Version, Sync: a.daemonSync, Interval: syncEvery, Seed: seed, Detail: a.daemonDetail, State: a.boardViewState,
+		Lists: a.boardListState, Repos: a.daemonRepos, Backlog: a.daemonBacklog})
 	if err != nil {
 		return err
 	}
@@ -146,6 +147,34 @@ func (a *App) daemonDetail(ctx context.Context, key ticket.Key, known *ticket.Ti
 		return nil, err
 	}
 	return a.loadDetail(ctx, c, key, known)
+}
+
+// daemonBacklog serves the daemon's GET /v1/backlog as the board loads its Backlog; when Jira fails it hands back
+// the last copy, if any, beside the error.
+func (a *App) daemonBacklog(ctx context.Context, force bool) (board.Backlog, error) {
+	c, err := a.LoadConfig()
+	if err != nil {
+		return board.Backlog{}, err
+	}
+	var last board.Backlog
+	bl, err := a.loadBacklog(ctx, c, force, func(older board.Backlog) { last = older })
+	if err != nil {
+		return last, err
+	}
+	return bl, nil
+}
+
+// daemonRepos names the configured repositories, which the daemon's Repos filter offers.
+func (a *App) daemonRepos() []string {
+	c, err := a.LoadConfig()
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, r := range c.Repos() {
+		names = append(names, r.Name)
+	}
+	return names
 }
 
 // logNewWarnings writes each sync warning the previous sync did not have to the daemon's log, so a failure

@@ -31,6 +31,12 @@ func (a *App) boardViewState() board.ViewState {
 	return board.ViewState{HiddenBoards: s.HiddenBoards, Team: s.Team}
 }
 
+// boardListState is what the daemon's GET /v1/prs and GET /v1/backlog show unless asked otherwise.
+func (a *App) boardListState() board.ListState {
+	s := a.loadBoardState()
+	return board.ListState{HiddenRepos: s.HiddenRepos, Collapsed: s.Collapsed, TeamPRs: s.TeamPRsShown(), BacklogMerged: s.BacklogMerged}
+}
+
 // boardView is the view the board opens in: --view when given, else the one the user last chose.
 func (a *App) boardView(flag string) string {
 	if flag != "" {
