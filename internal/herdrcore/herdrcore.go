@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pavp/tkt/internal/herdrport"
@@ -40,6 +42,19 @@ type Client struct {
 	app Runner
 	// questionAfter is how long StartAgent waits for a first status before taking its absence for a question.
 	questionAfter time.Duration
+	// newID makes the id of a space or tab the window does not know yet.
+	newID func(prefix string) string
+	// settle and settleTries space out the tries of a window action on a space or pane the window may not show yet.
+	settle      time.Duration
+	settleTries int
+	// lookPath finds an agent on tkt's PATH: herdr-core starts terminals with its own PATH, which may lack it.
+	lookPath func(string) (string, error)
+	// environ is tkt's environment, part of which the terminals it starts get over herdr-core's own.
+	environ func() []string
+
+	mu        sync.Mutex
+	windowErr error
+	windowAt  time.Time
 }
 
 // New finds hc, and herdr-app when it is there, on PATH.
@@ -49,6 +64,7 @@ func New() (*Client, error) {
 		return nil, ErrNotInstalled
 	}
 	c := NewWith(execRunner{path})
+	c.lookPath = exec.LookPath
 	if app, err := exec.LookPath("herdr-app"); err == nil {
 		c.app = execRunner{app}
 	}
@@ -56,7 +72,7 @@ func New() (*Client, error) {
 }
 
 func NewWith(hc Runner) *Client {
-	return &Client{hc: hc, questionAfter: 10 * time.Second}
+	return &Client{hc: hc, questionAfter: 10 * time.Second, newID: newID, settle: 250 * time.Millisecond, settleTries: 8, environ: os.Environ}
 }
 
 // NewWithApp is NewWith plus the herdr-app that layout operations run.

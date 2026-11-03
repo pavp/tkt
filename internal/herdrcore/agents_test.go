@@ -68,7 +68,7 @@ func status(state string) string {
 
 const (
 	placed     = `{"herdr.space":"sp1","herdr.tab":"tb1","where":"web / 1"}`
-	ran        = `{"address":"t12","name":"claude","argv":["claude"],"cwd":"/home/dev/code/web-DEMO-123","state":"live","labels":{}}`
+	ran        = `{"jsonrpc":"2.0","id":1,"result":{"address":"t12","name":"claude","argv":["claude"],"cwd":"/home/dev/code/web-DEMO-123","state":"live","labels":{}}}`
 	snapshot12 = `{"seq":1,"terminals":[{"address":"t12","status":null}]}`
 )
 
@@ -103,7 +103,7 @@ func TestStartAgent(t *testing.T) {
 			[]string{snapshot12, ev("finished", "t12", `{"exit_code":1}`)},
 			herdrcore.ErrExited, append(append([]string{}, inSpace...), "--", "claude")},
 		{"a taken name", "claude", nil,
-			[]string{got("t3", "null", placed), hcErr("name_taken")}, nil,
+			[]string{got("t3", "null", placed), rpcErr("name_taken")}, nil,
 			herdrport.ErrNameTaken, append(append([]string{}, inSpace...), "--", "claude")},
 		{"an unknown pane", "claude", nil, []string{hcErr("not_found")}, nil, herdrcore.ErrNotFound, nil},
 	}
@@ -120,8 +120,8 @@ func TestStartAgent(t *testing.T) {
 			if tt.wantRun == nil {
 				return
 			}
-			if !reflect.DeepEqual(f.calls[1].args, tt.wantRun) {
-				t.Errorf("run args = %q\nwant       %q", f.calls[1].args, tt.wantRun)
+			if got := runArgs(f.calls[1]); !reflect.DeepEqual(got, tt.wantRun) {
+				t.Errorf("run args = %q\nwant       %q", got, tt.wantRun)
 			}
 			if len(f.calls) > 3 && !reflect.DeepEqual(f.calls[3].args, []string{"events", "--json", "--terminal", "t12"}) {
 				t.Errorf("wait args = %q", f.calls[3].args)
@@ -303,7 +303,7 @@ func TestRunDetached(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"run", "--bg", "--json", "--no-parent", "--rm", "--cwd", "/home/dev/.local/share/tkt", "--", "sh", "-c", "exit 0"}
-	if len(f.calls) != 1 || !reflect.DeepEqual(f.calls[0].args, want) {
+	if len(f.calls) != 1 || !reflect.DeepEqual(runArgs(f.calls[0]), want) {
 		t.Errorf("calls = %+v\nwant %q", f.calls, want)
 	}
 }

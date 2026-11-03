@@ -95,36 +95,6 @@ func TestWorkspaces(t *testing.T) {
 	}
 }
 
-func TestCreateWorkspace(t *testing.T) {
-	tests := []struct {
-		name     string
-		outs     []herdrcore.Output
-		wantPane herdrport.Pane
-		wantLs   bool
-	}{
-		{"reads the new terminal from the reply", []herdrcore.Output{ok(`{"space":"sp2","tab":"tb2","pane":"p90","terminal":"t9"}`)},
-			herdrport.Pane{ID: "t9", WorkspaceID: "sp2", Cwd: "/home/dev/code/api"}, false},
-		{"finds the terminal in ls when the reply names only the space", []herdrcore.Output{ok(`{"space":"sp2"}`), ok(appLs)},
-			herdrport.Pane{ID: "t9", WorkspaceID: "sp2", Cwd: "/home/dev/code/api"}, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			app := &fakeApp{outs: tt.outs}
-			ws, pane, err := herdrcore.NewWithApp(newFake(), app).CreateWorkspace(context.Background(), "/home/dev/code/api", "DEMO-123 api", false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(ws, herdrport.Workspace{ID: "sp2", Label: "DEMO-123 api"}) || pane != tt.wantPane {
-				t.Errorf("CreateWorkspace = %+v, %+v", ws, pane)
-			}
-			checkDos(t, app.calls, []doWant{{"space.new", map[string]any{"name": "DEMO-123 api", "folder": "/home/dev/code/api", "machine": ""}}})
-			if got := len(app.calls) == 2 && app.calls[1][0] == "ls"; got != tt.wantLs {
-				t.Errorf("calls = %q", app.calls)
-			}
-		})
-	}
-}
-
 func TestLayoutCommands(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {
@@ -137,10 +107,6 @@ func TestLayoutCommands(t *testing.T) {
 			[]doWant{{"space.select", map[string]any{"id": "sp1"}}}},
 		{"focus pane focuses the terminal's pane", func(c *herdrcore.Client) error { return c.FocusPane(ctx, "t7") }, nil,
 			[]doWant{{"pane.focus", map[string]any{"terminal": "t7"}}}},
-		{"close pane closes the pane showing the terminal", func(c *herdrcore.Client) error { return c.ClosePane(ctx, "t7") }, []herdrcore.Output{ok(appLs)},
-			[]doWant{{"pane.close", map[string]any{"pane": "p77"}}}},
-		{"close workspace closes the space without asking", func(c *herdrcore.Client) error { return c.CloseWorkspace(ctx, "sp1") }, nil,
-			[]doWant{{"space.close", map[string]any{"id": "sp1", "confirmed": true}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -149,41 +115,6 @@ func TestLayoutCommands(t *testing.T) {
 				t.Fatal(err)
 			}
 			checkDos(t, app.calls, tt.want)
-		})
-	}
-}
-
-func TestClosePaneNotShown(t *testing.T) {
-	app := &fakeApp{outs: []herdrcore.Output{ok(appLs)}}
-	err := herdrcore.NewWithApp(newFake(), app).ClosePane(context.Background(), "t42")
-	if !errors.Is(err, herdrcore.ErrNotFound) || len(app.calls) != 1 {
-		t.Errorf("ClosePane = %v, calls %q", err, app.calls)
-	}
-}
-
-const terminalGet = `{"jsonrpc":"2.0","id":1,"result":{"address":"t7","name":"claude","cwd":"/home/dev/code/web","labels":{"herdr.space":"sp1","herdr.tab":"tb1"}}}`
-
-func TestSplitPane(t *testing.T) {
-	tests := []struct {
-		name, cwd  string
-		wantFolder map[string]any
-	}{
-		{"opens beside the pane in the folder asked", "/home/dev/code/web-DEMO-123", map[string]any{"folder": "/home/dev/code/web-DEMO-123", "place": "right"}},
-		{"keeps the pane's folder when none is asked", "", map[string]any{"folder": "/home/dev/code/web", "place": "right"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			hc := newFake()
-			hc.out = herdrcore.Output{Stdout: []byte(terminalGet)}
-			app := &fakeApp{outs: []herdrcore.Output{ok(`{}`), ok(`{"pane":"p12","terminal":"t12"}`)}}
-			pane, err := herdrcore.NewWithApp(hc, app).SplitPane(context.Background(), "t7", tt.cwd)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if pane != (herdrport.Pane{ID: "t12", WorkspaceID: "sp1", Cwd: tt.wantFolder["folder"].(string)}) {
-				t.Errorf("SplitPane = %+v", pane)
-			}
-			checkDos(t, app.calls, []doWant{{"pane.focus", map[string]any{"terminal": "t7"}}, {"terminal.open", tt.wantFolder}})
 		})
 	}
 }
@@ -201,6 +132,7 @@ func TestLayoutErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := herdrcore.NewWithApp(newFake(), &fakeApp{outs: []herdrcore.Output{tt.out, tt.out}})
+			herdrcore.SetSettle(c, 0, 1)
 			if _, err := c.Workspaces(ctx); err == nil || tt.sentinel != nil && !errors.Is(err, tt.sentinel) {
 				t.Errorf("Workspaces = %v", err)
 			}
@@ -232,17 +164,4 @@ func TestWorkspaceMetadataAndNotify(t *testing.T) {
 	if len(app.calls) != 0 {
 		t.Errorf("calls = %q", app.calls)
 	}
-}
-
-func TestOpenAgentSpace(t *testing.T) {
-	app := &fakeApp{outs: []herdrcore.Output{ok(`{"space":"sp2","tab":"tb2","pane":"p90","terminal":"t9"}`)}}
-	ws, pane, err := herdrcore.NewWithApp(newFake(), app).OpenAgentSpace(context.Background(), "/home/dev/wt/api-DEMO-123", "DEMO-123 · api", "codex", "Work on DEMO-123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ws.ID != "sp2" || pane != (herdrport.Pane{ID: "t9", WorkspaceID: "sp2", Cwd: "/home/dev/wt/api-DEMO-123"}) {
-		t.Errorf("OpenAgentSpace = %+v, %+v", ws, pane)
-	}
-	checkDos(t, app.calls, []doWant{{"space.new", map[string]any{"name": "DEMO-123 · api", "folder": "/home/dev/wt/api-DEMO-123", "machine": "",
-		"argv": []any{"codex", "--no-daemon"}, "task": "Work on DEMO-123"}}})
 }

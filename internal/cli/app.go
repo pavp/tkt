@@ -67,6 +67,8 @@ type App struct {
 
 	herdrsOnce sync.Once
 	herdrs     *herdrSet
+	// windowNoted makes noteWindow tell the user once.
+	windowNoted sync.Once
 
 	// syncWarnings are the last sync's warnings, so the daemon logs only the new ones.
 	warnMu       sync.Mutex
