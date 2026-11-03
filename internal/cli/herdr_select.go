@@ -66,7 +66,11 @@ func (a *App) chosenHerdr() HerdrAPI {
 	if err != nil {
 		return failingHerdr{err}
 	}
-	if ch.flavor == herdrDesktop {
+	return a.newHerdrOf(ch.flavor)
+}
+
+func (a *App) newHerdrOf(flavor herdrFlavor) HerdrAPI {
+	if flavor == herdrDesktop {
 		c, err := herdrcore.New()
 		if err != nil {
 			return failingHerdr{err}

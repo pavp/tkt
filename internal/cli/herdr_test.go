@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1124,6 +1125,30 @@ func (o takenOnce) StartAgent(ctx context.Context, paneID, kind, name string, ar
 	err := o.Client.StartAgent(ctx, paneID, kind, name, args)
 	delete(o.f.Errors, "agent.start")
 	return err
+}
+
+func TestThePluginSyncTalksToHerdrWhenBothHerdrsRun(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+	h, f, _ := herdrHarness(t)
+	classic := h.app.NewHerdr
+	h.app.herdrOf = func(flavor herdrFlavor) HerdrAPI {
+		if flavor == herdrClassic {
+			return classic()
+		}
+		return failingHerdr{errors.New("herdr desktop has no plugins")}
+	}
+	h.app.HerdrRunning = func(context.Context) (bool, bool) { return true, true }
+	h.app.NewHerdr = h.app.chosenHerdr
+	dir := filepath.Join(h.app.Env.DataDir(), "herdr-plugin")
+	_ = os.MkdirAll(dir, 0o700)
+	_ = os.WriteFile(filepath.Join(dir, herdrplugin.FileName), []byte(herdrplugin.Render("/opt/tkt/bin/tkt", "0.12.0")), 0o600)
+
+	Version = "0.12.3"
+	h.app.syncHerdrPlugin(context.Background())
+	if count(f, "plugin.link") != 1 {
+		t.Errorf("the 0.9.5 plugin is linked in Herdr even when Herdr desktop runs too: links %d", count(f, "plugin.link"))
+	}
 }
 
 func TestAReleaseBringsTheInstalledHerdrPluginUpToDate(t *testing.T) {

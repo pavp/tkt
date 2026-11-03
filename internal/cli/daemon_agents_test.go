@@ -133,7 +133,7 @@ func (e *emptyBoard) Board() (board.Snapshot, bool) { return board.Snapshot{}, f
 func TestAgentsBeforeTheFirstSyncLeaveTheSidebarAlone(t *testing.T) {
 	h, f := agentWorld(t, "working")
 	rec := &emptyBoard{}
-	if _, err := h.app.syncAgents(context.Background(), rec); err != nil {
+	if _, err := h.app.syncAgents(context.Background(), daemonHerdr{herdrClassic, h.app.NewHerdr()}, rec); err != nil {
 		t.Fatal(err)
 	}
 	if n := count(f, "workspace.report_metadata"); n != 0 {

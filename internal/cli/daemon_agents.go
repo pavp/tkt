@@ -26,13 +26,13 @@ const (
 	watchRetryMax = 30 * time.Second
 )
 
-// watchAgents keeps the daemon's agent states and the Herdr sidebar current as Herdr reports changes,
-// following Herdr again whenever it drops the subscription or starts later, until ctx ends.
-func (a *App) watchAgents(ctx context.Context, d agentBoard) {
+// watchHerdrAgents keeps the agent states and the sidebar of one Herdr current as it reports changes,
+// following it again whenever it drops the subscription or starts later, until ctx ends.
+func (a *App) watchHerdrAgents(ctx context.Context, h daemonHerdr, d agentBoard) {
 	wait := watchRetry
 	for ctx.Err() == nil {
 		began := time.Now()
-		if err := a.watchAgentsOnce(ctx, d); err == nil {
+		if err := a.watchAgentsOnce(ctx, h, d); err == nil {
 			wait = watchRetry
 			continue
 		}
@@ -54,8 +54,8 @@ func nextWatchWait(wait, lived time.Duration) time.Duration {
 
 // watchAgentsOnce follows Herdr until it fails, or returns nil once the panes running agents change, so
 // the caller subscribes again for the new panes.
-func (a *App) watchAgentsOnce(ctx context.Context, d agentBoard) error {
-	panes, err := a.syncAgents(ctx, d)
+func (a *App) watchAgentsOnce(ctx context.Context, h daemonHerdr, d agentBoard) error {
+	panes, err := a.syncAgents(ctx, h, d)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func (a *App) watchAgentsOnce(ctx context.Context, d agentBoard) error {
 	changed := make(chan struct{}, 1)
 	done := make(chan error, 1)
 	go func() {
-		done <- a.NewHerdr().Watch(wctx, subs, func(herdrport.Event) {
+		done <- h.api.Watch(wctx, subs, func(herdrport.Event) {
 			select {
 			case changed <- struct{}{}:
 			default:
@@ -86,7 +86,7 @@ func (a *App) watchAgentsOnce(ctx context.Context, d agentBoard) error {
 			if err := a.Sleep(ctx, agentSettle); err != nil {
 				return err
 			}
-			now, err := a.syncAgents(ctx, d)
+			now, err := a.syncAgents(ctx, h, d)
 			if err != nil {
 				return err
 			}
@@ -97,9 +97,9 @@ func (a *App) watchAgentsOnce(ctx context.Context, d agentBoard) error {
 	}
 }
 
-// syncAgents reads the agent state of each ticket on the daemon's board, rewrites the Herdr sidebar,
-// and returns the panes running agents, sorted.
-func (a *App) syncAgents(ctx context.Context, d agentBoard) ([]string, error) {
+// syncAgents reads the agent state of each ticket on the daemon's board from one Herdr, rewrites its
+// sidebar, and returns the panes running agents there, sorted.
+func (a *App) syncAgents(ctx context.Context, h daemonHerdr, d agentBoard) ([]string, error) {
 	c, err := a.LoadConfig()
 	if err != nil {
 		return nil, err
@@ -109,12 +109,12 @@ func (a *App) syncAgents(ctx context.Context, d agentBoard) ([]string, error) {
 	snap, have := d.Board()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_, agents, err := a.updateSidebar(ctx, c, snap, have)
+	_, agents, err := a.updateSidebarOn(ctx, h.api, c, snap, have && h.sidebar())
 	if err != nil {
 		return nil, err
 	}
 	d.SetAgents(agents)
-	list, err := a.NewHerdr().Agents(ctx)
+	list, err := h.api.Agents(ctx)
 	if err != nil {
 		return nil, err
 	}

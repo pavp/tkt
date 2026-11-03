@@ -48,7 +48,9 @@ type App struct {
 	NewHerdr func() HerdrAPI
 	// HerdrRunning reports which Herdrs answer: Herdr 0.9.5 on its socket, and Herdr desktop.
 	HerdrRunning func(ctx context.Context) (classic, desktop bool)
-	Executable   func() (string, error)
+	// herdrOf opens a client for one Herdr; the daemon, which follows every running Herdr, uses it.
+	herdrOf    func(herdrFlavor) HerdrAPI
+	Executable func() (string, error)
 	// OrgMember reports whether a gh token belongs to an active member of a GitHub organization.
 	OrgMember func(ctx context.Context, token, org string) (bool, error)
 	// StartDetached starts a program that outlives tkt, writing its output to logPath, and returns its pid.
@@ -62,6 +64,9 @@ type App struct {
 	tokens  map[string]string
 	// jiraClients keeps one Jira client per site, email and token; tokenMu guards it too.
 	jiraClients map[string]JiraAPI
+
+	herdrsOnce sync.Once
+	herdrs     *herdrSet
 
 	// syncWarnings are the last sync's warnings, so the daemon logs only the new ones.
 	warnMu       sync.Mutex
@@ -97,6 +102,7 @@ func NewApp() (*App, error) {
 	a.OrgMember = github.New(nil).OrgMember
 	a.NewHerdr = a.chosenHerdr
 	a.HerdrRunning = a.herdrRunning
+	a.herdrOf = a.newHerdrOf
 	a.StartDetached = startDetached
 	a.Signal = syscall.Kill
 	a.Executable = executable

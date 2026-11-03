@@ -163,7 +163,7 @@ func (a *App) logNewWarnings(warnings []string) {
 
 // daemonSync reads the configuration afresh, so changes made in the board's settings apply without a
 // restart, fails when the fetch does, so the daemon keeps its last good board, and rewrites the Herdr
-// sidebar with the new board when Herdr runs.
+// sidebar with the new board when Herdr runs, reading agent states from every Herdr it follows.
 func (a *App) daemonSync(ctx context.Context, partial func(board.Snapshot)) (board.Snapshot, error) {
 	c, err := a.LoadConfig()
 	if err != nil {
@@ -177,12 +177,16 @@ func (a *App) daemonSync(ctx context.Context, partial func(board.Snapshot)) (boa
 		return board.Snapshot{}, stale
 	}
 	a.logNewWarnings(snap.Warnings)
-	if a.NewHerdr != nil {
-		hctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		if _, agents, err := a.updateSidebar(hctx, c, snap, true); err == nil {
-			snap.Agents = agents
+	hctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var agents []map[string]string
+	for _, h := range a.daemonHerdrs().current(hctx) {
+		if _, got, err := a.updateSidebarOn(hctx, h.api, c, snap, h.sidebar()); err == nil {
+			agents = append(agents, got)
 		}
+	}
+	if len(agents) > 0 {
+		snap.Agents = mostUrgentPerTicket(agents...)
 	}
 	return snap, nil
 }
