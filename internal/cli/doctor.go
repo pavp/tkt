@@ -79,13 +79,18 @@ func (a *App) doctor(cmd *cobra.Command) []check {
 		{"gh", true, "needed for GitHub access (`gh auth login`)"},
 		{"herdr", false, "optional: enables the Herdr plugin, and tells tkt which agents it can open"},
 	} {
+		var c check
 		if p, err := a.Run.LookPath(tool.name); err == nil {
-			checks = append(checks, check{tool.name, statusOK, p, ""})
+			c = check{tool.name, statusOK, p, ""}
 		} else if tool.required {
-			checks = append(checks, check{tool.name, statusFail, "not found in PATH", tool.why})
+			c = check{tool.name, statusFail, "not found in PATH", tool.why}
 		} else {
-			checks = append(checks, check{tool.name, statusWarn, "not found in PATH", tool.why})
+			c = check{tool.name, statusWarn, "not found in PATH", tool.why}
 		}
+		if tool.name == "herdr" {
+			c = a.herdrDoctorDetail(cmd.Context(), c)
+		}
+		checks = append(checks, c)
 	}
 
 	if kinds, err := a.agentKinds(cmd.Context()); err != nil {

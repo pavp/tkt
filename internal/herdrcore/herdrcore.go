@@ -10,6 +10,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/pavp/tkt/internal/herdrport"
 )
@@ -149,6 +150,7 @@ type execRunner struct {
 
 func (r execRunner) Run(ctx context.Context, stdin []byte, args ...string) (Output, error) {
 	cmd := exec.CommandContext(ctx, r.path, args...)
+	cmd.WaitDelay = time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = bytes.NewReader(stdin), &stdout, &stderr
 	err := cmd.Run()
@@ -164,6 +166,7 @@ func (r execRunner) Run(ctx context.Context, stdin []byte, args ...string) (Outp
 
 func (r execRunner) Stream(ctx context.Context, args ...string) (io.ReadCloser, error) {
 	cmd := exec.CommandContext(ctx, r.path, args...)
+	cmd.WaitDelay = time.Second
 	s := &stream{cmd: cmd, name: args[0]}
 	cmd.Stderr = &s.stderr
 	out, err := cmd.StdoutPipe()
@@ -191,4 +194,10 @@ func (s *stream) Close() error {
 		return failure(s.name, exit.ExitCode(), s.stderr.Bytes())
 	}
 	return err
+}
+
+// Running reports whether herdr-core answers `hc server status`.
+func (c *Client) Running(ctx context.Context) bool {
+	out, err := c.hc.Run(ctx, nil, "server", "status")
+	return err == nil && out.Code == 0
 }

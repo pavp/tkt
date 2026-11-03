@@ -21,7 +21,6 @@ import (
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/execx"
 	"github.com/pavp/tkt/internal/github"
-	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/paths"
 	"github.com/pavp/tkt/internal/repos"
@@ -45,9 +44,11 @@ type App struct {
 	Now          func() time.Time
 	Sleep        func(ctx context.Context, d time.Duration) error
 	// Launch runs an interactive program attached to the terminal and waits for it.
-	Launch     func(dir, name string, args []string) error
-	NewHerdr   func() HerdrAPI
-	Executable func() (string, error)
+	Launch   func(dir, name string, args []string) error
+	NewHerdr func() HerdrAPI
+	// HerdrRunning reports which Herdrs answer: Herdr 0.9.5 on its socket, and Herdr desktop.
+	HerdrRunning func(ctx context.Context) (classic, desktop bool)
+	Executable   func() (string, error)
 	// OrgMember reports whether a gh token belongs to an active member of a GitHub organization.
 	OrgMember func(ctx context.Context, token, org string) (bool, error)
 	// StartDetached starts a program that outlives tkt, writing its output to logPath, and returns its pid.
@@ -94,7 +95,8 @@ func NewApp() (*App, error) {
 	}
 	a.NewGitHub = a.githubFor
 	a.OrgMember = github.New(nil).OrgMember
-	a.NewHerdr = func() HerdrAPI { return herdr.New(herdr.SocketPath(a.Env.Getenv, a.Env.Home)) }
+	a.NewHerdr = a.chosenHerdr
+	a.HerdrRunning = a.herdrRunning
 	a.StartDetached = startDetached
 	a.Signal = syscall.Kill
 	a.Executable = executable
