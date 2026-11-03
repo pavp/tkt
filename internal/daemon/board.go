@@ -58,21 +58,14 @@ func (s *Server) board(w http.ResponseWriter, r *http.Request) {
 		state = s.opts.State()
 	}
 	q := r.URL.Query()
-	if v := q.Get("team"); v != "" {
-		state.Team = v == "true"
+	if !queryBool(w, q, "team", &state.Team) {
+		return
 	}
-	if vs, ok := q["hidden_boards"]; ok {
-		state.HiddenBoards = slices.DeleteFunc(slices.Clone(vs), func(v string) bool { return v == "" })
-	}
-	hidden := map[string]bool{}
-	for _, b := range state.HiddenBoards {
-		hidden[b] = true
-	}
+	queryList(q, "hidden_boards", &state.HiddenBoards)
+	hidden := setOf(state.HiddenBoards)
 	view := BoardView{FetchedAt: snap.FetchedAt, Partial: snap.Partial, Syncing: syncing, SyncError: syncErr, ViewState: state,
 		Boards: []BoardFilter{}, Columns: []BoardColumn{}, Sections: []BoardSection{}, Agents: snap.Agents, LabelField: snap.LabelField, Warnings: snap.Warnings}
-	if view.HiddenBoards == nil {
-		view.HiddenBoards = []string{}
-	}
+	view.HiddenBoards = orNone(view.HiddenBoards)
 	for name, n := range board.BoardCounts(snap.Tickets, state.Team) {
 		view.Boards = append(view.Boards, BoardFilter{Name: name, Tickets: n, Hidden: hidden[name]})
 	}

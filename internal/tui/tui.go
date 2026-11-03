@@ -118,6 +118,14 @@ type BoardState struct {
 	BacklogMerged bool `json:"backlog_merged,omitempty"`
 }
 
+// TeamPRsShown reports whether the PRs filter shows everyone else's pull requests, following Team while unset.
+func (s BoardState) TeamPRsShown() bool {
+	if s.TeamPRs != nil {
+		return *s.TeamPRs
+	}
+	return s.Team
+}
+
 type ClonesFoundMsg struct {
 	Repo  string
 	Paths []string
@@ -346,10 +354,7 @@ func (m Model) WithState(s BoardState) Model {
 	for _, g := range s.Collapsed {
 		m.collapsed[g] = true
 	}
-	m.team, m.teamPRs, m.backlogMerged = s.Team, s.Team, s.BacklogMerged
-	if s.TeamPRs != nil {
-		m.teamPRs = *s.TeamPRs
-	}
+	m.team, m.teamPRs, m.backlogMerged = s.Team, s.TeamPRsShown(), s.BacklogMerged
 	return m
 }
 
@@ -399,18 +404,16 @@ func (m *Model) explainList() {
 }
 
 // reviews are the review requests the PRs filter lists, those of hidden repositories left out.
-func (m Model) reviews() []ticket.PullRequest {
-	return slices.DeleteFunc(m.stripReviews(), func(pr ticket.PullRequest) bool { return m.repoHidden(pr.Repo) })
-}
+func (m Model) reviews() []ticket.PullRequest { return board.Reviews(m.snap, m.prFilter()) }
 
 // stripReviews are the review requests the strip above the tickets shows; the repository filter belongs to
 // the PRs filter and leaves them alone.
 func (m Model) stripReviews() []ticket.PullRequest {
-	reviews := m.snap.Reviews
-	if !m.showBots {
-		reviews = m.snap.WithoutBots().Reviews
-	}
-	return slices.Clone(reviews)
+	return board.Reviews(m.snap, board.PRFilter{Bots: m.showBots})
+}
+
+func (m Model) prFilter() board.PRFilter {
+	return board.PRFilter{HiddenRepos: m.hiddenRepos, Team: m.teamPRs, Bots: m.showBots}
 }
 
 // prCount counts the PRs filter's pull requests: the user's, the review requests and, while shown, the team's.
@@ -423,29 +426,20 @@ func (m Model) prCount() int {
 }
 
 // others are the open pull requests of everyone else, listed while Team is on, filtered as reviews are.
-func (m Model) others() []ticket.PullRequest {
-	others := m.snap.Others
-	if !m.showBots {
-		others = m.snap.WithoutBots().Others
-	}
-	return slices.DeleteFunc(slices.Clone(others), func(pr ticket.PullRequest) bool { return pr.Yours || m.repoHidden(pr.Repo) })
-}
+func (m Model) others() []ticket.PullRequest { return board.Others(m.snap, m.prFilter()) }
 
 // repoHidden reports whether the user hid repo; a pull request whose repository is unknown always shows.
 func (m Model) repoHidden(repo string) bool { return repo != "" && m.hiddenRepos[repo] }
-
-// ticketShown hides the tickets of hidden boards; a ticket on no team board always shows.
-func (m Model) ticketShown(t ticket.Ticket) bool { return t.Board == "" || !m.hiddenBoards[t.Board] }
 
 // boardTickets counts, per team board, the tickets Sprint can show, the team's only while it is on; the board
 // filter offers them.
 func (m Model) boardTickets() map[string]int {
 	boards := map[string]int{}
 	if m.filter == FilterBacklog {
-		for _, t := range m.backlogTickets() {
-			boards[t.Board]++
+		if m.backlog == nil {
+			return boards
 		}
-		return boards
+		return m.backlog.BoardCounts()
 	}
 	return board.BoardCounts(m.snap.Tickets, m.team)
 }
@@ -459,31 +453,12 @@ func (m Model) shownTickets() []ticket.Ticket {
 // boardRepos counts, per repository the board knows (the configured ones and any with pull requests), its
 // open pull requests and review requests; the repository filter offers them.
 func (m Model) boardRepos() map[string]int {
-	repos := map[string]int{}
-	add := func(pr ticket.PullRequest) {
-		if pr.Repo == "" {
-			return
-		}
-		if _, ok := repos[pr.Repo]; !ok {
-			repos[pr.Repo] = 0
-		}
-		if pr.State == ticket.PROpen || pr.State == "" {
-			repos[pr.Repo]++
-		}
-	}
-	for _, t := range m.snap.Tickets {
-		for _, pr := range t.PRs {
-			add(pr)
-		}
-	}
-	for _, pr := range m.snap.Reviews {
-		add(pr)
-	}
 	cfg := m.actions.Config()
+	var names []string
 	for _, r := range cfg.Repos() {
-		add(ticket.PullRequest{Repo: r.Name, State: ticket.PRMerged})
+		names = append(names, r.Name)
 	}
-	return repos
+	return board.Repos(m.snap, names)
 }
 
 // repoNotice says how many repositories the filter leaves; it is empty while every one shows.
@@ -536,10 +511,7 @@ func (m Model) scopeNotice() string {
 	return m.boardNotice()
 }
 
-func (m Model) hiddenBots() int {
-	shown := m.snap.WithoutBots()
-	return len(m.snap.Reviews) + len(m.snap.Others) - len(shown.Reviews) - len(shown.Others)
-}
+func (m Model) hiddenBots() int { return board.HiddenBots(m.snap) }
 
 // botToggleLine is listLines' marker for the reviews filter's "show bots" line, which a click toggles;
 // sectionLine marks a section's title, such as "My tickets".
@@ -562,53 +534,13 @@ func (m Model) tickets() []ticket.Ticket {
 
 // myPRs lists the open pull requests of the user's tickets by repository, repositories with one that needs
 // the user first, then by name, and within each repository those that need the user first.
-func (m Model) myPRs() []item {
-	var out []item
-	// Jira can link one pull request to several tickets; it is listed once, under the ticket its branch names.
-	at := map[string]int{}
-	named := func(it item) bool { return slices.Contains(ticket.BranchKeys(it.pr.Branch), it.ticket.Key) }
-	for _, t := range board.Sorted(m.snap.Tickets) {
-		if t.Team {
-			continue
-		}
-		for _, pr := range t.PRs {
-			if pr.State != ticket.PROpen || m.repoHidden(pr.Repo) {
-				continue
-			}
-			t, pr := t, pr
-			it := item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), ticket: &t, pr: &pr}
-			id := fmt.Sprintf("%s#%d", strings.ToLower(pr.Repo), pr.Number)
-			if i, ok := at[id]; ok {
-				if named(it) && !named(out[i]) {
-					out[i] = it
-				}
-				continue
-			}
-			at[id] = len(out)
-			out = append(out, it)
-		}
+func (m Model) myPRs() []item { return prItemsOf(board.MyPRs(m.snap, m.prFilter())) }
+
+func prItemsOf(rows []board.PRRow) []item {
+	out := make([]item, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, item{key: ticket.Key(fmt.Sprintf("#%d", r.PR.Number)), ticket: r.Ticket, pr: r.PR, other: r.Other})
 	}
-	for _, pr := range m.snap.Others {
-		id := fmt.Sprintf("%s#%d", strings.ToLower(pr.Repo), pr.Number)
-		if _, ok := at[id]; ok || !pr.Yours || pr.State != ticket.PROpen || m.repoHidden(pr.Repo) {
-			continue
-		}
-		at[id] = len(out)
-		out = append(out, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr, other: true})
-	}
-	urgent := map[string]bool{}
-	for _, it := range out {
-		urgent[it.pr.Repo] = urgent[it.pr.Repo] || needsYou(*it.pr)
-	}
-	slices.SortStableFunc(out, func(a, b item) int {
-		if c := boolRank(urgent[b.pr.Repo]) - boolRank(urgent[a.pr.Repo]); c != 0 {
-			return c
-		}
-		if c := strings.Compare(a.pr.Repo, b.pr.Repo); c != 0 {
-			return c
-		}
-		return boolRank(needsYou(*b.pr)) - boolRank(needsYou(*a.pr))
-	})
 	return out
 }
 
@@ -620,52 +552,11 @@ func (m Model) prItems() []item { return m.prLayout(false) }
 // that collapsing a group never moves the columns.
 func (m Model) prLayout(every bool) []item {
 	var out []item
-	add := func(group, title string, rows []item) {
-		needs := 0
-		for _, it := range rows {
-			if it.review() || it.own() && needsYou(*it.pr) {
-				needs++
-			}
+	for _, g := range board.PRGroups(m.snap, m.prFilter()) {
+		out = append(out, item{key: ticket.Key("group:" + g.Group), group: g.Group, title: g.Title, count: len(g.Rows), needs: g.Needs})
+		if every || !m.folded(g.Group) {
+			out = append(out, prItemsOf(g.Rows)...)
 		}
-		out = append(out, item{key: ticket.Key("group:" + group), group: group, title: title, count: len(rows), needs: needs})
-		if every || !m.folded(group) {
-			out = append(out, rows...)
-		}
-	}
-	mine := m.myPRs()
-	for i := 0; i < len(mine); {
-		j, repo := i, mine[i].pr.Repo
-		for j < len(mine) && mine[j].pr.Repo == repo {
-			j++
-		}
-		title := "Mine"
-		if repo != "" {
-			title += " · " + repo
-		}
-		add("mine:"+repo, title, mine[i:j])
-		i = j
-	}
-	// Showing every pull request, review requests join the others in their repository's group, first and still
-	// marked; with Requested on they have groups of their own.
-	var rest []item
-	for _, pr := range m.reviews() {
-		rest = append(rest, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr})
-	}
-	group, title := "review:", "Review requested · "
-	if m.teamPRs {
-		for _, pr := range m.others() {
-			rest = append(rest, item{key: ticket.Key(fmt.Sprintf("#%d", pr.Number)), pr: &pr, other: true})
-		}
-		group, title = "team:", ""
-	}
-	slices.SortStableFunc(rest, func(a, b item) int { return strings.Compare(a.pr.Repo, b.pr.Repo) })
-	for i := 0; i < len(rest); {
-		j, repo := i, rest[i].pr.Repo
-		for j < len(rest) && rest[j].pr.Repo == repo {
-			j++
-		}
-		add(group+repo, title+repo, rest[i:j])
-		i = j
 	}
 	return out
 }
@@ -710,19 +601,15 @@ func (m Model) backlogTickets() []ticket.Ticket {
 	if m.backlog == nil {
 		return nil
 	}
-	var out []ticket.Ticket
-	for _, sp := range m.backlog.Sprints {
-		out = append(out, sp.Tickets...)
-	}
-	return append(out, m.backlog.Backlog...)
+	return m.backlog.Tickets()
 }
 
 // backlogGroup is the backlog's sprintless group, folded until the user opens it, as it is usually the
 // longest; collapsed then records it open.
-const backlogGroup = "backlog:"
+const backlogGroup = board.BacklogGroupKey
 
 // folded reports whether a group's rows are hidden.
-func (m Model) folded(group string) bool { return m.collapsed[group] != (group == backlogGroup) }
+func (m Model) folded(group string) bool { return board.Folded(m.collapsed, group) }
 
 // backlogItems lists the backlog's active sprints, then its future sprints soonest first, one group per
 // sprint and board, or per sprint name while merged, then its tickets in no sprint; each group's title row
@@ -736,65 +623,18 @@ func (m Model) backlogLayout(every bool) []item {
 		return nil
 	}
 	var out []item
-	add := func(group, title, boardName, dates string, ts []ticket.Ticket) {
-		ts = slices.DeleteFunc(slices.Clone(ts), func(t ticket.Ticket) bool { return !m.ticketShown(t) })
-		head := item{key: ticket.Key("group:" + group), group: group, title: title, board: boardName, dates: dates, count: len(ts)}
+	for _, g := range board.BacklogGroups(*m.backlog, m.hiddenBoards, m.backlogMerged) {
+		head := item{key: ticket.Key("group:" + g.Group), group: g.Group, title: g.Title, board: g.Board, dates: g.Dates, count: len(g.Tickets)}
 		if m.backlog.HasPoints {
-			head.badges, head.shortBadges = pointBadges(ts)
+			head.badges, head.shortBadges = pointBadges(g.Tickets)
 		}
 		out = append(out, head)
-		if every || !m.folded(group) {
-			for _, t := range ts {
+		if every || !m.folded(g.Group) {
+			for _, t := range g.Tickets {
 				out = append(out, item{key: t.Key, ticket: &t})
 			}
 		}
 	}
-	type sprintGroup struct {
-		key, title, board string
-		start, end        time.Time
-		active            bool
-		tickets           []ticket.Ticket
-	}
-	// Sprints come active first, then soonest first, so a group's first sprint places it.
-	var groups []*sprintGroup
-	byKey := map[string]*sprintGroup{}
-	for _, sp := range m.backlog.Sprints {
-		if m.hiddenBoards[sp.BoardName] {
-			continue
-		}
-		key, boardName := fmt.Sprintf("sprint:%d", sp.ID), sp.BoardName
-		if m.backlogMerged {
-			key, boardName = "sprint:"+sp.Name, ""
-		}
-		g, ok := byKey[key]
-		if !ok {
-			g = &sprintGroup{key: key, title: sp.Name, board: boardName}
-			byKey[key] = g
-			groups = append(groups, g)
-		}
-		if !sp.Start.IsZero() && (g.start.IsZero() || sp.Start.Before(g.start)) {
-			g.start = sp.Start
-		}
-		if sp.End.After(g.end) {
-			g.end = sp.End
-		}
-		g.active = g.active || sp.State == "active"
-		g.tickets = append(g.tickets, sp.Tickets...)
-	}
-	for _, g := range groups {
-		var dates []string
-		switch {
-		case !g.start.IsZero() && !g.end.IsZero():
-			dates = append(dates, g.start.Format("Jan 2")+" – "+g.end.Format("Jan 2"))
-		case !g.start.IsZero():
-			dates = append(dates, "from "+g.start.Format("Jan 2"))
-		}
-		if g.active {
-			dates = append(dates, "active")
-		}
-		add(g.key, g.title, g.board, strings.Join(dates, " · "), g.tickets)
-	}
-	add(backlogGroup, "Backlog", "", "", m.backlog.Backlog)
 	return out
 }
 
@@ -896,42 +736,9 @@ func (m *Model) toggleGroup(group string) tea.Cmd {
 	return m.actions.SaveState(m.state())
 }
 
-func needsYou(pr ticket.PullRequest) bool {
-	return len(pr.Attention()) > 0
-}
+func needsYou(pr ticket.PullRequest) bool { return board.NeedsYou(pr) }
 
-func boolRank(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-// prStatus words where one of the user's pull requests stands: what needs the user first, then whether it
-// can merge, then the review, as the CI mark beside it already shows a running check.
-func prStatus(pr ticket.PullRequest) string {
-	switch {
-	case pr.Checks == ticket.ChecksFail:
-		return string(ticket.ReasonCIFailing)
-	case pr.Review == ticket.ReviewChangesRequested:
-		return string(ticket.ReasonChangesRequested)
-	case pr.Merge == ticket.MergeConflicts:
-		return string(ticket.ReasonConflicts)
-	case pr.Unresolved > 0:
-		return fmt.Sprintf("%d unresolved", pr.Unresolved)
-	case pr.Draft:
-		return "Draft"
-	case pr.Merge == ticket.MergeReady:
-		return "Ready to merge"
-	case pr.Review == ticket.ReviewApproved:
-		return "Approved"
-	case pr.Review == ticket.ReviewRequired:
-		return "Waiting review"
-	case pr.Checks == ticket.ChecksPending:
-		return "CI running"
-	}
-	return "Open"
-}
+func prStatus(pr ticket.PullRequest) string { return board.PRStatus(pr) }
 
 // columns places each ticket in its column and each subtask in its own, done ones included as Jira does:
 // right after its parent when they share a column, else after that column's tickets.
