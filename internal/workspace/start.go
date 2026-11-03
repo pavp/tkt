@@ -26,4 +26,18 @@ type StartOptions struct {
 	Worktree string
 	// Agent is the agent kind to open, empty for Start to pick the only one installed.
 	Agent string
+	// Clone answers whether to clone a repository with no local clone; nil asks.
+	Clone *bool
 }
+
+// NeedsAnswer is a Start that stopped at a question no terminal can answer: Need names it.
+type NeedsAnswer struct{ Need string }
+
+const (
+	NeedClone    = "clone"
+	NeedWorktree = "worktree"
+	NeedRepos    = "repos"
+	NeedAgent    = "agent"
+)
+
+func (e NeedsAnswer) Error() string { return "start needs an answer for " + e.Need }

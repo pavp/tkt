@@ -41,6 +41,9 @@ func (a *App) inHerdrPlugins() bool {
 // whichHerdr picks the Herdr whose terminal runs tkt, else the only one running; it never guesses between two.
 func (a *App) whichHerdr(ctx context.Context) (herdrChoice, error) {
 	const inTerminal, onlyOne = "running in one of its terminals", "the only one running"
+	if u, ok := unattendedOf(ctx); ok {
+		return herdrChoice{u.flavor, "named by the caller"}, nil
+	}
 	switch {
 	case a.inDesktopTerminal():
 		return herdrChoice{herdrDesktop, inTerminal}, nil

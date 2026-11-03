@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/pavp/tkt/internal/workspace"
 )
 
 var kindValues = regexp.MustCompile(`(?s)--kind\b.*?\[possible values: ([^\]]*)\]`)
@@ -83,6 +85,9 @@ func (a *App) chooseAgent(ctx context.Context, asked string) (string, error) {
 	}
 	if len(kinds) == 1 {
 		return kinds[0], nil
+	}
+	if err := needAnswer(ctx, workspace.NeedAgent); err != nil {
+		return "", err
 	}
 	last := a.loadState().LastAgent
 	def := max(slices.Index(kinds, last), 0)

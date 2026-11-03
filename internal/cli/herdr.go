@@ -400,12 +400,16 @@ func (a *App) removeHerdrKeys(cmd *cobra.Command) error {
 
 // startInHerdr runs a Herdr Start of key with the answers a board's pickers gave, as `tkt herdr start` does.
 func (a *App) startInHerdr(ctx context.Context, key ticket.Key, o workspace.StartOptions) error {
-	return a.herdrStart(ctx, []string{string(key)}, startOpts{repos: o.Repos, worktree: o.Worktree, agent: o.Agent})
+	opts := startOpts{repos: o.Repos, worktree: o.Worktree, agent: o.Agent}
+	if o.Clone != nil {
+		opts.clone, opts.noClone = *o.Clone, !*o.Clone
+	}
+	return a.herdrStart(ctx, []string{string(key)}, opts)
 }
 
 // herdrStart opens one Herdr workspace with an agent per repository, or focuses the ticket's worktree.
 func (a *App) herdrStart(ctx context.Context, args []string, opts startOpts) error {
-	h := a.NewHerdr()
+	h := a.startHerdr(ctx)
 	opts.prefer = func(ws []workspace.Work) (workspace.Work, bool) { return workWithAgent(ctx, h, ws) }
 	plan, err := a.planStart(ctx, args, opts)
 	if err != nil {
@@ -437,6 +441,7 @@ func (a *App) herdrStart(ctx context.Context, args []string, opts startOpts) err
 		if err != nil {
 			return err
 		}
+		settle(ctx)
 		pane, err := a.startInWorkspace(ctx, h, kind, plan.Existing.Path, string(plan.Key), plan.Prompt, true)
 		markAgent(ctx, h, pane, plan.Key)
 		return err
@@ -445,6 +450,7 @@ func (a *App) herdrStart(ctx context.Context, args []string, opts startOpts) err
 	if err != nil {
 		return err
 	}
+	settle(ctx)
 	for i, dir := range plan.Dirs {
 		label := string(plan.Key) + " · " + filepath.Base(dir)
 		if err := a.startSetupAgent(ctx, h, plan, kind, dir, plan.Repos[i], label, i == 0); err != nil {
@@ -486,7 +492,11 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 	} else if p, ok := paneAt(ctx, h, dir); ok {
 		opened = splitBeside(p.ID, p.WorkspaceID)
 	}
-	if caller, callerWS := a.callerPane(); !opened && caller != "" {
+	caller, callerWS := a.callerPane()
+	if _, ok := unattendedOf(ctx); ok {
+		caller = ""
+	}
+	if !opened && caller != "" {
 		opened = splitBeside(caller, callerWS)
 	}
 	if !opened {

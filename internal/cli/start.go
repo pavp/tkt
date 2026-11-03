@@ -88,8 +88,10 @@ type startPlan struct {
 // startOpts are the choices a Start may arrive with; prefer, when set, picks among several worktrees
 // without asking, and reports false when it cannot tell.
 type startOpts struct {
-	repos    []string
-	clone    bool
+	repos []string
+	clone bool
+	// noClone skips a repository with no local clone instead of offering to clone it.
+	noClone  bool
 	worktree string
 	// agent is the agent kind asked for, empty to pick one.
 	agent  string
@@ -156,7 +158,7 @@ func (a *App) planStart(ctx context.Context, args []string, opts startOpts) (sta
 			}
 			if !ok {
 				var err error
-				if w, err = a.pickWork(existing); err != nil {
+				if w, err = a.pickWork(ctx, existing); err != nil {
 					return startPlan{}, err
 				}
 			}
@@ -166,7 +168,7 @@ func (a *App) planStart(ctx context.Context, args []string, opts startOpts) (sta
 		}
 	}
 
-	selected, err := a.pickRepos(space, repoFlags)
+	selected, err := a.pickRepos(ctx, space, repoFlags)
 	if err != nil {
 		return startPlan{}, err
 	}
@@ -177,8 +179,15 @@ func (a *App) planStart(ctx context.Context, args []string, opts startOpts) (sta
 	res := a.Resolver(c)
 	for _, r := range selected {
 		dir, err := res.Resolve(ctx, r)
-		if errors.Is(err, repos.ErrNotFound) {
+		switch {
+		case errors.Is(err, repos.ErrNotFound) && opts.noClone:
+			err = errors.New("not cloned locally")
+		case errors.Is(err, repos.ErrNotFound):
 			dir, err = a.offerClone(ctx, res, r, clone)
+		}
+		var need workspace.NeedsAnswer
+		if errors.As(err, &need) {
+			return startPlan{}, err
 		}
 		if err != nil {
 			fmt.Fprintf(a.Stderr, "! skipping %s: %v\n", r.Name, err)
@@ -210,9 +219,12 @@ func names(rs []config.Repo) []string {
 	return out
 }
 
-func (a *App) pickWork(ws []workspace.Work) (workspace.Work, error) {
+func (a *App) pickWork(ctx context.Context, ws []workspace.Work) (workspace.Work, error) {
 	if len(ws) == 1 {
 		return ws[0], nil
+	}
+	if err := needAnswer(ctx, workspace.NeedWorktree); err != nil {
+		return workspace.Work{}, err
 	}
 	for i, w := range ws {
 		fmt.Fprintf(a.Stderr, "  %d) %s  %s  %s\n", i+1, w.Repo, w.Branch, w.Path)
@@ -285,7 +297,7 @@ func (a *App) startChoices(ctx context.Context, c *config.Config, key ticket.Key
 }
 
 // pickRepos resolves --repo flags, or asks which of the space's repositories to use.
-func (a *App) pickRepos(space config.Space, flags []string) ([]config.Repo, error) {
+func (a *App) pickRepos(ctx context.Context, space config.Space, flags []string) ([]config.Repo, error) {
 	if len(space.Repos) == 0 {
 		return nil, fmt.Errorf("space %s has no repositories in the config", space.Key)
 	}
@@ -302,6 +314,9 @@ func (a *App) pickRepos(space config.Space, flags []string) ([]config.Repo, erro
 	}
 	if len(space.Repos) == 1 {
 		return space.Repos, nil
+	}
+	if err := needAnswer(ctx, workspace.NeedRepos); err != nil {
+		return nil, err
 	}
 	last := map[string]bool{}
 	for _, n := range a.loadState().LastRepos[space.Key] {
@@ -355,6 +370,9 @@ func (a *App) offerClone(ctx context.Context, res repos.Resolver, r config.Repo,
 		return "", errors.New("not cloned locally and no repo_roots configured to clone into")
 	}
 	if !yes {
+		if err := needAnswer(ctx, workspace.NeedClone); err != nil {
+			return "", err
+		}
 		ans, err := a.readLine(fmt.Sprintf("%s is not cloned locally. Clone it into %s? [Y/n] ", r.Name, res.Roots[0]))
 		if err != nil && !errors.Is(err, io.EOF) {
 			return "", err

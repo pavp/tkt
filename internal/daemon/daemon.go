@@ -58,6 +58,9 @@ type Options struct {
 	Repos func() []string
 	// Backlog serves GET /v1/backlog; nil answers that route with not found.
 	Backlog BacklogFunc
+	// StartChoices serves GET /v1/tickets/{key}/start and Start POST to it; nil answers them with not found.
+	StartChoices StartChoicesFunc
+	Start        StartFunc
 }
 
 // Info is what daemon.json records for clients: where the daemon listens and which process it is.
@@ -79,6 +82,8 @@ type Server struct {
 	// syncing is true while a sync runs; syncErr is the last sync's failure, cleared by the next good one.
 	syncing bool
 	syncErr string
+	// starting holds the tickets whose Start still runs, so a second one waits for it.
+	starting map[ticket.Key]bool
 	// backlogMu runs one backlog load at a time.
 	backlogMu sync.Mutex
 
@@ -97,7 +102,7 @@ func New(o Options) (*Server, error) {
 	if o.HelloTimeout == 0 {
 		o.HelloTimeout = 10 * time.Second
 	}
-	s := &Server{opts: o, token: tok, syncNow: make(chan struct{}, 1), clients: map[*client]struct{}{}, quit: make(chan struct{})}
+	s := &Server{opts: o, token: tok, syncNow: make(chan struct{}, 1), clients: map[*client]struct{}{}, starting: map[ticket.Key]bool{}, quit: make(chan struct{})}
 	if o.Seed != nil {
 		s.snap, s.have = *o.Seed, true
 	}
@@ -297,6 +302,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/board", s.authed(s.board))
 	mux.HandleFunc("GET /v1/prs", s.authed(s.prs))
 	mux.HandleFunc("GET /v1/backlog", s.authed(s.backlog))
+	mux.HandleFunc("GET /v1/tickets/{key}/start", s.authed(s.startChoices))
+	mux.HandleFunc("POST /v1/tickets/{key}/start", s.mutating(s.start))
 	mux.HandleFunc("POST /v1/sync", s.authed(s.requestSync))
 	mux.HandleFunc("GET /v1/ws", s.ws)
 	return mux
@@ -333,9 +340,8 @@ func (s *Server) ticket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "this daemon serves no ticket details")
 		return
 	}
-	key := ticket.Key(r.PathValue("key"))
-	if keys := ticket.KeysIn(string(key)); len(keys) != 1 || keys[0] != key {
-		writeError(w, http.StatusBadRequest, "bad_key", fmt.Sprintf("%q is not a ticket key like DEMO-123", key))
+	key, ok := pathKey(w, r)
+	if !ok {
 		return
 	}
 	s.mu.Lock()

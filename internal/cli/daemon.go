@@ -79,7 +79,7 @@ func (a *App) runDaemon(ctx context.Context) error {
 		seed = &snap
 	}
 	s, err := daemon.New(daemon.Options{Dir: a.Env.DataDir(), Version: Version, Sync: a.daemonSync, Interval: syncEvery, Seed: seed, Detail: a.daemonDetail, State: a.boardViewState,
-		Lists: a.boardListState, Repos: a.daemonRepos, Backlog: a.daemonBacklog})
+		Lists: a.boardListState, Repos: a.daemonRepos, Backlog: a.daemonBacklog, StartChoices: a.daemonStartChoices, Start: a.daemonStart})
 	if err != nil {
 		return err
 	}
