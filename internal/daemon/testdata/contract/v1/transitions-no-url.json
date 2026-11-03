@@ -1,0 +1,1 @@
+{"key":"DEMO-124","url":"","moves":[{"id":"31","to":"In Review","in_jira":false,"fields":[]},{"id":"51","to":"Blocked","in_jira":false,"fields":[{"id":"customfield_10300","name":"Reason","kind":"option","required":true,"options":[{"id":"9001","value":"Waiting on a decision"}]},{"id":"customfield_10301","name":"Owner","kind":"user","required":false}]}]}

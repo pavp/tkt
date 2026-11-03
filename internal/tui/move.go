@@ -12,43 +12,22 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/ticket"
 )
 
-// Transition is a status a ticket can move to from its current one. NeedsForm marks one whose Jira form
-// asks for what the board cannot fill, which it leaves to Jira; Fields are those it can.
-type Transition struct {
-	ID        string
-	To        string
-	NeedsForm bool
-	Fields    []Field
-}
-
-// The kinds of field the board fills: one of a list's options, or a user.
-const (
-	KindOption = "option"
-	KindUser   = "user"
+type (
+	Transition = board.Transition
+	Field      = board.Field
+	Option     = board.Option
+	Value      = board.Value
+	User       = board.User
 )
 
-type Field struct {
-	ID       string
-	Name     string
-	Kind     string
-	Required bool
-	Options  []Option
-}
-
-type Option struct {
-	ID    string
-	Value string
-}
-
-// Value fills Field with an option's or a user's ID.
-type Value struct {
-	Field string
-	Kind  string
-	ID    string
-}
+const (
+	KindOption = board.KindOption
+	KindUser   = board.KindUser
+)
 
 // TransitionsMsg carries the statuses Key can move to.
 type TransitionsMsg struct {
@@ -175,12 +154,6 @@ func (m Model) transitioned(msg TransitionedMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.actions.Refresh(), loading)
 }
 
-// User is someone a ticket can be assigned to.
-type User struct {
-	ID   string
-	Name string
-}
-
 // UsersListedMsg carries the users assignable to Key that match Query.
 type UsersListedMsg struct {
 	Key   ticket.Key
@@ -188,9 +161,6 @@ type UsersListedMsg struct {
 	Users []User
 	Err   error
 }
-
-// formKinds are the kinds of field the board's form fills.
-var formKinds = []string{KindOption, KindUser}
 
 // moveForm is a transition's form being filled; chosen maps a field's ID to its option or user.
 type moveForm struct {
@@ -223,20 +193,6 @@ func (p *formPrompt) searching() bool { return p.field != nil || p.assign != "" 
 type formMsg struct {
 	form   moveForm
 	status string
-}
-
-// leftToJira reports whether the board must leave tr to Jira's own form, and which fields it fills.
-func leftToJira(tr Transition) (bool, []Field) {
-	var fields []Field
-	for _, f := range tr.Fields {
-		switch {
-		case slices.Contains(formKinds, f.Kind):
-			fields = append(fields, f)
-		case f.Required:
-			return true, nil
-		}
-	}
-	return tr.NeedsForm, fields
 }
 
 func (f moveForm) with(field string, o *Option) moveForm {
@@ -282,16 +238,13 @@ func (m Model) formMenu(f moveForm) *menu {
 	}
 	items = append(items, menuItem{label: "Comment: " + cmp.Or(f.comment, "—"), prompt: &formPrompt{form: f, text: f.comment}})
 	move := func() tea.Cmd {
-		var values []Value
-		for _, field := range f.fields {
-			o, ok := f.chosen[field.ID]
-			if !ok {
-				if field.Required {
-					return reopen(f, "choose "+field.Name+" first")
-				}
-				continue
-			}
-			values = append(values, Value{Field: field.ID, Kind: field.Kind, ID: o.ID})
+		ids := map[string]string{}
+		for field, o := range f.chosen {
+			ids[field] = o.ID
+		}
+		values, missing := board.FormValues(f.fields, ids)
+		if missing != nil {
+			return reopen(f, "choose "+missing.Name+" first")
 		}
 		return m.actions.Transition(f.key, f.tr.ID, f.tr.To, values, f.comment)
 	}
@@ -311,21 +264,14 @@ func (m Model) moveMenu(k ticket.Key, trs []Transition) *menu {
 		url = m.snap.Tickets[i].URL
 	}
 	var items []menuItem
-	var seen []string
-	for _, tr := range trs {
-		if slices.Contains(seen, tr.To) {
+	for _, mv := range board.Moves(trs, url) {
+		tr := Transition{ID: mv.ID, To: mv.To}
+		if mv.InJira {
+			items = append(items, menuItem{label: tr.To + " · in Jira ↗", link: url, run: func() tea.Cmd { return a.Open(url) }})
 			continue
 		}
-		seen = append(seen, tr.To)
-		jira, fields := leftToJira(tr)
-		if jira {
-			if url != "" {
-				items = append(items, menuItem{label: tr.To + " · in Jira ↗", link: url, run: func() tea.Cmd { return a.Open(url) }})
-			}
-			continue
-		}
-		if len(fields) > 0 {
-			form := moveForm{key: k, tr: tr, fields: fields, chosen: map[string]Option{}}
+		if len(mv.Fields) > 0 {
+			form := moveForm{key: k, tr: tr, fields: mv.Fields, chosen: map[string]Option{}}
 			items = append(items, menuItem{label: tr.To, sub: func() *menu { return m.formMenu(form) }})
 			continue
 		}
