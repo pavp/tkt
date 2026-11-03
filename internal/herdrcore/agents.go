@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pavp/tkt/internal/herdrport"
@@ -49,23 +50,96 @@ func (c *Client) StartAgent(ctx context.Context, paneID, kind, name string, args
 	if err != nil {
 		return err
 	}
-	run := []string{"run", "--bg", "--json", "--no-parent", "--name", name, "--cwd", pane.Cwd}
-	for _, k := range []string{labelSpace, labelTab} {
-		if v := pane.Labels[k]; v != "" {
-			run = append(run, "--label", k+"="+v)
-		}
-	}
-	run = append(append(append(run, "--", kind), kindArgs[kind]...), args...)
-	out, err := c.run(ctx, nil, run...)
+	argv := append(append([]string{c.program(kind)}, kindArgs[kind]...), args...)
+	address, err := c.start(ctx, runReq{argv: argv, cwd: pane.Cwd, name: name, labels: placedLike(pane)})
 	if err != nil {
 		return err
+	}
+	return c.ready(ctx, address, name)
+}
+
+// placedLike are the labels that make the window show a new terminal in t's space and tab.
+func placedLike(t Terminal) map[string]string {
+	out := map[string]string{}
+	for _, k := range []string{labelSpace, labelTab} {
+		if v := t.Labels[k]; v != "" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// runReq is one terminal for herdr-core to start, with no parent: it outlives the terminal tkt runs in. No argv
+// starts that machine's shell.
+type runReq struct {
+	argv      []string
+	cwd, name string
+	labels    map[string]string
+	rm        bool
+}
+
+// start starts a terminal through the API's terminal.run, which, unlike `hc run`, takes environment variables to set
+// over herdr-core's own, and returns its address.
+func (c *Client) start(ctx context.Context, r runReq) (string, error) {
+	params := map[string]any{"cwd": r.cwd, "no_parent": true, "env": c.env()}
+	if len(r.argv) > 0 {
+		params["argv"] = r.argv
+	}
+	if r.name != "" {
+		params["name"] = r.name
+	}
+	if len(r.labels) > 0 {
+		params["labels"] = r.labels
+	}
+	if r.rm {
+		params["rm"] = true
 	}
 	var started struct {
 		Address string `json:"address"`
 	}
-	if err := json.Unmarshal(out, &started); err != nil || started.Address == "" {
-		return fmt.Errorf("hc run: unexpected output: %s", out)
+	if err := c.call(ctx, "terminal.run", params, &started); err != nil {
+		return "", err
 	}
+	if started.Address == "" {
+		return "", errors.New("hc terminal.run: no address in its reply")
+	}
+	return started.Address, nil
+}
+
+// env is what a terminal tkt starts takes from tkt over herdr-core's environment: herdr-core may run with another
+// PATH (on WSL, one without Homebrew's or ~/.local/bin), and an agent's own tkt commands, like the closer, must use the
+// config and data of the tkt that started them, and reach the same window (HERDR_APP_HOME). Secrets stay out:
+// herdr-core keeps what it is sent.
+func (c *Client) env() map[string]string {
+	out := map[string]string{}
+	if c.environ == nil {
+		return out
+	}
+	for _, kv := range c.environ() {
+		k, v, ok := strings.Cut(kv, "=")
+		switch {
+		case !ok || v == "":
+		case k == "PATH", k == "XDG_CONFIG_HOME", k == "XDG_DATA_HOME", k == "HERDR_APP_HOME":
+			out[k] = v
+		case strings.HasPrefix(k, "TKT_") && !secretName(k):
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func secretName(k string) bool {
+	k = strings.ToUpper(k)
+	for _, w := range []string{"TOKEN", "SECRET", "PASS", "KEY", "PAT", "CREDENTIAL", "AUTH"} {
+		if strings.Contains(k, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// ready waits until the agent at address is ready, with ErrNotReady when it starts on a question.
+func (c *Client) ready(ctx context.Context, address, name string) error {
 	ready := func(state string) (bool, error) {
 		switch state {
 		case "idle", "done":
@@ -77,16 +151,16 @@ func (c *Client) StartAgent(ctx context.Context, paneID, kind, name string, args
 		}
 		return false, nil
 	}
-	err = c.until(ctx, started.Address, c.questionAfter, ready)
+	err := c.until(ctx, address, c.questionAfter, ready)
 	if !errors.Is(err, ErrTimeout) {
 		return err
 	}
 	// A question at startup, such as Claude Code's folder trust, leaves the terminal live with no status at all,
 	// where Herdr 0.9.5 reports it blocked; the caller then waits for the user's answer.
-	if t, gerr := c.get(ctx, started.Address); gerr == nil && t.State == "live" && t.Status == "" {
+	if t, gerr := c.get(ctx, address); gerr == nil && t.State == "live" && t.Status == "" {
 		return herdrport.ErrNotReady
 	}
-	return c.until(ctx, started.Address, 2*time.Minute-c.questionAfter, ready)
+	return c.until(ctx, address, 2*time.Minute-c.questionAfter, ready)
 }
 
 // WaitAgent waits until target reports status; done counts as idle, since both wait for input.
@@ -217,6 +291,16 @@ func (c *Client) AgentPane(ctx context.Context, name string) (string, error) {
 // RunDetached runs argv in a terminal herdr-core owns, with no parent, removed once it exits: it outlives the
 // terminal it was started from, which ends every process started inside it when it closes.
 func (c *Client) RunDetached(ctx context.Context, cwd string, argv []string) error {
-	_, err := c.run(ctx, nil, append([]string{"run", "--bg", "--json", "--no-parent", "--rm", "--cwd", cwd, "--"}, argv...)...)
+	_, err := c.start(ctx, runReq{argv: argv, cwd: cwd, rm: true})
 	return err
+}
+
+// program is the program to run for an agent kind: its full path when tkt finds it, else the name for herdr-core to look up.
+func (c *Client) program(kind string) string {
+	if c.lookPath != nil {
+		if p, err := c.lookPath(kind); err == nil {
+			return p
+		}
+	}
+	return kind
 }

@@ -456,6 +456,9 @@ func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) erro
 // handoff can close it without closing anything of the user's: beside a pane open at dir, else beside the pane Start
 // runs in, else in a workspace tkt opens next to dir. Never a workspace at dir: Herdr makes it the head of the
 // worktree's group and refuses to close it alone.
+// Herdr desktop nests a worktree's space under its repository's only while a space at the main checkout is open, so
+// there the agent opens in the space of a pane at dir, else in one tkt opens at dir with a shell first; the handoff
+// closes only the agent, and the repository's space stays.
 // The handoff is saved before the agent gets its prompt, as the worktree event may follow right after.
 func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, kind, dir, repo, label string, focus bool) error {
 	_, desktop := h.(agentSpaces)
@@ -469,20 +472,21 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 		ho.Pane, ws = split.ID, workspace
 		return true
 	}
-	opened := false
-	if p, ok := paneAt(ctx, h, dir); ok {
+	opened, keep := false, ""
+	if desktop {
+		p, err := repoSpace(ctx, h, dir, focus)
+		if err != nil {
+			return err
+		}
+		ho.Pane, ws, keep, opened = p.ID, p.WorkspaceID, p.ID, true
+	} else if p, ok := paneAt(ctx, h, dir); ok {
 		opened = splitBeside(p.ID, p.WorkspaceID)
 	}
 	if caller, callerWS := a.callerPane(); !opened && caller != "" {
 		opened = splitBeside(caller, callerWS)
 	}
-	parent := filepath.Dir(dir)
-	// Herdr desktop has no worktree groups to keep the clone out of, and names the space as tkt says.
-	if desktop {
-		parent, label = dir, string(plan.Key)+" · setup · "+filepath.Base(dir)
-	}
 	if !opened {
-		host, root, err := h.CreateWorkspace(ctx, parent, label, focus)
+		host, root, err := h.CreateWorkspace(ctx, filepath.Dir(dir), label, focus)
 		if err != nil {
 			return err
 		}
@@ -494,17 +498,24 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 	}
 	if focus {
 		if ws != "" {
-			_ = h.FocusWorkspace(ctx, ws)
+			a.noteWindow(h.FocusWorkspace(ctx, ws))
 		}
-		_ = h.FocusPane(ctx, ho.Pane)
+		a.noteWindow(h.FocusPane(ctx, ho.Pane))
 	}
 	name, pane, err := a.startAgent(ctx, h, ho.Pane, kind)
 	if err != nil && !notReady(err) {
-		dropUnusedPane(ctx, h, ho)
+		if keep == "" {
+			dropUnusedPane(ctx, h, ho)
+		}
 		return err
 	}
+	if keep != "" && pane == keep {
+		return fmt.Errorf("the %s setup agent started, but tkt could not find the setup agent's terminal; finish %s there and close it yourself", kind, plan.Key)
+	}
 	if pane != ho.Pane {
-		_ = h.ClosePane(ctx, ho.Pane)
+		if ho.Pane != keep {
+			_ = h.ClosePane(ctx, ho.Pane)
+		}
 		ho.Pane = pane
 		if focus {
 			_ = h.FocusPane(ctx, pane)
@@ -529,6 +540,30 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 		prompt = desktopSetupPrompt(plan.Key, plan.Summary)
 	}
 	return a.promptStarted(ctx, h, name, where, prompt, err)
+}
+
+// repoSpace is a pane in a space at the clone dir, else the shell of a space tkt opens there, unnamed so Herdr desktop
+// names it after the repository.
+func repoSpace(ctx context.Context, h HerdrAPI, dir string, focus bool) (herdrport.Pane, error) {
+	if panes, err := h.Panes(ctx); err == nil {
+		for _, p := range panes {
+			if p.WorkspaceID != "" && p.Cwd != "" && filepath.Clean(p.Cwd) == filepath.Clean(dir) {
+				return p, nil
+			}
+		}
+	}
+	ws, root, err := h.CreateWorkspace(ctx, dir, "", focus)
+	return herdrport.Pane{ID: root.ID, WorkspaceID: ws.ID, Cwd: dir}, err
+}
+
+// noteWindow tells the user, once, that tkt cannot reach the Herdr desktop window, as from another machine of its core
+// over SSH: spaces still open there, but tkt can neither bring them forward nor name them.
+func (a *App) noteWindow(err error) {
+	if errors.Is(err, herdrcore.ErrNoWindow) {
+		a.windowNoted.Do(func() {
+			a.printf("! tkt cannot reach the Herdr desktop window from this machine, so it opens spaces there without focusing or naming them (%v)\n", err)
+		})
+	}
 }
 
 // dropUnusedPane closes the split tkt opened for a setup agent that did not start, and the workspace it opened for

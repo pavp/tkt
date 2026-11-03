@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pavp/tkt/internal/herdrcore"
 	"github.com/pavp/tkt/internal/herdrport"
 )
 
@@ -106,6 +107,39 @@ func TestLinkOnDesktopHandsThePendingTicketToAnAgentInANewSpace(t *testing.T) {
 		if !strings.Contains(h.out.String(), l) {
 			t.Errorf("log missing %q:\n%s", l, h.out)
 		}
+	}
+}
+
+func TestLinkOnDesktopWithoutTheWindowTellsOnceAndHandsOn(t *testing.T) {
+	h, d, _ := desktopHandoffHarness(t, desktopSetupAgent())
+	d.window = herdrcore.ErrNoWindow
+	if code := h.exec("link"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if n := strings.Count(h.out.String()+h.errOut.String(), windowNote); n != 1 || len(d.detached) != 1 {
+		t.Errorf("told %d times, detached %q, output %q", n, d.detached, h.out)
+	}
+}
+
+// The closer runs in a terminal herdr-core starts, where a failure before tkt logs anything left handoff.log empty: its
+// shell logs that it started first, and tkt logs before its first Herdr call.
+func TestTheCloserLogsItsStartBeforeAnythingCanFail(t *testing.T) {
+	h, d, _ := desktopHandoffHarness(t, desktopSetupAgent())
+	if code := h.exec("link"); code != 0 || len(d.detached) != 1 {
+		t.Fatalf("exit %d, detached %q: %s", code, d.detached, h.errOut)
+	}
+	script := d.detached[0][2]
+	logged, run := strings.Index(script, `close-setup started" >>"$2"`), strings.Index(script, `exec "$0"`)
+	if logged < 0 || run < logged {
+		t.Errorf("closer script = %q, want it to log its start before it runs tkt", script)
+	}
+	d.calls, d.agentsErr = nil, errors.New("hc: not found")
+	if code := h.exec("herdr", "close-setup", d.detached[0][4]); code != 0 {
+		t.Fatalf("close-setup exit %d: %s", code, h.errOut)
+	}
+	out := h.out.String()
+	if !strings.Contains(out, "close-setup DEMO-7: closing the setup agent t9") || !strings.Contains(out, "close-setup DEMO-7: failed: hc: not found") {
+		t.Errorf("log = %q", out)
 	}
 }
 

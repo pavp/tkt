@@ -3,7 +3,6 @@ package herdrcore_test
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -13,7 +12,7 @@ import (
 func hcArgs(f *seqHC) [][]string {
 	var args [][]string
 	for _, c := range f.calls {
-		args = append(args, c.args)
+		args = append(args, runArgs(c))
 	}
 	return args
 }
@@ -60,40 +59,6 @@ func TestPanesAndAgentsSkipFinishedTerminals(t *testing.T) {
 	agents, err := c.Agents(context.Background())
 	if err != nil || len(agents) != 1 || agents[0].PaneID != "t2" {
 		t.Errorf("Agents = %+v, %v", agents, err)
-	}
-}
-
-func TestClosingRemovesTheFinishedTerminals(t *testing.T) {
-	ctx := context.Background()
-	rm := func(t string) []string { return []string{"rm", "--json", t} }
-	tests := []struct {
-		name   string
-		act    func(c *herdrcore.Client) error
-		hcOuts []string
-		wantDo []doWant
-		wantHC [][]string
-	}{
-		{"close pane", func(c *herdrcore.Client) error { return c.ClosePane(ctx, "t7") }, []string{`{"removed":"t7"}`},
-			[]doWant{{"pane.close", map[string]any{"pane": "p77"}}}, [][]string{rm("t7")}},
-		{"a terminal still ending is ended first", func(c *herdrcore.Client) error { return c.ClosePane(ctx, "t7") },
-			[]string{hcErr("live"), `{"killed":true}`, `{"removed":"t7"}`},
-			[]doWant{{"pane.close", map[string]any{"pane": "p77"}}}, [][]string{rm("t7"), {"kill", "--json", "t7"}, rm("t7")}},
-		{"close workspace removes each of its terminals", func(c *herdrcore.Client) error { return c.CloseWorkspace(ctx, "sp1") },
-			[]string{`{"removed":"t3"}`, `{"removed":"t7"}`},
-			[]doWant{{"space.close", map[string]any{"id": "sp1", "confirmed": true}}}, [][]string{rm("t3"), rm("t7")}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			hc := &seqHC{outs: tt.hcOuts}
-			app := &fakeApp{outs: []herdrcore.Output{ok(appLs)}}
-			if err := tt.act(herdrcore.NewWithApp(hc, app)); err != nil {
-				t.Fatal(err)
-			}
-			checkDos(t, app.calls, tt.wantDo)
-			if got := hcArgs(hc); !reflect.DeepEqual(got, tt.wantHC) {
-				t.Errorf("hc calls = %q, want %q", got, tt.wantHC)
-			}
-		})
 	}
 }
 

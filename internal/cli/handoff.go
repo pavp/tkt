@@ -149,7 +149,8 @@ func (a *App) handOffFromLink(ctx context.Context, key ticket.Key, repo, dir str
 	}
 	if err == nil {
 		data := a.Env.DataDir()
-		err = s.RunDetached(ctx, data, []string{"sh", "-c", `exec "$0" herdr close-setup "$1" >>"$2" 2>&1`, exe, string(b), filepath.Join(data, "handoff.log")})
+		// The shell logs first, so a closer that dies before tkt logs anything still leaves a trace.
+		err = s.RunDetached(ctx, data, []string{"sh", "-c", `echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) close-setup started" >>"$2"; exec "$0" herdr close-setup "$1" >>"$2" 2>&1`, exe, string(b), filepath.Join(data, "handoff.log")})
 	}
 	if err != nil {
 		a.tellHandoff(ctx, h, fmt.Sprintf("could not close the setup agent of %s in pane %s: %v", ho.Key, ho.Pane, err))
@@ -166,7 +167,7 @@ func (a *App) startSpaceHandoff(ctx context.Context, h HerdrAPI, s agentSpaces, 
 		return pane, err
 	}
 	markAgent(ctx, h, pane.ID, ho.Key)
-	focusAgent(ctx, h, pane)
+	a.noteWindow(focusAgent(ctx, h, pane))
 	return pane, nil
 }
 
