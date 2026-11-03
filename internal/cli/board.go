@@ -598,11 +598,11 @@ func (b *boardActions) Copy(text, what string) tea.Cmd {
 
 func (b *boardActions) CopyContext(key ticket.Key) tea.Cmd {
 	return func() tea.Msg {
-		d, err := b.a.loadDetail(b.ctx, b.cfg(), key, nil)
+		text, err := b.a.contextText(b.ctx, b.cfg(), key)
 		if err != nil {
 			return tui.StatusMsg(err.Error())
 		}
-		if err := b.copy(renderContext(d, nil)); err != nil {
+		if err := b.copy(text); err != nil {
 			return tui.StatusMsg("could not copy: " + err.Error())
 		}
 		return tui.StatusMsg("✓ copied " + string(key) + "'s context as Markdown")

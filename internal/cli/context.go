@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/jira"
+	"github.com/pavp/tkt/internal/ticket"
 )
 
 // maxImageBytes bounds each downloaded image; anything larger stays a link.
@@ -99,6 +102,15 @@ func (a *App) downloadImages(cmd *cobra.Command, js JiraAPI, atts []jira.Attachm
 		out[at.Filename] = path
 	}
 	return out
+}
+
+// contextText is the ticket's Markdown as the board copies it, loaded without the board's copy of the ticket.
+func (a *App) contextText(ctx context.Context, c *config.Config, key ticket.Key) (string, error) {
+	d, err := a.loadDetail(ctx, c, key, nil)
+	if err != nil {
+		return "", err
+	}
+	return renderContext(d, nil), nil
 }
 
 func renderContext(d detail, images map[string]string) string {

@@ -16,6 +16,7 @@ import (
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/daemon"
 	"github.com/pavp/tkt/internal/ticket"
+	"github.com/pavp/tkt/internal/workspace"
 )
 
 // syncEvery is how often the daemon refreshes the board from Jira and GitHub.
@@ -78,8 +79,8 @@ func (a *App) runDaemon(ctx context.Context) error {
 	if snap, ok, err := a.cache().Load(); err == nil && ok {
 		seed = &snap
 	}
-	s, err := daemon.New(daemon.Options{Dir: a.Env.DataDir(), Version: Version, Sync: a.daemonSync, Interval: syncEvery, Seed: seed, Detail: a.daemonDetail, State: a.boardViewState,
-		Lists: a.boardListState, Repos: a.daemonRepos, Backlog: a.daemonBacklog, StartChoices: a.daemonStartChoices, Start: a.daemonStart,
+	s, err := daemon.New(daemon.Options{Dir: a.Env.DataDir(), Version: Version, Sync: a.daemonSync, Interval: syncEvery, Seed: seed, Detail: a.daemonDetail, Context: a.daemonContext, State: a.boardViewState,
+		Lists: a.boardListState, SavedState: a.loadBoardState, SaveState: a.saveBoardState, Repos: a.daemonRepos, Backlog: a.daemonBacklog, StartChoices: a.daemonStartChoices, Start: a.daemonStart,
 		Transitions: a.daemonTransitions, Transition: a.daemonTransition, Users: a.daemonUsers, Assign: a.daemonAssign,
 		TaskAgents: a.daemonTaskAgents, Task: a.daemonTask})
 	if err != nil {
@@ -142,13 +143,40 @@ func (a *App) handOverIfUpgraded(ctx context.Context) bool {
 	return true
 }
 
-// daemonDetail serves GET /v1/tickets/{key} with the configuration read afresh, like each sync.
-func (a *App) daemonDetail(ctx context.Context, key ticket.Key, known *ticket.Ticket) (any, error) {
+// ticketView is a ticket's detail with what the details screen shows beside it: why it needs the user, its
+// agent's state and its work.
+type ticketView struct {
+	detail
+	Attention []ticket.Reason  `json:"attention,omitempty"`
+	Agent     string           `json:"agent,omitempty"`
+	Work      []workspace.Work `json:"work,omitempty"`
+}
+
+// daemonDetail serves GET /v1/tickets/{key} with the configuration read afresh, like each sync. Work that cannot
+// be listed is left out rather than failing the detail.
+func (a *App) daemonDetail(ctx context.Context, key ticket.Key, known *ticket.Ticket, agent string) (any, error) {
 	c, err := a.LoadConfig()
 	if err != nil {
 		return nil, err
 	}
-	return a.loadDetail(ctx, c, key, known)
+	d, err := a.loadDetail(ctx, c, key, known)
+	if err != nil {
+		return nil, err
+	}
+	v := ticketView{detail: d, Attention: d.Ticket.Attention(), Agent: agent}
+	if all, err := a.allWork(ctx, c); err == nil {
+		v.Work = workspace.For(all, key)
+	}
+	return v, nil
+}
+
+// daemonContext serves GET /v1/tickets/{key}/context: the Markdown the board's copy context puts on the clipboard.
+func (a *App) daemonContext(ctx context.Context, key ticket.Key) (string, error) {
+	c, err := a.LoadConfig()
+	if err != nil {
+		return "", err
+	}
+	return a.contextText(ctx, c, key)
 }
 
 // daemonBacklog serves the daemon's GET /v1/backlog as the board loads its Backlog; when Jira fails it hands back

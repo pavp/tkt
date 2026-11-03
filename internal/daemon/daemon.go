@@ -30,8 +30,11 @@ const Protocol = 1
 type SyncFunc func(ctx context.Context, partial func(board.Snapshot)) (board.Snapshot, error)
 
 // DetailFunc loads one ticket with its description and comments; known is the board's copy of the ticket,
-// when the board holds it.
-type DetailFunc func(ctx context.Context, key ticket.Key, known *ticket.Ticket) (any, error)
+// when the board holds it, and agent the state of its agent in Herdr, empty when none runs.
+type DetailFunc func(ctx context.Context, key ticket.Key, known *ticket.Ticket, agent string) (any, error)
+
+// ContextFunc builds the Markdown the TUI's "copy context" puts on the clipboard.
+type ContextFunc func(ctx context.Context, key ticket.Key) (string, error)
 
 // BacklogFunc loads the team boards' backlog, from its cache while fresh unless forced. On an error it may return
 // the last copy it has, which is served with the error; a zero FetchedAt means it has none.
@@ -49,11 +52,17 @@ type Options struct {
 	HelloTimeout time.Duration
 	// Detail serves GET /v1/tickets/{key}; nil answers that route with not found.
 	Detail DetailFunc
+	// Context serves GET /v1/tickets/{key}/context; nil answers it with not found.
+	Context ContextFunc
 	// State is the board as the user last left it, which GET /v1/board shows unless its query says otherwise.
 	State func() board.ViewState
 	// Lists is the PRs tab and the Backlog as the user last left them, which GET /v1/prs and GET /v1/backlog show
 	// unless their query says otherwise.
 	Lists func() board.ListState
+	// SavedState and SaveState read and write board-state.json for GET and PATCH /v1/board/state; nil answers
+	// them with not found.
+	SavedState func() board.SavedState
+	SaveState  func(board.SavedState) error
 	// Repos names the configured repositories, which the Repos filter offers beside those with pull requests.
 	Repos func() []string
 	// Backlog serves GET /v1/backlog; nil answers that route with not found.
@@ -95,6 +104,8 @@ type Server struct {
 	// backlogMu runs one backlog load at a time; staleBacklog makes the next one ask Jira, as after an assignment.
 	backlogMu    sync.Mutex
 	staleBacklog bool
+	// stateMu runs one board state change at a time, so two clients' changes both land.
+	stateMu sync.Mutex
 
 	syncNow chan struct{}
 	// quit closes when Serve stops, so WebSocket handlers, which outlive the HTTP server's shutdown,
@@ -308,7 +319,10 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /v1/tickets", s.authed(s.tickets))
 	mux.HandleFunc("GET /v1/tickets/{key}", s.authed(s.ticket))
+	mux.HandleFunc("GET /v1/tickets/{key}/context", s.authed(s.ticketContext))
 	mux.HandleFunc("GET /v1/board", s.authed(s.board))
+	mux.HandleFunc("GET /v1/board/state", s.authed(s.boardState))
+	mux.HandleFunc("PATCH /v1/board/state", s.mutating(s.patchBoardState))
 	mux.HandleFunc("GET /v1/prs", s.authed(s.prs))
 	mux.HandleFunc("GET /v1/backlog", s.authed(s.backlog))
 	mux.HandleFunc("GET /v1/tickets/{key}/start", s.authed(s.startChoices))
@@ -366,12 +380,29 @@ func (s *Server) ticket(w http.ResponseWriter, r *http.Request) {
 	if t, ok := snap.Find(key); have && ok {
 		known = &t
 	}
-	d, err := s.opts.Detail(r.Context(), key, known)
+	d, err := s.opts.Detail(r.Context(), key, known, snap.Agents[string(key)])
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "detail_failed", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+func (s *Server) ticketContext(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Context == nil {
+		writeError(w, http.StatusNotFound, "not_found", "this daemon serves no ticket context")
+		return
+	}
+	key, ok := pathKey(w, r)
+	if !ok {
+		return
+	}
+	text, err := s.opts.Context(r.Context(), key)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "detail_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"key": string(key), "text": text})
 }
 
 // syncSoon asks the sync loop for a sync at once, unless one is already asked.
