@@ -66,7 +66,7 @@ func (c *Client) StartAgent(ctx context.Context, paneID, kind, name string, args
 	if err := json.Unmarshal(out, &started); err != nil || started.Address == "" {
 		return fmt.Errorf("hc run: unexpected output: %s", out)
 	}
-	return c.until(ctx, started.Address, 2*time.Minute, func(state string) (bool, error) {
+	ready := func(state string) (bool, error) {
 		switch state {
 		case "idle", "done":
 			return true, nil
@@ -76,7 +76,17 @@ func (c *Client) StartAgent(ctx context.Context, paneID, kind, name string, args
 			return true, fmt.Errorf("herdr desktop: %s reported an error at startup", name)
 		}
 		return false, nil
-	})
+	}
+	err = c.until(ctx, started.Address, c.questionAfter, ready)
+	if !errors.Is(err, ErrTimeout) {
+		return err
+	}
+	// A question at startup, such as Claude Code's folder trust, leaves the terminal live with no status at all,
+	// where Herdr 0.9.5 reports it blocked; the caller then waits for the user's answer.
+	if t, gerr := c.get(ctx, started.Address); gerr == nil && t.State == "live" && t.Status == "" {
+		return herdrport.ErrNotReady
+	}
+	return c.until(ctx, started.Address, 2*time.Minute-c.questionAfter, ready)
 }
 
 // WaitAgent waits until target reports status; done counts as idle, since both wait for input.
@@ -170,9 +180,15 @@ func snapshotStatus(ts []terminal) (state string, gone, ok bool) {
 }
 
 // Prompt pastes text into target and submits it. On a slow terminal the agent can still be reading a long
-// paste when Enter arrives, leaving it unsent, so Enter is pressed again when the agent neither started
-// working nor is asking a question; a question is never answered by that Enter.
+// paste when Enter arrives, leaving it unsent, so Enter is pressed again only while the agent stays idle: a
+// question is never answered by that Enter. An agent showing no status may be asking one whose default Enter
+// would pick (Claude Code's folder trust: "No, exit"), so it gets nothing and the caller waits as for a blocked one.
 func (c *Client) Prompt(ctx context.Context, target, text string) error {
+	if t, err := c.get(ctx, target); err != nil {
+		return err
+	} else if t.Status == "" {
+		return fmt.Errorf("%s shows no status: %w", target, herdrport.ErrBlocked)
+	}
 	var sent struct {
 		Started *bool `json:"started"`
 	}
@@ -185,7 +201,7 @@ func (c *Client) Prompt(ctx context.Context, target, text string) error {
 		return nil
 	}
 	t, err := c.get(ctx, target)
-	if err != nil || t.Status == "blocked" || t.Status == "working" {
+	if err != nil || t.Status != "idle" && t.Status != "done" {
 		return err
 	}
 	_, err = c.run(ctx, nil, "keys", "--json", t.Address, "enter")
@@ -196,4 +212,11 @@ func (c *Client) Prompt(ctx context.Context, target, text string) error {
 func (c *Client) AgentPane(ctx context.Context, name string) (string, error) {
 	t, err := c.get(ctx, name)
 	return t.Address, err
+}
+
+// RunDetached runs argv in a terminal herdr-core owns, with no parent, removed once it exits: it outlives the
+// terminal it was started from, which ends every process started inside it when it closes.
+func (c *Client) RunDetached(ctx context.Context, cwd string, argv []string) error {
+	_, err := c.run(ctx, nil, append([]string{"run", "--bg", "--json", "--no-parent", "--rm", "--cwd", cwd, "--"}, argv...)...)
+	return err
 }

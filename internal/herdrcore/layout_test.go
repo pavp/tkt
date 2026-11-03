@@ -233,3 +233,16 @@ func TestWorkspaceMetadataAndNotify(t *testing.T) {
 		t.Errorf("calls = %q", app.calls)
 	}
 }
+
+func TestOpenAgentSpace(t *testing.T) {
+	app := &fakeApp{outs: []herdrcore.Output{ok(`{"space":"sp2","tab":"tb2","pane":"p90","terminal":"t9"}`)}}
+	ws, pane, err := herdrcore.NewWithApp(newFake(), app).OpenAgentSpace(context.Background(), "/home/dev/wt/api-DEMO-123", "DEMO-123 · api", "codex", "Work on DEMO-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws.ID != "sp2" || pane != (herdrport.Pane{ID: "t9", WorkspaceID: "sp2", Cwd: "/home/dev/wt/api-DEMO-123"}) {
+		t.Errorf("OpenAgentSpace = %+v, %+v", ws, pane)
+	}
+	checkDos(t, app.calls, []doWant{{"space.new", map[string]any{"name": "DEMO-123 · api", "folder": "/home/dev/wt/api-DEMO-123", "machine": "",
+		"argv": []any{"codex", "--no-daemon"}, "task": "Work on DEMO-123"}}})
+}
