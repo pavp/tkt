@@ -145,6 +145,8 @@ func TestWaitAgent(t *testing.T) {
 		{"done is ready like idle", "idle", time.Minute, []string{got("t12", status("done"), "{}")}, nil, false, nil, false},
 		{"idle once a question is answered", "idle", time.Minute, []string{got("t12", status("blocked"), "{}")},
 			[]string{snapshot12, ev("status", "t12", `{"status":`+status("blocked")+`}`), ev("status", "t12", `{"status":`+status("idle")+`}`)}, false, nil, true},
+		{"idle once a question hc shows without status is answered", "idle", time.Minute, []string{got("t12", "null", "{}")},
+			[]string{snapshot12, ev("status", "t12", `{"status":`+status("idle")+`}`)}, false, nil, true},
 		{"working", "working", time.Minute, []string{got("t12", status("idle"), "{}")},
 			[]string{ev("status", "t12", `{"status":`+status("working")+`}`)}, false, nil, true},
 		{"a missed stream resyncs", "idle", time.Minute, []string{got("t12", status("working"), "{}")},
@@ -192,22 +194,60 @@ func rpcErr(kind string) string {
 	return `{"jsonrpc":"2.0","id":1,"error":{"code":1,"message":"` + kind + ` from hc","data":{"kind":"` + kind + `"}}}`
 }
 
+// Claude Code's folder trust question shows in hc as a live terminal with no status at all, never as blocked; Enter
+// there picks "No, exit".
+func TestStartAgentWithoutStatusIsAskingAQuestion(t *testing.T) {
+	tests := []struct {
+		name    string
+		outs    []string
+		events  []string
+		wantErr error
+	}{
+		{"no status past the grace is not ready", []string{got("t3", "null", placed), ran, got("t12", "null", "{}"), got("t12", "null", "{}")},
+			[]string{snapshot12}, herdrport.ErrNotReady},
+		{"a status within the grace keeps waiting until ready", []string{got("t3", "null", placed), ran, got("t12", "null", "{}"), got("t12", status("working"), "{}"), got("t12", status("working"), "{}")},
+			[]string{snapshot12}, context.DeadlineExceeded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &seqHC{outs: tt.outs, events: tt.events, hold: true}
+			c := herdrcore.NewWith(f)
+			herdrcore.SetQuestionAfter(c, 30*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			defer cancel()
+			err := c.StartAgent(ctx, "t3", "claude", "claude", nil)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("StartAgent = %v, want %v", err, tt.wantErr)
+			}
+			for _, call := range f.calls {
+				if len(call.args) > 0 && call.args[0] == "keys" || strings.Contains(call.stdin, "terminal.send") {
+					t.Errorf("typed into the agent: %+v", call)
+				}
+			}
+		})
+	}
+}
+
 func TestPrompt(t *testing.T) {
 	send := []string{"connect"}
+	ready := got("t12", status("idle"), "{}")
 	tests := []struct {
 		name    string
 		outs    []string
 		wantErr error
 		want    [][]string
 	}{
-		{"sent and started", []string{rpc(`{"started":true,"status":"idle","turn":3}`)}, nil, [][]string{send}},
-		{"a program without status", []string{rpc(`{"started":null,"status":null,"turn":0}`)}, nil, [][]string{send}},
-		{"a long paste left unsent gets Enter again", []string{rpc(`{"started":false,"status":"idle","turn":3}`), got("t12", status("idle"), "{}"), `{"status":"working","turn":3}`},
-			nil, [][]string{send, {"connect"}, {"keys", "--json", "t12", "enter"}}},
-		{"a question is never answered by that Enter", []string{rpc(`{"started":false,"status":"idle","turn":3}`), got("t12", status("blocked"), "{}")},
-			nil, [][]string{send, {"connect"}}},
-		{"a blocked agent refuses", []string{rpcErr("blocked")}, herdrport.ErrBlocked, [][]string{send}},
-		{"a finished agent", []string{rpcErr("finished")}, herdrcore.ErrExited, [][]string{send}},
+		{"sent and started", []string{ready, rpc(`{"started":true,"status":"idle","turn":3}`)}, nil, [][]string{send, send}},
+		{"a long paste left unsent gets Enter again", []string{ready, rpc(`{"started":false,"status":"idle","turn":3}`), got("t12", status("idle"), "{}"), `{"status":"working","turn":3}`},
+			nil, [][]string{send, send, {"connect"}, {"keys", "--json", "t12", "enter"}}},
+		{"a question is never answered by that Enter", []string{ready, rpc(`{"started":false,"status":"idle","turn":3}`), got("t12", status("blocked"), "{}")},
+			nil, [][]string{send, send, {"connect"}}},
+		{"nor is a question hc shows without status", []string{ready, rpc(`{"started":false,"status":"idle","turn":3}`), got("t12", "null", "{}")},
+			nil, [][]string{send, send, {"connect"}}},
+		{"an agent without status gets nothing: it may be asking whether to trust the folder", []string{got("t12", "null", "{}")},
+			herdrport.ErrBlocked, [][]string{send}},
+		{"a blocked agent refuses", []string{ready, rpcErr("blocked")}, herdrport.ErrBlocked, [][]string{send, send}},
+		{"a finished agent", []string{ready, rpcErr("finished")}, herdrcore.ErrExited, [][]string{send, send}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -223,14 +263,17 @@ func TestPrompt(t *testing.T) {
 			if !reflect.DeepEqual(args, tt.want) {
 				t.Errorf("calls = %q\nwant    %q", args, tt.want)
 			}
+			if len(f.calls) < 2 {
+				return
+			}
 			// Sent without a caller, the prompt arrives as typed, not wrapped as a report from tkt's terminal.
 			var req struct {
 				Method string         `json:"method"`
 				Params map[string]any `json:"params"`
 			}
-			if err := json.Unmarshal([]byte(f.calls[0].stdin), &req); err != nil || req.Method != "terminal.send" ||
+			if err := json.Unmarshal([]byte(f.calls[1].stdin), &req); err != nil || req.Method != "terminal.send" ||
 				!reflect.DeepEqual(req.Params, map[string]any{"terminal": "claude", "text": "- fix the DEMO-123 tests"}) {
-				t.Errorf("send request = %s", f.calls[0].stdin)
+				t.Errorf("send request = %s", f.calls[1].stdin)
 			}
 		})
 	}
@@ -251,5 +294,16 @@ func TestAgentKinds(t *testing.T) {
 	}
 	if want := []string{"claude", "codex", "pi"}; !reflect.DeepEqual(kinds, want) {
 		t.Errorf("kinds = %q, want %q", kinds, want)
+	}
+}
+
+func TestRunDetached(t *testing.T) {
+	f := &seqHC{outs: []string{ran}}
+	if err := herdrcore.NewWith(f).RunDetached(context.Background(), "/home/dev/.local/share/tkt", []string{"sh", "-c", "exit 0"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"run", "--bg", "--json", "--no-parent", "--rm", "--cwd", "/home/dev/.local/share/tkt", "--", "sh", "-c", "exit 0"}
+	if len(f.calls) != 1 || !reflect.DeepEqual(f.calls[0].args, want) {
+		t.Errorf("calls = %+v\nwant %q", f.calls, want)
 	}
 }

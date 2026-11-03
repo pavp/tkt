@@ -175,7 +175,7 @@ func TestHerdrStartCreatesWorkspacesWithAgents(t *testing.T) {
 	if len(hos) != 2 || hos[0].Repo != "example-org/web" || hos[1].Repo != "example-org/api" || hos[0].Clone != web || hos[1].Clone != api {
 		t.Fatalf("handoffs = %+v", hos)
 	}
-	if ho := hos[0]; ho.Key != "DEMO-7" || ho.Summary != "Export users" || ho.Pane != "w9:p2" || ho.Agent != "claude" || ho.Kind != "claude" || ho.Workspace != "w9" || ho.Host != "w9:p1" || ho.At.IsZero() {
+	if ho := hos[0]; ho.Key != "DEMO-7" || ho.Summary != "Export users" || ho.Pane != "w9:p2" || ho.Agent != "claude" || ho.Kind != "claude" || ho.Workspace != "w9" || ho.Host != "w9:p1" || ho.At.IsZero() || ho.Desktop {
 		t.Errorf("handoff = %+v", ho)
 	}
 	if len(*calls) != 0 {

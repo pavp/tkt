@@ -176,7 +176,19 @@ func (c *Client) Workspaces(ctx context.Context) ([]herdrport.Workspace, error) 
 
 // CreateWorkspace opens a space on this computer. The window always shows a new space, whatever focus says.
 func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string, _ bool) (herdrport.Workspace, herdrport.Pane, error) {
-	r, err := c.do(ctx, "space.new", map[string]any{"name": label, "folder": cwd, "machine": ""})
+	return c.newSpace(ctx, cwd, label, map[string]any{})
+}
+
+// OpenAgentSpace opens a space at folder whose first terminal runs kind, and herdr-app gives the agent task as
+// its first message once it is ready. It returns the space and the agent's terminal.
+func (c *Client) OpenAgentSpace(ctx context.Context, folder, name, kind, task string) (herdrport.Workspace, herdrport.Pane, error) {
+	argv := append([]string{kind}, kindArgs[kind]...)
+	return c.newSpace(ctx, folder, name, map[string]any{"argv": argv, "task": task})
+}
+
+func (c *Client) newSpace(ctx context.Context, cwd, label string, args map[string]any) (herdrport.Workspace, herdrport.Pane, error) {
+	args["name"], args["folder"], args["machine"] = label, cwd, ""
+	r, err := c.do(ctx, "space.new", args)
 	if err != nil {
 		return herdrport.Workspace{}, herdrport.Pane{}, err
 	}

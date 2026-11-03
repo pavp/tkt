@@ -111,7 +111,8 @@ func newHerdrCmd(a *App) *cobra.Command {
 		Short: "Open an agent on a ticket in Herdr workspaces",
 		Long: "Open an agent on a ticket in Herdr workspaces. A ticket with a worktree opens its agent there. Otherwise,\n" +
 			"per repository, a setup agent creates the worktree with `herdr worktree create`; tkt then starts an agent\n" +
-			"in the worktree's workspace and closes the setup agent, so the main checkout stays free.",
+			"in the worktree's workspace and closes the setup agent, so the main checkout stays free. On Herdr desktop\n" +
+			"the setup agent creates it with git and runs `tkt link`, which opens the agent in a new space there.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.herdrStart(cmd, args, startOpts{repos: repoFlags, clone: clone, worktree: worktree, agent: agent})
@@ -179,6 +180,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 			a.syncHerdrPlugin(cmd.Context())
 			return a.herdrSidebar(cmd, true)
 		}},
+		&cobra.Command{Use: "close-setup HANDOFF", Short: "Close the setup agent of a Start that tkt link handed on (Herdr desktop)", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return a.closeSetup(cmd.Context(), args[0]) }},
 		&cobra.Command{Use: "on-worktree", Short: "Link a worktree Herdr just created and hand its ticket to an agent there (event hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOnWorktree(cmd) }},
 	)
 	return cmd
@@ -456,7 +458,8 @@ func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) erro
 // worktree's group and refuses to close it alone.
 // The handoff is saved before the agent gets its prompt, as the worktree event may follow right after.
 func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, kind, dir, repo, label string, focus bool) error {
-	ho := handoff{Key: plan.Key, Summary: plan.Summary, Repo: repo, Clone: dir, Kind: kind}
+	_, desktop := h.(agentSpaces)
+	ho := handoff{Key: plan.Key, Summary: plan.Summary, Repo: repo, Clone: dir, Kind: kind, Desktop: desktop}
 	var ws string
 	splitBeside := func(pane, workspace string) bool {
 		split, err := h.SplitPane(ctx, pane, dir)
@@ -473,8 +476,13 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 	if caller, callerWS := a.callerPane(); !opened && caller != "" {
 		opened = splitBeside(caller, callerWS)
 	}
+	parent := filepath.Dir(dir)
+	// Herdr desktop has no worktree groups to keep the clone out of, and names the space as tkt says.
+	if desktop {
+		parent, label = dir, string(plan.Key)+" · setup · "+filepath.Base(dir)
+	}
 	if !opened {
-		host, root, err := h.CreateWorkspace(ctx, filepath.Dir(dir), label, focus)
+		host, root, err := h.CreateWorkspace(ctx, parent, label, focus)
 		if err != nil {
 			return err
 		}
@@ -516,7 +524,11 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 		return x.Key == ho.Key && strings.EqualFold(x.Repo, ho.Repo)
 	}), ho)
 	a.saveState(st)
-	return a.promptStarted(ctx, h, name, where, workspace.SetupPrompt(plan.Key, plan.Summary), err)
+	prompt := workspace.SetupPrompt(plan.Key, plan.Summary)
+	if _, ok := h.(agentSpaces); ok {
+		prompt = desktopSetupPrompt(plan.Key, plan.Summary)
+	}
+	return a.promptStarted(ctx, h, name, where, prompt, err)
 }
 
 // dropUnusedPane closes the split tkt opened for a setup agent that did not start, and the workspace it opened for
@@ -1137,7 +1149,7 @@ func (a *App) herdrOnWorktree(cmd *cobra.Command) error {
 		return err
 	}
 	a.printf("✓ %s ← %s (%s)\n", key, co.branch, co.repo)
-	if ho, ok := a.takeHandoff(key, co.repo); ok {
+	if ho, ok := a.takeHandoff(key, co.repo, false); ok {
 		a.handOff(cmd.Context(), ho, eventWorkspace(a.Env.Getenv("HERDR_PLUGIN_EVENT_JSON")))
 	}
 	if snap, ok, _ := a.cache().Load(); ok {

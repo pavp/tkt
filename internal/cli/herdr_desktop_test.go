@@ -22,6 +22,12 @@ type desktopHerdr struct {
 	wss      []herdrport.Workspace
 	window   error
 	calls    []string
+	texts    []string
+	spaceErr error
+	startErr error
+	waitErr  error
+	runErr   error
+	detached [][]string
 }
 
 func (d *desktopHerdr) did(f string, a ...any) { d.calls = append(d.calls, fmt.Sprintf(f, a...)) }
@@ -38,7 +44,11 @@ func (d *desktopHerdr) SplitPane(_ context.Context, pane, cwd string) (herdrport
 func (d *desktopHerdr) StartAgent(_ context.Context, pane, kind, name string, _ []string) error {
 	d.did("start %s %s", name, pane)
 	d.agents = append(d.agents, herdrport.Agent{PaneID: "t9", Agent: kind, Name: name, Status: "idle"})
-	return nil
+	return d.startErr
+}
+func (d *desktopHerdr) WaitAgent(_ context.Context, target, status string, _ time.Duration) error {
+	d.did("wait %s %s", target, status)
+	return d.waitErr
 }
 func (d *desktopHerdr) AgentPane(_ context.Context, name string) (string, error) {
 	if i := slices.IndexFunc(d.agents, func(ag herdrport.Agent) bool { return ag.Name == name }); i >= 0 {
@@ -62,8 +72,27 @@ func (d *desktopHerdr) ClosePane(_ context.Context, pane string) error {
 	d.did("close %s", pane)
 	return nil
 }
-func (d *desktopHerdr) Prompt(_ context.Context, target, _ string) error {
+func (d *desktopHerdr) Prompt(_ context.Context, target, text string) error {
 	d.did("prompt %s", target)
+	d.texts = append(d.texts, text)
+	return nil
+}
+func (d *desktopHerdr) OpenAgentSpace(_ context.Context, folder, name, kind, task string) (herdrport.Workspace, herdrport.Pane, error) {
+	d.did("space %q %s %s", name, folder, kind)
+	d.texts = append(d.texts, task)
+	return herdrport.Workspace{ID: "sp20", Label: name}, herdrport.Pane{ID: "t20", WorkspaceID: "sp20", Cwd: folder}, d.spaceErr
+}
+func (d *desktopHerdr) RunDetached(_ context.Context, cwd string, argv []string) error {
+	d.did("detach %s", cwd)
+	d.detached = append(d.detached, argv)
+	return d.runErr
+}
+func (d *desktopHerdr) CreateWorkspace(_ context.Context, cwd, label string, _ bool) (herdrport.Workspace, herdrport.Pane, error) {
+	d.did("workspace %q %s", label, cwd)
+	return herdrport.Workspace{ID: "sp1", Label: label}, herdrport.Pane{ID: "t1", WorkspaceID: "sp1", Cwd: cwd}, nil
+}
+func (d *desktopHerdr) CloseWorkspace(_ context.Context, id string) error {
+	d.did("close workspace %s", id)
 	return nil
 }
 func (d *desktopHerdr) Notify(context.Context, string, string) error {
@@ -90,7 +119,7 @@ func TestHerdrStartOnDesktopMarksTheAgentsOwnTerminal(t *testing.T) {
 	if !reflect.DeepEqual(d.calls, want) {
 		t.Errorf("calls = %q\nwant    %q", d.calls, want)
 	}
-	if hos := h.app.loadState().Handoffs; len(hos) != 1 || hos[0].Pane != "t9" || hos[0].Clone != web {
+	if hos := h.app.loadState().Handoffs; len(hos) != 1 || hos[0].Pane != "t9" || hos[0].Clone != web || !hos[0].Desktop {
 		t.Errorf("handoffs = %+v", hos)
 	}
 }
@@ -172,5 +201,64 @@ func TestAgentKindsOnDesktopAreTheInstalledKnownAgents(t *testing.T) {
 	h.run.missing["claude"], h.run.missing["opencode"] = true, true
 	if _, err := h.app.agentKinds(context.Background()); err == nil || !strings.Contains(err.Error(), "no agent Herdr desktop can start is installed; install one of: pi, claude") {
 		t.Errorf("none installed: %v", err)
+	}
+}
+
+func TestHerdrStartOnDesktopWaitsForTheAnswerToTheAgentsQuestion(t *testing.T) {
+	tests := []struct {
+		name       string
+		waitErr    error
+		wantPrompt bool
+		wantOut    string
+	}{
+		{"answered", nil, true, "✓ claude started in"},
+		{"not answered in time", herdrcore.ErrTimeout, false, "! It did not get ready in time; give it this prompt:"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, d := desktopHarness(t)
+			h.clone(t, "web")
+			d.startErr, d.waitErr = herdrport.ErrNotReady, tt.waitErr
+			if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "claude"); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.errOut)
+			}
+			out := h.out.String()
+			if n := strings.Count(out, "is asking a question; answer it there and the prompt follows"); n != 1 {
+				t.Errorf("told the user %d times: %q", n, out)
+			}
+			if !strings.Contains(out, tt.wantOut) || slices.Contains(d.calls, "prompt claude") != tt.wantPrompt || !slices.Contains(d.calls, "wait claude idle") {
+				t.Errorf("calls = %q, output = %q", d.calls, out)
+			}
+		})
+	}
+}
+
+func TestHerdrStartOnDesktopOpensTheSetupSpaceAtTheClone(t *testing.T) {
+	h, d := desktopHarness(t)
+	delete(h.env, "HC_TERMINAL_ID")
+	web := h.clone(t, "web")
+	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "claude"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if want := fmt.Sprintf("workspace %q %s", "DEMO-7 · setup · web", web); len(d.calls) == 0 || d.calls[0] != want {
+		t.Errorf("calls = %q, want first %q", d.calls, want)
+	}
+	if hos := h.app.loadState().Handoffs; len(hos) != 1 || hos[0].Workspace != "sp1" || hos[0].Host != "t1" {
+		t.Errorf("handoffs = %+v", hos)
+	}
+}
+
+func TestFixOnDesktopFindsTheUnnamedHandoffAgent(t *testing.T) {
+	h, _, _ := fixHarness(t)
+	d := &desktopHerdr{agents: []herdrport.Agent{{PaneID: "t22", WorkspaceID: "sp20", Agent: "claude", Cwd: "/src/web-DEMO-1", Tokens: map[string]string{ticketToken: "DEMO-1"}}}}
+	h.app.NewHerdr = func() HerdrAPI { return d }
+	h.env["HC_TERMINAL_ID"] = "t5"
+	h.clone(t, "web")
+	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1\nHEAD a\nbranch refs/heads/feature/DEMO-1-filter\n"
+	if code := h.exec("fix", "DEMO-1"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if !slices.Contains(d.calls, "prompt t22") {
+		t.Errorf("calls = %q, output = %q", d.calls, h.out)
 	}
 }

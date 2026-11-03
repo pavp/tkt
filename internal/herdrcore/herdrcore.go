@@ -38,6 +38,8 @@ type Client struct {
 	hc Runner
 	// app is herdr-app, which arranges the window; nil when it is not installed, as on a headless core.
 	app Runner
+	// questionAfter is how long StartAgent waits for a first status before taking its absence for a question.
+	questionAfter time.Duration
 }
 
 // New finds hc, and herdr-app when it is there, on PATH.
@@ -54,12 +56,14 @@ func New() (*Client, error) {
 }
 
 func NewWith(hc Runner) *Client {
-	return &Client{hc: hc}
+	return &Client{hc: hc, questionAfter: 10 * time.Second}
 }
 
 // NewWithApp is NewWith plus the herdr-app that layout operations run.
 func NewWithApp(hc, app Runner) *Client {
-	return &Client{hc: hc, app: app}
+	c := NewWith(hc)
+	c.app = app
+	return c
 }
 
 // Error is a failure hc reported; its kinds are listed by `hc schema`.

@@ -85,7 +85,8 @@ func newLinkCmd(a *App) *cobra.Command {
 		Short: "Register the current worktree as the work on a ticket",
 		Long: "Register the current worktree and branch as the work on a ticket, so the board shows it right away.\n" +
 			"Agents run it after creating their branch. The branch name must contain the ticket key; without\n" +
-			"KEY, the key is taken from the branch.",
+			"KEY, the key is taken from the branch. In a Herdr desktop terminal it also completes a Start waiting\n" +
+			"for this worktree: the ticket's agent opens in a new space there and the setup agent closes.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := a.LoadConfig()
@@ -114,6 +115,10 @@ func newLinkCmd(a *App) *cobra.Command {
 			known := false
 			for _, r := range c.Repos() {
 				known = known || strings.EqualFold(r.Name, co.repo)
+			}
+			// In Herdr 0.9.5 the worktree.created hook completes a pending Start instead.
+			if a.inDesktopTerminal() && a.NewHerdr != nil {
+				defer a.handOffFromLink(cmd.Context(), key, co.repo, co.top)
 			}
 			if a.jsonOut {
 				return a.printJSON(w)
