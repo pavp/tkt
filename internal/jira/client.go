@@ -73,6 +73,21 @@ type apiError struct {
 	Errors        map[string]string `json:"errors"`
 }
 
+// APIError is Jira answering a request with an error status.
+type APIError struct {
+	msg      string
+	status   int
+	messages []string
+	fields   map[string]string
+}
+
+func (e *APIError) Error() string { return e.msg }
+
+// Rejection is Jira's status, its general messages and its messages per field, as a form shows them.
+func (e *APIError) Rejection() (status int, messages []string, fields map[string]string) {
+	return e.status, e.messages, e.fields
+}
+
 // throttleRetries is how many times a request is repeated after Jira answers 429 Too Many Requests.
 const throttleRetries = 2
 
@@ -128,7 +143,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 		if len(msgs) == 0 {
 			msgs = []string{http.StatusText(resp.StatusCode)}
 		}
-		return fmt.Errorf("jira %s %s: %d %s", method, path, resp.StatusCode, strings.Join(msgs, "; "))
+		return &APIError{msg: fmt.Sprintf("jira %s %s: %d %s", method, path, resp.StatusCode, strings.Join(msgs, "; ")), status: resp.StatusCode, messages: ae.ErrorMessages, fields: ae.Errors}
 	}
 	if out == nil {
 		return nil

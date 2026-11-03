@@ -25,7 +25,6 @@ import (
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/daemon"
 	"github.com/pavp/tkt/internal/herdr"
-	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
 	"github.com/pavp/tkt/internal/workspace"
@@ -311,78 +310,27 @@ func (b *boardActions) JiraStatuses(space string) tea.Cmd {
 
 func (b *boardActions) Transitions(key ticket.Key) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-		defer cancel()
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.TransitionsMsg{Key: key, Err: err}
-		}
-		trs, err := js.Transitions(ctx, string(key))
-		out := make([]tui.Transition, len(trs))
-		for i, t := range trs {
-			out[i] = tui.Transition{ID: t.ID, To: t.To, NeedsForm: t.NeedsForm}
-			for _, f := range t.Fields {
-				field := tui.Field{ID: f.ID, Name: f.Name, Kind: f.Kind, Required: f.Required}
-				for _, o := range f.Options {
-					field.Options = append(field.Options, tui.Option{ID: o.ID, Value: o.Value})
-				}
-				out[i].Fields = append(out[i].Fields, field)
-			}
-		}
-		return tui.TransitionsMsg{Key: key, Transitions: out, Err: err}
+		trs, err := b.a.transitions(b.ctx, b.cfg(), key)
+		return tui.TransitionsMsg{Key: key, Transitions: trs, Err: err}
 	}
 }
 
 func (b *boardActions) Users(key ticket.Key, query string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-		defer cancel()
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.UsersListedMsg{Key: key, Query: query, Err: err}
-		}
-		found, err := js.AssignableUsers(ctx, string(key), query)
-		users := make([]tui.User, len(found))
-		for i, u := range found {
-			users[i] = tui.User{ID: u.AccountID, Name: u.DisplayName}
-		}
+		users, err := b.a.assignableUsers(b.ctx, b.cfg(), key, query)
 		return tui.UsersListedMsg{Key: key, Query: query, Users: users, Err: err}
 	}
 }
 
 func (b *boardActions) Assign(key ticket.Key, who tui.Assignee) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-		defer cancel()
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.AssignedMsg{Key: key, Who: who, Err: err}
-		}
-		id := who.ID
-		if who.Me {
-			me, err := js.Myself(ctx)
-			if err != nil {
-				return tui.AssignedMsg{Key: key, Who: who, Err: err}
-			}
-			id = me.AccountID
-		}
-		return tui.AssignedMsg{Key: key, Who: who, Err: js.Assign(ctx, string(key), id)}
+		return tui.AssignedMsg{Key: key, Who: who, Err: b.a.assign(b.ctx, b.cfg(), key, who.Me, who.ID)}
 	}
 }
 
 func (b *boardActions) Transition(key ticket.Key, id, to string, values []tui.Value, comment string) tea.Cmd {
-	vs := make([]jira.Value, len(values))
-	for i, v := range values {
-		vs[i] = jira.Value{Field: v.Field, Kind: v.Kind, ID: v.ID}
-	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-		defer cancel()
-		js, err := b.a.jiraClient(b.cfg())
-		if err == nil {
-			err = js.Transition(ctx, string(key), id, vs, comment)
-		}
-		return tui.TransitionedMsg{Key: key, To: to, Err: err}
+		return tui.TransitionedMsg{Key: key, To: to, Err: b.a.transition(b.ctx, b.cfg(), key, id, values, comment)}
 	}
 }
 

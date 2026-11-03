@@ -150,7 +150,11 @@ func (s *Server) backlog(w http.ResponseWriter, r *http.Request) {
 	queryList(q, "hidden_boards", &state.HiddenBoards)
 	// One load at a time, so requests arriving together share the copy the first one caches instead of each asking Jira.
 	s.backlogMu.Lock()
-	bl, err := s.opts.Backlog(r.Context(), refresh)
+	stale := s.takeStaleBacklog()
+	bl, err := s.opts.Backlog(r.Context(), refresh || stale)
+	if err != nil && stale {
+		s.markBacklogStale()
+	}
 	s.backlogMu.Unlock()
 	if err != nil && bl.FetchedAt.IsZero() {
 		writeError(w, http.StatusBadGateway, "backlog_failed", err.Error())

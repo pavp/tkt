@@ -61,6 +61,11 @@ type Options struct {
 	// StartChoices serves GET /v1/tickets/{key}/start and Start POST to it; nil answers them with not found.
 	StartChoices StartChoicesFunc
 	Start        StartFunc
+	// Transitions, Transition, Users and Assign serve Move and Assign; nil answers their routes with not found.
+	Transitions TransitionsFunc
+	Transition  TransitionFunc
+	Users       UsersFunc
+	Assign      AssignFunc
 }
 
 // Info is what daemon.json records for clients: where the daemon listens and which process it is.
@@ -84,8 +89,9 @@ type Server struct {
 	syncErr string
 	// starting holds the tickets whose Start still runs, so a second one waits for it.
 	starting map[ticket.Key]bool
-	// backlogMu runs one backlog load at a time.
-	backlogMu sync.Mutex
+	// backlogMu runs one backlog load at a time; staleBacklog makes the next one ask Jira, as after an assignment.
+	backlogMu    sync.Mutex
+	staleBacklog bool
 
 	syncNow chan struct{}
 	// quit closes when Serve stops, so WebSocket handlers, which outlive the HTTP server's shutdown,
@@ -304,6 +310,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/backlog", s.authed(s.backlog))
 	mux.HandleFunc("GET /v1/tickets/{key}/start", s.authed(s.startChoices))
 	mux.HandleFunc("POST /v1/tickets/{key}/start", s.mutating(s.start))
+	mux.HandleFunc("GET /v1/tickets/{key}/transitions", s.authed(s.moves))
+	mux.HandleFunc("POST /v1/tickets/{key}/transitions", s.mutating(s.move))
+	mux.HandleFunc("GET /v1/tickets/{key}/users", s.authed(s.users))
+	mux.HandleFunc("PUT /v1/tickets/{key}/assignee", s.mutating(s.assign))
 	mux.HandleFunc("POST /v1/sync", s.authed(s.requestSync))
 	mux.HandleFunc("GET /v1/ws", s.ws)
 	return mux
@@ -359,6 +369,14 @@ func (s *Server) ticket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d)
 }
 
+// syncSoon asks the sync loop for a sync at once, unless one is already asked.
+func (s *Server) syncSoon() {
+	select {
+	case s.syncNow <- struct{}{}:
+	default:
+	}
+}
+
 // public leaves out the development-panel cache, which only the sync needs.
 func public(snap board.Snapshot) board.Snapshot {
 	snap.Panels = nil
@@ -366,10 +384,7 @@ func public(snap board.Snapshot) board.Snapshot {
 }
 
 func (s *Server) requestSync(w http.ResponseWriter, _ *http.Request) {
-	select {
-	case s.syncNow <- struct{}{}:
-	default:
-	}
+	s.syncSoon()
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
 }
 
