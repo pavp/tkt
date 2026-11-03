@@ -70,11 +70,11 @@ func (a *App) herdrOpenBoard(ctx context.Context) error {
 	current := a.Env.Getenv("HERDR_WORKSPACE_ID")
 	if b, err := os.ReadFile(a.boardPaneFile()); err == nil {
 		if pane, ws, ok := strings.Cut(strings.TrimSpace(string(b)), " "); ok {
-			if ws == current && h.FocusPluginPane(ctx, pane) == nil {
+			if ws == current && plugins(h).FocusPluginPane(ctx, pane) == nil {
 				return nil
 			}
-			_ = h.ClosePluginPane(ctx, pane)
+			_ = plugins(h).ClosePluginPane(ctx, pane)
 		}
 	}
-	return h.OpenPluginPane(ctx, herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "board"})
+	return plugins(h).OpenPluginPane(ctx, herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "board"})
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pavp/tkt/internal/config"
-	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/herdrport"
 	"github.com/pavp/tkt/internal/paths"
 	"github.com/pavp/tkt/internal/repos"
 	"github.com/pavp/tkt/internal/ticket"
@@ -85,7 +85,8 @@ func newLinkCmd(a *App) *cobra.Command {
 		Short: "Register the current worktree as the work on a ticket",
 		Long: "Register the current worktree and branch as the work on a ticket, so the board shows it right away.\n" +
 			"Agents run it after creating their branch. The branch name must contain the ticket key; without\n" +
-			"KEY, the key is taken from the branch.",
+			"KEY, the key is taken from the branch. In a Herdr desktop terminal it also completes a Start waiting\n" +
+			"for this worktree: the ticket's agent opens in a new space there and the setup agent closes.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := a.LoadConfig()
@@ -114,6 +115,10 @@ func newLinkCmd(a *App) *cobra.Command {
 			known := false
 			for _, r := range c.Repos() {
 				known = known || strings.EqualFold(r.Name, co.repo)
+			}
+			// In Herdr 0.9.5 the worktree.created hook completes a pending Start instead.
+			if a.inDesktopTerminal() && a.NewHerdr != nil {
+				defer a.handOffFromLink(cmd.Context(), key, co.repo, co.top)
 			}
 			if a.jsonOut {
 				return a.printJSON(w)
@@ -188,7 +193,7 @@ func newUnlinkCmd(a *App) *cobra.Command {
 
 // unmarkAgents clears the ticket mark of every agent pane given one of keys, since the mark alone keeps an agent
 // on its ticket; without Herdr running there is nothing to clear.
-func (a *App) unmarkAgents(ctx context.Context, keys map[ticket.Key]bool) []herdr.Agent {
+func (a *App) unmarkAgents(ctx context.Context, keys map[ticket.Key]bool) []herdrport.Agent {
 	if a.NewHerdr == nil || len(keys) == 0 {
 		return nil
 	}
@@ -197,7 +202,7 @@ func (a *App) unmarkAgents(ctx context.Context, keys map[ticket.Key]bool) []herd
 	if err != nil {
 		return nil
 	}
-	var out []herdr.Agent
+	var out []herdrport.Agent
 	for _, ag := range agents {
 		if !keys[ticket.Key(ag.Tokens[ticketToken])] {
 			continue

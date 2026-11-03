@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -174,7 +175,7 @@ func TestHerdrStartCreatesWorkspacesWithAgents(t *testing.T) {
 	if len(hos) != 2 || hos[0].Repo != "example-org/web" || hos[1].Repo != "example-org/api" || hos[0].Clone != web || hos[1].Clone != api {
 		t.Fatalf("handoffs = %+v", hos)
 	}
-	if ho := hos[0]; ho.Key != "DEMO-7" || ho.Summary != "Export users" || ho.Pane != "w9:p2" || ho.Agent != "claude" || ho.Kind != "claude" || ho.Workspace != "w9" || ho.Host != "w9:p1" || ho.At.IsZero() {
+	if ho := hos[0]; ho.Key != "DEMO-7" || ho.Summary != "Export users" || ho.Pane != "w9:p2" || ho.Agent != "claude" || ho.Kind != "claude" || ho.Workspace != "w9" || ho.Host != "w9:p1" || ho.At.IsZero() || ho.Desktop {
 		t.Errorf("handoff = %+v", ho)
 	}
 	if len(*calls) != 0 {
@@ -847,7 +848,7 @@ func TestHerdrInstallUndoesSidebarRowsThatAddWarnings(t *testing.T) {
 	original := "[toast]\nenabled = true\n"
 	cfg := herdrConfig(t, h, original)
 	f.Results["server.reload_config"] = `{"type":"config_reload","status":"partial","diagnostics":["[toast] is not a known section"]}`
-	h.app.NewHerdr = func() HerdrAPI { return reloadSequence{HerdrAPI: herdr.New(f.Path), f: f} }
+	h.app.NewHerdr = func() HerdrAPI { return reloadSequence{Client: herdr.New(f.Path), f: f} }
 	if code := h.exec("herdr", "install", "--no-keys", "--sidebar"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
@@ -861,7 +862,7 @@ func TestHerdrInstallUndoesSidebarRowsThatAddWarnings(t *testing.T) {
 
 // reloadSequence makes the second reload (after tkt writes its rows) report a new warning.
 type reloadSequence struct {
-	HerdrAPI
+	*herdr.Client
 	f *herdrtest.FakeServer
 }
 
@@ -869,7 +870,7 @@ func (r reloadSequence) ReloadConfig(ctx context.Context) error {
 	if count(r.f, "server.reload_config") == 1 {
 		r.f.Results["server.reload_config"] = `{"type":"config_reload","status":"partial","diagnostics":["[toast] is not a known section","ui.sidebar.spaces.rows: unknown style"]}`
 	}
-	return r.HerdrAPI.ReloadConfig(ctx)
+	return r.Client.ReloadConfig(ctx)
 }
 
 func TestHerdrRefreshLabelsWorkspacesOpenedOnAPlainCheckout(t *testing.T) {
@@ -905,7 +906,7 @@ func TestHerdrStartNamesAgentsClaudeAndNumbersTakenNames(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	f.Results["workspace.create"] = `{"type":"workspace_created","workspace":{"workspace_id":"w9","label":"x"},"root_pane":{"pane_id":"w9:p1"}}`
 	f.Errors["agent.start"] = "agent name claude is already used; candidates: pane_id=w1:p1"
-	h.app.NewHerdr = func() HerdrAPI { return takenOnce{HerdrAPI: herdr.New(f.Path), f: f} }
+	h.app.NewHerdr = func() HerdrAPI { return takenOnce{Client: herdr.New(f.Path), f: f} }
 	if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "claude", "/src/web", "DEMO-7 · web", "prompt", true); err != nil {
 		t.Fatal(err)
 	}
@@ -947,7 +948,7 @@ func TestHerdrStartReusesOpenWorkspaceWithoutAgent(t *testing.T) {
 			h.app.NewHerdr = func() HerdrAPI { return herdr.New(f.Path) }
 			if tt.startErr != "" {
 				f.Errors["agent.start"] = tt.startErr
-				h.app.NewHerdr = func() HerdrAPI { return takenOnce{HerdrAPI: herdr.New(f.Path), f: f} }
+				h.app.NewHerdr = func() HerdrAPI { return takenOnce{Client: herdr.New(f.Path), f: f} }
 			}
 			if _, err := h.app.startInWorkspace(context.Background(), h.app.NewHerdr(), "claude", "/src/web", "DEMO-7 · web", "Work on DEMO-7", true); err != nil {
 				t.Fatal(err)
@@ -1116,14 +1117,38 @@ func TestHerdrStartWaitsForBlockedAgentBeforePrompting(t *testing.T) {
 
 // takenOnce lets the first agent.start fail with agent_name_taken and the next ones succeed.
 type takenOnce struct {
-	HerdrAPI
+	*herdr.Client
 	f *herdrtest.FakeServer
 }
 
 func (o takenOnce) StartAgent(ctx context.Context, paneID, kind, name string, args []string) error {
-	err := o.HerdrAPI.StartAgent(ctx, paneID, kind, name, args)
+	err := o.Client.StartAgent(ctx, paneID, kind, name, args)
 	delete(o.f.Errors, "agent.start")
 	return err
+}
+
+func TestThePluginSyncTalksToHerdrWhenBothHerdrsRun(t *testing.T) {
+	old := Version
+	t.Cleanup(func() { Version = old })
+	h, f, _ := herdrHarness(t)
+	classic := h.app.NewHerdr
+	h.app.herdrOf = func(flavor herdrFlavor) HerdrAPI {
+		if flavor == herdrClassic {
+			return classic()
+		}
+		return failingHerdr{errors.New("herdr desktop has no plugins")}
+	}
+	h.app.HerdrRunning = func(context.Context) (bool, bool) { return true, true }
+	h.app.NewHerdr = h.app.chosenHerdr
+	dir := filepath.Join(h.app.Env.DataDir(), "herdr-plugin")
+	_ = os.MkdirAll(dir, 0o700)
+	_ = os.WriteFile(filepath.Join(dir, herdrplugin.FileName), []byte(herdrplugin.Render("/opt/tkt/bin/tkt", "0.12.0")), 0o600)
+
+	Version = "0.12.3"
+	h.app.syncHerdrPlugin(context.Background())
+	if count(f, "plugin.link") != 1 {
+		t.Errorf("the 0.9.5 plugin is linked in Herdr even when Herdr desktop runs too: links %d", count(f, "plugin.link"))
+	}
 }
 
 func TestAReleaseBringsTheInstalledHerdrPluginUpToDate(t *testing.T) {

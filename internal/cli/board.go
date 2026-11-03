@@ -438,7 +438,7 @@ func (b *boardActions) SaveConfig(c config.Config) tea.Cmd {
 	}
 }
 
-func (b *boardActions) inHerdr() bool { return b.a.Env.Getenv("HERDR_ENV") == "1" }
+func (b *boardActions) inHerdr() bool { return b.a.inHerdr() }
 
 func (b *boardActions) Agents(snap board.Snapshot) tea.Cmd {
 	return func() tea.Msg {
@@ -539,7 +539,7 @@ func (b *boardActions) Detail(key ticket.Key, known *ticket.Ticket) tea.Cmd {
 // TicketPane closes the board and opens the live ticket pane in the ticket's own workspace, next to its
 // agent; without a worktree it opens in the current workspace. Outside Herdr it shows the ticket in place.
 func (b *boardActions) TicketPane(key ticket.Key) tea.Cmd {
-	if b.inHerdr() {
+	if b.a.inHerdrPlugins() {
 		return tea.Sequence(b.ticketPaneOpen(key), tea.Quit)
 	}
 	exe, err := b.a.Executable()
@@ -574,7 +574,7 @@ func (b *boardActions) ticketPaneOpen(key ticket.Key) tea.Cmd {
 			pane.WorkspaceID = b.a.Env.Getenv("HERDR_WORKSPACE_ID")
 		}
 		pane.TargetPaneID = targetPane(b.ctx, h, pane.WorkspaceID)
-		if err := h.OpenPluginPane(b.ctx, pane); err != nil {
+		if err := plugins(h).OpenPluginPane(b.ctx, pane); err != nil {
 			return tui.StatusMsg("ticket pane: " + err.Error())
 		}
 		return nil
@@ -602,7 +602,7 @@ func (b *boardActions) Fix(key ticket.Key, known *ticket.Ticket) tea.Cmd {
 		if err != nil {
 			return tui.StatusMsg(err.Error())
 		}
-		if !b.inHerdr() {
+		if !b.a.inHerdrPlugins() {
 			return tui.StatusMsg("outside Herdr: run `tkt fix " + string(key) + "` to print the prompt")
 		}
 		if pane == "" {

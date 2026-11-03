@@ -21,7 +21,6 @@ import (
 	"github.com/pavp/tkt/internal/credstore"
 	"github.com/pavp/tkt/internal/execx"
 	"github.com/pavp/tkt/internal/github"
-	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/paths"
 	"github.com/pavp/tkt/internal/repos"
@@ -45,8 +44,12 @@ type App struct {
 	Now          func() time.Time
 	Sleep        func(ctx context.Context, d time.Duration) error
 	// Launch runs an interactive program attached to the terminal and waits for it.
-	Launch     func(dir, name string, args []string) error
-	NewHerdr   func() HerdrAPI
+	Launch   func(dir, name string, args []string) error
+	NewHerdr func() HerdrAPI
+	// HerdrRunning reports which Herdrs answer: Herdr 0.9.5 on its socket, and Herdr desktop.
+	HerdrRunning func(ctx context.Context) (classic, desktop bool)
+	// herdrOf opens a client for one Herdr; the daemon, which follows every running Herdr, uses it.
+	herdrOf    func(herdrFlavor) HerdrAPI
 	Executable func() (string, error)
 	// OrgMember reports whether a gh token belongs to an active member of a GitHub organization.
 	OrgMember func(ctx context.Context, token, org string) (bool, error)
@@ -61,6 +64,11 @@ type App struct {
 	tokens  map[string]string
 	// jiraClients keeps one Jira client per site, email and token; tokenMu guards it too.
 	jiraClients map[string]JiraAPI
+
+	herdrsOnce sync.Once
+	herdrs     *herdrSet
+	// windowNoted makes noteWindow tell the user once.
+	windowNoted sync.Once
 
 	// syncWarnings are the last sync's warnings, so the daemon logs only the new ones.
 	warnMu       sync.Mutex
@@ -94,7 +102,9 @@ func NewApp() (*App, error) {
 	}
 	a.NewGitHub = a.githubFor
 	a.OrgMember = github.New(nil).OrgMember
-	a.NewHerdr = func() HerdrAPI { return herdr.New(herdr.SocketPath(a.Env.Getenv, a.Env.Home)) }
+	a.NewHerdr = a.chosenHerdr
+	a.HerdrRunning = a.herdrRunning
+	a.herdrOf = a.newHerdrOf
 	a.StartDetached = startDetached
 	a.Signal = syscall.Kill
 	a.Executable = executable

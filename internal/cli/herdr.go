@@ -18,37 +18,68 @@ import (
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
 	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/herdrcore"
 	"github.com/pavp/tkt/internal/herdrplugin"
+	"github.com/pavp/tkt/internal/herdrport"
 	"github.com/pavp/tkt/internal/paths"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/workspace"
 )
 
-// HerdrAPI is the part of Herdr's socket API tkt uses.
+// HerdrAPI is what tkt needs from any Herdr.
 type HerdrAPI interface {
-	Workspaces(ctx context.Context) ([]herdr.Workspace, error)
-	CreateWorkspace(ctx context.Context, cwd, label string, focus bool) (herdr.Workspace, herdr.Pane, error)
+	Workspaces(ctx context.Context) ([]herdrport.Workspace, error)
+	CreateWorkspace(ctx context.Context, cwd, label string, focus bool) (herdrport.Workspace, herdrport.Pane, error)
 	FocusWorkspace(ctx context.Context, id string) error
 	FocusPane(ctx context.Context, paneID string) error
 	ReportWorkspaceTokens(ctx context.Context, workspaceID, source string, tokens map[string]*string, ttl time.Duration) error
 	ReportPaneTokens(ctx context.Context, paneID, source string, tokens map[string]*string) error
-	Agents(ctx context.Context) ([]herdr.Agent, error)
-	Panes(ctx context.Context) ([]herdr.Pane, error)
+	Agents(ctx context.Context) ([]herdrport.Agent, error)
+	Panes(ctx context.Context) ([]herdrport.Pane, error)
 	StartAgent(ctx context.Context, paneID, kind, name string, args []string) error
 	WaitAgent(ctx context.Context, target, status string, timeout time.Duration) error
-	SplitPane(ctx context.Context, paneID, cwd string) (herdr.Pane, error)
+	SplitPane(ctx context.Context, paneID, cwd string) (herdrport.Pane, error)
 	Prompt(ctx context.Context, target, text string) error
-	OpenPluginPane(ctx context.Context, p herdr.PaneOpen) error
-	Watch(ctx context.Context, subs []herdr.Subscription, on func(herdr.Event)) error
-	FocusPluginPane(ctx context.Context, paneID string) error
-	ClosePluginPane(ctx context.Context, paneID string) error
+	Watch(ctx context.Context, subs []herdrport.Subscription, on func(herdrport.Event)) error
 	ClosePane(ctx context.Context, paneID string) error
 	CloseWorkspace(ctx context.Context, id string) error
 	Notify(ctx context.Context, title, body string) error
+}
+
+// HerdrPlugins is what only a Herdr with plugins and a reloadable config file offers.
+type HerdrPlugins interface {
+	OpenPluginPane(ctx context.Context, p herdr.PaneOpen) error
+	FocusPluginPane(ctx context.Context, paneID string) error
+	ClosePluginPane(ctx context.Context, paneID string) error
 	LinkPlugin(ctx context.Context, path string) error
 	UnlinkPlugin(ctx context.Context, id string) error
 	ReloadConfig(ctx context.Context) error
 }
+
+var (
+	_ HerdrAPI     = (*herdr.Client)(nil)
+	_ HerdrPlugins = (*herdr.Client)(nil)
+	_ HerdrAPI     = (*herdrcore.Client)(nil)
+)
+
+var errNoPlugins = errors.New("this Herdr has no plugins")
+
+// plugins returns h's plugin operations; on a Herdr without them each one fails with errNoPlugins.
+func plugins(h HerdrAPI) HerdrPlugins {
+	if p, ok := h.(HerdrPlugins); ok {
+		return p
+	}
+	return noPlugins{}
+}
+
+type noPlugins struct{}
+
+func (noPlugins) OpenPluginPane(context.Context, herdr.PaneOpen) error { return errNoPlugins }
+func (noPlugins) FocusPluginPane(context.Context, string) error        { return errNoPlugins }
+func (noPlugins) ClosePluginPane(context.Context, string) error        { return errNoPlugins }
+func (noPlugins) LinkPlugin(context.Context, string) error             { return errNoPlugins }
+func (noPlugins) UnlinkPlugin(context.Context, string) error           { return errNoPlugins }
+func (noPlugins) ReloadConfig(context.Context) error                   { return errNoPlugins }
 
 const (
 	sidebarSource = "plugin:tkt"
@@ -68,7 +99,9 @@ func newHerdrCmd(a *App) *cobra.Command {
 		Use:   "herdr",
 		Short: "Herdr integration: install the plugin, and the commands it runs",
 		Long: "Herdr integration. `tkt herdr install` links the tkt plugin into a running Herdr; the other\n" +
-			"subcommands are what the plugin's actions, panes and hooks run.",
+			"subcommands are what the plugin's actions, panes and hooks run.\n\n" +
+			"With both Herdr and Herdr desktop installed, tkt uses the one whose terminal runs it, else the one\n" +
+			"running; when both run and nothing says which, it fails and asks to be run from a terminal inside one.",
 	}
 	var repoFlags []string
 	var clone bool
@@ -78,7 +111,8 @@ func newHerdrCmd(a *App) *cobra.Command {
 		Short: "Open an agent on a ticket in Herdr workspaces",
 		Long: "Open an agent on a ticket in Herdr workspaces. A ticket with a worktree opens its agent there. Otherwise,\n" +
 			"per repository, a setup agent creates the worktree with `herdr worktree create`; tkt then starts an agent\n" +
-			"in the worktree's workspace and closes the setup agent, so the main checkout stays free.",
+			"in the worktree's workspace and closes the setup agent, so the main checkout stays free. On Herdr desktop\n" +
+			"the setup agent creates it with git and runs `tkt link`, which opens the agent in a new space there.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.herdrStart(cmd, args, startOpts{repos: repoFlags, clone: clone, worktree: worktree, agent: agent})
@@ -113,7 +147,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 		start,
 		installCmd,
 		&cobra.Command{Use: "uninstall", Short: "Unlink the tkt plugin from Herdr and remove its keybindings", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := a.NewHerdr().UnlinkPlugin(cmd.Context(), a.pluginID()); err != nil {
+			if err := plugins(a.NewHerdr()).UnlinkPlugin(cmd.Context(), a.pluginID()); err != nil {
 				return err
 			}
 			a.printf("✓ Unlinked the tkt plugin from Herdr\n")
@@ -127,16 +161,16 @@ func newHerdrCmd(a *App) *cobra.Command {
 			if _, err := os.Stat(a.ConfigPath()); err != nil {
 				entry = "setup"
 			}
-			return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: entry, Focus: true})
+			return plugins(a.NewHerdr()).OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: entry, Focus: true})
 		}},
 		&cobra.Command{Use: "open-board", Short: "Open the board popup (setup when tkt is not configured)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			if _, err := os.Stat(a.ConfigPath()); err != nil {
-				return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "setup"})
+				return plugins(a.NewHerdr()).OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "setup"})
 			}
 			return a.herdrOpenBoard(cmd.Context())
 		}},
 		&cobra.Command{Use: "setup", Short: "Open `tkt init` in a Herdr tab", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-			return a.NewHerdr().OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "setup"})
+			return plugins(a.NewHerdr()).OpenPluginPane(cmd.Context(), herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "setup"})
 		}},
 		&cobra.Command{Use: "open-ticket", Short: "Open the live ticket pane for the current workspace", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOpenTicket(cmd) }},
 		&cobra.Command{Use: "open [URL]", Short: "Open the ticket behind a clicked Jira or pull request link", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return a.herdrOpen(cmd, args) }},
@@ -146,6 +180,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 			a.syncHerdrPlugin(cmd.Context())
 			return a.herdrSidebar(cmd, true)
 		}},
+		&cobra.Command{Use: "close-setup HANDOFF", Short: "Close the setup agent of a Start that tkt link handed on (Herdr desktop)", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return a.closeSetup(cmd.Context(), args[0]) }},
 		&cobra.Command{Use: "on-worktree", Short: "Link a worktree Herdr just created and hand its ticket to an agent there (event hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOnWorktree(cmd) }},
 	)
 	return cmd
@@ -160,7 +195,7 @@ func (a *App) herdrInstall(cmd *cobra.Command, keys, noKeys, sidebar, noSidebar 
 	if err := paths.WritePrivateFile(filepath.Join(dir, herdrplugin.FileName), []byte(herdrplugin.Render(exe, Version))); err != nil {
 		return err
 	}
-	if err := a.NewHerdr().LinkPlugin(cmd.Context(), dir); err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
+	if err := plugins(a.NewHerdr()).LinkPlugin(cmd.Context(), dir); err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
 		return err
 	}
 	a.printf("✓ Linked the tkt plugin into Herdr (%s)\n", dir)
@@ -211,7 +246,7 @@ func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
 	// Warnings the config already causes are not tkt's doing; only new ones mean Herdr rejected the rows.
 	known := map[string]bool{}
 	var before *herdr.ReloadRejected
-	if errors.As(h.ReloadConfig(cmd.Context()), &before) {
+	if errors.As(plugins(h).ReloadConfig(cmd.Context()), &before) {
 		for _, d := range before.Diagnostics {
 			known[d] = true
 		}
@@ -222,7 +257,7 @@ func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
 	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
 		return err
 	}
-	err = h.ReloadConfig(cmd.Context())
+	err = plugins(h).ReloadConfig(cmd.Context())
 	var rejected *herdr.ReloadRejected
 	if errors.As(err, &rejected) {
 		var added []string
@@ -235,7 +270,7 @@ func (a *App) addHerdrSidebar(cmd *cobra.Command, yes bool) error {
 			if werr := os.WriteFile(path, current, 0o644); werr != nil {
 				return fmt.Errorf("restore %s after Herdr rejected it: %w", path, werr)
 			}
-			_ = h.ReloadConfig(cmd.Context())
+			_ = plugins(h).ReloadConfig(cmd.Context())
 			if len(added) == 0 {
 				added = rejected.Diagnostics
 			}
@@ -266,7 +301,7 @@ func (a *App) removeHerdrSidebar(cmd *cobra.Command) error {
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 		return err
 	}
-	_ = a.NewHerdr().ReloadConfig(cmd.Context())
+	_ = plugins(a.NewHerdr()).ReloadConfig(cmd.Context())
 	a.printf("✓ Removed tkt's sidebar lines from %s\n", path)
 	return nil
 }
@@ -336,7 +371,7 @@ func (a *App) addHerdrKeys(cmd *cobra.Command, yes bool) error {
 	for _, d := range dropped {
 		a.printf("✓ Moved %s off %s\n", d.Description, d.Key)
 	}
-	if err := a.NewHerdr().ReloadConfig(cmd.Context()); err != nil {
+	if err := plugins(a.NewHerdr()).ReloadConfig(cmd.Context()); err != nil {
 		a.printf("! keybindings saved; reload Herdr's config to use them (%v)\n", err)
 	}
 	if len(plan.Add) > 0 {
@@ -358,7 +393,7 @@ func (a *App) removeHerdrKeys(cmd *cobra.Command) error {
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 		return err
 	}
-	_ = a.NewHerdr().ReloadConfig(cmd.Context())
+	_ = plugins(a.NewHerdr()).ReloadConfig(cmd.Context())
 	a.printf("✓ Removed tkt's keybindings from %s\n", path)
 	return nil
 }
@@ -382,7 +417,10 @@ func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) erro
 				ws.ID = ag.WorkspaceID
 				a.printf("Focusing the agent of %s\n", plan.Key)
 			}
-			if err := h.FocusWorkspace(ctx, ws.ID); err != nil {
+			if err := h.FocusWorkspace(ctx, ws.ID); errors.Is(err, herdrcore.ErrNoWindow) {
+				a.printf("! %v\n", err)
+				return nil
+			} else if err != nil {
 				return err
 			}
 			// The workspace alone may show another tab; the agent's pane brings its own tab forward.
@@ -418,9 +456,13 @@ func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) erro
 // handoff can close it without closing anything of the user's: beside a pane open at dir, else beside the pane Start
 // runs in, else in a workspace tkt opens next to dir. Never a workspace at dir: Herdr makes it the head of the
 // worktree's group and refuses to close it alone.
+// Herdr desktop nests a worktree's space under its repository's only while a space at the main checkout is open, so
+// there the agent opens in the space of a pane at dir, else in one tkt opens at dir with a shell first; the handoff
+// closes only the agent, and the repository's space stays.
 // The handoff is saved before the agent gets its prompt, as the worktree event may follow right after.
 func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, kind, dir, repo, label string, focus bool) error {
-	ho := handoff{Key: plan.Key, Summary: plan.Summary, Repo: repo, Clone: dir, Kind: kind}
+	_, desktop := h.(agentSpaces)
+	ho := handoff{Key: plan.Key, Summary: plan.Summary, Repo: repo, Clone: dir, Kind: kind, Desktop: desktop}
 	var ws string
 	splitBeside := func(pane, workspace string) bool {
 		split, err := h.SplitPane(ctx, pane, dir)
@@ -430,12 +472,18 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 		ho.Pane, ws = split.ID, workspace
 		return true
 	}
-	opened := false
-	if p, ok := paneAt(ctx, h, dir); ok {
+	opened, keep := false, ""
+	if desktop {
+		p, err := repoSpace(ctx, h, dir, focus)
+		if err != nil {
+			return err
+		}
+		ho.Pane, ws, keep, opened = p.ID, p.WorkspaceID, p.ID, true
+	} else if p, ok := paneAt(ctx, h, dir); ok {
 		opened = splitBeside(p.ID, p.WorkspaceID)
 	}
-	if caller := a.Env.Getenv("HERDR_PANE_ID"); !opened && caller != "" {
-		opened = splitBeside(caller, a.Env.Getenv("HERDR_WORKSPACE_ID"))
+	if caller, callerWS := a.callerPane(); !opened && caller != "" {
+		opened = splitBeside(caller, callerWS)
 	}
 	if !opened {
 		host, root, err := h.CreateWorkspace(ctx, filepath.Dir(dir), label, focus)
@@ -448,23 +496,37 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 		}
 		ho.Workspace, ho.Host = host.ID, root.ID
 	}
+	if focus {
+		if ws != "" {
+			a.noteWindow(h.FocusWorkspace(ctx, ws))
+		}
+		a.noteWindow(h.FocusPane(ctx, ho.Pane))
+	}
+	name, pane, err := a.startAgent(ctx, h, ho.Pane, kind)
+	if err != nil && !notReady(err) {
+		if keep == "" {
+			dropUnusedPane(ctx, h, ho)
+		}
+		return err
+	}
+	if keep != "" && pane == keep {
+		return fmt.Errorf("the %s setup agent started, but tkt could not find the setup agent's terminal; finish %s there and close it yourself", kind, plan.Key)
+	}
+	if pane != ho.Pane {
+		if ho.Pane != keep {
+			_ = h.ClosePane(ctx, ho.Pane)
+		}
+		ho.Pane = pane
+		if focus {
+			_ = h.FocusPane(ctx, pane)
+		}
+	}
 	where := "pane " + ho.Pane
 	switch {
 	case ho.Workspace != "":
 		where = fmt.Sprintf("workspace %s (%s)", label, ho.Workspace)
 	case ws != "":
 		where = "a pane beside workspace " + ws
-	}
-	if focus {
-		if ws != "" {
-			_ = h.FocusWorkspace(ctx, ws)
-		}
-		_ = h.FocusPane(ctx, ho.Pane)
-	}
-	name, err := a.startAgent(ctx, h, ho.Pane, kind)
-	if err != nil && !notReady(err) {
-		dropUnusedPane(ctx, h, ho)
-		return err
 	}
 	markAgent(ctx, h, ho.Pane, plan.Key)
 	ho.Agent, ho.At = name, a.Now()
@@ -473,14 +535,42 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 		return x.Key == ho.Key && strings.EqualFold(x.Repo, ho.Repo)
 	}), ho)
 	a.saveState(st)
-	return a.promptStarted(ctx, h, name, where, workspace.SetupPrompt(plan.Key, plan.Summary), err)
+	prompt := workspace.SetupPrompt(plan.Key, plan.Summary)
+	if _, ok := h.(agentSpaces); ok {
+		prompt = desktopSetupPrompt(plan.Key, plan.Summary)
+	}
+	return a.promptStarted(ctx, h, name, where, prompt, err)
+}
+
+// repoSpace is a pane in a space at the clone dir, else the shell of a space tkt opens there, unnamed so Herdr desktop
+// names it after the repository.
+func repoSpace(ctx context.Context, h HerdrAPI, dir string, focus bool) (herdrport.Pane, error) {
+	if panes, err := h.Panes(ctx); err == nil {
+		for _, p := range panes {
+			if p.WorkspaceID != "" && p.Cwd != "" && filepath.Clean(p.Cwd) == filepath.Clean(dir) {
+				return p, nil
+			}
+		}
+	}
+	ws, root, err := h.CreateWorkspace(ctx, dir, "", focus)
+	return herdrport.Pane{ID: root.ID, WorkspaceID: ws.ID, Cwd: dir}, err
+}
+
+// noteWindow tells the user, once, that tkt cannot reach the Herdr desktop window, as from another machine of its core
+// over SSH: spaces still open there, but tkt can neither bring them forward nor name them.
+func (a *App) noteWindow(err error) {
+	if errors.Is(err, herdrcore.ErrNoWindow) {
+		a.windowNoted.Do(func() {
+			a.printf("! tkt cannot reach the Herdr desktop window from this machine, so it opens spaces there without focusing or naming them (%v)\n", err)
+		})
+	}
 }
 
 // dropUnusedPane closes the split tkt opened for a setup agent that did not start, and the workspace it opened for
 // it, unless an agent came up there anyway, which the user may still want.
 func dropUnusedPane(ctx context.Context, h HerdrAPI, ho handoff) {
 	agents, err := h.Agents(ctx)
-	if err != nil || slices.ContainsFunc(agents, func(ag herdr.Agent) bool { return ag.PaneID == ho.Pane }) {
+	if err != nil || slices.ContainsFunc(agents, func(ag herdrport.Agent) bool { return ag.PaneID == ho.Pane }) {
 		return
 	}
 	if ho.Workspace != "" {
@@ -498,27 +588,28 @@ func dropUnusedPane(ctx context.Context, h HerdrAPI, ho handoff) {
 // It returns the pane the agent started in, empty when none did.
 func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, kind, dir, label, prompt string, focus bool) (string, error) {
 	if p, ok := idlePaneAt(ctx, h, dir); ok {
-		used := p.ID
-		name, err := a.startAgent(ctx, h, used, kind)
+		name, agent, err := a.startAgent(ctx, h, p.ID, kind)
 		if err != nil && !notReady(err) {
 			if split, serr := h.SplitPane(ctx, p.ID, dir); serr == nil {
-				used = split.ID
-				name, err = a.startAgent(ctx, h, used, kind)
+				name, agent, err = a.startAgent(ctx, h, split.ID, kind)
+				if err == nil || notReady(err) {
+					dropPlaceholder(ctx, h, split.ID, agent)
+				}
 			}
 		}
 		if err == nil || notReady(err) {
 			if focus {
 				_ = h.FocusWorkspace(ctx, p.WorkspaceID)
 			}
-			return used, a.promptStarted(ctx, h, name, "open workspace "+p.WorkspaceID, prompt, err)
+			return agent, a.promptStarted(ctx, h, name, "open workspace "+p.WorkspaceID, prompt, err)
 		}
 	}
 	ws, pane, err := h.CreateWorkspace(ctx, dir, label, focus)
 	if err != nil {
 		return "", err
 	}
-	name, err := a.startAgent(ctx, h, pane.ID, kind)
-	return pane.ID, a.promptStarted(ctx, h, name, fmt.Sprintf("workspace %s (%s)", label, ws.ID), prompt, err)
+	name, agent, err := a.startAgent(ctx, h, pane.ID, kind)
+	return agent, a.promptStarted(ctx, h, name, fmt.Sprintf("workspace %s (%s)", label, ws.ID), prompt, err)
 }
 
 // ticketToken is the pane value naming the ticket an agent works on, which tkt reports as it hands the agent a
@@ -534,9 +625,10 @@ func markAgent(ctx context.Context, h HerdrAPI, pane string, key ticket.Key) {
 	_ = h.ReportPaneTokens(ctx, pane, sidebarSource, map[string]*string{ticketToken: &k})
 }
 
-// startAgent returns the agent's name, which later calls target: Herdr may not resolve the pane id to it yet.
-func (a *App) startAgent(ctx context.Context, h HerdrAPI, paneID, kind string) (string, error) {
-	name := kind
+// startAgent returns the agent's name, which later calls target: Herdr may not resolve the pane id to it yet. It also
+// returns the pane the agent runs in, which is paneID unless the Herdr opened the agent a terminal of its own.
+func (a *App) startAgent(ctx context.Context, h HerdrAPI, paneID, kind string) (name, pane string, err error) {
+	name = kind
 	busy := 0
 	for n := 2; ; {
 		err := h.StartAgent(ctx, paneID, kind, name, []string{})
@@ -545,15 +637,58 @@ func (a *App) startAgent(ctx context.Context, h HerdrAPI, paneID, kind string) (
 		case paneBusy(err) && busy < 20:
 			busy++
 			if serr := a.Sleep(ctx, 500*time.Millisecond); serr != nil {
-				return name, err
+				return name, paneID, err
 			}
 		case err != nil && nameTaken(err) && n <= 9:
 			name = fmt.Sprintf("%s-%d", kind, n)
 			n++
 		default:
-			return name, err
+			return name, agentPane(ctx, h, paneID, name, err), err
 		}
 	}
+}
+
+// agentTerminals is a Herdr that opens each agent in a terminal of its own beside the pane it was given (Herdr
+// desktop), which stays an empty shell: marks, focus and later prompts need the agent's own terminal.
+type agentTerminals interface {
+	AgentPane(ctx context.Context, name string) (string, error)
+}
+
+func agentPane(ctx context.Context, h HerdrAPI, paneID, name string, startErr error) string {
+	t, ok := h.(agentTerminals)
+	if !ok || startErr != nil && !notReady(startErr) {
+		return paneID
+	}
+	if p, err := t.AgentPane(ctx, name); err == nil && p != "" {
+		return p
+	}
+	return paneID
+}
+
+// dropPlaceholder closes the pane tkt opened for an agent that the Herdr started in a terminal of its own instead.
+func dropPlaceholder(ctx context.Context, h HerdrAPI, placeholder, agent string) {
+	if agent != placeholder {
+		_ = h.ClosePane(ctx, placeholder)
+	}
+}
+
+// callerPane is the pane tkt runs in and its workspace, as the Herdr running it names them; Herdr desktop names no
+// workspace in its terminals' environment.
+func (a *App) callerPane() (pane, workspace string) {
+	if a.inDesktopTerminal() {
+		return a.Env.Getenv("HC_TERMINAL_ID"), ""
+	}
+	return a.Env.Getenv("HERDR_PANE_ID"), a.Env.Getenv("HERDR_WORKSPACE_ID")
+}
+
+// notify tells the user msg through Herdr, or prints it where Herdr cannot notify (Herdr desktop).
+func (a *App) notify(ctx context.Context, h HerdrAPI, msg string) error {
+	err := h.Notify(ctx, "tkt", msg)
+	if errors.Is(err, errors.ErrUnsupported) {
+		a.printf("%s\n", msg)
+		return nil
+	}
+	return err
 }
 
 // promptStarted sends the first prompt once the agent is ready. An agent showing a question at startup (such as
@@ -602,7 +737,7 @@ func (a *App) promptAgent(ctx context.Context, h HerdrAPI, agent, where, prompt 
 func (a *App) promptWhenNamed(ctx context.Context, h HerdrAPI, agent, prompt string) error {
 	var err error
 	for range 20 {
-		if err = h.Prompt(ctx, agent, prompt); err == nil || !strings.Contains(err.Error(), "not an active named agent") {
+		if err = h.Prompt(ctx, agent, prompt); !errors.Is(err, herdrport.ErrNotNamed) {
 			return err
 		}
 		if serr := a.Sleep(ctx, 500*time.Millisecond); serr != nil {
@@ -631,14 +766,14 @@ func (a *App) checkoutFree(ctx context.Context, dir string) bool {
 }
 
 // idlePaneAt finds a pane at dir in a workspace where no agent runs.
-func idlePaneAt(ctx context.Context, h HerdrAPI, dir string) (herdr.Pane, bool) {
+func idlePaneAt(ctx context.Context, h HerdrAPI, dir string) (herdrport.Pane, bool) {
 	panes, err := h.Panes(ctx)
 	if err != nil {
-		return herdr.Pane{}, false
+		return herdrport.Pane{}, false
 	}
 	agents, err := h.Agents(ctx)
 	if err != nil {
-		return herdr.Pane{}, false
+		return herdrport.Pane{}, false
 	}
 	busy := map[string]bool{}
 	for _, ag := range agents {
@@ -649,34 +784,42 @@ func idlePaneAt(ctx context.Context, h HerdrAPI, dir string) (herdr.Pane, bool) 
 			return p, true
 		}
 	}
-	return herdr.Pane{}, false
+	return herdrport.Pane{}, false
 }
 
 // paneAt is a pane open at dir, whether or not an agent runs there.
-func paneAt(ctx context.Context, h HerdrAPI, dir string) (herdr.Pane, bool) {
+func paneAt(ctx context.Context, h HerdrAPI, dir string) (herdrport.Pane, bool) {
 	panes, err := h.Panes(ctx)
 	if err != nil {
-		return herdr.Pane{}, false
+		return herdrport.Pane{}, false
 	}
 	for _, p := range panes {
 		if p.Cwd != "" && filepath.Clean(p.Cwd) == filepath.Clean(dir) {
 			return p, true
 		}
 	}
-	return herdr.Pane{}, false
+	return herdrport.Pane{}, false
 }
 
-func workspaceAt(ctx context.Context, h HerdrAPI, path string) (herdr.Workspace, bool) {
+func workspaceAt(ctx context.Context, h HerdrAPI, path string) (herdrport.Workspace, bool) {
 	all, err := h.Workspaces(ctx)
 	if err != nil {
-		return herdr.Workspace{}, false
+		return herdrport.Workspace{}, false
 	}
 	for _, ws := range all {
-		if ws.Worktree != nil && filepath.Clean(ws.Worktree.CheckoutPath) == filepath.Clean(path) {
+		if d := workspaceDir(ws); d != "" && filepath.Clean(d) == filepath.Clean(path) {
 			return ws, true
 		}
 	}
-	return herdr.Workspace{}, false
+	return herdrport.Workspace{}, false
+}
+
+// workspaceDir is where a workspace works: its worktree, else, on a Herdr that knows no worktrees, its folder.
+func workspaceDir(ws herdrport.Workspace) string {
+	if ws.Worktree != nil {
+		return ws.Worktree.CheckoutPath
+	}
+	return ws.Folder
 }
 
 // workWithAgent picks the one worktree an agent works in; with none or several there is nothing to tell.
@@ -695,10 +838,10 @@ func workWithAgent(ctx context.Context, h HerdrAPI, ws []workspace.Work) (worksp
 
 // agentAt finds an agent working inside path, which Herdr reports as a worktree only when it created that
 // worktree itself; an agent without a folder is placed by its pane's.
-func agentAt(ctx context.Context, h HerdrAPI, path string) (herdr.Agent, bool) {
+func agentAt(ctx context.Context, h HerdrAPI, path string) (herdrport.Agent, bool) {
 	agents, err := h.Agents(ctx)
 	if err != nil {
-		return herdr.Agent{}, false
+		return herdrport.Agent{}, false
 	}
 	var cwd map[string]string
 	for _, ag := range agents {
@@ -718,7 +861,7 @@ func agentAt(ctx context.Context, h HerdrAPI, path string) (herdr.Agent, bool) {
 			return ag, true
 		}
 	}
-	return herdr.Agent{}, false
+	return herdrport.Agent{}, false
 }
 
 func within(dir, root string) bool {
@@ -749,13 +892,13 @@ func (a *App) herdrOpenTicket(cmd *cobra.Command) error {
 	}
 	for _, dir := range dirs {
 		if key, ok := a.keyAt(ctx, c, dir); ok {
-			return h.OpenPluginPane(ctx, herdr.PaneOpen{
+			return plugins(h).OpenPluginPane(ctx, herdr.PaneOpen{
 				PluginID: a.pluginID(), Entrypoint: "ticket", Cwd: dir,
 				Env: map[string]string{"TKT_KEY": string(key)}, WorkspaceID: id, TargetPaneID: targetPane(ctx, h, id),
 			})
 		}
 	}
-	return h.Notify(ctx, "tkt", "This workspace's branch carries no ticket key")
+	return a.notify(ctx, h, "This workspace's branch carries no ticket key")
 }
 
 // targetPane picks the pane a split opens beside in a workspace: its focused pane, else its first.
@@ -849,7 +992,7 @@ func (a *App) herdrOpen(cmd *cobra.Command, args []string) error {
 	snap, _, _ := a.cache().Load()
 	key, ok := keyFromURL(u, snap)
 	if !ok {
-		return h.Notify(ctx, "tkt", "No ticket found for "+u)
+		return a.notify(ctx, h, "No ticket found for "+u)
 	}
 	if all, err := a.allWork(ctx, c); err == nil {
 		for _, w := range workspace.For(all, key) {
@@ -861,7 +1004,7 @@ func (a *App) herdrOpen(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
-	return h.OpenPluginPane(ctx, herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "ticket-popup", Env: map[string]string{"TKT_KEY": string(key)}})
+	return plugins(h).OpenPluginPane(ctx, herdr.PaneOpen{PluginID: a.pluginID(), Entrypoint: "ticket-popup", Env: map[string]string{"TKT_KEY": string(key)}})
 }
 
 func (a *App) herdrTicketPopup(cmd *cobra.Command) error {
@@ -917,7 +1060,10 @@ func (a *App) herdrSidebar(cmd *cobra.Command, cachedOnly bool) error {
 // updateSidebar returns the agent status shown for every workspace that holds a ticket and, when report
 // is set, labels that workspace in the sidebar.
 func (a *App) updateSidebar(ctx context.Context, c *config.Config, snap board.Snapshot, report bool) (int, map[string]string, error) {
-	h := a.NewHerdr()
+	return a.updateSidebarOn(ctx, a.NewHerdr(), c, snap, report)
+}
+
+func (a *App) updateSidebarOn(ctx context.Context, h HerdrAPI, c *config.Config, snap board.Snapshot, report bool) (int, map[string]string, error) {
 	all, err := h.Workspaces(ctx)
 	if err != nil {
 		return 0, nil, err
@@ -1038,7 +1184,7 @@ func (a *App) herdrOnWorktree(cmd *cobra.Command) error {
 		return err
 	}
 	a.printf("✓ %s ← %s (%s)\n", key, co.branch, co.repo)
-	if ho, ok := a.takeHandoff(key, co.repo); ok {
+	if ho, ok := a.takeHandoff(key, co.repo, false); ok {
 		a.handOff(cmd.Context(), ho, eventWorkspace(a.Env.Getenv("HERDR_PLUGIN_EVENT_JSON")))
 	}
 	if snap, ok, _ := a.cache().Load(); ok {
@@ -1060,7 +1206,7 @@ func (a *App) agentStatesQuietly(ctx context.Context, c *config.Config, snap boa
 }
 
 func (a *App) readSidebarQuietly(ctx context.Context, c *config.Config, snap board.Snapshot, report bool) map[string]string {
-	if a.Env.Getenv("HERDR_ENV") != "1" || a.NewHerdr == nil {
+	if !a.inHerdr() || a.NewHerdr == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -1088,19 +1234,17 @@ func sidebarTokens(t ticket.Ticket) map[string]*string {
 }
 
 func nameTaken(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "agent_name_taken") || strings.Contains(msg, "is already used")
+	return errors.Is(err, herdrport.ErrNameTaken)
 }
 
-// notReady means Herdr started the agent but it is showing a question, such as Claude Code's folder trust prompt.
 func paneBusy(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "agent_pane_busy")
+	return errors.Is(err, herdrport.ErrPaneBusy)
 }
 
 func notReady(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "agent_not_ready")
+	return errors.Is(err, herdrport.ErrNotReady)
 }
 
 func blocked(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "agent_blocked")
+	return errors.Is(err, herdrport.ErrBlocked)
 }

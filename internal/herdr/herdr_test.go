@@ -11,6 +11,7 @@ import (
 
 	"github.com/pavp/tkt/internal/herdr"
 	"github.com/pavp/tkt/internal/herdr/herdrtest"
+	"github.com/pavp/tkt/internal/herdrport"
 )
 
 func TestSocketPath(t *testing.T) {
@@ -140,6 +141,34 @@ func TestErrors(t *testing.T) {
 	}
 }
 
+func TestErrorsMatchThePortErrors(t *testing.T) {
+	cases := []struct {
+		name, code, msg string
+		want            error
+	}{
+		{"name taken by code", "agent_name_taken", "name in use", herdrport.ErrNameTaken},
+		{"name taken by message", "bad_request", "name claude is already used", herdrport.ErrNameTaken},
+		{"pane busy", "agent_pane_busy", "pane is busy", herdrport.ErrPaneBusy},
+		{"agent not ready", "agent_not_ready", "agent shows a question", herdrport.ErrNotReady},
+		{"agent blocked", "agent_blocked", "agent is blocked", herdrport.ErrBlocked},
+		{"agent not named yet", "bad_request", "claude is not an active named agent", herdrport.ErrNotNamed},
+	}
+	all := []error{herdrport.ErrNameTaken, herdrport.ErrPaneBusy, herdrport.ErrNotReady, herdrport.ErrBlocked, herdrport.ErrNotNamed}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := herdrtest.Start(t)
+			f.Errors["agent.start"] = tc.msg
+			f.Codes = map[string]string{"agent.start": tc.code}
+			err := herdr.New(f.Path).StartAgent(context.Background(), "p", "claude", "claude", nil)
+			for _, e := range all {
+				if errors.Is(err, e) != (e == tc.want) {
+					t.Errorf("errors.Is(%v, %v) = %v", err, e, !(e == tc.want))
+				}
+			}
+		})
+	}
+}
+
 func TestLargeResponse(t *testing.T) {
 	f := herdrtest.Start(t)
 	big := strings.Repeat("x", 200_000)
@@ -154,10 +183,10 @@ func TestWatchSubscribesAndDeliversEvents(t *testing.T) {
 	f := herdrtest.Start(t)
 	c := herdr.New(f.Path)
 	ctx, cancel := context.WithCancel(context.Background())
-	got := make(chan herdr.Event, 4)
+	got := make(chan herdrport.Event, 4)
 	done := make(chan error, 1)
-	subs := []herdr.Subscription{{Type: "pane.created"}, {Type: "pane.agent_status_changed", PaneID: "w1:p1"}}
-	go func() { done <- c.Watch(ctx, subs, func(e herdr.Event) { got <- e }) }()
+	subs := []herdrport.Subscription{{Type: "pane.created"}, {Type: "pane.agent_status_changed", PaneID: "w1:p1"}}
+	go func() { done <- c.Watch(ctx, subs, func(e herdrport.Event) { got <- e }) }()
 	deadline := time.Now().Add(2 * time.Second)
 	for f.Watchers() == 0 {
 		if time.Now().After(deadline) {
@@ -190,7 +219,7 @@ func TestWatchSubscribesAndDeliversEvents(t *testing.T) {
 func TestWatchReportsARefusedSubscription(t *testing.T) {
 	f := herdrtest.Start(t)
 	f.Errors["events.subscribe"] = "missing field pane_id"
-	err := herdr.New(f.Path).Watch(context.Background(), []herdr.Subscription{{Type: "pane.agent_status_changed"}}, func(herdr.Event) {})
+	err := herdr.New(f.Path).Watch(context.Background(), []herdrport.Subscription{{Type: "pane.agent_status_changed"}}, func(herdrport.Event) {})
 	if err == nil || !strings.Contains(err.Error(), "missing field pane_id") {
 		t.Errorf("err = %v", err)
 	}
@@ -200,7 +229,7 @@ func TestWatchEndsWhenHerdrCloses(t *testing.T) {
 	f := herdrtest.Start(t)
 	done := make(chan error, 1)
 	go func() {
-		done <- herdr.New(f.Path).Watch(context.Background(), []herdr.Subscription{{Type: "pane.created"}}, func(herdr.Event) {})
+		done <- herdr.New(f.Path).Watch(context.Background(), []herdrport.Subscription{{Type: "pane.created"}}, func(herdrport.Event) {})
 	}()
 	for f.Watchers() == 0 {
 		time.Sleep(5 * time.Millisecond)
@@ -213,5 +242,24 @@ func TestWatchEndsWhenHerdrCloses(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("watch kept running")
+	}
+}
+
+func TestReachable(t *testing.T) {
+	f := herdrtest.Start(t)
+	tests := []struct {
+		name   string
+		socket string
+		want   bool
+	}{
+		{"server listening", f.Path, true},
+		{"no socket", filepath.Join(t.TempDir(), "herdr.sock"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := herdr.Reachable(tt.socket); got != tt.want {
+				t.Errorf("Reachable = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

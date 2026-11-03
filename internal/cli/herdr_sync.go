@@ -47,7 +47,7 @@ func (a *App) syncHerdrPlugin(ctx context.Context) {
 			logf("%v", err)
 			return
 		}
-		if err := a.NewHerdr().LinkPlugin(ctx, dir); err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
+		if err := a.classicPlugins().LinkPlugin(ctx, dir); err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
 			logf("link: %v", err)
 		}
 	}
@@ -98,7 +98,7 @@ func (a *App) syncHerdrKeys(ctx context.Context) error {
 	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
 		return err
 	}
-	return a.NewHerdr().ReloadConfig(ctx)
+	return a.classicPlugins().ReloadConfig(ctx)
 }
 
 func (a *App) herdrNoticeFile() string  { return filepath.Join(a.Env.DataDir(), "herdr-notice") }
@@ -130,4 +130,12 @@ func (a *App) takeHerdrNotice() string {
 	}
 	_ = os.Remove(a.herdrNoticeFile())
 	return string(b)
+}
+
+// classicPlugins reaches Herdr's plugin system even when Herdr desktop runs too: only Herdr has one.
+func (a *App) classicPlugins() HerdrPlugins {
+	if a.herdrOf != nil {
+		return plugins(a.herdrOf(herdrClassic))
+	}
+	return plugins(a.NewHerdr())
 }

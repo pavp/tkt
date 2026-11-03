@@ -14,7 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/pavp/tkt/internal/config"
-	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/herdrport"
 	"github.com/pavp/tkt/internal/repos"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
@@ -195,7 +195,7 @@ func (e noClone) Error() string { return e.repo + " is not cloned locally" }
 // forward, as Start's "Go to the agent in Herdr" does.
 func bringForward(ctx context.Context, h HerdrAPI, pane string) {
 	if panes, err := h.Panes(ctx); err == nil {
-		if i := slices.IndexFunc(panes, func(p herdr.Pane) bool { return p.ID == pane }); i >= 0 {
+		if i := slices.IndexFunc(panes, func(p herdrport.Pane) bool { return p.ID == pane }); i >= 0 {
 			_ = h.FocusWorkspace(ctx, panes[i].WorkspaceID)
 		}
 	}
@@ -308,11 +308,11 @@ func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, kind, dir, label, 
 	if err != nil {
 		return "", err
 	}
-	pane := ""
+	pane, split := "", false
 	if panes, err := h.Panes(ctx); err == nil {
-		if i := slices.IndexFunc(panes, func(p herdr.Pane) bool { return same(p.Cwd) }); i >= 0 {
-			if split, err := h.SplitPane(ctx, panes[i].ID, dir); err == nil {
-				pane = split.ID
+		if i := slices.IndexFunc(panes, func(p herdrport.Pane) bool { return same(p.Cwd) }); i >= 0 {
+			if s, err := h.SplitPane(ctx, panes[i].ID, dir); err == nil {
+				pane, split = s.ID, true
 			}
 		}
 	}
@@ -323,14 +323,17 @@ func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, kind, dir, label, 
 		}
 		pane = root.ID
 	}
-	name, err := a.startAgent(ctx, h, pane, kind)
+	name, agent, err := a.startAgent(ctx, h, pane, kind)
 	if notReady(err) {
 		err = h.WaitAgent(ctx, name, "idle", 4*time.Minute)
 	}
 	if err != nil {
 		return "", err
 	}
-	return pane, a.promptWhenNamed(ctx, h, name, prompt)
+	if split {
+		dropPlaceholder(ctx, h, pane, agent)
+	}
+	return agent, a.promptWhenNamed(ctx, h, name, prompt)
 }
 
 // reviewPrompt asks an agent to review a pull request with its own tools and to keep its findings to itself: what
