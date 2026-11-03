@@ -415,7 +415,10 @@ func (a *App) herdrStart(cmd *cobra.Command, args []string, opts startOpts) erro
 				ws.ID = ag.WorkspaceID
 				a.printf("Focusing the agent of %s\n", plan.Key)
 			}
-			if err := h.FocusWorkspace(ctx, ws.ID); err != nil {
+			if err := h.FocusWorkspace(ctx, ws.ID); errors.Is(err, herdrcore.ErrNoWindow) {
+				a.printf("! %v\n", err)
+				return nil
+			} else if err != nil {
 				return err
 			}
 			// The workspace alone may show another tab; the agent's pane brings its own tab forward.
@@ -467,8 +470,8 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 	if p, ok := paneAt(ctx, h, dir); ok {
 		opened = splitBeside(p.ID, p.WorkspaceID)
 	}
-	if caller := a.Env.Getenv("HERDR_PANE_ID"); !opened && caller != "" {
-		opened = splitBeside(caller, a.Env.Getenv("HERDR_WORKSPACE_ID"))
+	if caller, callerWS := a.callerPane(); !opened && caller != "" {
+		opened = splitBeside(caller, callerWS)
 	}
 	if !opened {
 		host, root, err := h.CreateWorkspace(ctx, filepath.Dir(dir), label, focus)
@@ -481,23 +484,30 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 		}
 		ho.Workspace, ho.Host = host.ID, root.ID
 	}
-	where := "pane " + ho.Pane
-	switch {
-	case ho.Workspace != "":
-		where = fmt.Sprintf("workspace %s (%s)", label, ho.Workspace)
-	case ws != "":
-		where = "a pane beside workspace " + ws
-	}
 	if focus {
 		if ws != "" {
 			_ = h.FocusWorkspace(ctx, ws)
 		}
 		_ = h.FocusPane(ctx, ho.Pane)
 	}
-	name, err := a.startAgent(ctx, h, ho.Pane, kind)
+	name, pane, err := a.startAgent(ctx, h, ho.Pane, kind)
 	if err != nil && !notReady(err) {
 		dropUnusedPane(ctx, h, ho)
 		return err
+	}
+	if pane != ho.Pane {
+		_ = h.ClosePane(ctx, ho.Pane)
+		ho.Pane = pane
+		if focus {
+			_ = h.FocusPane(ctx, pane)
+		}
+	}
+	where := "pane " + ho.Pane
+	switch {
+	case ho.Workspace != "":
+		where = fmt.Sprintf("workspace %s (%s)", label, ho.Workspace)
+	case ws != "":
+		where = "a pane beside workspace " + ws
 	}
 	markAgent(ctx, h, ho.Pane, plan.Key)
 	ho.Agent, ho.At = name, a.Now()
@@ -531,27 +541,28 @@ func dropUnusedPane(ctx context.Context, h HerdrAPI, ho handoff) {
 // It returns the pane the agent started in, empty when none did.
 func (a *App) startInWorkspace(ctx context.Context, h HerdrAPI, kind, dir, label, prompt string, focus bool) (string, error) {
 	if p, ok := idlePaneAt(ctx, h, dir); ok {
-		used := p.ID
-		name, err := a.startAgent(ctx, h, used, kind)
+		name, agent, err := a.startAgent(ctx, h, p.ID, kind)
 		if err != nil && !notReady(err) {
 			if split, serr := h.SplitPane(ctx, p.ID, dir); serr == nil {
-				used = split.ID
-				name, err = a.startAgent(ctx, h, used, kind)
+				name, agent, err = a.startAgent(ctx, h, split.ID, kind)
+				if err == nil || notReady(err) {
+					dropPlaceholder(ctx, h, split.ID, agent)
+				}
 			}
 		}
 		if err == nil || notReady(err) {
 			if focus {
 				_ = h.FocusWorkspace(ctx, p.WorkspaceID)
 			}
-			return used, a.promptStarted(ctx, h, name, "open workspace "+p.WorkspaceID, prompt, err)
+			return agent, a.promptStarted(ctx, h, name, "open workspace "+p.WorkspaceID, prompt, err)
 		}
 	}
 	ws, pane, err := h.CreateWorkspace(ctx, dir, label, focus)
 	if err != nil {
 		return "", err
 	}
-	name, err := a.startAgent(ctx, h, pane.ID, kind)
-	return pane.ID, a.promptStarted(ctx, h, name, fmt.Sprintf("workspace %s (%s)", label, ws.ID), prompt, err)
+	name, agent, err := a.startAgent(ctx, h, pane.ID, kind)
+	return agent, a.promptStarted(ctx, h, name, fmt.Sprintf("workspace %s (%s)", label, ws.ID), prompt, err)
 }
 
 // ticketToken is the pane value naming the ticket an agent works on, which tkt reports as it hands the agent a
@@ -567,9 +578,10 @@ func markAgent(ctx context.Context, h HerdrAPI, pane string, key ticket.Key) {
 	_ = h.ReportPaneTokens(ctx, pane, sidebarSource, map[string]*string{ticketToken: &k})
 }
 
-// startAgent returns the agent's name, which later calls target: Herdr may not resolve the pane id to it yet.
-func (a *App) startAgent(ctx context.Context, h HerdrAPI, paneID, kind string) (string, error) {
-	name := kind
+// startAgent returns the agent's name, which later calls target: Herdr may not resolve the pane id to it yet. It also
+// returns the pane the agent runs in, which is paneID unless the Herdr opened the agent a terminal of its own.
+func (a *App) startAgent(ctx context.Context, h HerdrAPI, paneID, kind string) (name, pane string, err error) {
+	name = kind
 	busy := 0
 	for n := 2; ; {
 		err := h.StartAgent(ctx, paneID, kind, name, []string{})
@@ -578,15 +590,58 @@ func (a *App) startAgent(ctx context.Context, h HerdrAPI, paneID, kind string) (
 		case paneBusy(err) && busy < 20:
 			busy++
 			if serr := a.Sleep(ctx, 500*time.Millisecond); serr != nil {
-				return name, err
+				return name, paneID, err
 			}
 		case err != nil && nameTaken(err) && n <= 9:
 			name = fmt.Sprintf("%s-%d", kind, n)
 			n++
 		default:
-			return name, err
+			return name, agentPane(ctx, h, paneID, name, err), err
 		}
 	}
+}
+
+// agentTerminals is a Herdr that opens each agent in a terminal of its own beside the pane it was given (Herdr
+// desktop), which stays an empty shell: marks, focus and later prompts need the agent's own terminal.
+type agentTerminals interface {
+	AgentPane(ctx context.Context, name string) (string, error)
+}
+
+func agentPane(ctx context.Context, h HerdrAPI, paneID, name string, startErr error) string {
+	t, ok := h.(agentTerminals)
+	if !ok || startErr != nil && !notReady(startErr) {
+		return paneID
+	}
+	if p, err := t.AgentPane(ctx, name); err == nil && p != "" {
+		return p
+	}
+	return paneID
+}
+
+// dropPlaceholder closes the pane tkt opened for an agent that the Herdr started in a terminal of its own instead.
+func dropPlaceholder(ctx context.Context, h HerdrAPI, placeholder, agent string) {
+	if agent != placeholder {
+		_ = h.ClosePane(ctx, placeholder)
+	}
+}
+
+// callerPane is the pane tkt runs in and its workspace, as the Herdr running it names them; Herdr desktop names no
+// workspace in its terminals' environment.
+func (a *App) callerPane() (pane, workspace string) {
+	if a.inDesktopTerminal() {
+		return a.Env.Getenv("HC_TERMINAL_ID"), ""
+	}
+	return a.Env.Getenv("HERDR_PANE_ID"), a.Env.Getenv("HERDR_WORKSPACE_ID")
+}
+
+// notify tells the user msg through Herdr, or prints it where Herdr cannot notify (Herdr desktop).
+func (a *App) notify(ctx context.Context, h HerdrAPI, msg string) error {
+	err := h.Notify(ctx, "tkt", msg)
+	if errors.Is(err, errors.ErrUnsupported) {
+		a.printf("%s\n", msg)
+		return nil
+	}
+	return err
 }
 
 // promptStarted sends the first prompt once the agent is ready. An agent showing a question at startup (such as
@@ -705,11 +760,19 @@ func workspaceAt(ctx context.Context, h HerdrAPI, path string) (herdrport.Worksp
 		return herdrport.Workspace{}, false
 	}
 	for _, ws := range all {
-		if ws.Worktree != nil && filepath.Clean(ws.Worktree.CheckoutPath) == filepath.Clean(path) {
+		if d := workspaceDir(ws); d != "" && filepath.Clean(d) == filepath.Clean(path) {
 			return ws, true
 		}
 	}
 	return herdrport.Workspace{}, false
+}
+
+// workspaceDir is where a workspace works: its worktree, else, on a Herdr that knows no worktrees, its folder.
+func workspaceDir(ws herdrport.Workspace) string {
+	if ws.Worktree != nil {
+		return ws.Worktree.CheckoutPath
+	}
+	return ws.Folder
 }
 
 // workWithAgent picks the one worktree an agent works in; with none or several there is nothing to tell.
@@ -788,7 +851,7 @@ func (a *App) herdrOpenTicket(cmd *cobra.Command) error {
 			})
 		}
 	}
-	return h.Notify(ctx, "tkt", "This workspace's branch carries no ticket key")
+	return a.notify(ctx, h, "This workspace's branch carries no ticket key")
 }
 
 // targetPane picks the pane a split opens beside in a workspace: its focused pane, else its first.
@@ -882,7 +945,7 @@ func (a *App) herdrOpen(cmd *cobra.Command, args []string) error {
 	snap, _, _ := a.cache().Load()
 	key, ok := keyFromURL(u, snap)
 	if !ok {
-		return h.Notify(ctx, "tkt", "No ticket found for "+u)
+		return a.notify(ctx, h, "No ticket found for "+u)
 	}
 	if all, err := a.allWork(ctx, c); err == nil {
 		for _, w := range workspace.For(all, key) {

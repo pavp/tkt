@@ -29,6 +29,8 @@ type Workspace struct {
 	Label    string
 	Tokens   map[string]string
 	Worktree *Worktree
+	// Folder is where the workspace's terminals start, for a Herdr that knows no worktrees (Herdr desktop).
+	Folder string
 }
 
 type Pane struct {

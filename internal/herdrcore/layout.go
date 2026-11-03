@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -27,7 +28,12 @@ type AppError struct {
 	Message string
 }
 
-func (e *AppError) Error() string { return "herdr-app " + e.Command + ": " + e.Message }
+func (e *AppError) Error() string {
+	if e.Is(ErrNoWindow) {
+		return ErrNoWindow.Error() + " (herdr-app " + e.Command + ": " + e.Message + ")"
+	}
+	return "herdr-app " + e.Command + ": " + e.Message
+}
 
 func (e *AppError) Is(target error) bool {
 	return target == ErrNoWindow && strings.Contains(e.Message, "no Herdr window")
@@ -90,11 +96,54 @@ type space struct {
 	Name   string `json:"name"`
 	Folder string `json:"folder"`
 	Tabs   []struct {
-		Terminals []struct {
-			Terminal string `json:"terminal"`
-			Pane     string `json:"pane"`
-		} `json:"terminals"`
+		Terminals []shown `json:"terminals"`
 	} `json:"tabs"`
+}
+
+// shown is a terminal the window shows, and the pane it shows it in.
+type shown struct {
+	Terminal string `json:"terminal"`
+	Pane     string `json:"pane"`
+}
+
+func (s space) shown() []shown {
+	var out []shown
+	for _, tab := range s.Tabs {
+		out = append(out, tab.Terminals...)
+	}
+	return out
+}
+
+// shownWhere finds the first terminal in ss that match accepts.
+func shownWhere(ss []space, match func(shown) bool) (shown, bool) {
+	for _, s := range ss {
+		for _, t := range s.shown() {
+			if match(t) {
+				return t, true
+			}
+		}
+	}
+	return shown{}, false
+}
+
+// focusedTerminal is the terminal in the window's focused pane; empty when the window cannot tell, as when closed.
+func (c *Client) focusedTerminal(ctx context.Context) string {
+	if c.app == nil {
+		return ""
+	}
+	out, err := c.appRun(ctx, "status")
+	var st struct {
+		FocusedPane string `json:"focused_pane"`
+	}
+	if err != nil || json.Unmarshal(out, &st) != nil || st.FocusedPane == "" {
+		return ""
+	}
+	ss, err := c.spaces(ctx)
+	if err != nil {
+		return ""
+	}
+	t, _ := shownWhere(ss, func(t shown) bool { return t.Pane == st.FocusedPane })
+	return t.Terminal
 }
 
 func (c *Client) spaces(ctx context.Context) ([]space, error) {
@@ -120,7 +169,7 @@ func (c *Client) Workspaces(ctx context.Context) ([]herdrport.Workspace, error) 
 	}
 	out := make([]herdrport.Workspace, len(ss))
 	for i, s := range ss {
-		out[i] = herdrport.Workspace{ID: s.ID, Label: cmp.Or(s.Name, filepath.Base(s.Folder))}
+		out[i] = herdrport.Workspace{ID: s.ID, Label: cmp.Or(s.Name, filepath.Base(s.Folder)), Folder: s.Folder}
 	}
 	return out, nil
 }
@@ -140,8 +189,8 @@ func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string, _ bool)
 			return herdrport.Workspace{}, herdrport.Pane{}, err
 		}
 		for _, s := range ss {
-			if s.ID == r.Space && len(s.Tabs) > 0 && len(s.Tabs[0].Terminals) > 0 {
-				r.Terminal = s.Tabs[0].Terminals[0].Terminal
+			if t := s.shown(); s.ID == r.Space && len(t) > 0 {
+				r.Terminal = t[0].Terminal
 			}
 		}
 	}
@@ -182,28 +231,50 @@ func (c *Client) SplitPane(ctx context.Context, paneID, cwd string) (herdrport.P
 	return herdrport.Pane{ID: r.Terminal, WorkspaceID: t.Space, Cwd: cwd}, nil
 }
 
-// ClosePane closes the pane showing terminal paneID, which ends it.
+// ClosePane closes the pane showing terminal paneID, which ends it, and removes the terminal from hc.
 func (c *Client) ClosePane(ctx context.Context, paneID string) error {
 	ss, err := c.spaces(ctx)
 	if err != nil {
 		return err
 	}
-	for _, s := range ss {
-		for _, tab := range s.Tabs {
-			for _, t := range tab.Terminals {
-				if t.Terminal == paneID {
-					_, err := c.do(ctx, "pane.close", map[string]any{"pane": t.Pane})
-					return err
-				}
-			}
-		}
+	t, ok := shownWhere(ss, func(t shown) bool { return t.Terminal == paneID })
+	if !ok {
+		return fmt.Errorf("%s is not shown in the window: %w", paneID, ErrNotFound)
 	}
-	return fmt.Errorf("%s is not shown in the window: %w", paneID, ErrNotFound)
+	if _, err := c.do(ctx, "pane.close", map[string]any{"pane": t.Pane}); err != nil {
+		return err
+	}
+	c.remove(ctx, paneID)
+	return nil
 }
 
+// CloseWorkspace closes the space, which ends its terminals, and removes them from hc.
 func (c *Client) CloseWorkspace(ctx context.Context, id string) error {
-	_, err := c.do(ctx, "space.close", map[string]any{"id": id, "confirmed": true})
-	return err
+	ss, err := c.spaces(ctx)
+	if err != nil {
+		return err
+	}
+	var ended []shown
+	if i := slices.IndexFunc(ss, func(s space) bool { return s.ID == id }); i >= 0 {
+		ended = ss[i].shown()
+	}
+	if _, err := c.do(ctx, "space.close", map[string]any{"id": id, "confirmed": true}); err != nil {
+		return err
+	}
+	for _, t := range ended {
+		c.remove(ctx, t.Terminal)
+	}
+	return nil
+}
+
+// remove deletes a terminal the window closed, which hc otherwise keeps listed as finished. rm takes only
+// finished terminals, so one still ending is ended first. It is best effort: the pane is already gone.
+func (c *Client) remove(ctx context.Context, address string) {
+	if _, err := c.run(ctx, nil, "rm", "--json", address); err == nil || errors.Is(err, ErrNotFound) {
+		return
+	}
+	_, _ = c.run(ctx, nil, "kill", "--json", address)
+	_, _ = c.run(ctx, nil, "rm", "--json", address)
 }
 
 // ReportWorkspaceTokens does nothing: a space carries no metadata and the desktop has no sidebar rows that

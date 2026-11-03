@@ -24,13 +24,16 @@ type Terminal struct {
 	Tab     string
 	Agent   string
 	Status  string
-	Labels  map[string]string
+	// State is live or finished; hc keeps a finished terminal until it is removed.
+	State  string
+	Labels map[string]string
 }
 
 type terminal struct {
 	Address string            `json:"address"`
 	Name    *string           `json:"name"`
 	Cwd     string            `json:"cwd"`
+	State   string            `json:"state"`
 	Labels  map[string]string `json:"labels"`
 	Status  *struct {
 		App   string `json:"app"`
@@ -39,7 +42,7 @@ type terminal struct {
 }
 
 func (t terminal) port() Terminal {
-	p := Terminal{Address: t.Address, Cwd: t.Cwd, Space: t.Labels[labelSpace], Tab: t.Labels[labelTab], Labels: t.Labels}
+	p := Terminal{Address: t.Address, Cwd: t.Cwd, State: t.State, Space: t.Labels[labelSpace], Tab: t.Labels[labelTab], Labels: t.Labels}
 	if t.Name != nil {
 		p.Name = *t.Name
 	}
@@ -69,9 +72,12 @@ func (c *Client) Panes(ctx context.Context) ([]herdrport.Pane, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]herdrport.Pane, len(ts))
-	for i, t := range ts {
-		out[i] = herdrport.Pane{ID: t.Address, WorkspaceID: t.Space, Cwd: t.Cwd}
+	focused := c.focusedTerminal(ctx)
+	out := make([]herdrport.Pane, 0, len(ts))
+	for _, t := range ts {
+		if t.State != "finished" {
+			out = append(out, herdrport.Pane{ID: t.Address, WorkspaceID: t.Space, Cwd: t.Cwd, Focused: focused != "" && t.Address == focused})
+		}
 	}
 	return out, nil
 }
@@ -84,7 +90,7 @@ func (c *Client) Agents(ctx context.Context) ([]herdrport.Agent, error) {
 	}
 	var out []herdrport.Agent
 	for _, t := range ts {
-		if t.Agent == "" {
+		if t.Agent == "" || t.State == "finished" {
 			continue
 		}
 		out = append(out, herdrport.Agent{PaneID: t.Address, WorkspaceID: t.Space, Agent: kindOf(t.Agent), Name: t.Name, Status: t.Status, Cwd: t.Cwd, Tokens: t.Labels})
