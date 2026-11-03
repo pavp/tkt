@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
 )
 
@@ -155,10 +156,8 @@ func (s *settingsView) rows() []settingsRow {
 		for ri, r := range sp.Repos {
 			out = append(out, settingsRow{kind: rowRepo, space: si, idx: ri, name: r.Name})
 		}
-		for _, name := range s.inferred[sp.Key] {
-			if !sp.Ignores(name) && !slices.ContainsFunc(sp.Repos, func(r config.Repo) bool { return strings.EqualFold(r.Name, name) }) {
-				out = append(out, settingsRow{kind: rowInferred, space: si, name: name})
-			}
+		for _, name := range board.InferredRepos(sp, s.inferred[sp.Key]) {
+			out = append(out, settingsRow{kind: rowInferred, space: si, name: name})
 		}
 		out = append(out, settingsRow{kind: rowAddRepo, space: si})
 	}

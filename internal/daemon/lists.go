@@ -71,6 +71,8 @@ type BacklogView struct {
 	LabelField   string           `json:"label_field,omitempty"`
 	Me           string           `json:"me,omitempty"`
 	Warnings     []string         `json:"warnings,omitempty"`
+	// NoTeamBoards says the backlog is empty because no team board is set, which the TUI tells apart too.
+	NoTeamBoards bool `json:"no_team_boards,omitempty"`
 }
 
 type BacklogSection struct {
@@ -162,7 +164,7 @@ func (s *Server) backlog(w http.ResponseWriter, r *http.Request) {
 	}
 	hidden, collapsed := setOf(state.HiddenBoards), setOf(lists.Collapsed)
 	view := BacklogView{FetchedAt: bl.FetchedAt, HiddenBoards: orNone(state.HiddenBoards), Merged: lists.BacklogMerged, Collapsed: orNone(lists.Collapsed),
-		Boards: []BoardFilter{}, Groups: []BacklogSection{}, LabelField: bl.LabelField, Me: bl.Me, Warnings: bl.Warnings}
+		Boards: []BoardFilter{}, Groups: []BacklogSection{}, LabelField: bl.LabelField, Me: bl.Me, Warnings: bl.Warnings, NoTeamBoards: bl.NoTeamBoards}
 	if err != nil {
 		view.Error = err.Error()
 	}

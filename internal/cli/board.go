@@ -163,8 +163,8 @@ func (b *boardActions) cfg() *config.Config {
 // Config returns the configuration as written on disk, with "~" unexpanded, so saving it keeps the
 // user's paths portable; the board itself runs on an expanded copy.
 func (b *boardActions) Config() config.Config {
-	if c, err := config.Load(b.a.ConfigPath()); err == nil {
-		return *c
+	if c, err := b.a.savedConfig(); err == nil {
+		return c
 	}
 	return b.cfg().Clone()
 }
@@ -235,11 +235,7 @@ func (b *boardActions) NativePicker() bool { return b.a.nativePicker() }
 
 func (b *boardActions) JiraBoards(space string) tea.Cmd {
 	return func() tea.Msg {
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.JiraBoardsListedMsg{Space: space, Err: err}
-		}
-		boards, err := b.a.teamBoardChoices(b.ctx, js, space)
+		boards, err := b.a.jiraBoards(b.ctx, b.cfg(), space)
 		return tui.JiraBoardsListedMsg{Space: space, Boards: boards, Err: err}
 	}
 }
@@ -295,16 +291,8 @@ func (b *boardActions) MoveToSprint(key ticket.Key, sprint int, name string) tea
 
 func (b *boardActions) JiraStatuses(space string) tea.Cmd {
 	return func() tea.Msg {
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.JiraStatusesListedMsg{Space: space, Err: err}
-		}
-		statuses, err := js.Statuses(b.ctx, space)
-		out := make([]tui.JiraStatus, len(statuses))
-		for i, st := range statuses {
-			out[i] = tui.JiraStatus{Name: st.Name, Category: st.Category}
-		}
-		return tui.JiraStatusesListedMsg{Space: space, Statuses: out, Err: err}
+		statuses, err := b.a.jiraStatuses(b.ctx, b.cfg(), space)
+		return tui.JiraStatusesListedMsg{Space: space, Statuses: statuses, Err: err}
 	}
 }
 
@@ -345,13 +333,7 @@ func (b *boardActions) SaveState(s tui.BoardState) tea.Cmd {
 
 func (b *boardActions) JiraFields() tea.Cmd {
 	return func() tea.Msg {
-		js, err := b.a.jiraClient(b.cfg())
-		if err != nil {
-			return tui.JiraFieldsListedMsg{Err: err}
-		}
-		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-		defer cancel()
-		names, err := js.FieldNames(ctx)
+		names, err := b.a.jiraFieldNames(b.ctx, b.cfg())
 		return tui.JiraFieldsListedMsg{Names: names, Err: err}
 	}
 }
@@ -384,8 +366,8 @@ func listDirs(dir string) (names, broken []string, err error) {
 
 func (b *boardActions) SaveConfig(c config.Config) tea.Cmd {
 	return func() tea.Msg {
-		c = c.Clone()
-		if err := config.Save(b.a.ConfigPath(), &c); err != nil {
+		c, err := b.a.saveConfig(c)
+		if err != nil {
 			return tui.SettingsSavedMsg{Err: err}
 		}
 		inUse := c.Clone()
