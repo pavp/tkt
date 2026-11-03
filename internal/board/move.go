@@ -93,8 +93,8 @@ func Moves(trs []Transition, url string) []Move {
 // required field left without one, which moving needs.
 func FormValues(fields []Field, chosen map[string]string) (values []Value, missing *Field) {
 	for _, f := range fields {
-		id, ok := chosen[f.ID]
-		if !ok {
+		id := chosen[f.ID]
+		if id == "" {
 			if f.Required {
 				return nil, &f
 			}
