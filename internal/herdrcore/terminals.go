@@ -76,7 +76,7 @@ func (c *Client) Panes(ctx context.Context) ([]herdrport.Pane, error) {
 	return out, nil
 }
 
-// Agents lists the terminals whose program reports a status; Tokens are the terminal's labels.
+// Agents lists the terminals whose program reports a status, by tkt's kind; Tokens are the terminal's labels.
 func (c *Client) Agents(ctx context.Context) ([]herdrport.Agent, error) {
 	ts, err := c.Terminals(ctx)
 	if err != nil {
@@ -87,7 +87,7 @@ func (c *Client) Agents(ctx context.Context) ([]herdrport.Agent, error) {
 		if t.Agent == "" {
 			continue
 		}
-		out = append(out, herdrport.Agent{PaneID: t.Address, WorkspaceID: t.Space, Agent: t.Agent, Name: t.Name, Status: t.Status, Cwd: t.Cwd, Tokens: t.Labels})
+		out = append(out, herdrport.Agent{PaneID: t.Address, WorkspaceID: t.Space, Agent: kindOf(t.Agent), Name: t.Name, Status: t.Status, Cwd: t.Cwd, Tokens: t.Labels})
 	}
 	return out, nil
 }
