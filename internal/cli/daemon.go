@@ -80,7 +80,8 @@ func (a *App) runDaemon(ctx context.Context) error {
 	}
 	s, err := daemon.New(daemon.Options{Dir: a.Env.DataDir(), Version: Version, Sync: a.daemonSync, Interval: syncEvery, Seed: seed, Detail: a.daemonDetail, State: a.boardViewState,
 		Lists: a.boardListState, Repos: a.daemonRepos, Backlog: a.daemonBacklog, StartChoices: a.daemonStartChoices, Start: a.daemonStart,
-		Transitions: a.daemonTransitions, Transition: a.daemonTransition, Users: a.daemonUsers, Assign: a.daemonAssign})
+		Transitions: a.daemonTransitions, Transition: a.daemonTransition, Users: a.daemonUsers, Assign: a.daemonAssign,
+		TaskAgents: a.daemonTaskAgents, Task: a.daemonTask})
 	if err != nil {
 		return err
 	}

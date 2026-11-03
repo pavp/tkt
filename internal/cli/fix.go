@@ -77,7 +77,7 @@ func (a *App) deliverFeedback(ctx context.Context, c *config.Config, key ticket.
 	if err != nil {
 		return "", "", err
 	}
-	if printOnly || !a.inHerdr() {
+	if _, ok := unattendedOf(ctx); printOnly || !a.inHerdr() && !ok {
 		return prompt, "", nil
 	}
 	pane, err = a.agentPaneFor(ctx, c, key)
@@ -85,7 +85,7 @@ func (a *App) deliverFeedback(ctx context.Context, c *config.Config, key ticket.
 		return "", "", err
 	}
 	step(string(key) + " · sending it to the agent…")
-	if err := a.NewHerdr().Prompt(ctx, pane, prompt); err != nil {
+	if err := a.startHerdr(ctx).Prompt(ctx, pane, prompt); err != nil {
 		return "", "", err
 	}
 	return fmt.Sprintf("✓ Sent %s's feedback to its agent", key), pane, nil
@@ -201,7 +201,7 @@ func (a *App) agentPaneFor(ctx context.Context, c *config.Config, key ticket.Key
 	if len(paths) == 0 {
 		return "", fmt.Errorf("%s has no worktree yet: start it first", key)
 	}
-	h := a.NewHerdr()
+	h := a.startHerdr(ctx)
 	wss, err := h.Workspaces(ctx)
 	if err != nil {
 		return "", err
