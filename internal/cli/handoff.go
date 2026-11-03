@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/herdrport"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/workspace"
 )
@@ -84,13 +84,13 @@ func (a *App) startHandoff(ctx context.Context, h HerdrAPI, ho handoff, ws strin
 	if err != nil {
 		return err
 	}
-	var root []herdr.Pane
+	var root []herdrport.Pane
 	for _, p := range panes {
 		if p.WorkspaceID == ws {
 			root = append(root, p)
 		}
 	}
-	if len(root) != 1 || slices.ContainsFunc(agents, func(ag herdr.Agent) bool { return ag.PaneID == root[0].ID }) {
+	if len(root) != 1 || slices.ContainsFunc(agents, func(ag herdrport.Agent) bool { return ag.PaneID == root[0].ID }) {
 		return fmt.Errorf("workspace %s has no single empty pane to start the agent in", ws)
 	}
 	pane := root[0].ID
@@ -115,7 +115,7 @@ func closeSetupAgent(ctx context.Context, h HerdrAPI, ho handoff) error {
 	if err != nil {
 		return err
 	}
-	if slices.ContainsFunc(agents, func(ag herdr.Agent) bool { return ag.PaneID == ho.Pane && ag.Name != ho.Agent }) {
+	if slices.ContainsFunc(agents, func(ag herdrport.Agent) bool { return ag.PaneID == ho.Pane && ag.Name != ho.Agent }) {
 		return fmt.Errorf("another agent runs there now")
 	}
 	if err := h.ClosePane(ctx, ho.Pane); err != nil {
@@ -128,7 +128,7 @@ func closeSetupAgent(ctx context.Context, h HerdrAPI, ho handoff) error {
 	if err != nil {
 		return err
 	}
-	left := slices.DeleteFunc(panes, func(p herdr.Pane) bool { return p.WorkspaceID != ho.Workspace || p.ID == ho.Pane })
+	left := slices.DeleteFunc(panes, func(p herdrport.Pane) bool { return p.WorkspaceID != ho.Workspace || p.ID == ho.Pane })
 	if len(left) != 1 || left[0].ID != ho.Host {
 		return nil
 	}

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/pavp/tkt/internal/board"
-	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/herdrport"
 )
 
 // agentBoard is the part of the daemon the agent watcher feeds.
@@ -59,19 +59,19 @@ func (a *App) watchAgentsOnce(ctx context.Context, d agentBoard) error {
 	if err != nil {
 		return err
 	}
-	subs := make([]herdr.Subscription, 0, len(paneEvents)+len(panes))
+	subs := make([]herdrport.Subscription, 0, len(paneEvents)+len(panes))
 	for _, e := range paneEvents {
-		subs = append(subs, herdr.Subscription{Type: e})
+		subs = append(subs, herdrport.Subscription{Type: e})
 	}
 	for _, p := range panes {
-		subs = append(subs, herdr.Subscription{Type: "pane.agent_status_changed", PaneID: p})
+		subs = append(subs, herdrport.Subscription{Type: "pane.agent_status_changed", PaneID: p})
 	}
 	wctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	changed := make(chan struct{}, 1)
 	done := make(chan error, 1)
 	go func() {
-		done <- a.NewHerdr().Watch(wctx, subs, func(herdr.Event) {
+		done <- a.NewHerdr().Watch(wctx, subs, func(herdrport.Event) {
 			select {
 			case changed <- struct{}{}:
 			default:

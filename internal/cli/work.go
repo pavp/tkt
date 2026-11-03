@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pavp/tkt/internal/config"
-	"github.com/pavp/tkt/internal/herdr"
+	"github.com/pavp/tkt/internal/herdrport"
 	"github.com/pavp/tkt/internal/paths"
 	"github.com/pavp/tkt/internal/repos"
 	"github.com/pavp/tkt/internal/ticket"
@@ -188,7 +188,7 @@ func newUnlinkCmd(a *App) *cobra.Command {
 
 // unmarkAgents clears the ticket mark of every agent pane given one of keys, since the mark alone keeps an agent
 // on its ticket; without Herdr running there is nothing to clear.
-func (a *App) unmarkAgents(ctx context.Context, keys map[ticket.Key]bool) []herdr.Agent {
+func (a *App) unmarkAgents(ctx context.Context, keys map[ticket.Key]bool) []herdrport.Agent {
 	if a.NewHerdr == nil || len(keys) == 0 {
 		return nil
 	}
@@ -197,7 +197,7 @@ func (a *App) unmarkAgents(ctx context.Context, keys map[ticket.Key]bool) []herd
 	if err != nil {
 		return nil
 	}
-	var out []herdr.Agent
+	var out []herdrport.Agent
 	for _, ag := range agents {
 		if !keys[ticket.Key(ag.Tokens[ticketToken])] {
 			continue

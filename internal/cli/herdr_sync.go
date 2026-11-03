@@ -47,7 +47,7 @@ func (a *App) syncHerdrPlugin(ctx context.Context) {
 			logf("%v", err)
 			return
 		}
-		if err := a.NewHerdr().LinkPlugin(ctx, dir); err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
+		if err := plugins(a.NewHerdr()).LinkPlugin(ctx, dir); err != nil && !strings.Contains(strings.ToLower(err.Error()), "already") {
 			logf("link: %v", err)
 		}
 	}
@@ -98,7 +98,7 @@ func (a *App) syncHerdrKeys(ctx context.Context) error {
 	if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
 		return err
 	}
-	return a.NewHerdr().ReloadConfig(ctx)
+	return plugins(a.NewHerdr()).ReloadConfig(ctx)
 }
 
 func (a *App) herdrNoticeFile() string  { return filepath.Join(a.Env.DataDir(), "herdr-notice") }
