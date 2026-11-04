@@ -10,6 +10,7 @@ go test ./...               # all tests
 go test -race ./...         # before committing concurrency changes
 go vet ./...                # static checks
 gofmt -l .                  # must print nothing
+node --test 'internal/herdrmod/test/*.test.js'   # Herdr desktop mod logic, against the daemon's contract fixtures
 ```
 
 UI (phase 3 onward) lives in `web/` and is embedded with `go:embed`; its commands are added here when it exists.
