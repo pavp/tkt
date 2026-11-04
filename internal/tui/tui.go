@@ -43,8 +43,9 @@ type Actions interface {
 	Detail(key ticket.Key, known *ticket.Ticket) tea.Cmd
 	// Config returns a copy of the configuration in use, for the settings view to edit.
 	Config() config.Config
-	// SaveConfig writes the configuration; the outcome arrives as a SettingsSavedMsg.
-	SaveConfig(c config.Config) tea.Cmd
+	// SaveConfig writes c, the change made to base; when config.toml no longer holds base, it writes nothing and
+	// answers a SettingsChangedMsg with what the file holds, else a SettingsSavedMsg.
+	SaveConfig(base, c config.Config) tea.Cmd
 	// FindClones looks for local clones of repo ("owner/name"); they arrive as a ClonesFoundMsg.
 	FindClones(repo string) tea.Cmd
 	// RepoAt reads the GitHub repository a folder's origin points to; it arrives as a RepoFoundMsg.
@@ -115,6 +116,15 @@ type RepoFoundMsg struct {
 type FolderPickedMsg struct {
 	Path string
 	Err  error
+}
+
+// BoardStateMsg is the board's filters as saved elsewhere, such as by the Herdr desktop mod.
+type BoardStateMsg struct{ State BoardState }
+
+// SettingsChangedMsg is config.toml as saved elsewhere; Conflict marks a save refused because of it.
+type SettingsChangedMsg struct {
+	Config   config.Config
+	Conflict bool
 }
 
 // SettingsSavedMsg reports a settings save: the configuration as written, with defaults filled in, or why
@@ -827,6 +837,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reselect()
 	case SettingsSavedMsg:
 		return m.settingsSaved(msg)
+	case SettingsChangedMsg:
+		return m.settingsChanged(msg)
+	case BoardStateMsg:
+		m = m.WithState(msg.State)
+		m.reselect()
+		return m, nil
 	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg, ReposListedMsg, JiraFieldsListedMsg, JiraBoardsListedMsg:
 		return m.settingsLookup(msg)
 	case JiraStatusesListedMsg:
@@ -1752,24 +1768,11 @@ func (m Model) syncLabel() string {
 	if m.filter == FilterBacklog {
 		return m.backlogLabel()
 	}
-	switch {
-	case m.loading && m.snap.Partial:
-		return spinFrames[m.spin%len(spinFrames)] + " updating PRs…"
-	case m.loading:
-		return spinFrames[m.spin%len(spinFrames)] + " refreshing…"
-	case m.snap.FetchedAt.IsZero():
-		return "not synced yet"
-	case m.stale != nil:
-		return "! cached · " + m.snap.FetchedAt.Local().Format("15:04")
+	label := board.SyncLabel(board.SyncState{Loading: m.loading, Partial: m.snap.Partial, Failed: m.stale != nil, FetchedAt: m.snap.FetchedAt}, m.now())
+	if m.loading {
+		return spinFrames[m.spin%len(spinFrames)] + " " + label
 	}
-	d := m.now().Sub(m.snap.FetchedAt)
-	switch {
-	case d < time.Minute:
-		return "✓ synced just now"
-	case d < time.Hour:
-		return fmt.Sprintf("✓ synced %d min ago", int(d.Minutes()))
-	}
-	return "✓ synced " + m.snap.FetchedAt.Local().Format("15:04")
+	return label
 }
 
 // backlogLabel is the Backlog's own state in the sync corner, which `g` and its timer refresh apart from the sprint.
@@ -2005,13 +2008,6 @@ func moreLine(arrow string, n int) string {
 // columnHead is a column's header: name left, count right, a rule below. Every column looks the same;
 // the box border alone shows where the selection is.
 // pointsText words story points for a card, "3pt" or "0.5pt"; empty when unestimated.
-func pointsText(p float64) string {
-	if p == 0 {
-		return ""
-	}
-	return strconv.FormatFloat(p, 'f', -1, 64) + "pt"
-}
-
 // columnHead titles a column with its count and, when any of its tickets is estimated, their points.
 func columnHead(name string, count int, points float64, width int) []string {
 	n := strconv.Itoa(count)
@@ -2033,25 +2029,6 @@ var (
 	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(colorText)
 	keyDim      = lipgloss.NewStyle().Foreground(colorSubtle)
 )
-
-// subtaskProgress words a parent's subtasks, "1/3 subtasks · 1 to do": how many are done and how many have
-// not started though their parent has.
-func subtaskProgress(t ticket.Ticket) string {
-	done, todo := 0, 0
-	for _, st := range t.Subtasks {
-		switch {
-		case st.Category == ticket.Done:
-			done++
-		case st.Category == ticket.ToDo && t.Category != ticket.ToDo:
-			todo++
-		}
-	}
-	out := fmt.Sprintf("%d/%d subtasks", done, len(t.Subtasks))
-	if todo > 0 {
-		out += fmt.Sprintf(" · %d to do", todo)
-	}
-	return out
-}
 
 // cardTicket is what an item's card shows: a subtask's key marked ↳ and its parent named where the type goes.
 func cardTicket(it item) ticket.Ticket {
@@ -2103,7 +2080,7 @@ func card(t ticket.Ticket, outer int, sel, compact, labeled bool, agent string) 
 	}
 	// The points follow the key; when they and the flags do not both fit, the points give way.
 	flag := flagFor(head)
-	if pts := pointsText(t.Points); pts != "" {
+	if pts := board.PointsText(t.Points); pts != "" {
 		withPts := head + dim.Render(" "+pts)
 		if f := flagFor(withPts); lipgloss.Width(withPts)+1+lipgloss.Width(f) <= inner {
 			head, flag = withPts, f
@@ -2130,14 +2107,14 @@ func card(t ticket.Ticket, outer int, sel, compact, labeled bool, agent string) 
 		}
 		progress, name := "", t.Type
 		if len(t.Subtasks) > 0 {
-			progress = subtaskProgress(t)
+			progress = board.SubtaskProgress(t)
 		}
 		if name == "" && progress == "" {
 			name = t.Status
 		}
 		// The type's name shows whole or not at all, as its icon already tells it; the subtask progress
 		// may be cut, and the assignee always stays.
-		who := shortName(t.Assignee)
+		who := board.ShortName(t.Assignee)
 		room := inner - lipgloss.Width(icon) - lipgloss.Width(who) - 3
 		info := strings.Trim(progress+" · "+name, " ·")
 		if lipgloss.Width(info) > room {
@@ -2453,7 +2430,7 @@ func (m Model) listView() string {
 	} else {
 		for _, it := range measured {
 			if it.ticket != nil && !it.mine() {
-				assigneeW = max(assigneeW, lipgloss.Width("ASSIGNEE"), lipgloss.Width(shortName(it.ticket.Assignee)))
+				assigneeW = max(assigneeW, lipgloss.Width("ASSIGNEE"), lipgloss.Width(board.ShortName(it.ticket.Assignee)))
 			}
 		}
 		if assigneeW > 0 {
@@ -2546,7 +2523,7 @@ func assigneeCell(name string, assigneeW int) string {
 	if assigneeW == 0 {
 		return ""
 	}
-	return pad(truncate(shortName(name), assigneeW-1), assigneeW)
+	return pad(truncate(board.ShortName(name), assigneeW-1), assigneeW)
 }
 
 // assigneeMaxWidth caps the ASSIGNEE column, which shows short names such as "Ana L."; authorMaxWidth caps
@@ -2578,18 +2555,6 @@ func authorCell(login string, authorW int) string {
 
 // shortName shortens a person's name to the first name and the last name's initial, "Ana L.", for the
 // board's narrow cells; an empty name means the ticket is unassigned.
-func shortName(name string) string {
-	parts := strings.Fields(name)
-	switch len(parts) {
-	case 0:
-		return "unassigned"
-	case 1:
-		return parts[0]
-	}
-	last := []rune(parts[len(parts)-1])
-	return parts[0] + " " + string(last[0]) + "."
-}
-
 // agentWidth fits the longest agent cell, "● needs you".
 const agentWidth = 11
 
@@ -2656,30 +2621,26 @@ func statusMark(t ticket.Ticket) (icon, word string, style lipgloss.Style) {
 	return ic.glyph, ic.glyph + " " + t.Status, lipgloss.NewStyle().Foreground(ic.color)
 }
 
-// typeIcons are matched in order against the lowercased Jira type name, in English or Spanish, so
-// "Subtarea" is a subtask before it is a task.
-var typeIcons = []struct {
-	words []string
+// typeIcons are the icon and color of each kind board.TypeKind sorts Jira types into, like Jira's own.
+var typeIcons = map[string]struct {
 	glyph string
 	color lipgloss.Color
 }{
-	{[]string{"bug", "error", "defect"}, "●", ctpRed},
-	{[]string{"epic", "épica"}, "◆", ctpMauve},
-	{[]string{"sub"}, "■", ctpTeal},
-	{[]string{"story", "historia"}, "■", ctpGreen},
-	{[]string{"task", "tarea"}, "■", ctpBlue},
+	"bug":     {"●", ctpRed},
+	"epic":    {"◆", ctpMauve},
+	"subtask": {"■", ctpTeal},
+	"story":   {"■", ctpGreen},
+	"task":    {"■", ctpBlue},
 }
 
-// typeGlyph is a one-cell colored icon for a Jira issue type, like Jira's own; empty when there is no type.
+// typeGlyph is a one-cell colored icon for a Jira issue type; empty when there is no type.
 func typeGlyph(typ string) string {
-	if typ == "" {
+	kind := board.TypeKind(typ)
+	if kind == "" {
 		return ""
 	}
-	l := strings.ToLower(typ)
-	for _, ic := range typeIcons {
-		if slices.ContainsFunc(ic.words, func(w string) bool { return strings.Contains(l, w) }) {
-			return lipgloss.NewStyle().Foreground(ic.color).Render(ic.glyph)
-		}
+	if ic, ok := typeIcons[kind]; ok {
+		return lipgloss.NewStyle().Foreground(ic.color).Render(ic.glyph)
 	}
 	return dim.Render("■")
 }
@@ -2857,32 +2818,13 @@ func (m Model) preview() string {
 	}
 	t := it.ticket
 	title := truncate(titleStyle.Render(string(t.Key))+" "+statusBadge(*t)+titleStyle.Render(" · "+t.Summary), m.width)
-	parts := []string{cmp.Or(t.Assignee, "unassigned")}
-	switch {
-	case t.Points == 1:
-		parts = append([]string{"1 point"}, parts...)
-	case t.Points != 0:
-		parts = append([]string{strconv.FormatFloat(t.Points, 'f', -1, 64) + " points"}, parts...)
-	}
-	for _, r := range t.Attention() {
-		parts = append(parts, string(r))
-	}
-	if len(t.Attention()) == 0 && t.Checks() == ticket.ChecksPass {
-		parts = append(parts, "checks pass")
-	}
-	for _, pr := range t.PRs {
-		if pr.State == ticket.PROpen {
-			parts = append(parts, pr.Repo+"#"+fmt.Sprint(pr.Number))
-		}
-	}
-	hint := actionHint(*t)
+	parts := board.PreviewParts(*t)
+	hint := board.ActionHint(*t, m.snap.Agents[string(t.Key)] != "")
 	switch {
 	case m.filter == FilterBacklog:
 		hint = "enter for actions"
 	case strings.HasPrefix(hint, "f sends") && !m.actions.InHerdr():
 		hint = "f copies the feedback prompt"
-	case strings.HasPrefix(hint, "f sends") && m.snap.Agents[string(t.Key)] == "":
-		hint = strings.Replace(hint, "to the agent", "to an agent", 1)
 	}
 	if hint != "" {
 		parts = append(parts, hint)
@@ -2904,24 +2846,6 @@ func ciWord(c ticket.CheckState) string {
 		return "passing ✓"
 	}
 	return "not reported"
-}
-
-// actionHint tells what the most useful key does for this ticket, as the mockup's preview line does.
-func actionHint(t ticket.Ticket) string {
-	reasons := t.Attention()
-	switch {
-	case t.Team:
-		return "enter for details"
-	case len(reasons) > 0 && reasons[0] == ticket.ReasonCIFailing:
-		return "f sends the failure to the agent"
-	case len(reasons) > 0:
-		return "f sends the review comments to the agent"
-	case len(t.PRs) == 0 && t.Category == ticket.ToDo:
-		return "enter asks for repos and opens an agent"
-	case len(t.PRs) == 0:
-		return "enter opens the agent"
-	}
-	return "p opens the PR ↗"
 }
 
 var keyStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)

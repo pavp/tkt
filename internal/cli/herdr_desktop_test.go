@@ -323,3 +323,34 @@ func TestFixOnDesktopFindsTheUnnamedHandoffAgent(t *testing.T) {
 		t.Errorf("calls = %q, output = %q", d.calls, h.out)
 	}
 }
+
+func TestAgentKindsOnDesktopPreferTheAgentsHerdrDesktopKnows(t *testing.T) {
+	h, _ := desktopHarness(t)
+	h.run.missing["herdr"] = true
+	if err := h.app.saveAgentKinds([]string{"opencode", "aider", "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	h.run.missing["aider"] = true
+	kinds, err := h.app.agentKinds(context.Background())
+	if err != nil || !reflect.DeepEqual(kinds, []string{"opencode", "claude"}) {
+		t.Errorf("agentKinds = %q, %v; want Herdr desktop's installed agents in its order", kinds, err)
+	}
+	if err := h.app.saveAgentKinds([]string{}); err != nil {
+		t.Fatal(err)
+	}
+	if kinds, err := h.app.agentKinds(context.Background()); err != nil || len(kinds) < 2 || kinds[0] != "pi" {
+		t.Errorf("with no saved agents = %q, %v; want the fixed list", kinds, err)
+	}
+}
+
+func TestAgentKindsOnDesktopFallBackWhenNoSavedAgentIsInstalled(t *testing.T) {
+	h, _ := desktopHarness(t)
+	h.run.missing["herdr"] = true
+	if err := h.app.saveAgentKinds([]string{"onlymissing"}); err != nil {
+		t.Fatal(err)
+	}
+	h.run.missing["onlymissing"] = true
+	if kinds, err := h.app.agentKinds(context.Background()); err != nil || len(kinds) == 0 || kinds[0] != "pi" {
+		t.Errorf("agentKinds = %q, %v; want the fixed list's installed agents", kinds, err)
+	}
+}

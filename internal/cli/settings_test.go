@@ -20,7 +20,7 @@ func TestBoardSaveConfigWritesAndSwapsTheConfig(t *testing.T) {
 	edit := b.Config()
 	edit.Spaces[0].Repos = append(edit.Spaces[0].Repos, config.Repo{Name: "example-org/api", Path: "~/code/api"})
 	edit.RepoRoots = []string{"~/src", "~/code"}
-	msg, ok := b.SaveConfig(edit)().(tui.SettingsSavedMsg)
+	msg, ok := b.SaveConfig(b.Config(), edit)().(tui.SettingsSavedMsg)
 	if !ok || msg.Err != nil {
 		t.Fatalf("save = %+v", msg)
 	}
@@ -46,7 +46,7 @@ func TestBoardSaveConfigRejectsInvalidAndKeepsTheFile(t *testing.T) {
 	before, _ := os.ReadFile(h.app.configPath)
 	edit := b.Config()
 	edit.Spaces[0].Repos = append(edit.Spaces[0].Repos, config.Repo{Name: "not a repo"})
-	msg := b.SaveConfig(edit)().(tui.SettingsSavedMsg)
+	msg := b.SaveConfig(b.Config(), edit)().(tui.SettingsSavedMsg)
 	if msg.Err == nil {
 		t.Fatal("an invalid repository was saved")
 	}
@@ -70,7 +70,7 @@ func TestBoardSaveConfigKeepsTildePaths(t *testing.T) {
 		t.Fatalf("the editor should see the paths as written: %+v", edit)
 	}
 	edit.RepoRoots = []string{"~/code"}
-	if msg := b.SaveConfig(edit)().(tui.SettingsSavedMsg); msg.Err != nil || msg.Config.RepoRoots[0] != "~/code" {
+	if msg := b.SaveConfig(b.Config(), edit)().(tui.SettingsSavedMsg); msg.Err != nil || msg.Config.RepoRoots[0] != "~/code" {
 		t.Fatalf("save = %+v", msg)
 	}
 	data, _ := os.ReadFile(h.app.configPath)

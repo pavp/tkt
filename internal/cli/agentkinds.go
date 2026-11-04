@@ -2,9 +2,13 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pavp/tkt/internal/paths"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -26,6 +30,11 @@ var desktopKinds = []string{"pi", "claude", "codex", "gemini", "cursor", "devin"
 // back to one agent.
 func (a *App) agentKinds(ctx context.Context) ([]string, error) {
 	if ch, err := a.whichHerdr(ctx); err == nil && ch.flavor == herdrDesktop {
+		if known := a.loadAgentKinds(); len(known) > 0 {
+			if kinds, err := a.installedKinds(known, herdrDesktop); err == nil {
+				return kinds, nil
+			}
+		}
 		return a.installedKinds(desktopKinds, herdrDesktop)
 	}
 	if _, err := a.Run.LookPath("herdr"); err != nil {
@@ -138,4 +147,27 @@ func (a *App) defaultAgent(ctx context.Context) (string, error) {
 func (a *App) agentChoices(ctx context.Context) (kinds []string, last string, err error) {
 	kinds, err = a.agentKinds(ctx)
 	return kinds, a.loadState().LastAgent, err
+}
+
+func (a *App) agentKindsFile() string { return filepath.Join(a.Env.DataDir(), "herdr-agents.json") }
+
+// saveAgentKinds keeps the agents Herdr desktop knows, as its tkt mod reads them, most picked first.
+func (a *App) saveAgentKinds(kinds []string) error {
+	b, err := json.Marshal(struct {
+		Agents []string `json:"agents"`
+	}{kinds})
+	if err != nil {
+		return err
+	}
+	return paths.WritePrivateFile(a.agentKindsFile(), b)
+}
+
+func (a *App) loadAgentKinds() []string {
+	var saved struct {
+		Agents []string `json:"agents"`
+	}
+	if b, err := os.ReadFile(a.agentKindsFile()); err != nil || json.Unmarshal(b, &saved) != nil {
+		return nil
+	}
+	return saved.Agents
 }

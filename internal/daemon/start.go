@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -141,8 +142,22 @@ func (s *Server) mutating(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
-		next(w, r)
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next(rec, r)
+		if s.opts.Log != nil {
+			s.opts.Log("write %s %s → %d\n", r.Method, strconv.Quote(r.URL.Path), rec.status)
+		}
 	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
 }
 
 func (s *Server) start(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +231,9 @@ func (s *Server) runJob(w http.ResponseWriter, r *http.Request, j job, run func(
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"id": id, "state": "finished"})
 	case <-settled:
+		s.mu.Lock()
+		s.recordJob(id, jobEnd{Kind: j.kind, Subject: j.subject, State: "running"})
+		s.mu.Unlock()
 		writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "state": "started"})
 		go func() {
 			err := <-done
@@ -223,9 +241,11 @@ func (s *Server) runJob(w http.ResponseWriter, r *http.Request, j job, run func(
 			defer s.mu.Unlock()
 			delete(s.running, busy)
 			if err != nil {
+				s.recordJob(id, jobEnd{Kind: j.kind, Subject: j.subject, State: "failed", Message: err.Error()})
 				s.publish(j.kind+".failed", map[string]string{"id": id, j.field: j.subject, "message": err.Error()})
 				return
 			}
+			s.recordJob(id, jobEnd{Kind: j.kind, Subject: j.subject, State: "finished"})
 			s.publish(j.kind+".finished", map[string]string{"id": id, j.field: j.subject})
 		}()
 	}

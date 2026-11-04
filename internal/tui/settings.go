@@ -518,7 +518,25 @@ func (m Model) saveSettings(change func(c *config.Config)) (tea.Model, tea.Cmd) 
 	change(&c)
 	m.settings.saving = true
 	m.settings.err = ""
-	return m, m.actions.SaveConfig(c)
+	return m, m.actions.SaveConfig(m.settings.cfg.Clone(), c)
+}
+
+func (m Model) settingsChanged(msg SettingsChangedMsg) (tea.Model, tea.Cmd) {
+	s := m.settings
+	if s == nil {
+		return m, nil
+	}
+	s.saving, s.err, s.msg = false, "", ""
+	s.cfg = msg.Config
+	if rows := s.rows(); s.row >= len(rows) || !rows[s.row].selectable() {
+		s.row = s.firstSelectable()
+	}
+	if msg.Conflict {
+		s.err = "not saved: config.toml changed elsewhere · Settings now shows it, make the change again"
+	} else {
+		s.msg = "config.toml changed elsewhere · Settings shows it now"
+	}
+	return m, nil
 }
 
 func (m Model) settingsSaved(msg SettingsSavedMsg) (tea.Model, tea.Cmd) {

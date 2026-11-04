@@ -83,10 +83,21 @@ type Options struct {
 	// and PATCH /v1/settings; nil answers the settings routes with not found.
 	Settings     func() (config.Config, error)
 	SaveSettings func(config.Config) (config.Config, error)
+	// SaveAgentKinds keeps the agents Herdr desktop knows, which the Herdr desktop mod sends, for agent kinds.
+	SaveAgentKinds func([]string) error
 	// JiraStatuses, JiraBoards and JiraFields list what Settings offers from Jira.
 	JiraStatuses StatusesFunc
 	JiraBoards   BoardsFunc
 	JiraFields   FieldsFunc
+	// StateFile and ConfigFile are board-state.json and config.toml, which the TUI writes too: when their content
+	// changes the daemon sends state.updated or settings.updated, checking every WatchEvery (none when zero).
+	StateFile  string
+	ConfigFile string
+	WatchEvery time.Duration
+	// Now is the clock for what answers say about time, such as how long ago the board synced; nil is time.Now.
+	Now func() time.Time
+	// Log records each write a request made (method, path and answer); nil logs nothing.
+	Log func(format string, args ...any)
 }
 
 // Info is what daemon.json records for clients: where the daemon listens and which process it is.
@@ -97,8 +108,11 @@ type Info struct {
 }
 
 type Server struct {
-	opts  Options
-	token string
+	opts    Options
+	jobs    map[string]jobEnd
+	watchMu sync.Mutex
+	sums    map[string][32]byte
+	token   string
 
 	// mu guards the board and the clients, so a client joining between two events sees each once.
 	mu      sync.Mutex
@@ -226,6 +240,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		defer loop.Done()
 		s.syncLoop(ctx)
 	}()
+	defer s.watch()()
 
 	defer s.quitOnce.Do(func() { close(s.quit) })
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
@@ -274,6 +289,9 @@ func (s *Server) syncOnce(ctx context.Context) {
 		if p.Agents == nil {
 			p.Agents = s.snap.Agents
 		}
+		if p.AgentsBy == nil {
+			p.AgentsBy = s.snap.AgentsBy
+		}
 		s.snap, s.have, painted = p, true, true
 		s.publish("snapshot", public(p))
 	})
@@ -296,10 +314,13 @@ func (s *Server) syncOnce(ctx context.Context) {
 		// The sync could not read Herdr; the agents it last reported still stand.
 		snap.Agents = old.Agents
 	}
+	if snap.AgentsBy == nil {
+		snap.AgentsBy = old.AgentsBy
+	}
 	s.snap, s.have = snap, true
 	s.publishChanges(old, had, snap)
 	if had && !maps.Equal(old.Agents, snap.Agents) {
-		s.publish("agent.updated", map[string]any{"agents": snap.Agents})
+		s.publish("agent.updated", map[string]any{"agents": snap.Agents, "agents_by": snap.AgentsBy})
 	}
 	s.publish("sync.finished", map[string]any{"fetched_at": snap.FetchedAt})
 }
@@ -320,7 +341,25 @@ func (s *Server) SetAgents(agents map[string]string) {
 		return
 	}
 	s.snap.Agents = agents
-	s.publish("agent.updated", map[string]any{"agents": agents})
+	s.publish("agent.updated", map[string]any{"agents": agents, "agents_by": s.snap.AgentsBy})
+}
+
+// SetAgentsBy records each Herdr's agent states apart, with their most urgent union as Agents, and tells
+// clients when they changed.
+func (s *Server) SetAgentsBy(by map[string]map[string]string) {
+	union := map[string]string{}
+	for _, part := range by {
+		for key, state := range part {
+			union[key] = board.MostUrgentAgent([]string{union[key], state})
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if maps.Equal(s.snap.Agents, union) && maps.EqualFunc(s.snap.AgentsBy, by, maps.Equal) {
+		return
+	}
+	s.snap.Agents, s.snap.AgentsBy = union, by
+	s.publish("agent.updated", map[string]any{"agents": union, "agents_by": by})
 }
 
 func (s *Server) Handler() http.Handler {
@@ -334,6 +373,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/board", s.authed(s.board))
 	mux.HandleFunc("GET /v1/board/state", s.authed(s.boardState))
 	mux.HandleFunc("PATCH /v1/board/state", s.mutating(s.patchBoardState))
+	mux.HandleFunc("POST /v1/herdr/agents", s.mutating(s.saveAgentKinds))
+	mux.HandleFunc("GET /v1/jobs/{id}", s.authed(s.jobState))
 	mux.HandleFunc("GET /v1/prs", s.authed(s.prs))
 	mux.HandleFunc("GET /v1/backlog", s.authed(s.backlog))
 	mux.HandleFunc("GET /v1/tickets/{key}/start", s.authed(s.startChoices))

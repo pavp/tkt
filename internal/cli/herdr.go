@@ -143,10 +143,14 @@ func newHerdrCmd(a *App) *cobra.Command {
 	installCmd.Flags().BoolVar(&sidebarFlag, "sidebar", false, "add the sidebar rows without asking")
 	installCmd.Flags().BoolVar(&noSidebar, "no-sidebar", false, "do not add sidebar rows")
 
+	cmd.AddCommand(newExportModCmd(a))
 	cmd.AddCommand(
 		start,
 		installCmd,
 		&cobra.Command{Use: "uninstall", Short: "Unlink the tkt plugin from Herdr and remove its keybindings", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+			if ch, err := a.whichHerdr(cmd.Context()); err == nil && ch.flavor == herdrDesktop {
+				return a.uninstallDesktopMod()
+			}
 			if err := plugins(a.NewHerdr()).UnlinkPlugin(cmd.Context(), a.pluginID()); err != nil {
 				return err
 			}
@@ -187,6 +191,13 @@ func newHerdrCmd(a *App) *cobra.Command {
 }
 
 func (a *App) herdrInstall(cmd *cobra.Command, keys, noKeys, sidebar, noSidebar bool) error {
+	if ch, err := a.whichHerdr(cmd.Context()); err == nil && ch.flavor == herdrDesktop {
+		installed, err := a.installDesktopMod(cmd.Context())
+		if err != nil || !installed || noKeys {
+			return err
+		}
+		return a.addDesktopKey(keys)
+	}
 	exe, err := a.Executable()
 	if err != nil {
 		return fmt.Errorf("locate the tkt binary: %w", err)

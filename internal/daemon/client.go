@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -62,6 +64,29 @@ func (c *Client) send(ctx context.Context, hc *http.Client, method, path string)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	return hc.Do(req)
+}
+
+// Call sends one request to the daemon as given, with body as JSON when not nil, and returns its answer as is.
+func (c *Client) Call(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
+	var rd io.Reader
+	if body != nil {
+		rd = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := c.slow.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	out, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	return resp.StatusCode, out, err
 }
 
 // Ticket decodes one ticket's detail into out. The daemon asks Jira for it, so it may take seconds.

@@ -194,7 +194,7 @@ func (r *recorder) PickFolder(start string) tea.Cmd {
 }
 
 func (r *recorder) Config() config.Config { return r.cfg.Clone() }
-func (r *recorder) SaveConfig(c config.Config) tea.Cmd {
+func (r *recorder) SaveConfig(_, c config.Config) tea.Cmd {
 	r.calls = append(r.calls, "save")
 	return func() tea.Msg {
 		if r.saveErr != nil {
@@ -2915,7 +2915,7 @@ func TestTicketsShowTheirAssignee(t *testing.T) {
 
 func TestShortName(t *testing.T) {
 	for in, want := range map[string]string{"Ana López": "Ana L.", "Ana María López Ruiz": "Ana R.", "dev": "dev", "": "unassigned"} {
-		if got := shortName(in); got != want {
+		if got := board.ShortName(in); got != want {
 			t.Errorf("shortName(%q) = %q, want %q", in, got, want)
 		}
 	}

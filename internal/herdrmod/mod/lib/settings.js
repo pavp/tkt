@@ -1,0 +1,45 @@
+// Settings as the TUI's sections (internal/tui/settings.go), each change a PATCH /v1/settings of only what changed.
+
+export const SECTIONS = [
+  { id: "spaces", title: "Spaces & repositories" },
+  { id: "boards", title: "Team boards" },
+  { id: "statuses", title: "Statuses" },
+  { id: "clones", title: "Local clones" },
+  { id: "board", title: "Board" },
+  { id: "machine", title: "Machine" },
+];
+
+/** A space's repositories with one added ({repo, path}) or one removed (its name). */
+export function reposPatch(space, change) {
+  let repos = (space.repos ?? []).map((r) => ({ repo: r.repo, path: r.path }));
+  if (change.remove) repos = repos.filter((r) => r.repo !== change.remove);
+  if (change.add) repos.push(change.add);
+  return { spaces: { [space.key]: { repos } } };
+}
+
+/** A space's team boards with board id turned on or off. */
+export function boardsPatch(space, id) {
+  const ids = (space.team_boards ?? []).map((b) => b.id);
+  return { spaces: { [space.key]: { team_boards: ids.includes(id) ? ids.filter((b) => b !== id) : [...ids, id] } } };
+}
+
+/** A status's column or mark ({column} or {mark}), or null to bring it back to automatic. */
+export function statusPatch(space, name, change) {
+  return { spaces: { [space]: { statuses: { [name]: change } } } };
+}
+
+/** The clones folders with one added or removed. */
+export function rootsPatch(roots, change) {
+  let next = [...(roots ?? [])];
+  if (change.remove) next = next.filter((r) => r !== change.remove);
+  if (change.add && !next.includes(change.add)) next.push(change.add);
+  return { repo_roots: next };
+}
+
+/** The Statuses section's rows: each status's column (by title) and mark, and whether either was set by hand. */
+export function statusRows(view, columns) {
+  const title = Object.fromEntries((columns ?? []).map((c) => [c.id, c.title]));
+  return (view.statuses ?? []).map((s) => ({
+    name: s.name, column: title[s.column] ?? s.column, columnAuto: s.column_auto, mark: s.mark, markAuto: s.mark_auto, changed: !s.column_auto || !s.mark_auto,
+  }));
+}

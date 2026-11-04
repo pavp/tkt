@@ -34,6 +34,8 @@ type fakeDaemons struct {
 	version string
 	// detail serves GET /v1/tickets/{key}; nil leaves the route answering not found, like an older daemon.
 	detail daemon.DetailFunc
+	// watch makes the fake daemons announce board-state.json and config.toml when another program changes them.
+	watch bool
 }
 
 func (f *fakeDaemons) server() *daemon.Server {
@@ -56,7 +58,12 @@ func (f *fakeDaemons) install(t *testing.T, h *harness) {
 		sync := func(context.Context, func(board.Snapshot)) (board.Snapshot, error) {
 			return board.Snapshot{}, errors.New("fake daemons do not sync")
 		}
-		s, err := daemon.New(daemon.Options{Dir: h.app.Env.DataDir(), Version: version, Sync: sync, Interval: time.Hour, Seed: seed, Detail: f.detail})
+		opts := daemon.Options{Dir: h.app.Env.DataDir(), Version: version, Sync: sync, Interval: time.Hour, Seed: seed, Detail: f.detail}
+		if f.watch {
+			opts.StateFile, opts.ConfigFile, opts.WatchEvery = h.app.boardStateFile(), h.app.ConfigPath(), 10*time.Millisecond
+			opts.SavedState, opts.Settings = h.app.loadBoardState, h.app.savedConfig
+		}
+		s, err := daemon.New(opts)
 		if err != nil {
 			return 0, err
 		}

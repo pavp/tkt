@@ -16,6 +16,8 @@ type BoardView struct {
 	Partial   bool      `json:"partial,omitempty"`
 	Syncing   bool      `json:"syncing,omitempty"`
 	SyncError string    `json:"sync_error,omitempty"`
+	// SyncLabel says how fresh the board is, as the TUI's status line does.
+	SyncLabel string `json:"sync_label"`
 	board.ViewState
 	Boards     []BoardFilter     `json:"boards"`
 	Columns    []BoardColumn     `json:"columns"`
@@ -62,9 +64,17 @@ func (s *Server) board(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	queryList(q, "hidden_boards", &state.HiddenBoards)
+	agents := snap.Agents
+	if h := q.Get("herdr"); h != "" {
+		if h != "desktop" && h != "classic" {
+			writeError(w, http.StatusBadRequest, "bad_request", "herdr must be desktop or classic")
+			return
+		}
+		agents = orNoAgents(snap.AgentsBy[h])
+	}
 	hidden := setOf(state.HiddenBoards)
 	view := BoardView{FetchedAt: snap.FetchedAt, Partial: snap.Partial, Syncing: syncing, SyncError: syncErr, ViewState: state,
-		Boards: []BoardFilter{}, Columns: []BoardColumn{}, Sections: []BoardSection{}, Agents: snap.Agents, LabelField: snap.LabelField, Warnings: snap.Warnings}
+		Boards: []BoardFilter{}, Columns: []BoardColumn{}, Sections: []BoardSection{}, Agents: agents, LabelField: snap.LabelField, Warnings: snap.Warnings}
 	view.HiddenBoards = orNone(view.HiddenBoards)
 	for name, n := range board.BoardCounts(snap.Tickets, state.Team) {
 		view.Boards = append(view.Boards, BoardFilter{Name: name, Tickets: n, Hidden: hidden[name]})
@@ -84,7 +94,24 @@ func (s *Server) board(w http.ResponseWriter, r *http.Request) {
 			view.Sections[last].Rows = append(view.Sections[last].Rows, rows[i])
 		}
 	}
+	for i := range view.Columns {
+		withCards(view.Columns[i].Rows, agents)
+	}
+	for i := range view.Sections {
+		withCards(view.Sections[i].Rows, agents)
+	}
+	view.SyncLabel = board.SyncLabel(board.SyncState{Loading: syncing, Partial: snap.Partial, Failed: syncErr != "", FetchedAt: snap.FetchedAt}, s.now())
 	writeJSON(w, http.StatusOK, view)
+}
+
+// withCards adds each row's card; the rows are the view's own copies, so the snapshot keeps none.
+func withCards(rows []board.Row, agents map[string]string) {
+	for i := range rows {
+		if rows[i].Ticket != nil {
+			c := board.CardOf(*rows[i].Ticket, agents[string(rows[i].Key)] != "")
+			rows[i].Card = &c
+		}
+	}
 }
 
 func orEmpty(rows []board.Row) []board.Row {
@@ -92,4 +119,18 @@ func orEmpty(rows []board.Row) []board.Row {
 		return []board.Row{}
 	}
 	return rows
+}
+
+func orNoAgents(m map[string]string) map[string]string {
+	if m == nil {
+		return map[string]string{}
+	}
+	return m
+}
+
+func (s *Server) now() time.Time {
+	if s.opts.Now != nil {
+		return s.opts.Now()
+	}
+	return time.Now()
 }

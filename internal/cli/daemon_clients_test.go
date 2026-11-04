@@ -86,6 +86,7 @@ func TestHerdrRestoreStartsTheDaemon(t *testing.T) {
 
 func TestBoardFollowsTheDaemon(t *testing.T) {
 	h, f := startHarness(t)
+	h.env["HERDR_ENV"] = "1"
 	f.board = daemonBoard()
 	c, err := h.app.LoadConfig()
 	if err != nil {

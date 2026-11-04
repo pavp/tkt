@@ -20,6 +20,8 @@ type Row struct {
 	Key    ticket.Key     `json:"key"`
 	Parent ticket.Key     `json:"parent,omitempty"`
 	Ticket *ticket.Ticket `json:"ticket,omitempty"`
+	// Card is what the ticket's card says, set where the daemon serves rows to clients that draw cards.
+	Card *Card `json:"card,omitempty"`
 	// Mine marks one of the user's pull requests listed with its ticket, which starts no section.
 	Mine bool `json:"-"`
 }
@@ -89,7 +91,7 @@ func Points(rows []Row) float64 {
 			points += r.Ticket.Points
 		}
 	}
-	return points
+	return roundPoints(points)
 }
 
 // ListRows orders the list: the user's tickets sorted, then the team's sorted and grouped by board, each

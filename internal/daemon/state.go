@@ -75,6 +75,7 @@ func (s *Server) patchBoardState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := viewOf(st)
+	s.noteFile(s.opts.StateFile)
 	s.mu.Lock()
 	s.publish("state.updated", v)
 	s.mu.Unlock()
