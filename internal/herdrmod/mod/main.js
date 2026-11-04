@@ -11,6 +11,7 @@ import { previewOf, legendFor, problemOf } from "./lib/footer.js";
 import { prRows, toggled, reposChip } from "./lib/prs.js";
 import { backlogRows, badges } from "./lib/backlog.js";
 import { ticketMenu, prMenu } from "./lib/menus.js";
+import { firstPicker, answer, taskPicker } from "./lib/start.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -39,6 +40,7 @@ export default class Tkt extends View {
     this.failures = 0;
     this.found = [];
     this.menu = null;
+    this.picker = null;
     this.notice = "";
     this.lastClick = { key: null, at: 0 };
     this.focus = cx.focus_handle();
@@ -362,6 +364,33 @@ export default class Tkt extends View {
             this.notice = `copied the context of ${item.key}`;
             break;
           }
+          case "start":
+            await this.openStart(item.key);
+            break;
+          case "notYours":
+            this.menu = { title: `${item.key} is not yours`, subtitle: "", sel: 0, items: [
+              { label: "Assign it to me, then start", action: "assignMeStart", key: item.key },
+              { label: "Start without assigning", action: "start", key: item.key },
+              { label: "Cancel", action: "cancel" },
+            ] };
+            break;
+          case "assignMeStart": {
+            const a = await this.call("PUT", `/v1/tickets/${item.key}/assignee`, { to: "me" });
+            if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+            await this.openStart(item.key);
+            break;
+          }
+          case "fix":
+            await this.sendTask({ ticket: item.key, to: "own" });
+            break;
+          case "feedbackTo":
+            await this.openTask({ ticket: item.key }, `ticket=${encodeURIComponent(item.key)}`);
+            break;
+          case "review":
+            await this.openTask({ review: { repo: item.pr.repo, number: item.pr.number } }, `repo=${encodeURIComponent(item.pr.repo)}&number=${item.pr.number}`);
+            break;
+          case "cancel":
+            break;
           default:
             this.notice = `${item.label.replace(" ▸", "")}: not in the Herdr desktop window yet`;
         }
@@ -371,6 +400,96 @@ export default class Tkt extends View {
       cx.notify();
     });
     cx.notify();
+  }
+
+  async openStart(key) {
+    const a = await this.call("GET", `/v1/tickets/${key}/start?herdr=desktop`);
+    if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+    const p = firstPicker(key, a.body);
+    if (p.error) throw new Error(p.error);
+    this.choices_ = a.body;
+    this.picker = { ...p, checked: new Set(p.rows.filter((r) => r.checked).map((r) => r.value)) };
+  }
+
+  async postStart(key, body) {
+    const a = await this.call("POST", `/v1/tickets/${key}/start`, body);
+    if (a.status === 409 && a.body?.code === "needs_answer" && a.body.needs === "clone") {
+      this.picker = { step: "clone", key, body, title: `Start ${key}`, question: "Clone the repositories that have no clone here?", sel: 0, checked: new Set(),
+        rows: [{ label: "Clone them", value: true }, { label: "Skip them", value: false }] };
+      return;
+    }
+    if (a.status === 202) this.notice = `starting ${key}: its agent opens in Herdr`;
+    else if (a.status === 200) this.notice = `went to ${key}'s agent`;
+    else throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+  }
+
+  async openTask(subject, query) {
+    const a = await this.call("GET", `/v1/tasks/agents?herdr=desktop&${query}`);
+    if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+    this.picker = { ...taskPicker(a.body), subject, checked: new Set() };
+  }
+
+  async sendTask(body) {
+    const a = await this.call("POST", "/v1/tasks", { herdr: "desktop", ...body });
+    if (a.status === 409 && a.body?.code === "needs_answer" && a.body.needs === "clone") {
+      this.picker = { step: "taskClone", body, title: "Clone the repository?", question: `${a.body.repo ?? "It"} has no clone: clone it into ${a.body.into ?? "your clones folder"}?`, sel: 0, checked: new Set(),
+        rows: [{ label: "Clone it", value: true }, { label: "Cancel", value: false }] };
+      return;
+    }
+    if (a.status === 200 || a.status === 202) this.notice = "sent to the agent";
+    else throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+  }
+
+  /** One row of the open picker was chosen (or, on a multi picker, its Next pressed with values). */
+  choose(values, row, cx) {
+    const p = this.picker;
+    this.picker = null;
+    cx.spawn(async (cx) => {
+      try {
+        if (p.step === "clone") await this.postStart(p.key, { ...p.body, clone: row.value });
+        else if (p.step === "taskClone") { if (row.value) await this.sendTask({ ...p.body, clone: true }); }
+        else if (p.step === "task") {
+          if (row.task) await this.sendTask({ ...p.subject, ...row.task });
+          else this.picker = { step: "kind", subject: p.subject, title: p.title, question: "Which agent?", checked: new Set(),
+            sel: Math.max(row.kinds.indexOf(row.last), 0), rows: row.kinds.map((k) => ({ label: k, hint: k === row.last ? "last used" : "", value: k })) };
+        } else if (p.step === "kind") await this.sendTask({ ...p.subject, to: "new", agent: row.value });
+        else {
+          const next = answer(p, values, this.choices_);
+          if (next.post) await this.postStart(p.key, next.post);
+          else this.picker = { ...next.picker, checked: new Set() };
+        }
+      } catch (e) {
+        this.notice = `could not: ${e.message}`;
+      }
+      cx.notify();
+    });
+    cx.notify();
+  }
+
+  pickerBox(t) {
+    const p = this.picker;
+    return v_flex().id("picker").absolute().top(70).left(0).right(0).items_center()
+      .child(v_flex().id("picker-box").w(420).p(12).gap(3).rounded(10).bg(t.popover).border(1).border_color(t.accent)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .child(div().font_semibold().text_color(t.foreground).child(p.title))
+        .when(Boolean(p.question), (el) => el.child(div().pb(6).text_color(t.muted).child(p.question)))
+        .children(p.rows.map((r, i) =>
+          h_flex().id(`pick-${i}`).gap(8).px(8).py(4).rounded(5).bg(i === p.sel ? t.selected : t.popover).hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => {
+              if (p.multi) {
+                if (p.checked.has(r.value)) p.checked.delete(r.value); else p.checked.add(r.value);
+                cx.notify();
+              } else this.choose([r.value], r, cx);
+            })
+            .when(Boolean(p.multi), (el) => el.child(div().w(14).text_color(t.accent).child(p.checked.has(r.value) ? "☑" : "☐")))
+            .child(div().flex_1().truncate().text_color(t.foreground).child(r.label))
+            .when(Boolean(r.hint), (el) => el.child(div().text_color(t.dim).child(r.hint)))))
+        .child(h_flex().pt(8).gap(8).justify_end()
+          .child(div().id("pick-cancel").px(10).py(3).rounded(5).text_color(t.muted).hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => { this.picker = null; cx.notify(); }).child("Cancel"))
+          .when(Boolean(p.multi), (el) => el.child(div().id("pick-next").px(10).py(3).rounded(5).bg(t.solid).text_color(t.solid_foreground)
+            .on_click((_e, cx) => { if (p.checked.size > 0) this.choose([...p.checked], null, cx); })
+            .child("Next")))));
   }
 
   menuBox(t) {
@@ -394,6 +513,8 @@ export default class Tkt extends View {
       if (k === "down") this.menu.sel = Math.min(this.menu.items.length - 1, this.menu.sel + 1);
       if (k === "up") this.menu.sel = Math.max(0, this.menu.sel - 1);
       if (k === "enter") return this.act(this.menu.items[this.menu.sel], cx);
+    } else if (this.picker && k === "escape") {
+      this.picker = null;
     } else if (k === "escape" && this.panel) {
       this.panel = null;
     }
@@ -612,13 +733,14 @@ export default class Tkt extends View {
     const t = theme();
     return v_flex().id("root").relative().size_full().bg(t.surface).text_size(13)
       .track_focus(this.focus).on_key_down((e, cx) => this.key(e, cx))
-      .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.panel || this.menu) { this.panel = null; this.menu = null; cx.notify(); } })
+      .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
       .child(this.header(t))
       .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
       .when(this.tab === "sprint" && !this.choices, (el) => el.child(this.preview(t, this.answers.sprint?.body)))
       .child(this.legend(t))
       .child(this.status(t))
       .when(Boolean(this.openPanel()), (el) => { const p = this.openPanel(); return el.child(this.filterPanel(t, p.items, p.hidden, p.field)); })
-      .when(Boolean(this.menu), (el) => el.child(this.menuBox(t)));
+      .when(Boolean(this.menu), (el) => el.child(this.menuBox(t)))
+      .when(Boolean(this.picker), (el) => el.child(this.pickerBox(t)));
   }
 }
