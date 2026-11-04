@@ -4,12 +4,13 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay } from "herdr";
-import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed } from "./lib/client.js";
+import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords } from "./lib/columns.js";
 import { previewOf, legendFor, problemOf } from "./lib/footer.js";
 import { prRows, toggled, reposChip } from "./lib/prs.js";
 import { backlogRows, badges } from "./lib/backlog.js";
+import { ticketMenu, prMenu } from "./lib/menus.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -37,6 +38,11 @@ export default class Tkt extends View {
     this.choices = null;
     this.failures = 0;
     this.found = [];
+    this.menu = null;
+    this.notice = "";
+    this.lastClick = { key: null, at: 0 };
+    this.focus = cx.focus_handle();
+    this.outdated = [];
     this.view = "columns";
     this.range = { start: 0, end: 0 };
     this.shownRange = { start: 0, end: 0 };
@@ -61,14 +67,19 @@ export default class Tkt extends View {
     return parseAnswer(await exec("tkt", args, on ? { on } : {}));
   }
 
-  /** The machines tkt is installed on, asked with `tkt --version`, which starts no daemon. */
+  /** The machines whose tkt the mod can use, asked with `tkt api --help`, which starts no daemon; a tkt too old
+   *  for `tkt api` is set apart so the person can be told to update it. */
   async discover() {
     const found = [];
+    this.outdated = [];
     for (const on of machineOrder(machines(), remembered())) {
+      let r = null;
       try {
-        const r = await exec("tkt", ["--version"], on ? { on } : {});
-        if (r.code === 0) found.push(on);
+        r = await exec("tkt", ["api", "--help"], on ? { on } : {});
       } catch {}
+      const state = tktOn(r);
+      if (state === "ready") found.push(on);
+      if (state === "old") this.outdated.push(on);
     }
     this.found = found;
     return pickMachine(found, remembered());
@@ -104,6 +115,7 @@ export default class Tkt extends View {
   async call(method, path, body) {
     if (this.machine === undefined) {
       const pick = await this.discover();
+      if (pick.none && this.outdated.length > 0) throw new Error(outdatedNote(this.outdated));
       if (pick.none) throw new Error("tkt is not installed on this computer or on any machine connected to Herdr");
       if (pick.choose) {
         this.choices = pick.choose;
@@ -269,7 +281,7 @@ export default class Tkt extends View {
         if (r.kind === "title") this.patchState({ collapsed: toggled(view.collapsed, r.group) }, cx);
         else {
           this.selected = r.key;
-          cx.notify();
+          this.clicked(r.key, () => this.menuFor(r), cx);
         }
       }))
       .child(Scrollbar.vertical("backlog-rows").absolute().inset_0());
@@ -302,10 +314,90 @@ export default class Tkt extends View {
         if (r.kind === "title") this.patchState({ collapsed: toggled(view.collapsed, r.group) }, cx);
         else {
           this.selected = r.key + r.group;
-          cx.notify();
+          this.clicked(this.selected, () => this.menuFor(r), cx);
         }
       }))
       .child(Scrollbar.vertical("pr-rows").absolute().inset_0());
+  }
+
+  /** A click selects; a second one on the same item within 400 ms opens its menu (S9: no native double-click). */
+  clicked(key, open, cx) {
+    const now = Date.now();
+    const double = this.lastClick.key === key && now - this.lastClick.at < 400;
+    this.lastClick = { key, at: now };
+    if (double) this.menu = { ...open(), sel: 0 };
+    cx.notify();
+  }
+
+  menuFor(row) {
+    if (this.tab === "prs") return prMenu(row.raw, { agent: this.answers.sprint?.body?.agents?.[row.ticketKey] });
+    const agents = this.answers.sprint?.body?.agents ?? {};
+    if (this.tab === "backlog") return ticketMenu(row.ticket, { backlog: true, me: this.answers.backlog?.body?.me, agent: agents[row.key] });
+    return ticketMenu(row.ticket, { agent: agents[row.key], attention: row.card?.attention });
+  }
+
+  async local(script, arg) {
+    const r = await exec("sh", ["-c", script, "sh", arg]);
+    if (r.code !== 0) throw new Error((r.stderr || "it did not run").trim());
+  }
+
+  /** Runs a menu item; the screens Start, Move, Assign, details and feedback open come with their own tasks. */
+  act(item, cx) {
+    this.menu = null;
+    cx.spawn(async (cx) => {
+      try {
+        switch (item.action) {
+          case "open":
+            await this.local('open "$1" 2>/dev/null || xdg-open "$1"', item.url);
+            this.notice = "opened ↗";
+            break;
+          case "copy":
+            await this.local('printf %s "$1" | (pbcopy 2>/dev/null || wl-copy 2>/dev/null || xclip -selection clipboard)', item.value);
+            this.notice = `copied ${item.value}`;
+            break;
+          case "copyContext": {
+            const a = await this.call("GET", `/v1/tickets/${item.key}/context`);
+            if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+            await this.local('printf %s "$1" | (pbcopy 2>/dev/null || wl-copy 2>/dev/null || xclip -selection clipboard)', a.body.text);
+            this.notice = `copied the context of ${item.key}`;
+            break;
+          }
+          default:
+            this.notice = `${item.label.replace(" ▸", "")}: not in the Herdr desktop window yet`;
+        }
+      } catch (e) {
+        this.notice = `could not: ${e.message}`;
+      }
+      cx.notify();
+    });
+    cx.notify();
+  }
+
+  menuBox(t) {
+    const m = this.menu;
+    return v_flex().id("menu").absolute().top(70).left(0).right(0).items_center()
+      .child(v_flex().id("menu-box").w(380).p(10).gap(2).rounded(10).bg(t.popover).border(1).border_color(t.accent)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .child(div().font_semibold().text_color(t.foreground).child(m.title))
+        .when(Boolean(m.subtitle), (el) => el.child(div().pb(6).text_size(12).text_color(t.dim).child(m.subtitle)))
+        .children(m.items.map((item, i) =>
+          div().id(`menu-${i}`).px(8).py(4).rounded(5).bg(i === m.sel ? t.selected : t.popover).text_color(t.foreground)
+            .hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => this.act(item, cx))
+            .child(item.label))));
+  }
+
+  key(e, cx) {
+    const k = e.key;
+    if (this.menu) {
+      if (k === "escape") this.menu = null;
+      if (k === "down") this.menu.sel = Math.min(this.menu.items.length - 1, this.menu.sel + 1);
+      if (k === "up") this.menu.sel = Math.max(0, this.menu.sel - 1);
+      if (k === "enter") return this.act(this.menu.items[this.menu.sel], cx);
+    } else if (k === "escape" && this.panel) {
+      this.panel = null;
+    }
+    cx.notify();
   }
 
   sync(cx) {
@@ -416,7 +508,7 @@ export default class Tkt extends View {
     const sel = this.selected === c.key;
     return v_flex().id(`card-${c.key}`).p(8).gap(3).rounded(8).border(1)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .on_click((_e, cx) => { this.selected = c.key; cx.notify(); })
+      .on_click((_e, cx) => { this.selected = c.key; this.clicked(c.key, () => this.menuFor(this.selectedRow(this.answers.sprint?.body) ?? {}), cx); })
       .border_color(sel ? t.accent : c.attention ? t.blocked : t.border).bg(t.raised).hover((s) => s.border_color(t.accent))
       .child(h_flex().gap(6).items_center()
         .child(div().text_color(t.dim).child(c.subtask ? `↳ ${c.key}` : c.key))
@@ -462,7 +554,8 @@ export default class Tkt extends View {
         const [kind, ...rest] = key.split("-");
         if (kind === "row") {
           this.selected = rest.slice(0, -1).join("-");
-          cx.notify();
+          const row = rows.find((r) => r.kind === "row" && r.key === this.selected);
+          this.clicked(this.selected, () => this.menuFor(row), cx);
         }
       }))
       .child(Scrollbar.vertical("rows").absolute().inset_0())
@@ -507,7 +600,7 @@ export default class Tkt extends View {
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => this.pick(cx))
         .child(where))
-      .child(div().flex_1().truncate().text_color(this.error ? t.blocked : t.dim).child(this.error ? problemOf(this.error, this.machine) : ""))
+      .child(div().flex_1().truncate().text_color(this.error ? t.blocked : t.dim).child(this.error ? problemOf(this.error, this.machine) : this.notice))
       .child(div().text_color(t.dim).child(this.tab === "backlog" ? (this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : "") : this.answers.sprint?.body?.sync_label ?? ""))
       .child(div().id("sync").px(6).rounded(4).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
@@ -518,12 +611,14 @@ export default class Tkt extends View {
   render(_cx) {
     const t = theme();
     return v_flex().id("root").relative().size_full().bg(t.surface).text_size(13)
-      .on_mouse_down("left", (_e, cx) => { if (this.panel) { this.panel = null; cx.notify(); } })
+      .track_focus(this.focus).on_key_down((e, cx) => this.key(e, cx))
+      .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.panel || this.menu) { this.panel = null; this.menu = null; cx.notify(); } })
       .child(this.header(t))
       .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
       .when(this.tab === "sprint" && !this.choices, (el) => el.child(this.preview(t, this.answers.sprint?.body)))
       .child(this.legend(t))
       .child(this.status(t))
-      .when(Boolean(this.openPanel()), (el) => { const p = this.openPanel(); return el.child(this.filterPanel(t, p.items, p.hidden, p.field)); });
+      .when(Boolean(this.openPanel()), (el) => { const p = this.openPanel(); return el.child(this.filterPanel(t, p.items, p.hidden, p.field)); })
+      .when(Boolean(this.menu), (el) => el.child(this.menuBox(t)));
   }
 }

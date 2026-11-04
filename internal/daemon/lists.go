@@ -56,6 +56,8 @@ type PRRow struct {
 	Status    string              `json:"status"`
 	Approvals string              `json:"approvals,omitempty"`
 	NeedsYou  bool                `json:"needs_you,omitempty"`
+	// Attention is why the pull request needs its author, for the fix its menu offers.
+	Attention []string `json:"attention,omitempty"`
 }
 
 // BacklogView is the Backlog as the board lays it out: its sprints, then the tickets in no sprint.
@@ -127,7 +129,7 @@ func (s *Server) prs(w http.ResponseWriter, r *http.Request) {
 		sec := PRSection{Group: g.Group, Title: g.Title, Count: len(g.Rows), Needs: g.Needs, Collapsed: board.Folded(collapsed, g.Group), Rows: []PRRow{}}
 		for _, row := range g.Rows {
 			sec.Rows = append(sec.Rows, PRRow{Key: fmt.Sprintf("#%d", row.PR.Number), PR: row.PR, Ticket: row.Ticket, Other: row.Other, Review: row.Review(),
-				Status: row.Status(), Approvals: row.PR.ApprovalsText(), NeedsYou: board.NeedsYou(*row.PR)})
+				Status: row.Status(), Approvals: row.PR.ApprovalsText(), NeedsYou: board.NeedsYou(*row.PR), Attention: reasons(row.PR.Attention())})
 		}
 		view.Sections = append(view.Sections, sec)
 	}
@@ -234,4 +236,12 @@ func orNone(vs []string) []string {
 		return []string{}
 	}
 	return vs
+}
+
+func reasons(rs []ticket.Reason) []string {
+	var out []string
+	for _, r := range rs {
+		out = append(out, string(r))
+	}
+	return out
 }
