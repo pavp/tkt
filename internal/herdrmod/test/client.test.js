@@ -61,3 +61,12 @@ test("a machine's tkt is ready, too old for the mod, or absent", async () => {
   assert.equal(outdatedNote(["wsl-dev"]), "tkt on wsl-dev is too old for Herdr desktop: update tkt there (it needs `tkt api`)");
   assert.equal(outdatedNote([null]), "tkt on this computer is too old for Herdr desktop: update tkt (it needs `tkt api`)");
 });
+
+test("the mod updates itself only from a released tkt whose version differs", async () => {
+  const { needsUpdate } = await import("../mod/lib/client.js");
+  assert.equal(needsUpdate("0.18.0", "0.19.0"), true);
+  assert.equal(needsUpdate("0.18.0", "0.18.0"), false);
+  assert.equal(needsUpdate("dev", "0.19.0"), false);
+  assert.equal(needsUpdate("0.18.0", "dev"), false);
+  assert.equal(needsUpdate("0.18.0", undefined), false);
+});

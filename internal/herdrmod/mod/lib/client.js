@@ -68,3 +68,9 @@ export function outdatedNote(machines) {
   const there = machines.some((m) => m !== null) ? " there" : "";
   return `tkt on ${where} is too old for Herdr desktop: update tkt${there} (it needs \`tkt api\`)`;
 }
+
+/** Whether the mod should take the files of the tkt it talks to: both released, and their versions differ. A
+ *  development build ("dev") never replaces nor is replaced, so working on the mod is not undone. */
+export function needsUpdate(modVersion, tktVersion) {
+  return Boolean(tktVersion) && modVersion !== "dev" && tktVersion !== "dev" && modVersion !== tktVersion;
+}

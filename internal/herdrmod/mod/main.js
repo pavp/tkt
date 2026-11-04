@@ -3,8 +3,9 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView } from "gpui-base";
-import { exec, machines, knownAgents, theme, props, closeOverlay } from "herdr";
-import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote } from "./lib/client.js";
+import { exec, machines, knownAgents, theme, props, closeOverlay, appHome } from "herdr";
+import * as fs from "fs/promises";
+import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords } from "./lib/columns.js";
 import { previewOf, legendFor, problemOf } from "./lib/footer.js";
@@ -117,8 +118,13 @@ export default class Tkt extends View {
       try {
         const h = await this.call("GET", "/health");
         const v = h.body?.version;
-        if (v && MOD_VERSION !== "dev" && v !== "dev" && v !== MOD_VERSION) {
-          this.notice = `the tkt mod (${MOD_VERSION}) differs from tkt on ${on ?? "this computer"} (${v}): run \`tkt herdr install\` there`;
+        if (needsUpdate(MOD_VERSION, v)) {
+          try {
+            await this.updateFrom(on);
+            this.notice = `updated the tkt mod to ${v}, as tkt on ${on ?? "this computer"}`;
+          } catch (e) {
+            this.notice = `the tkt mod (${MOD_VERSION}) differs from tkt on ${on ?? "this computer"} (${v}) and could not update: ${e.message}`;
+          }
           cx.notify();
         }
       } catch {}
@@ -617,6 +623,19 @@ export default class Tkt extends View {
       .child(heading("Work")).children(v.work.length === 0 ? [div().text_color(t.dim).child("no worktree linked")] : v.work.map((w, i) =>
         v_flex().id(`w-${i}`).child(div().text_color(t.foreground).child(w.where)).child(div().text_size(11).text_color(t.dim).truncate().child(w.path))));
     return v_flex().id("details").flex_1().min_h_0().child(nav).child(h_flex().flex_1().min_h_0().items_start().child(left).child(right));
+  }
+
+  /** Writes the mod the tkt on machine on carries over this one; Herdr reloads the mod when its files change. */
+  async updateFrom(on) {
+    const r = await exec("tkt", ["herdr", "export-mod", "--json"], on ? { on } : {});
+    if (r.code !== 0) throw new Error((r.stderr || "tkt herdr export-mod failed").trim());
+    const { files } = JSON.parse(r.stdout);
+    const dir = `${appHome()}/mods/tkt`;
+    for (const [path, text] of Object.entries(files)) {
+      const target = `${dir}/${path}`;
+      await fs.mkdir(target.slice(0, target.lastIndexOf("/")), { recursive: true });
+      await fs.writeFile(target, text);
+    }
   }
 
   async openSettings() {
