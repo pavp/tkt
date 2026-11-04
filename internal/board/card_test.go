@@ -53,7 +53,9 @@ func TestPointSumsHaveNoFloatingPointNoise(t *testing.T) {
 }
 
 func TestACardSummarizesItsFinishedPullRequests(t *testing.T) {
-	pr := func(n int, state ticket.PRState) ticket.PullRequest { return ticket.PullRequest{Number: n, State: state} }
+	pr := func(n int, state ticket.PRState) ticket.PullRequest {
+		return ticket.PullRequest{Number: n, State: state}
+	}
 	tests := []struct {
 		name string
 		prs  []ticket.PullRequest
