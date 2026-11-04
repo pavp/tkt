@@ -58,3 +58,26 @@ func TestTheSyncLabelSaysHowFreshTheBoardIs(t *testing.T) {
 		})
 	}
 }
+
+func TestTheBacklogLabelSaysWhenItWasLoaded(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 30, 0, 0, time.Local)
+	tests := []struct {
+		name    string
+		loading bool
+		at      time.Time
+		want    string
+	}{
+		{"loading", true, now, "refreshing backlog…"},
+		{"never", false, time.Time{}, "not loaded yet"},
+		{"just now", false, now.Add(-10 * time.Second), "✓ loaded just now"},
+		{"minutes", false, now.Add(-4 * time.Minute), "✓ loaded 4 min ago"},
+		{"hours", false, now.Add(-2 * time.Hour), "✓ loaded 10:30"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := board.BacklogLabel(tt.loading, tt.at, now); got != tt.want {
+				t.Errorf("BacklogLabel = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

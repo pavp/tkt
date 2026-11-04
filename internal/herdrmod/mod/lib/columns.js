@@ -28,6 +28,7 @@ export function cardOf(row, agents) {
     label: t.label ?? "",
     agent: agents?.[row.key] ?? "",
     prs: (t.prs ?? []).filter((p) => p.state !== "merged" && p.state !== "closed").map(prMark),
+    finished: card.finished ?? "",
   };
 }
 
@@ -60,4 +61,20 @@ export function wrapWords(text, width, max) {
   const last = kept[max - 1];
   kept[max - 1] = (last.length + 1 > width ? last.slice(0, width - 1) : last) + "…";
   return kept;
+}
+
+// The TUI's status marks (internal/tui markIcons): an icon, and the theme color nearest the TUI's.
+const MARKS = {
+  diamond: ["◇", "ansi4"],
+  blocked: ["⊘", "ansi3"],
+  clock: ["◷", "ansi6"],
+  flag: ["⚑", "ansi5"],
+  star: ["★", "ansi11"],
+  triangle: ["▲", "ansi2"],
+};
+
+/** A status mark as the card shows it: its icon, the icon before the status, and its color; null for none. */
+export function markOf(mark, status) {
+  const m = MARKS[mark];
+  return m ? { glyph: m[0], word: `${m[0]} ${status}`, tone: m[1] } : null;
 }

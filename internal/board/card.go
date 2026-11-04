@@ -20,6 +20,8 @@ type Card struct {
 	// Details and Hint are the preview's second line for the ticket when it is selected.
 	Details []string `json:"details,omitempty"`
 	Hint    string   `json:"hint,omitempty"`
+	// Finished words the merged and closed pull requests: "#12 merged" for one, else "7 merged · 1 closed".
+	Finished string `json:"finished,omitempty"`
 }
 
 // CardOf is t's card; hasAgent says an agent works on it in the Herdr the card is drawn for.
@@ -31,7 +33,24 @@ func CardOf(t ticket.Ticket, hasAgent bool) Card {
 	if len(t.Subtasks) > 0 {
 		c.Progress = SubtaskProgress(t)
 	}
+	c.Finished = finishedPRs(t.PRs)
 	return c
+}
+
+func finishedPRs(prs []ticket.PullRequest) string {
+	_, merged, closed := ticket.SplitPRs(prs)
+	if merged+closed != 1 {
+		return ticket.FinishedSummary(merged, closed)
+	}
+	for _, pr := range prs {
+		switch pr.State {
+		case ticket.PRMerged:
+			return fmt.Sprintf("#%d merged", pr.Number)
+		case ticket.PRClosed:
+			return fmt.Sprintf("#%d closed", pr.Number)
+		}
+	}
+	return ""
 }
 
 func PointsText(p float64) string {

@@ -51,3 +51,26 @@ func TestPointSumsHaveNoFloatingPointNoise(t *testing.T) {
 		t.Errorf("Points = %v, want 0.3", got)
 	}
 }
+
+func TestACardSummarizesItsFinishedPullRequests(t *testing.T) {
+	pr := func(n int, state ticket.PRState) ticket.PullRequest {
+		return ticket.PullRequest{Number: n, State: state}
+	}
+	tests := []struct {
+		name string
+		prs  []ticket.PullRequest
+		want string
+	}{
+		{"one merged", []ticket.PullRequest{pr(12, ticket.PRMerged)}, "#12 merged"},
+		{"one closed beside an open one", []ticket.PullRequest{pr(12, ticket.PROpen), pr(9, ticket.PRClosed)}, "#9 closed"},
+		{"several", []ticket.PullRequest{pr(1, ticket.PRMerged), pr(2, ticket.PRMerged), pr(3, ticket.PRClosed)}, ticket.FinishedSummary(2, 1)},
+		{"none finished", []ticket.PullRequest{pr(12, ticket.PROpen)}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := board.CardOf(ticket.Ticket{Key: "DEMO-1", PRs: tt.prs}, false).Finished; got != tt.want {
+				t.Errorf("Finished = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

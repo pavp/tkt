@@ -35,3 +35,13 @@ test("the Repos chip counts the repositories shown", () => {
   assert.equal(reposChip(fixture("prs.json").repos), "Repos");
   assert.equal(reposChip(fixture("prs-hidden-repo.json").repos), "Repos 2/3");
 });
+
+test("a pull request's preview says what the TUI's PRs preview says", async () => {
+  const { prPreview } = await import("../mod/lib/prs.js");
+  const rows = prRows(fixture("prs.json"));
+  const mine = rows.find((r) => r.key === "#12");
+  assert.deepEqual(prPreview(mine), { title: "#12 · DEMO-1 · Filter accounts", line: "CI failing in example-org/api · CI failing ✕ · enter for actions" });
+  const review = rows.find((r) => r.key === "#15");
+  assert.deepEqual(prPreview(review), { title: "#15 · Rate limit the API", line: "review requested by grace in example-org/api · CI not reported · enter for actions" });
+  assert.equal(prPreview(undefined), null);
+});

@@ -88,3 +88,21 @@ func SyncLabel(s SyncState, now time.Time) string {
 	}
 	return "✓ synced " + s.FetchedAt.Local().Format("15:04")
 }
+
+// BacklogLabel says how fresh the Backlog is: refreshing, loaded N min ago, or not loaded yet (a zero time).
+func BacklogLabel(loading bool, fetchedAt, now time.Time) string {
+	switch {
+	case loading:
+		return "refreshing backlog…"
+	case fetchedAt.IsZero():
+		return "not loaded yet"
+	}
+	d := now.Sub(fetchedAt)
+	switch {
+	case d < time.Minute:
+		return "✓ loaded just now"
+	case d < time.Hour:
+		return fmt.Sprintf("✓ loaded %d min ago", int(d.Minutes()))
+	}
+	return "✓ loaded " + fetchedAt.Local().Format("15:04")
+}

@@ -7,9 +7,9 @@ import { exec, machines, knownAgents, theme, props, closeOverlay, appHome } from
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
-import { columnCards, cardOf, wrapWords } from "./lib/columns.js";
+import { columnCards, cardOf, wrapWords, markOf } from "./lib/columns.js";
 import { previewOf, legendFor, problemOf } from "./lib/footer.js";
-import { prRows, toggled, reposChip } from "./lib/prs.js";
+import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
 import { backlogRows, badges } from "./lib/backlog.js";
 import { ticketMenu, prMenu } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker } from "./lib/start.js";
@@ -283,6 +283,19 @@ export default class Tkt extends View {
     if (!this.panel || !view) return null;
     if (this.panel === "repos") return { items: view.repos ?? [], hidden: view.hidden_repos, field: "hidden_repos" };
     return { items: view.boards ?? [], hidden: view.hidden_boards, field: "hidden_boards" };
+  }
+
+  /** The Sprint's Team toggle: the team's tickets come with a sync, so the change asks for one, as the TUI's t does. */
+  teamToggle(t) {
+    const view = this.answers.sprint?.body;
+    if (!view) return div();
+    return this.toggle("team", Boolean(view.team), (cx) => this.attempt(async () => {
+      const a = await this.call("PATCH", "/v1/board/state", { team: !view.team });
+      if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+      await this.call("POST", "/v1/sync", {});
+      this.notice = view.team ? "only your tickets" : "with the team's tickets · syncing…";
+      this.load(cx);
+    }, cx)).child("Team");
   }
 
   boardsChip(t) {
@@ -903,7 +916,7 @@ export default class Tkt extends View {
   }
 
   preview(t, board) {
-    const p = previewOf(this.selectedRow(board));
+    const p = this.tab === "prs" ? prPreview(prRows(board).find((r) => r.kind === "row" && r.key + r.group === this.selected)) : previewOf(this.selectedRow(board));
     if (!p) return div().px(12).py(6).text_size(12).text_color(t.dim).child("nothing selected");
     return v_flex().px(12).py(6).gap(2).border_t(1).border_color(t.border)
       .child(div().truncate().font_semibold().text_color(t.foreground).child(p.title))
@@ -943,7 +956,7 @@ export default class Tkt extends View {
       .when(this.tab === "sprint", (el) => el.child(this.viewSwitch(t)))
       .when(this.tab === "prs", (el) => el.child(this.prControls(t)))
       .when(this.tab === "backlog", (el) => el.child(this.backlogControls(t)))
-      .when(this.tab === "sprint", (el) => el.child(this.boardsChip(t)))
+      .when(this.tab === "sprint", (el) => el.child(this.teamToggle(t)).child(this.boardsChip(t)))
       .child(div().id("gear").px(8).py(3).rounded(6).text_color(this.settings ? t.foreground : t.muted).hover((s) => s.bg(t.hover))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => { if (this.settings) { this.settings = null; cx.notify(); } else this.attempt(() => this.openSettings(), cx); })
@@ -983,7 +996,8 @@ export default class Tkt extends View {
   }
 
   card(t, c) {
-    const flag = c.attention ? `! ${c.attention}` : c.mark ? `${c.mark} ${c.status}` : "";
+    const mark = markOf(c.mark, c.status);
+    const flag = c.attention ? `! ${c.attention}` : mark ? mark.word : "";
     const lines = wrapWords(c.summary, 34, 2);
     const sel = this.selected === c.key;
     return v_flex().id(`card-${c.key}`).p(8).gap(3).rounded(8).border(1)
@@ -994,11 +1008,12 @@ export default class Tkt extends View {
         .child(div().text_color(t.dim).child(c.subtask ? `↳ ${c.key}` : c.key))
         .when(Boolean(c.points), (el) => el.child(div().text_color(t.dim).child(c.points)))
         .child(div().flex_1())
-        .when(Boolean(flag), (el) => el.child(div().text_color(c.attention ? t.blocked : t.muted).child(flag)))
+        .when(Boolean(flag), (el) => el.child(div().text_color(c.attention ? t.blocked : t[mark?.tone] ?? t.muted).child(flag)))
         .when(Boolean(c.agent), (el) => el.child(div().text_color(t[c.agent] ?? t.unknown).child("●"))))
       .children(lines.map((l, i) => div().id(`card-${c.key}-l${i}`).font_semibold().text_color(c.team ? t.muted : t.foreground).child(l)))
-      .child(h_flex().gap(6).text_size(12).children(c.prs.length === 0 ? [div().text_color(t.dim).child("—")] :
-        c.prs.map((p, i) => h_flex().id(`card-${c.key}-pr${i}`).gap(3).child(div().text_color(t.muted).child(p.ref)).child(div().text_color(t[p.tone] ?? t.dim).child(p.mark)))))
+      .child(h_flex().gap(6).text_size(12).children(c.prs.length === 0 && !c.finished ? [div().text_color(t.dim).child("—")] :
+        c.prs.map((p, i) => h_flex().id(`card-${c.key}-pr${i}`).gap(3).child(div().text_color(t.muted).child(p.ref)).child(div().text_color(t[p.tone] ?? t.dim).child(p.mark))))
+        .when(Boolean(c.finished), (el) => el.child(div().text_color(t.dim).child(c.finished))))
       .when(Boolean(c.label), (el) => el.child(div().text_size(12).text_color(t.accent).child(c.label)))
       .child(div().text_size(12).text_color(t.dim).truncate().child([c.info, c.who].filter(Boolean).join(" · ")));
   }
@@ -1013,7 +1028,7 @@ export default class Tkt extends View {
     const pr = c.prs[0];
     return h_flex().h(ROW).px(12).gap(10).items_center().bg(sel ? t.selected : t.surface)
       .child(div().w(96).text_color(sel ? t.foreground : t.dim).child(c.subtask ? `↳ ${c.key}` : c.key))
-      .child(div().w(110).truncate().text_color(c.attention ? t.blocked : t.muted).child(c.attention ? `! ${c.attention}` : c.status))
+      .child(div().w(110).truncate().text_color(c.attention ? t.blocked : t.muted).child(c.attention ? `! ${c.attention}` : markOf(c.mark, c.status)?.word ?? c.status))
       .child(div().w(40).text_color(t.dim).child(c.points))
       .child(div().w(80).truncate().text_color(t.muted).child(c.who))
       .child(div().w(16).text_color(t[c.agent] ?? t.dim).child(c.agent ? "●" : ""))
@@ -1083,7 +1098,7 @@ export default class Tkt extends View {
         .on_click((_e, cx) => this.pick(cx))
         .child(where))
       .child(div().flex_1().truncate().text_color(this.error ? t.blocked : t.dim).child(this.error ? problemOf(this.error, this.machine) : this.notice))
-      .child(div().text_color(t.dim).child(this.tab === "backlog" ? (this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : "") : this.answers.sprint?.body?.sync_label ?? ""))
+      .child(div().text_color(t.dim).child(this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.answers[this.tab]?.body?.sync_label ?? ""))
       .child(div().id("sync").px(6).rounded(4).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => this.sync(cx))
@@ -1097,7 +1112,7 @@ export default class Tkt extends View {
       .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
       .child(this.header(t))
       .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
-      .when(this.tab === "sprint" && !this.choices && !this.details && !this.settings, (el) => el.child(this.preview(t, this.answers.sprint?.body)))
+      .when((this.tab === "sprint" || this.tab === "prs") && !this.choices && !this.details && !this.settings, (el) => el.child(this.preview(t, this.answers[this.tab]?.body)))
       .child(this.legend(t))
       .child(this.status(t))
       .when(Boolean(this.openPanel()), (el) => { const p = this.openPanel(); return el.child(this.filterPanel(t, p.items, p.hidden, p.field)); })

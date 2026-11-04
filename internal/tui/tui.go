@@ -1777,20 +1777,15 @@ func (m Model) syncLabel() string {
 
 // backlogLabel is the Backlog's own state in the sync corner, which `g` and its timer refresh apart from the sprint.
 func (m Model) backlogLabel() string {
-	switch {
-	case m.backlogLoading:
-		return spinFrames[m.spin%len(spinFrames)] + " refreshing backlog…"
-	case m.backlog == nil:
-		return "not loaded yet"
+	var at time.Time
+	if m.backlog != nil {
+		at = m.backlog.FetchedAt
 	}
-	d := m.now().Sub(m.backlog.FetchedAt)
-	switch {
-	case d < time.Minute:
-		return "✓ loaded just now"
-	case d < time.Hour:
-		return fmt.Sprintf("✓ loaded %d min ago", int(d.Minutes()))
+	label := board.BacklogLabel(m.backlogLoading, at, m.now())
+	if m.backlogLoading {
+		return spinFrames[m.spin%len(spinFrames)] + " " + label
 	}
-	return "✓ loaded " + m.backlog.FetchedAt.Local().Format("15:04")
+	return label
 }
 
 var reviewChip = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorReview).Padding(0, 1)
