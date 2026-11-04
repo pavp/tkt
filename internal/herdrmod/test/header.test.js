@@ -41,3 +41,17 @@ test("the filter's notice says how much it hides, and which key changes it", () 
   assert.deepEqual(scopeNotice("prs", prs), { text: "Showing 1 of 2 repositories · ", key: "R", after: " change" });
   assert.equal(scopeNotice("backlog", backlog), null);
 });
+
+test("the Sprint and PRs tabs load together, as both counts show on the header; the Backlog only when shown", async () => {
+  const { routesFor } = await import("../mod/lib/header.js");
+  const tabs = [{ id: "sprint", route: "/v1/board?herdr=desktop" }, { id: "prs", route: "/v1/prs" }, { id: "backlog", route: "/v1/backlog" }];
+  assert.deepEqual(routesFor(tabs, "sprint", {}), [["sprint", "/v1/board?herdr=desktop"], ["prs", "/v1/prs"]]);
+  assert.deepEqual(routesFor(tabs, "prs", { bots: true }), [["prs", "/v1/prs?bots=true"], ["sprint", "/v1/board?herdr=desktop"]]);
+  assert.deepEqual(routesFor(tabs, "backlog", { refreshBacklog: true }), [["backlog", "/v1/backlog?refresh=true"], ["sprint", "/v1/board?herdr=desktop"], ["prs", "/v1/prs"]]);
+});
+
+test("the view switch is one button whose icon names the view in use, as the TUI's", async () => {
+  const { viewButton } = await import("../mod/lib/header.js");
+  assert.deepEqual(viewButton("columns"), { label: "◫ View", next: "list" });
+  assert.deepEqual(viewButton("list"), { label: "≣ View", next: "columns" });
+});

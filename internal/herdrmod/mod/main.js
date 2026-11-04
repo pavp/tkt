@@ -17,7 +17,7 @@ import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./l
 import { detailView, neighbors, detailsKey } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
-import { tabCount, contextText, scopeNotice } from "./lib/header.js";
+import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction } from "./lib/nav.js";
 
 const TABS = [
@@ -194,15 +194,12 @@ export default class Tkt extends View {
   }
 
   load(cx) {
-    const tab = TABS.find((t) => t.id === this.tab);
-    let route = tab.id === "prs" && this.bots ? `${tab.route}?bots=true` : tab.route;
-    if (tab.id === "backlog" && this.refreshBacklog) {
-      route = `${tab.route}?refresh=true`;
-      this.refreshBacklog = false;
-    }
+    const routes = routesFor(TABS, this.tab, { bots: this.bots, refreshBacklog: this.refreshBacklog });
+    if (this.tab === "backlog") this.refreshBacklog = false;
     cx.spawn(async (cx) => {
       try {
-        this.answers[tab.id] = await this.call("GET", route);
+        const answers = await Promise.all(routes.map(([, route]) => this.call("GET", route)));
+        routes.forEach(([id], i) => { this.answers[id] = answers[i]; });
         if (this.jobs.length > 0) await this.followJobs();
         this.error = null;
         if (this.pendingUse) {
@@ -1124,16 +1121,11 @@ export default class Tkt extends View {
   }
 
   viewSwitch(t) {
-    const option = (id, title) => {
-      const on = this.view === id;
-      return div().id(`view-${id}`).px(10).py(2).rounded(5)
-        .bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => this.setView(id, cx))
-        .child(title);
-    };
-    return h_flex().p(2).gap(2).rounded(7).border(1).border_color(t.border)
-      .child(option("columns", "◫ Columns")).child(option("list", "≣ List"));
+    const b = viewButton(this.view);
+    return div().id("view").px(10).py(2).rounded(6).border(1).border_color(t.border).text_color(t.foreground).hover((s) => s.bg(t.hover))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => this.setView(b.next, cx))
+      .child(b.label);
   }
 
   card(t, c) {

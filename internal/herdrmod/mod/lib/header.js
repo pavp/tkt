@@ -47,3 +47,20 @@ export function scopeNotice(tab, body) {
   const hidden = boards.filter((b) => b.hidden).length;
   return hidden ? { text: `Showing ${boards.length - hidden} of ${boards.length} boards · `, key: "B", after: " change" } : null;
 }
+
+/** The routes a load asks: the tab in view first, then the Sprint and PRs, whose counts the header always shows;
+ *  the Backlog, which asks Jira, only while it is in view. */
+export function routesFor(tabs, current, { bots = false, refreshBacklog = false } = {}) {
+  const route = (t) => {
+    if (t.id === "prs" && bots) return `${t.route}?bots=true`;
+    if (t.id === "backlog" && refreshBacklog) return `${t.route}?refresh=true`;
+    return t.route;
+  };
+  const first = tabs.find((t) => t.id === current);
+  const rest = tabs.filter((t) => t.id !== current && t.id !== "backlog");
+  return [first, ...rest].map((t) => [t.id, route(t)]);
+}
+
+export function viewButton(view) {
+  return view === "list" ? { label: "≣ View", next: "columns" } : { label: "◫ View", next: "list" };
+}
