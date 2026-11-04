@@ -89,6 +89,8 @@ links the tkt plugin into the running Herdr (0.9.5 or later); after an upgrade t
 
 `tkt herdr start KEY` works in Herdr workspaces instead of the current terminal: for a ticket without a worktree, a setup agent creates one per repository with `herdr worktree create`, and tkt then hands the ticket to an agent started in that worktree's workspace and closes the setup agent, so the main checkout stays free (Claude Code asks whether to trust each new worktree's folder, and tkt waits for the answer; trust `~/.herdr/worktrees` once, by opening Claude Code there, and it never asks again); when the ticket already has a worktree with an agent working in it, it focuses that agent's workspace instead (the board's menu then reads "Go to the agent in Herdr"). `tkt herdr uninstall` removes the plugin and the keybindings it added.
 
+In a Herdr desktop terminal, `tkt herdr install` puts the tkt mod into Herdr desktop's app folder (`~/.config/herdr-app/mods/tkt`, or `HERDR_APP_HOME`), checked with `herdr-app check`; run it again after updating tkt so the mod matches, and `tkt herdr uninstall` removes it. The mod shows the board in a Herdr window and reaches tkt on this computer or on a machine connected to Herdr desktop.
+
 `tkt api METHOD PATH [--body JSON]` sends one request to the tkt daemon and prints its answer as JSON (`{"status", "body"}`); the Herdr desktop mod reaches tkt this way, on this computer or on a machine connected to Herdr desktop. Writes run at once, so a client confirms with you first.
 
 ## Develop

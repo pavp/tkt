@@ -147,6 +147,9 @@ func newHerdrCmd(a *App) *cobra.Command {
 		start,
 		installCmd,
 		&cobra.Command{Use: "uninstall", Short: "Unlink the tkt plugin from Herdr and remove its keybindings", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+			if ch, err := a.whichHerdr(cmd.Context()); err == nil && ch.flavor == herdrDesktop {
+				return a.uninstallDesktopMod()
+			}
 			if err := plugins(a.NewHerdr()).UnlinkPlugin(cmd.Context(), a.pluginID()); err != nil {
 				return err
 			}
@@ -187,6 +190,9 @@ func newHerdrCmd(a *App) *cobra.Command {
 }
 
 func (a *App) herdrInstall(cmd *cobra.Command, keys, noKeys, sidebar, noSidebar bool) error {
+	if ch, err := a.whichHerdr(cmd.Context()); err == nil && ch.flavor == herdrDesktop {
+		return a.installDesktopMod(cmd.Context())
+	}
 	exe, err := a.Executable()
 	if err != nil {
 		return fmt.Errorf("locate the tkt binary: %w", err)

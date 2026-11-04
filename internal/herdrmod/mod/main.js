@@ -15,6 +15,7 @@ import { firstPicker, answer, taskPicker } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows } from "./lib/settings.js";
+import { MOD_VERSION } from "./lib/version.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -112,7 +113,15 @@ export default class Tkt extends View {
     try {
       localStorage.setItem("machine", JSON.stringify(on));
     } catch {}
-    cx.spawn(async () => {
+    cx.spawn(async (cx) => {
+      try {
+        const h = await this.call("GET", "/health");
+        const v = h.body?.version;
+        if (v && MOD_VERSION !== "dev" && v !== "dev" && v !== MOD_VERSION) {
+          this.notice = `the tkt mod (${MOD_VERSION}) differs from tkt on ${on ?? "this computer"} (${v}): run \`tkt herdr install\` there`;
+          cx.notify();
+        }
+      } catch {}
       try {
         const known = await knownAgents(on ? { on } : {});
         await this.call("POST", "/v1/herdr/agents", { agents: agentKinds(known) });
