@@ -2,7 +2,7 @@
 // core runs tkt, so it works whether tkt runs here or on a machine reached over SSH.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView } from "gpui-base";
+import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView, VirtualListScrollHandle } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay, appHome } from "herdr";
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
@@ -17,6 +17,7 @@ import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./l
 import { detailView, neighbors } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
+import { direction, tabAfter, stepList, stepColumns, targets } from "./lib/nav.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -55,6 +56,8 @@ export default class Tkt extends View {
     this.notice = "";
     this.lastClick = { key: null, at: 0 };
     this.focus = cx.focus_handle();
+    this.focus.focus();
+    this.scrolls = { rows: VirtualListScrollHandle.new(), "pr-rows": VirtualListScrollHandle.new(), "backlog-rows": VirtualListScrollHandle.new() };
     this.outdated = [];
     this.view = "columns";
     this.range = { start: 0, end: 0 };
@@ -342,7 +345,7 @@ export default class Tkt extends View {
     const rows = backlogRows(view);
     return v_flex().id("backlog").relative().flex_1().min_h_0()
       .child(v_virtual_list("backlog-rows", rows.length, ROW, (i) => `${i}`, (range) =>
-        rows.slice(range.start, range.end).map((r) => this.backlogRow(t, r))).size_full().on_item_click((key, cx) => {
+        rows.slice(range.start, range.end).map((r) => this.backlogRow(t, r))).size_full().track_scroll(this.scrolls["backlog-rows"]).on_item_click((key, cx) => {
         const r = rows[Number(key)];
         if (!r) return;
         if (r.kind === "title") this.patchState({ collapsed: toggled(view.collapsed, r.group) }, cx);
@@ -375,7 +378,7 @@ export default class Tkt extends View {
     if (rows.length === 0) return div().p(16).text_color(t.muted).child("No pull requests: none of yours open, and no review requested.");
     return v_flex().id("prs").relative().flex_1().min_h_0()
       .child(v_virtual_list("pr-rows", rows.length, ROW, (i) => `${i}`, (range) =>
-        rows.slice(range.start, range.end).map((r) => this.prRow(t, r))).size_full().on_item_click((key, cx) => {
+        rows.slice(range.start, range.end).map((r) => this.prRow(t, r))).size_full().track_scroll(this.scrolls["pr-rows"]).on_item_click((key, cx) => {
         const r = rows[Number(key)];
         if (!r) return;
         if (r.kind === "title") this.patchState({ collapsed: toggled(view.collapsed, r.group) }, cx);
@@ -899,8 +902,33 @@ export default class Tkt extends View {
       this.picker = null;
     } else if (k === "escape" && this.panel) {
       this.panel = null;
+    } else if (!this.prompt && !this.choices && !this.details && !this.settings && !this.picker && !this.panel) {
+      this.boardKey(e, cx);
     }
     cx.notify();
+  }
+
+  /** The board's keys, as the TUI's: tabs, the view, and moving the selection. */
+  boardKey(e, cx) {
+    const tab = tabAfter(e.keystroke, this.tab);
+    if (tab) return this.select(tab, cx);
+    if (e.keystroke === "v") {
+      if (this.tab === "backlog") return this.patchState({ backlog_merged: !this.answers.backlog?.body?.merged }, cx);
+      if (this.tab === "sprint") return this.setView(this.view === "columns" ? "list" : "columns", cx);
+      return;
+    }
+    const d = direction(e.keystroke);
+    const body = this.answers[this.tab]?.body;
+    if (!d || !body) return;
+    const at = targets(this.tab, this.view, body);
+    if (at.cols) {
+      this.selected = stepColumns(at.cols, this.selected, d[0], d[1]);
+      return;
+    }
+    if (d[1] === 0) return;
+    this.selected = stepList(at.ids, this.selected, d[1]);
+    const i = at.ids.indexOf(this.selected);
+    if (i >= 0) this.scrolls[at.list].scroll_to_item(at.at[i], "center");
   }
 
   sync(cx) {
@@ -1059,7 +1087,7 @@ export default class Tkt extends View {
       .child(v_virtual_list("rows", rows.length, ROW, (i) => `${rows[i].kind}-${rows[i].key ?? rows[i].title}-${i}`, (range) => {
         this.range = { start: range.start, end: range.end };
         return rows.slice(range.start, range.end).map((r) => this.listRow(t, r, board));
-      }).size_full().on_item_click((key, cx) => {
+      }).size_full().track_scroll(this.scrolls.rows).on_item_click((key, cx) => {
         const [kind, ...rest] = key.split("-");
         if (kind === "row") {
           this.selected = rest.slice(0, -1).join("-");
