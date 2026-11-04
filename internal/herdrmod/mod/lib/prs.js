@@ -20,6 +20,7 @@ export function prRows(view) {
         other: Boolean(r.other),
         who: r.pr?.author || r.ticket?.assignee || "",
         approvals: r.approvals ?? "",
+        raw: r,
       });
     }
   }

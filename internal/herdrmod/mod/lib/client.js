@@ -53,3 +53,18 @@ export function failed(failures) {
   const n = failures + 1;
   return n >= LOOK_AGAIN ? { failures: 0, lookAgain: true } : { failures: n, lookAgain: false };
 }
+
+/** What `tkt api --help` says of a machine's tkt: ready, too old to have `tkt api`, or not there (null when
+ *  the machine could not run it). */
+export function tktOn(result) {
+  if (!result) return "none";
+  if (result.code === 0) return "ready";
+  return /unknown command "api"/.test(result.stderr ?? "") ? "old" : "none";
+}
+
+/** Tells the person to update tkt where it is too old for the mod. */
+export function outdatedNote(machines) {
+  const where = machines.map((m) => m ?? "this computer").join(" and ");
+  const there = machines.some((m) => m !== null) ? " there" : "";
+  return `tkt on ${where} is too old for Herdr desktop: update tkt${there} (it needs \`tkt api\`)`;
+}

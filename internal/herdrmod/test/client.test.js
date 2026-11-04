@@ -51,3 +51,13 @@ test("the machine in use is looked for again after it failed a few times in a ro
   assert.deepEqual(failed(1), { failures: 2, lookAgain: false });
   assert.deepEqual(failed(2), { failures: 0, lookAgain: true });
 });
+
+test("a machine's tkt is ready, too old for the mod, or absent", async () => {
+  const { tktOn, outdatedNote } = await import("../mod/lib/client.js");
+  assert.equal(tktOn({ code: 0, stdout: "Sends one request…", stderr: "" }), "ready");
+  assert.equal(tktOn({ code: 1, stdout: "", stderr: 'tkt: unknown command "api" for "tkt"\n' }), "old");
+  assert.equal(tktOn({ code: 127, stdout: "", stderr: "sh: tkt: not found" }), "none");
+  assert.equal(tktOn(null), "none");
+  assert.equal(outdatedNote(["wsl-dev"]), "tkt on wsl-dev is too old for Herdr desktop: update tkt there (it needs `tkt api`)");
+  assert.equal(outdatedNote([null]), "tkt on this computer is too old for Herdr desktop: update tkt (it needs `tkt api`)");
+});
