@@ -5,7 +5,7 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay, appHome } from "herdr";
 import * as fs from "fs/promises";
-import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate } from "./lib/client.js";
+import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords } from "./lib/columns.js";
 import { previewOf, legendFor, problemOf } from "./lib/footer.js";
@@ -76,8 +76,24 @@ export default class Tkt extends View {
     cx.timer.every(POLL, (cx) => this.load(cx));
   }
 
+  /** tkt's path on machine on: Herdr runs programs with a plain PATH, which may miss where tkt is installed
+   *  (Homebrew on Linux adds itself in the interactive shell's rc), so the user's own shell is asked too. */
+  async tkt(on) {
+    const key = on ?? "";
+    if (!this.tktPaths) this.tktPaths = {};
+    if (!this.tktPaths[key]) {
+      let path = null;
+      try {
+        const r = await exec("sh", ["-c", 'command -v tkt || "${SHELL:-sh}" -ic "command -v tkt" 2>/dev/null'], on ? { on } : {});
+        path = tktPathFrom(r.stdout);
+      } catch {}
+      this.tktPaths[key] = path ?? "tkt";
+    }
+    return this.tktPaths[key];
+  }
+
   async run(args, on) {
-    return parseAnswer(await exec("tkt", args, on ? { on } : {}));
+    return parseAnswer(await exec(await this.tkt(on), args, on ? { on } : {}));
   }
 
   /** The machines whose tkt the mod can use, asked with `tkt api --help`, which starts no daemon; a tkt too old
@@ -88,7 +104,7 @@ export default class Tkt extends View {
     for (const on of machineOrder(machines(), remembered())) {
       let r = null;
       try {
-        r = await exec("tkt", ["api", "--help"], on ? { on } : {});
+        r = await exec(await this.tkt(on), ["api", "--help"], on ? { on } : {});
       } catch {}
       const state = tktOn(r);
       if (state === "ready") found.push(on);
@@ -627,9 +643,11 @@ export default class Tkt extends View {
 
   /** Writes the mod the tkt on machine on carries over this one; Herdr reloads the mod when its files change. */
   async updateFrom(on) {
-    const r = await exec("tkt", ["herdr", "export-mod", "--json"], on ? { on } : {});
+    const r = await exec(await this.tkt(on), ["herdr", "export-mod", "--json"], on ? { on } : {});
     if (r.code !== 0) throw new Error((r.stderr || "tkt herdr export-mod failed").trim());
     const { files } = JSON.parse(r.stdout);
+    const outside = Object.keys(files).find((path) => !safeModPath(path));
+    if (outside !== undefined) throw new Error(`tkt on ${on ?? "this computer"} sent a file outside the mod's folder (${outside}); nothing was written`);
     const dir = `${appHome()}/mods/tkt`;
     for (const [path, text] of Object.entries(files)) {
       const target = `${dir}/${path}`;

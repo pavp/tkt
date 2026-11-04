@@ -66,11 +66,24 @@ export function tktOn(result) {
 export function outdatedNote(machines) {
   const where = machines.map((m) => m ?? "this computer").join(" and ");
   const there = machines.some((m) => m !== null) ? " there" : "";
-  return `tkt on ${where} is too old for Herdr desktop: update tkt${there} (it needs \`tkt api\`)`;
+  return `tkt on ${where} ${machines.length > 1 ? "are" : "is"} too old for Herdr desktop: update tkt${there} (it needs \`tkt api\`)`;
 }
 
 /** Whether the mod should take the files of the tkt it talks to: both released, and their versions differ. A
  *  development build ("dev") never replaces nor is replaced, so working on the mod is not undone. */
 export function needsUpdate(modVersion, tktVersion) {
   return Boolean(tktVersion) && modVersion !== "dev" && tktVersion !== "dev" && modVersion !== tktVersion;
+}
+
+/** Whether a file name from `tkt herdr export-mod --json` stays inside the mod's folder: relative, plain
+ *  segments only; a tkt on another machine must not write anywhere else on this one. */
+export function safeModPath(path) {
+  if (typeof path !== "string" || path === "" || path.startsWith("/") || path.includes("\\")) return false;
+  return path.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
+
+/** The tkt a shell found, from what it printed: its last absolute path, since an interactive shell may print more. */
+export function tktPathFrom(stdout) {
+  const lines = (stdout ?? "").split("\n").map((l) => l.trim()).filter((l) => l.startsWith("/"));
+  return lines.length > 0 ? lines[lines.length - 1] : null;
 }
