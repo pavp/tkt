@@ -85,3 +85,24 @@ export function prCell(c) {
   if (pr) return { text: `${pr.ref} ${pr.mark}`, tone: pr.tone ?? "dim" };
   return { text: c.finished || "—", tone: "dim" };
 }
+
+const TYPE_ICONS = { bug: ["●", "ansi1"], epic: ["◆", "ansi5"], subtask: ["■", "ansi6"], story: ["■", "ansi2"], task: ["■", "ansi4"] };
+
+/** The icon of a card's Jira type kind, in the TUI's colors (theme ansi names); null without a type. */
+export function typeIcon(kind) {
+  if (!kind) return null;
+  const [glyph, tone] = TYPE_ICONS[kind] ?? ["■", "dim"];
+  return { glyph, tone };
+}
+
+export function agentGlyph(status) {
+  return status === "idle" ? "○" : "●";
+}
+
+/** The top right of a card: why it needs you with its status mark's icon, else the mark with its status. */
+export function cardFlag(attention, mark) {
+  if (attention) return mark ? `! ${attention} ${mark.glyph}` : `! ${attention}`;
+  return mark ? mark.word : "";
+}
+
+export const EMPTY_COLUMN = "— nothing here";

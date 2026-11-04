@@ -7,7 +7,7 @@ import { exec, machines, knownAgents, theme, props, closeOverlay, appHome } from
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
-import { columnCards, cardOf, wrapWords, markOf, prCell } from "./lib/columns.js";
+import { columnCards, cardOf, wrapWords, markOf, prCell, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN } from "./lib/columns.js";
 import { previewOf, legendFor, problemOf, warningsLine } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview, prsToggle } from "./lib/prs.js";
 import { backlogRows, badges } from "./lib/backlog.js";
@@ -1164,27 +1164,33 @@ export default class Tkt extends View {
       .child(b.label);
   }
 
-  card(t, c) {
+  card(t, c, labelField) {
     const mark = markOf(c.mark, c.status);
-    const flag = c.attention ? `! ${c.attention}` : mark ? mark.word : "";
+    const flag = cardFlag(c.attention, mark);
     const lines = wrapWords(c.summary, 34, 2);
-    const sel = this.selected === c.key;
+    const sel = this.selected === c.key && !this.inStrip;
+    const icon = typeIcon(c.typeKind);
     return v_flex().id(`card-${c.key}`).p(8).gap(3).rounded(8).border(1)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { this.selected = c.key; this.clicked(c.key, () => this.menuFor(this.selectedRow(this.answers.sprint?.body) ?? {}), cx); })
       .border_color(sel ? t.accent : c.attention ? t.blocked : t.border).bg(t.raised).hover((s) => s.border_color(t.accent))
       .child(h_flex().gap(6).items_center()
-        .child(div().text_color(t.dim).child(c.subtask ? `↳ ${c.key}` : c.key))
+        .child(h_flex().gap(4).child(div().text_color(t.accent).child(sel ? "▸" : ""))
+          .when(c.subtask, (el) => el.child(div().text_color(t.ansi6 ?? t.dim).child("↳")))
+          .child(div().text_color(sel ? t.foreground : t.dim).when(sel, (el) => el.font_semibold()).child(c.key)))
         .when(Boolean(c.points), (el) => el.child(div().text_color(t.dim).child(c.points)))
         .child(div().flex_1())
         .when(Boolean(flag), (el) => el.child(div().text_color(c.attention ? t.blocked : t[mark?.tone] ?? t.muted).child(flag)))
-        .when(Boolean(c.agent), (el) => el.child(div().text_color(t[c.agent] ?? t.unknown).child("●"))))
+        .when(Boolean(c.agent), (el) => el.child(div().text_color(t[c.agent] ?? t.unknown).child(agentGlyph(c.agent)))))
       .children(lines.map((l, i) => div().id(`card-${c.key}-l${i}`).font_semibold().text_color(c.team ? t.muted : t.foreground).child(l)))
       .child(h_flex().gap(6).text_size(12).children(c.prs.length === 0 && !c.finished ? [div().text_color(t.dim).child("—")] :
         c.prs.map((p, i) => h_flex().id(`card-${c.key}-pr${i}`).gap(3).child(div().text_color(t.muted).child(p.ref)).child(div().text_color(t[p.tone] ?? t.dim).child(p.mark))))
         .when(Boolean(c.finished), (el) => el.child(div().text_color(t.dim).child(c.finished))))
-      .when(Boolean(c.label), (el) => el.child(div().text_size(12).text_color(t.accent).child(c.label)))
-      .child(div().text_size(12).text_color(t.dim).truncate().child([c.info, c.who].filter(Boolean).join(" · ")));
+      .when(Boolean(labelField), (el) => el.child(h_flex().h(18).text_size(12)
+        .when(Boolean(c.label), (row) => row.child(div().px(5).rounded(4).bg(t.chrome).text_color(t.foreground).child(c.label)))))
+      .child(h_flex().gap(5).text_size(12)
+        .when(Boolean(icon), (el) => el.child(div().text_color(t[icon.tone] ?? t.dim).child(icon.glyph)))
+        .child(div().flex_1().text_color(t.dim).truncate().child([c.info, c.who].filter(Boolean).join(" · "))));
   }
 
   listRow(t, r, board) {
@@ -1234,13 +1240,15 @@ export default class Tkt extends View {
   columns(t, board) {
     return h_flex().id("columns").flex_1().min_h_0().gap(10).p(10).items_start().children(
       columnCards(board).map((col) =>
-        v_flex().id(`col-${col.category}`).flex_1().min_w(220).h_full().min_h_0().gap(6)
+        v_flex().id(`col-${col.category}`).flex_1().min_w(220).h_full().min_h_0().gap(6).p(6).rounded(8).border(1)
+          .border_color(!this.inStrip && col.cards.some((c) => c.key === this.selected) ? t.accent : t.border)
           .child(h_flex().px(4).pb(4).border_b(1).border_color(t.border)
             .child(div().font_semibold().text_color(t.foreground).child(col.title))
             .child(div().flex_1())
             .child(div().text_color(t.dim).child([String(col.count), col.points].filter(Boolean).join(" · "))))
           .child(v_flex().id(`col-${col.category}-cards`).flex_1().min_h_0().overflow_y_scrollbar().gap(6)
-            .children(col.cards.map((c) => this.card(t, c))))));
+            .when(col.cards.length === 0, (el) => el.child(div().px(4).text_color(t.dim).child(EMPTY_COLUMN)))
+            .children(col.cards.map((c) => this.card(t, c, board.label_field))))));
   }
 
   body(t) {
