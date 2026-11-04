@@ -37,7 +37,6 @@ func (a *App) daemonSnapshot(ctx context.Context) (board.Snapshot, bool) {
 		return board.Snapshot{}, false
 	}
 	snap, err := c.Tickets(ctx)
-	a.agentsHere(&snap)
 	return snap, err == nil
 }
 
@@ -87,8 +86,7 @@ func (a *App) followDaemon(ctx context.Context, b *boardActions, send func(tea.M
 				switch e.Type {
 				case "snapshot", "agent.updated", "sync.finished":
 					if snap, err := c.Tickets(ctx); err == nil {
-						a.agentsHere(&snap)
-						send(tui.SnapshotMsg{Snap: snap, Quiet: true})
+						send(tui.SnapshotMsg{Snap: a.boardAgentsHere(snap), Quiet: true})
 					}
 				case "state.updated":
 					if st, changed := b.stateChanged(); changed {

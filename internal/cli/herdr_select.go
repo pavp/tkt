@@ -31,21 +31,22 @@ func (a *App) terminalHerdr() string {
 	switch {
 	case a.inDesktopTerminal():
 		return "desktop"
-	case a.Env.Getenv("HERDR_ENV") == "1":
+	case a.Env.Getenv("HERDR_ENV") == "1" || a.Env.Getenv("HERDR_PLUGIN_ID") != "":
 		return "classic"
 	}
 	return ""
 }
 
-// agentsHere keeps only the agents of the Herdr tkt runs in: each Herdr's agents are its own, and a terminal
-// of neither shows none.
-func (a *App) agentsHere(snap *board.Snapshot) {
+// boardAgentsHere is snap with only the agents of the Herdr whose terminal runs the board: each Herdr's
+// agents are its own, and a terminal of neither shows none.
+func (a *App) boardAgentsHere(snap board.Snapshot) board.Snapshot {
 	switch here := a.terminalHerdr(); {
 	case here == "":
 		snap.Agents = nil
 	case snap.AgentsBy != nil:
 		snap.Agents = snap.AgentsBy[here]
 	}
+	return snap
 }
 
 type herdrChoice struct {

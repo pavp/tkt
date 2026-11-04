@@ -244,13 +244,15 @@ func (a *App) daemonSync(ctx context.Context, partial func(board.Snapshot)) (boa
 	hctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var agents []map[string]string
+	by := map[string]map[string]string{}
 	for _, h := range a.daemonHerdrs().current(hctx) {
 		if _, got, err := a.updateSidebarOn(hctx, h.api, c, snap, h.sidebar()); err == nil {
 			agents = append(agents, got)
+			by[h.flavor.wire()] = got
 		}
 	}
 	if len(agents) > 0 {
-		snap.Agents = mostUrgentPerTicket(agents...)
+		snap.Agents, snap.AgentsBy = mostUrgentPerTicket(agents...), by
 	}
 	return snap, nil
 }
