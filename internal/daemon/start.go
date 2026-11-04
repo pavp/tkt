@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -144,7 +145,7 @@ func (s *Server) mutating(next http.HandlerFunc) http.HandlerFunc {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next(rec, r)
 		if s.opts.Log != nil {
-			s.opts.Log("write %s %s → %d\n", r.Method, r.URL.Path, rec.status)
+			s.opts.Log("write %s %s → %d\n", r.Method, strconv.Quote(r.URL.Path), rec.status)
 		}
 	})
 }
