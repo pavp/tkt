@@ -14,6 +14,7 @@ import { ticketMenu, prMenu } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors } from "./lib/details.js";
+import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows } from "./lib/settings.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -45,6 +46,7 @@ export default class Tkt extends View {
     this.picker = null;
     this.jobs = [];
     this.details = null;
+    this.settings = null;
     this.prompt = null;
     this.form = null;
     this.input = InputState.new({ placeholder: "" });
@@ -383,6 +385,9 @@ export default class Tkt extends View {
             this.notice = `copied the context of ${item.key}`;
             break;
           }
+          case "settingsPatch":
+            await this.patchSettings(item.change);
+            break;
           case "details":
             await this.openDetails(item.key);
             break;
@@ -496,7 +501,14 @@ export default class Tkt extends View {
     this.prompt = null;
     cx.spawn(async (cx) => {
       try {
-        if (p.kind === "comment") {
+        if (p.kind === "addRepo") {
+          const [repo, ...path] = text.split(/\s+/);
+          if (!repo || path.length === 0) throw new Error("give owner/name, then the folder of its clone");
+          await this.patchSettings(reposPatch(p.space, { add: { repo, path: path.join(" ") } }));
+        } else if (p.kind === "addRoot") {
+          if (!text) throw new Error("give a folder");
+          await this.patchSettings(rootsPatch(this.settings.data.repo_roots, { add: text }));
+        } else if (p.kind === "comment") {
           this.form.comment = text;
           this.menu = { ...formMenu(this.form.key, this.form.move, this.form), sel: 0 };
         } else {
@@ -527,7 +539,7 @@ export default class Tkt extends View {
           .child(div().id("prompt-cancel").px(10).py(3).rounded(5).text_color(t.muted).hover((s) => s.bg(t.hover))
             .on_click((_e, cx) => { this.prompt = null; cx.notify(); }).child("Cancel"))
           .child(div().id("prompt-ok").px(10).py(3).rounded(5).bg(t.solid).text_color(t.solid_foreground)
-            .on_click((_e, cx) => this.answerPrompt(cx)).child(p.kind === "comment" ? "Done" : "Search"))));
+            .on_click((_e, cx) => this.answerPrompt(cx)).child(p.kind === "comment" || p.kind.startsWith("add") ? "Done" : "Search"))));
   }
 
   /** The keys of the shown tab's tickets, in its order, for the details' arrows. */
@@ -596,6 +608,103 @@ export default class Tkt extends View {
       .child(heading("Work")).children(v.work.length === 0 ? [div().text_color(t.dim).child("no worktree linked")] : v.work.map((w, i) =>
         v_flex().id(`w-${i}`).child(div().text_color(t.foreground).child(w.where)).child(div().text_size(11).text_color(t.dim).truncate().child(w.path))));
     return v_flex().id("details").flex_1().min_h_0().child(nav).child(h_flex().flex_1().min_h_0().items_start().child(left).child(right));
+  }
+
+  async openSettings() {
+    const a = await this.call("GET", "/v1/settings");
+    if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+    this.settings = { section: this.settings?.section ?? "spaces", data: a.body, statuses: {}, boards: {}, fields: null };
+  }
+
+  async patchSettings(change) {
+    const a = await this.call("PATCH", "/v1/settings", change);
+    if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+    this.settings.data = a.body;
+    this.settings.statuses = {};
+    this.notice = "✓ saved to config.toml · the board refreshes with it";
+  }
+
+  /** Runs fn in a task, telling its error, then renders. */
+  attempt(fn, cx) {
+    cx.spawn(async (cx) => {
+      try {
+        await fn();
+      } catch (e) {
+        this.notice = `could not: ${e.message}`;
+      }
+      cx.notify();
+    });
+  }
+
+  async lookup(kind, space) {
+    const q = space ? `?space=${encodeURIComponent(space)}` : "";
+    const a = await this.call("GET", `/v1/settings/${kind}${q}`);
+    if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+    return a.body;
+  }
+
+  settingsScreen(t) {
+    const st = this.settings;
+    const d = st.data;
+    const link = (id, text, onClick, tone) => div().id(id).px(6).py(1).rounded(4).text_color(tone ?? t.accent).hover((s) => s.bg(t.hover))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => onClick(cx)).child(text);
+    const heading = (text) => div().pt(10).pb(4).font_semibold().text_color(t.foreground).child(text);
+    const side = v_flex().id("settings-side").w(200).p(8).gap(2).border_r(1).border_color(t.border).children(SECTIONS.map((sec) =>
+      div().id(`sec-${sec.id}`).px(10).py(5).rounded(6).bg(st.section === sec.id ? t.selected : t.surface).text_color(st.section === sec.id ? t.foreground : t.muted)
+        .hover((s) => s.bg(t.hover)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { st.section = sec.id; cx.notify(); }).child(sec.title)));
+    let content = v_flex();
+    if (st.section === "spaces") {
+      content = v_flex().children(d.spaces.map((sp) => v_flex().id(`sp-${sp.key}`).pb(8)
+        .child(heading([sp.key, sp.name].filter(Boolean).join(" · ")))
+        .children(sp.repos.map((r) => h_flex().id(`repo-${sp.key}-${r.repo}`).gap(10).py(2)
+          .child(div().w(260).truncate().text_color(t.foreground).child(r.repo)).child(div().flex_1().truncate().text_color(t.dim).child(r.path))
+          .child(link(`rm-${sp.key}-${r.repo}`, "remove", (cx) => this.attempt(() => this.patchSettings(reposPatch(sp, { remove: r.repo })), cx), t.muted))))
+        .when(sp.inferred.length > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(`also seen in its pull requests: ${sp.inferred.join(", ")}`)))
+        .child(link(`add-${sp.key}`, "+ Add a repository", (cx) => { this.ask({ kind: "addRepo", title: `Add to ${sp.key}: owner/name, then its folder`, space: sp }); cx.notify(); }))));
+    } else if (st.section === "boards") {
+      content = v_flex().children(d.spaces.map((sp) => v_flex().id(`bs-${sp.key}`).pb(8).child(heading(sp.key))
+        .children((st.boards[sp.key] ?? sp.team_boards).map((b) => {
+          const on = sp.team_boards.some((x) => x.id === b.id);
+          return h_flex().id(`b-${sp.key}-${b.id}`).gap(8).py(2).on_click((_e, cx) => this.attempt(() => this.patchSettings(boardsPatch(sp, b.id)), cx))
+            .child(div().w(14).text_color(t.accent).child(on ? "☑" : "☐")).child(div().text_color(t.foreground).child(b.name));
+        }))
+        .when(!st.boards[sp.key], (el) => el.child(link(`lb-${sp.key}`, "Choose from Jira's boards…", (cx) => this.attempt(async () => { st.boards[sp.key] = (await this.lookup("boards", sp.key)).boards; }, cx))))));
+    } else if (st.section === "statuses") {
+      content = v_flex().children(d.spaces.map((sp) => {
+        const loaded = st.statuses[sp.key];
+        const block = v_flex().id(`ss-${sp.key}`).pb(8).child(heading(sp.key));
+        if (!loaded) return block.child(link(`ls-${sp.key}`, "Read the statuses from Jira…", (cx) => this.attempt(async () => { st.statuses[sp.key] = await this.lookup("statuses", sp.key); }, cx)));
+        return block.children(statusRows(loaded, d.columns).map((r) => h_flex().id(`s-${sp.key}-${r.name}`).gap(10).py(2)
+          .child(div().w(180).truncate().text_color(t.foreground).child(r.name))
+          .child(link(`sc-${sp.key}-${r.name}`, `${r.column}${r.columnAuto ? "" : " •"}`, (cx) => { this.menu = { title: `${r.name}: column`, sel: 0, items: d.columns.map((c) => ({ label: c.title, action: "settingsPatch", change: statusPatch(sp.key, r.name, { column: c.id }) })) }; cx.notify(); }, t.muted))
+          .child(link(`sm-${sp.key}-${r.name}`, `${r.mark}${r.markAuto ? "" : " •"}`, (cx) => { this.menu = { title: `${r.name}: mark`, sel: 0, items: d.marks.map((m) => ({ label: m, action: "settingsPatch", change: statusPatch(sp.key, r.name, { mark: m }) })) }; cx.notify(); }, t.muted))
+          .when(r.changed, (el) => el.child(link(`sr-${sp.key}-${r.name}`, "↺ automatic", (cx) => this.attempt(() => this.patchSettings(statusPatch(sp.key, r.name, null)), cx), t.dim)))));
+      }));
+    } else if (st.section === "clones") {
+      content = v_flex().child(heading("Folders tkt looks for clones in; the first one is where new clones go"))
+        .children(d.repo_roots.map((root) => h_flex().id(`root-${root}`).gap(10).py(2).child(div().flex_1().text_color(t.foreground).child(root))
+          .child(link(`rmr-${root}`, "remove", (cx) => this.attempt(() => this.patchSettings(rootsPatch(d.repo_roots, { remove: root })), cx), t.muted))))
+        .child(link("add-root", "+ Add a folder", (cx) => { this.ask({ kind: "addRoot", title: "A folder for clones, such as ~/src" }); cx.notify(); }));
+    } else if (st.section === "board") {
+      const pick = (field, title) => (cx) => this.attempt(async () => {
+        const names = (await this.lookup("fields")).fields ?? [];
+        this.menu = { title, sel: 0, items: [{ label: "— none", action: "settingsPatch", change: { [field]: "" } }, ...names.map((n) => ({ label: n, action: "settingsPatch", change: { [field]: n } }))] };
+      }, cx);
+      content = v_flex()
+        .child(heading("The field a ticket's label comes from")).child(link("label-field", d.label_field || "— none", pick("label_field", "Label field")))
+        .child(heading("The story points field")).child(link("points-field", d.points_field || "detected", pick("points_field", "Story points field")));
+    } else {
+      content = v_flex().child(heading("The machine whose tkt this window shows"))
+        .child(div().text_color(t.foreground).child(this.machine === undefined ? "none yet" : this.machine ?? "This computer"))
+        .child(link("change-machine", "Change machine…", (cx) => this.pick(cx)));
+    }
+    const nav = h_flex().px(12).py(6).gap(8).items_center().border_b(1).border_color(t.border)
+      .child(link("settings-back", "‹ Back", (cx) => { this.settings = null; cx.notify(); }, t.foreground))
+      .child(div().text_color(t.muted).child("Settings"));
+    return v_flex().id("settings").flex_1().min_h_0().child(nav)
+      .child(h_flex().flex_1().min_h_0().items_start().child(side)
+        .child(v_flex().id("settings-content").flex_1().min_h_0().overflow_y_scrollbar().p(14).child(content)));
   }
 
   async openStart(key) {
@@ -789,6 +898,10 @@ export default class Tkt extends View {
       .when(this.tab === "prs", (el) => el.child(this.prControls(t)))
       .when(this.tab === "backlog", (el) => el.child(this.backlogControls(t)))
       .when(this.tab === "sprint", (el) => el.child(this.boardsChip(t)))
+      .child(div().id("gear").px(8).py(3).rounded(6).text_color(this.settings ? t.foreground : t.muted).hover((s) => s.bg(t.hover))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { if (this.settings) { this.settings = null; cx.notify(); } else this.attempt(() => this.openSettings(), cx); })
+        .child("⚙"))
       .child(div().id("close").px(8).py(3).rounded(6).text_color(t.muted).hover((s) => s.bg(t.hover))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click(() => close())
@@ -902,6 +1015,7 @@ export default class Tkt extends View {
 
   body(t) {
     if (this.choices) return this.chooser(t);
+    if (this.settings) return this.settingsScreen(t);
     if (this.details) return this.detailsScreen(t);
     const answer = this.answers[this.tab];
     if (!answer) return div().p(16).text_color(this.error ? t.blocked : t.muted).child(this.error ? problemOf(this.error, this.machine) : "Loading…");
@@ -937,7 +1051,7 @@ export default class Tkt extends View {
       .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
       .child(this.header(t))
       .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
-      .when(this.tab === "sprint" && !this.choices && !this.details, (el) => el.child(this.preview(t, this.answers.sprint?.body)))
+      .when(this.tab === "sprint" && !this.choices && !this.details && !this.settings, (el) => el.child(this.preview(t, this.answers.sprint?.body)))
       .child(this.legend(t))
       .child(this.status(t))
       .when(Boolean(this.openPanel()), (el) => { const p = this.openPanel(); return el.child(this.filterPanel(t, p.items, p.hidden, p.field)); })
