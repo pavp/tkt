@@ -34,3 +34,9 @@ test("the sticky title is the section of the first row shown, once its own title
   assert.deepEqual(moreAround(rows, { start: 0, end: rows.length }), { above: 0, below: 0 });
   assert.deepEqual(moreAround(rows, { start: 2, end: 3 }), { above: 1, below: tickets - 2 });
 });
+
+test("a list row keeps its card's words", () => {
+  const rows = listRows(fixture("board.json").sections).filter((r) => r.kind === "row");
+  assert.ok(rows.length > 0);
+  for (const r of rows) assert.ok(r.card && "who" in r.card, `${r.key} lost its card`);
+});

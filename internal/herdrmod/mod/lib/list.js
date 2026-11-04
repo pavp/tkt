@@ -7,7 +7,7 @@ export function listRows(sections) {
   for (const s of sections ?? []) {
     rows.push({ kind: "title", title: s.title, count: s.count });
     for (const r of s.rows ?? []) {
-      rows.push({ kind: "row", key: r.key, parent: r.parent ?? null, ticket: r.ticket });
+      rows.push({ kind: "row", key: r.key, parent: r.parent ?? null, ticket: r.ticket, card: r.card });
     }
   }
   return rows;
