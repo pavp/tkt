@@ -36,7 +36,7 @@ UI (phase 3 onward) lives in `web/` and is embedded with `go:embed`; its command
 - Never write, log, print, or commit Jira or GitHub tokens. Secrets come only from the OS credential store (macOS Keychain, Linux Secret Service, WSL: Windows Credential Manager via `powershell.exe`) or the documented `TKT_JIRA_TOKEN` fallback. Never ask the user to paste a token into chat.
 - The daemon binds `127.0.0.1` only, authenticates with the 256-bit token in a `0600` file, and checks `Origin` plus the `hello` token on WebSocket.
 - Config dir `~/.config/tkt/`; data dir is created with mode `0700`, token file `0600`.
-- Mutating actions (Jira transitions, comments, merges) require confirmation in the UI, never inside the agent or MCP alone.
+- Mutating actions (Jira transitions, comments, merges) are confirmed by the person in the UI clients (TUI, Herdr desktop mod) before they call the daemon. The daemon API and `tkt api` perform a valid request in one step without a confirmation of their own, and the daemon logs every write.
 - During development, only read operations against real Jira and GitHub. Ask before any write against real services.
 
 ## Workflow
