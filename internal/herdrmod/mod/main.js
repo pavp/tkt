@@ -20,6 +20,7 @@ import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows 
 import { MOD_VERSION } from "./lib/version.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
 import { stripChips, atTop } from "./lib/strip.js";
+import { scrolled, menuHeight, MENU_ROW, cardHeight, revealed } from "./lib/scroll.js";
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget } from "./lib/nav.js";
 
 const TABS = [
@@ -60,7 +61,12 @@ export default class Tkt extends View {
     this.lastClick = { key: null, at: 0 };
     this.focus = cx.focus_handle();
     this.focus.focus();
-    this.scrolls = { rows: VirtualListScrollHandle.new(), "pr-rows": VirtualListScrollHandle.new(), "backlog-rows": VirtualListScrollHandle.new() };
+    this.scrolls = { rows: VirtualListScrollHandle.new(), "pr-rows": VirtualListScrollHandle.new(), "backlog-rows": VirtualListScrollHandle.new(), menu: VirtualListScrollHandle.new() };
+    this.colPanes = {};
+    this.panes = { details: { offset: 0, view: 0, content: 0 }, settings: { offset: 0, view: 0, content: 0 } };
+    this.windowHeight = 0;
+    // GPUI moves the focus with tab; bound in the mod's own key context, tab switches tabs as in the TUI.
+    cx.bind_keys([{ keystroke: "tab", action: "tkt::NextTab", context: "TktMod" }, { keystroke: "shift-tab", action: "tkt::PrevTab", context: "TktMod" }]);
     this.outdated = [];
     this.view = "columns";
     this.range = { start: 0, end: 0 };
@@ -631,6 +637,7 @@ export default class Tkt extends View {
   async openDetails(key) {
     const keys = this.details?.keys ?? this.shownKeys();
     this.details = { key, keys, view: null };
+    this.panes.details.offset = 0;
     const a = await this.call("GET", `/v1/tickets/${key}`);
     if (a.status !== 200) {
       this.details = null;
@@ -650,6 +657,19 @@ export default class Tkt extends View {
     });
   }
 
+  /** A pane that scrolls by an offset, so keys can scroll it as the wheel does; GPUI scrolls only virtual lists
+   *  from code. */
+  scrollPane(id, pane, content) {
+    return v_flex().id(id).min_h_0().overflow_hidden()
+      .on_size_change((size) => { pane.view = size.height; })
+      .on_scroll_wheel((e, cx) => {
+        const max = Math.max(0, pane.content - pane.view);
+        pane.offset = Math.max(0, Math.min(max, pane.offset - e.delta.y));
+        cx.notify();
+      })
+      .child(v_flex().id(`${id}-content`).mt(-pane.offset).on_size_change((size) => { pane.content = size.height; }).child(content));
+  }
+
   detailsScreen(t) {
     const d = this.details;
     const v = d.view;
@@ -664,7 +684,7 @@ export default class Tkt extends View {
       .child(button("next", "▶", Boolean(next), (cx) => this.goDetails(next, cx)));
     if (!v) return v_flex().flex_1().child(nav).child(div().p(16).text_color(t.muted).child("Loading…"));
     const heading = (text) => div().pt(10).pb(4).font_semibold().text_color(t.foreground).child(text);
-    const left = v_flex().id("details-left").flex_1().min_w_0().min_h_0().overflow_y_scrollbar().p(14).gap(4)
+    const leftContent = v_flex().p(14).gap(4)
       .child(div().text_size(16).font_semibold().text_color(t.foreground).child(v.title))
       .child(h_flex().gap(14).text_size(12).children(v.fields.map(([k, val], i) => h_flex().id(`f-${i}`).gap(4).child(div().text_color(t.dim).child(k)).child(div().text_color(t.foreground).child(val)))))
       .when(Boolean(v.attention), (el) => el.child(div().text_color(t.blocked).child(`! ${v.attention}`)))
@@ -675,6 +695,7 @@ export default class Tkt extends View {
         h_flex().id(`st-${st.key}`).gap(10).child(div().w(96).text_color(t.dim).child(st.key)).child(div().w(110).text_color(t.muted).child(st.status)).child(div().flex_1().truncate().text_color(t.foreground).child(st.summary)))))
       .when(v.comments.length > 0, (el) => el.child(heading(`Comments · ${v.comments.length}`)).children(v.comments.map((c, i) =>
         v_flex().id(`c-${i}`).pb(6).child(div().text_size(12).text_color(t.dim).child(`${c.who} · ${c.when}`)).child(TextView.markdown(`cbody-${i}`, c.body || "")))));
+    const left = this.scrollPane("details-left", this.panes.details, leftContent).flex_1().min_w_0().h_full();
     const menu = ticketMenu(d.ticket, { agent: v.agent, attention: v.attention ? [v.attention] : [] });
     const right = v_flex().id("details-right").w(300).min_h_0().overflow_y_scrollbar().p(12).gap(4).border_l(1).border_color(t.border)
       .child(heading("Agent")).child(div().text_color(v.agent ? t[v.agent] ?? t.foreground : t.dim).child(v.agent ? `● ${v.agent}` : "no agent"))
@@ -801,7 +822,7 @@ export default class Tkt extends View {
       .child(div().text_color(t.muted).child("Settings"));
     return v_flex().id("settings").flex_1().min_h_0().child(nav)
       .child(h_flex().flex_1().min_h_0().items_start().child(side)
-        .child(v_flex().id("settings-content").flex_1().min_h_0().overflow_y_scrollbar().p(14).child(content)));
+        .child(this.scrollPane("settings-content", this.panes.settings, v_flex().p(14).child(content)).flex_1().h_full()));
   }
 
   async openStart(key) {
@@ -913,34 +934,50 @@ export default class Tkt extends View {
           .when((m.reviewers ?? []).length > 0, (el) => el.child(h_flex().flex_wrap().gap(10).text_size(12)
             .children(m.reviewers.map((r, i) => div().id(`rev-${i}`).text_color(t[r.tone] ?? t.foreground).child(r.text)))))
           .child(div().h(6))
-          .children(m.items.map((item, i) =>
-            h_flex().id(`menu-${i}`).gap(6).px(8).py(4).rounded(5).bg(i === m.sel ? t.selected : t.popover).text_color(t.foreground)
-              .hover((s) => s.bg(t.hover))
-              .on_click((_e, cx) => this.act(item, cx))
-              .child(div().w(10).text_color(t.accent).child(i === m.sel ? "▸" : ""))
-              .child(div().flex_1().truncate().child(item.label))
-              .when(Boolean(item.keyHint), (el) => el.child(div().text_color(t.accent).child(item.keyHint)))))
+          .child(v_flex().relative().h(menuHeight(m.items.length, this.windowHeight))
+            .child(v_virtual_list("menu-items", m.items.length, MENU_ROW, (i) => `${m.title}-${i}`, (range) =>
+              m.items.slice(range.start, range.end).map((item, j) => {
+                const i = range.start + j;
+                return h_flex().h(MENU_ROW).gap(6).px(8).items_center().rounded(5).bg(i === m.sel ? t.selected : t.popover).text_color(t.foreground)
+                  .child(div().w(10).text_color(t.accent).child(i === m.sel ? "▸" : ""))
+                  .child(div().flex_1().truncate().child(item.label))
+                  .when(Boolean(item.keyHint), (el) => el.child(div().text_color(t.accent).child(item.keyHint)));
+              })).size_full().track_scroll(this.scrolls.menu).on_item_click((key, cx) => {
+                const i = Number(key.slice(key.lastIndexOf("-") + 1));
+                if (m.items[i]) this.act(m.items[i], cx);
+              }))
+            .child(Scrollbar.vertical("menu-items").absolute().inset_0()))
           .child(div().pt(6).text_size(11).text_color(t.dim).child(menuFooter(m.items[m.sel])))));
   }
 
 
   key(e, cx) {
+    if (!this.prompt && keyOf(e) === "q") e = { ...e, key: "escape", keystroke: "escape", key_char: undefined };
     const k = e.key;
     if (this.menu) {
       if (k === "escape") this.menu = backOf(this.menu);
       if (k === "down") this.menu.sel = Math.min(this.menu.items.length - 1, this.menu.sel + 1);
       if (k === "up") this.menu.sel = Math.max(0, this.menu.sel - 1);
+      if (this.menu && (k === "down" || k === "up")) this.scrolls.menu.scroll_to_item(this.menu.sel);
       if (k === "enter") return this.act(this.menu.items[this.menu.sel], cx);
       const item = this.menu?.items[this.menu.sel];
       if (keyOf(e) === "c" && item?.action === "open" && item.url) return this.act({ action: "copy", value: item.url, label: "copy" }, cx);
     } else if (this.picker) {
       this.pickerKeyDown(keyOf(e), cx);
     } else if (this.details && !this.prompt) {
-      const a = detailsKey(keyOf(e));
+      const kk = keyOf(e);
+      const a = detailsKey(kk);
+      const to = scrolled(this.panes.details, kk === "pagedown" || kk === "pageup" ? kk : e.keystroke === "space" ? " " : kk);
       if (a === "back") this.details = null;
-      if (a === "copy") this.act({ action: "copyContext", key: this.details.key, label: "copy" }, cx);
-    } else if (this.settings && !this.prompt && k === "escape") {
-      this.settings = null;
+      else if (a === "copy") this.act({ action: "copyContext", key: this.details.key, label: "copy" }, cx);
+      else if (kk === "enter" && this.details.ticket) this.menu = { ...ticketMenu(this.details.ticket, {}), sel: 0 };
+      else if (to !== null) this.panes.details.offset = to;
+    } else if (this.settings && !this.prompt) {
+      if (k === "escape") this.settings = null;
+      else {
+        const to = scrolled(this.panes.settings, keyOf(e));
+        if (to !== null) this.panes.settings.offset = to;
+      }
     } else if (k === "escape" && this.panel) {
       this.panel = null;
     } else if (!this.prompt && !this.choices && !this.details && !this.settings && !this.picker && !this.panel) {
@@ -1051,6 +1088,14 @@ export default class Tkt extends View {
     }
     if (at.cols) {
       this.selected = stepColumns(at.cols, this.selected, d[0], d[1]);
+      const ci = at.cols.findIndex((c) => c.includes(this.selected));
+      const col = columnCards(body)[ci];
+      if (col) {
+        const heights = col.cards.map((c) => cardHeight({ lines: wrapWords(c.summary, 34, 2).length, label: Boolean(body.label_field) }) + 6);
+        const i = at.cols[ci].indexOf(this.selected);
+        const pane = this.colPane(col.category);
+        pane.offset = revealed(pane, heights.slice(0, i).reduce((a, b) => a + b, 0), heights[i]);
+      }
       return;
     }
     if (d[1] === 0) return;
@@ -1204,7 +1249,7 @@ export default class Tkt extends View {
     const lines = wrapWords(c.summary, 34, 2);
     const sel = this.selected === c.key && !this.inStrip;
     const icon = typeIcon(c.typeKind);
-    return v_flex().id(`card-${c.key}`).p(8).gap(3).rounded(8).border(1)
+    return v_flex().id(`card-${c.key}`).h(cardHeight({ lines: lines.length, label: Boolean(labelField) })).p(8).gap(3).rounded(8).border(1)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { this.selected = c.key; this.clicked(c.key, () => this.menuFor(this.selectedRow(this.answers.sprint?.body) ?? {}), cx); })
       .border_color(sel ? t.accent : c.attention ? t.blocked : t.border).bg(t.raised).hover((s) => s.border_color(t.accent))
@@ -1302,9 +1347,14 @@ export default class Tkt extends View {
             .child(div().font_semibold().text_color(t.foreground).child(col.title))
             .child(div().flex_1())
             .child(div().text_color(t.dim).child([String(col.count), col.points].filter(Boolean).join(" · "))))
-          .child(v_flex().id(`col-${col.category}-cards`).flex_1().min_h_0().overflow_y_scrollbar().gap(6)
-            .when(col.cards.length === 0, (el) => el.child(div().px(4).text_color(t.dim).child(EMPTY_COLUMN)))
-            .children(col.cards.map((c) => this.card(t, c, board.label_field))))));
+          .child(col.cards.length === 0 ? div().px(4).text_color(t.dim).child(EMPTY_COLUMN)
+            : this.scrollPane(`col-${col.category}-cards`, this.colPane(col.category),
+              v_flex().gap(6).children(col.cards.map((c) => this.card(t, c, board.label_field)))).flex_1())));
+  }
+
+  colPane(category) {
+    if (!this.colPanes[category]) this.colPanes[category] = { offset: 0, view: 0, content: 0 };
+    return this.colPanes[category];
   }
 
   body(t) {
@@ -1341,7 +1391,10 @@ export default class Tkt extends View {
   render(_cx) {
     const t = theme();
     return v_flex().id("root").relative().size_full().bg(t.surface).text_size(13)
-      .track_focus(this.focus).on_key_down((e, cx) => this.key(e, cx))
+      .key_context("TktMod").track_focus(this.focus).on_key_down((e, cx) => this.key(e, cx))
+      .on_action("tkt::NextTab", (_e, cx) => this.key({ key: "tab", keystroke: "tab", modifiers: {} }, cx))
+      .on_action("tkt::PrevTab", (_e, cx) => this.key({ key: "tab", keystroke: "shift-tab", modifiers: { shift: true } }, cx))
+      .on_size_change((size) => { this.windowHeight = size.height; })
       .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
       .child(this.header(t))
       .when(!this.choices && !this.details && !this.settings, (el) => el.child(this.contextLine(t)))
