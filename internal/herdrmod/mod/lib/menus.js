@@ -28,6 +28,8 @@ export function ticketMenu(t, opts = {}) {
   if (opts.backlog) {
     const notYours = !t.assignee || t.assignee !== opts.me;
     const items = [notYours ? { label: startItem(key, opts.agent).label, action: "notYours", key } : startItem(key, opts.agent)];
+    const move = sprintMoveItem(t, { groups: opts.groups, activeSprints: opts.activeSprints });
+    if (move) items.push(move);
     items.push({ label: "Show details", action: "details", key });
     if (t.url) items.push({ label: "Open in Jira ↗", action: "open", url: t.url });
     items.push({ label: "Assign to… ▸", action: "assignMenu", key, now: t.assignee ?? "" });
@@ -84,4 +86,21 @@ export function prMenu(row, opts = {}) {
   if (t.url) items.push(copy("Copy the Jira link", t.url));
   items.push(copy(`Copy the key ${t.key}`, t.key));
   return { title: `Pull request #${pr.number}`, subtitle: `${t.key} · ${t.status}`, items };
+}
+
+/** The Backlog's Move to current sprint for a ticket, as the TUI offers it: its board's active sprints, asking
+ *  first; null when the ticket is already in an active sprint's group or its board runs none. */
+export function sprintMoveItem(t, { groups = [], activeSprints = [] } = {}) {
+  if (groups.some((g) => g.active && (g.rows ?? []).some((r) => r.key === t.key))) return null;
+  const mine = activeSprints.filter((sp) => sp.board === t.board);
+  const confirm = (sp) => ({
+    title: `Move ${t.key} to ${sp.name}?`,
+    items: [{ label: "Yes, move it", action: "moveToSprint", key: t.key, sprint: sp.id, name: sp.name }, { label: "Cancel", action: "cancel" }],
+  });
+  if (mine.length === 0) return null;
+  if (mine.length === 1) return { label: "Move to current sprint", action: "submenu", menu: confirm(mine[0]) };
+  return {
+    label: "Move to current sprint ▸", action: "submenu",
+    menu: { title: `Move ${t.key} to which sprint?`, items: mine.map((sp) => ({ label: sp.name, action: "submenu", menu: confirm(sp) })) },
+  };
 }

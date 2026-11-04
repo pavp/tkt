@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -74,23 +75,33 @@ type BacklogView struct {
 	Collapsed    []string         `json:"collapsed"`
 	Boards       []BoardFilter    `json:"boards"`
 	Groups       []BacklogSection `json:"groups"`
-	LabelField   string           `json:"label_field,omitempty"`
-	Me           string           `json:"me,omitempty"`
-	Warnings     []string         `json:"warnings,omitempty"`
+	// ActiveSprints are the team boards' running sprints, whatever the grouping, which a ticket can be moved into.
+	ActiveSprints []ActiveSprint `json:"active_sprints"`
+	LabelField    string         `json:"label_field,omitempty"`
+	Me            string         `json:"me,omitempty"`
+	Warnings      []string       `json:"warnings,omitempty"`
 	// NoTeamBoards says the backlog is empty because no team board is set, which the TUI tells apart too.
 	NoTeamBoards bool `json:"no_team_boards,omitempty"`
 }
 
 type BacklogSection struct {
-	Group     string         `json:"group"`
-	Title     string         `json:"title"`
-	Board     string         `json:"board,omitempty"`
-	Dates     string         `json:"dates,omitempty"`
-	Sprints   []int          `json:"sprints,omitempty"`
+	Group   string `json:"group"`
+	Title   string `json:"title"`
+	Board   string `json:"board,omitempty"`
+	Dates   string `json:"dates,omitempty"`
+	Sprints []int  `json:"sprints,omitempty"`
+	// Active marks an active sprint's group, which a Backlog ticket can be moved into.
+	Active    bool           `json:"active,omitempty"`
 	Count     int            `json:"count"`
 	Collapsed bool           `json:"collapsed"`
 	Points    *BacklogPoints `json:"points,omitempty"`
 	Rows      []board.Row    `json:"rows"`
+}
+
+type ActiveSprint struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Board string `json:"board"`
 }
 
 // BacklogPoints are a group's story points by stage, set only when the site has a story points field.
@@ -171,16 +182,21 @@ func (s *Server) backlog(w http.ResponseWriter, r *http.Request) {
 	}
 	hidden, collapsed := setOf(state.HiddenBoards), setOf(lists.Collapsed)
 	view := BacklogView{FetchedAt: bl.FetchedAt, SyncLabel: board.BacklogLabel(false, bl.FetchedAt, s.now()), HiddenBoards: orNone(state.HiddenBoards), Merged: lists.BacklogMerged, Collapsed: orNone(lists.Collapsed),
-		Boards: []BoardFilter{}, Groups: []BacklogSection{}, LabelField: bl.LabelField, Me: bl.Me, Warnings: bl.Warnings, NoTeamBoards: bl.NoTeamBoards}
+		Boards: []BoardFilter{}, Groups: []BacklogSection{}, ActiveSprints: []ActiveSprint{}, LabelField: bl.LabelField, Me: bl.Me, Warnings: bl.Warnings, NoTeamBoards: bl.NoTeamBoards}
 	if err != nil {
 		view.Error = err.Error()
+	}
+	for _, sp := range bl.Sprints {
+		if sp.State == "active" {
+			view.ActiveSprints = append(view.ActiveSprints, ActiveSprint{ID: sp.ID, Name: sp.Name, Board: sp.BoardName})
+		}
 	}
 	for name, n := range bl.BoardCounts() {
 		view.Boards = append(view.Boards, BoardFilter{Name: name, Tickets: n, Hidden: hidden[name]})
 	}
 	slices.SortFunc(view.Boards, func(a, b BoardFilter) int { return strings.Compare(a.Name, b.Name) })
 	for _, g := range board.BacklogGroups(bl, hidden, lists.BacklogMerged) {
-		sec := BacklogSection{Group: g.Group, Title: g.Title, Board: g.Board, Dates: g.Dates, Sprints: g.Sprints, Count: len(g.Tickets), Collapsed: board.Folded(collapsed, g.Group), Rows: []board.Row{}}
+		sec := BacklogSection{Group: g.Group, Title: g.Title, Board: g.Board, Dates: g.Dates, Sprints: g.Sprints, Active: activeSprint(bl, g.Sprints), Count: len(g.Tickets), Collapsed: board.Folded(collapsed, g.Group), Rows: []board.Row{}}
 		if bl.HasPoints {
 			p := BacklogPoints{}
 			p.ToDo, p.Doing, p.Done, p.Unestimated = board.PointsByStage(g.Tickets)
@@ -249,4 +265,49 @@ func reasons(rs []ticket.Reason) []string {
 		out = append(out, string(r))
 	}
 	return out
+}
+
+func activeSprint(bl board.Backlog, ids []int) bool {
+	for _, sp := range bl.Sprints {
+		if sp.State == "active" && slices.Contains(ids, sp.ID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) moveToSprint(w http.ResponseWriter, r *http.Request) {
+	if s.opts.MoveToSprint == nil || s.opts.Backlog == nil {
+		writeError(w, http.StatusNotFound, "not_found", "this daemon moves no tickets into sprints")
+		return
+	}
+	key, ok := pathKey(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Sprint int `json:"sprint"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil || req.Sprint <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", `send {"sprint": <an active sprint's id>}`)
+		return
+	}
+	bl, err := s.opts.Backlog(r.Context(), false)
+	if err != nil && len(bl.Sprints) == 0 {
+		writeError(w, http.StatusBadGateway, "backlog_failed", err.Error())
+		return
+	}
+	if !activeSprint(bl, []int{req.Sprint}) {
+		writeError(w, http.StatusConflict, "sprint_unavailable", fmt.Sprintf("sprint %d is not an active sprint of the Backlog", req.Sprint))
+		return
+	}
+	if err := s.opts.MoveToSprint(r.Context(), key, req.Sprint); err != nil {
+		writeJiraError(w, err)
+		return
+	}
+	s.markBacklogStale()
+	s.syncSoon()
+	writeJSON(w, http.StatusOK, map[string]any{"key": key, "sprint": req.Sprint})
 }

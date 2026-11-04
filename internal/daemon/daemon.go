@@ -85,6 +85,8 @@ type Options struct {
 	SaveSettings func(config.Config) (config.Config, error)
 	// SaveAgentKinds keeps the agents Herdr desktop knows, which the Herdr desktop mod sends, for agent kinds.
 	SaveAgentKinds func([]string) error
+	// MoveToSprint moves a Backlog ticket into a sprint, for POST /v1/tickets/{key}/sprint.
+	MoveToSprint func(ctx context.Context, key ticket.Key, sprint int) error
 	// JiraStatuses, JiraBoards and JiraFields list what Settings offers from Jira.
 	JiraStatuses StatusesFunc
 	JiraBoards   BoardsFunc
@@ -375,6 +377,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /v1/board/state", s.mutating(s.patchBoardState))
 	mux.HandleFunc("POST /v1/herdr/agents", s.mutating(s.saveAgentKinds))
 	mux.HandleFunc("GET /v1/jobs/{id}", s.authed(s.jobState))
+	mux.HandleFunc("POST /v1/tickets/{key}/sprint", s.mutating(s.moveToSprint))
 	mux.HandleFunc("GET /v1/prs", s.authed(s.prs))
 	mux.HandleFunc("GET /v1/backlog", s.authed(s.backlog))
 	mux.HandleFunc("GET /v1/tickets/{key}/start", s.authed(s.startChoices))

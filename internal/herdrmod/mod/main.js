@@ -399,7 +399,7 @@ export default class Tkt extends View {
   menuFor(row) {
     if (this.tab === "prs") return prMenu(row.raw, { agent: this.answers.sprint?.body?.agents?.[row.ticketKey] });
     const agents = this.answers.sprint?.body?.agents ?? {};
-    if (this.tab === "backlog") return ticketMenu(row.ticket, { backlog: true, me: this.answers.backlog?.body?.me, agent: agents[row.key] });
+    if (this.tab === "backlog") return ticketMenu(row.ticket, { backlog: true, me: this.answers.backlog?.body?.me, agent: agents[row.key], groups: this.answers.backlog?.body?.groups, activeSprints: this.answers.backlog?.body?.active_sprints });
     return ticketMenu(row.ticket, { agent: agents[row.key], attention: row.card?.attention });
   }
 
@@ -427,6 +427,14 @@ export default class Tkt extends View {
             if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
             await this.local('printf %s "$1" | (pbcopy 2>/dev/null || wl-copy 2>/dev/null || xclip -selection clipboard)', a.body.text);
             this.notice = `copied the context of ${item.key}`;
+            break;
+          }
+          case "moveToSprint": {
+            const a = await this.call("POST", `/v1/tickets/${item.key}/sprint`, { sprint: item.sprint });
+            if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+            this.notice = `moved ${item.key} to ${item.name}`;
+            this.refreshBacklog = true;
+            this.load(cx);
             break;
           }
           case "settingsPatch":

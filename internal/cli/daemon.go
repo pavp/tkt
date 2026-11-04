@@ -86,7 +86,7 @@ func (a *App) runDaemon(ctx context.Context) error {
 		Lists: a.boardListState, SavedState: a.loadBoardState, SaveState: a.saveBoardState, Repos: a.daemonRepos, Backlog: a.daemonBacklog, StartChoices: a.daemonStartChoices, Start: a.daemonStart,
 		Transitions: a.daemonTransitions, Transition: a.daemonTransition, Users: a.daemonUsers, Assign: a.daemonAssign,
 		TaskAgents: a.daemonTaskAgents, Task: a.daemonTask,
-		StateFile: a.boardStateFile(), ConfigFile: a.ConfigPath(), WatchEvery: watchEvery, Log: a.printf, SaveAgentKinds: a.saveAgentKinds,
+		StateFile: a.boardStateFile(), ConfigFile: a.ConfigPath(), WatchEvery: watchEvery, Log: a.printf, SaveAgentKinds: a.saveAgentKinds, MoveToSprint: a.daemonMoveToSprint,
 		Settings: a.savedConfig, SaveSettings: a.saveConfig, JiraStatuses: a.daemonStatuses, JiraBoards: a.daemonBoards, JiraFields: a.daemonFields})
 	if err != nil {
 		return err
@@ -182,6 +182,19 @@ func (a *App) daemonContext(ctx context.Context, key ticket.Key) (string, error)
 		return "", err
 	}
 	return a.contextText(ctx, c, key)
+}
+
+// daemonMoveToSprint serves POST /v1/tickets/{key}/sprint, as the Backlog's Move to current sprint does.
+func (a *App) daemonMoveToSprint(ctx context.Context, key ticket.Key, sprint int) error {
+	c, err := a.LoadConfig()
+	if err != nil {
+		return err
+	}
+	js, err := a.jiraClient(c)
+	if err != nil {
+		return err
+	}
+	return js.MoveToSprint(ctx, sprint, string(key))
 }
 
 // daemonBacklog serves the daemon's GET /v1/backlog as the board loads its Backlog; when Jira fails it hands back
