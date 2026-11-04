@@ -7,6 +7,7 @@ import { exec, machines, knownAgents, theme, props, closeOverlay } from "herdr";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords } from "./lib/columns.js";
+import { previewOf, legendFor, problemOf } from "./lib/footer.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -156,6 +157,42 @@ export default class Tkt extends View {
     cx.notify();
   }
 
+  sync(cx) {
+    cx.spawn(async (cx) => {
+      try {
+        await this.call("POST", "/v1/sync", {});
+      } catch (e) {
+        this.error = e.message;
+      }
+      this.load(cx);
+      cx.notify();
+    });
+  }
+
+  selectedRow(board) {
+    if (!this.selected || !board) return undefined;
+    for (const group of [...(board.columns ?? []), ...(board.sections ?? [])]) {
+      const row = group.rows.find((r) => r.key === this.selected);
+      if (row) return row;
+    }
+    return undefined;
+  }
+
+  preview(t, board) {
+    const p = previewOf(this.selectedRow(board));
+    if (!p) return div().px(12).py(6).text_size(12).text_color(t.dim).child("nothing selected");
+    return v_flex().px(12).py(6).gap(2).border_t(1).border_color(t.border)
+      .child(div().truncate().font_semibold().text_color(t.foreground).child(p.title))
+      .child(h_flex().gap(6).text_size(12)
+        .when(Boolean(p.label), (el) => el.child(div().px(4).rounded(3).bg(t.raised).text_color(t.accent).child(p.label)))
+        .child(div().flex_1().truncate().text_color(t.dim).child(p.line)));
+  }
+
+  legend(t) {
+    return h_flex().px(12).py(4).gap(14).text_size(11).children(legendFor(this.tab, this.view).map(([k, what], i) =>
+      h_flex().id(`legend-${i}`).gap(4).child(div().text_color(t.accent).child(k)).child(div().text_color(t.dim).child(what))));
+  }
+
   select(id, cx) {
     this.tab = id;
     this.load(cx);
@@ -217,8 +254,11 @@ export default class Tkt extends View {
   card(t, c) {
     const flag = c.attention ? `! ${c.attention}` : c.mark ? `${c.mark} ${c.status}` : "";
     const lines = wrapWords(c.summary, 34, 2);
+    const sel = this.selected === c.key;
     return v_flex().id(`card-${c.key}`).p(8).gap(3).rounded(8).border(1)
-      .border_color(c.attention ? t.blocked : t.border).bg(t.raised).hover((s) => s.border_color(t.accent))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => { this.selected = c.key; cx.notify(); })
+      .border_color(sel ? t.accent : c.attention ? t.blocked : t.border).bg(t.raised).hover((s) => s.border_color(t.accent))
       .child(h_flex().gap(6).items_center()
         .child(div().text_color(t.dim).child(c.subtask ? `↳ ${c.key}` : c.key))
         .when(Boolean(c.points), (el) => el.child(div().text_color(t.dim).child(c.points)))
@@ -255,7 +295,7 @@ export default class Tkt extends View {
     const sticky = stickyAt(rows, this.shownRange);
     const more = moreAround(rows, this.shownRange);
     const hint = (text) => div().absolute().right(16).px(8).py(1).rounded(10).bg(t.raised).text_size(11).text_color(t.dim).child(text);
-    return v_flex().id("list").relative().flex_1()
+    return v_flex().id("list").relative().flex_1().min_h_0()
       .child(v_virtual_list("rows", rows.length, ROW, (i) => `${rows[i].kind}-${rows[i].key ?? rows[i].title}-${i}`, (range) => {
         this.range = { start: range.start, end: range.end };
         return rows.slice(range.start, range.end).map((r) => this.listRow(t, r, board));
@@ -276,23 +316,24 @@ export default class Tkt extends View {
   }
 
   columns(t, board) {
-    return h_flex().id("columns").flex_1().gap(10).p(10).items_start().children(
+    return h_flex().id("columns").flex_1().min_h_0().gap(10).p(10).items_start().children(
       columnCards(board).map((col) =>
-        v_flex().id(`col-${col.category}`).flex_1().min_w(220).h_full().gap(6)
+        v_flex().id(`col-${col.category}`).flex_1().min_w(220).h_full().min_h_0().gap(6)
           .child(h_flex().px(4).pb(4).border_b(1).border_color(t.border)
             .child(div().font_semibold().text_color(t.foreground).child(col.title))
             .child(div().flex_1())
             .child(div().text_color(t.dim).child([String(col.count), col.points].filter(Boolean).join(" · "))))
-          .child(v_flex().id(`col-${col.category}-cards`).flex_1().overflow_y_scrollbar().gap(6)
+          .child(v_flex().id(`col-${col.category}-cards`).flex_1().min_h_0().overflow_y_scrollbar().gap(6)
             .children(col.cards.map((c) => this.card(t, c))))));
   }
 
   body(t) {
     if (this.choices) return this.chooser(t);
     const answer = this.answers[this.tab];
-    if (!answer) return div().p(16).text_color(t.muted).child(this.error ? "" : "Loading…");
+    if (!answer) return div().p(16).text_color(this.error ? t.blocked : t.muted).child(this.error ? problemOf(this.error, this.machine) : "Loading…");
     if (answer.status === 503) return div().p(16).text_color(t.muted).child("tkt is syncing the board for the first time…");
-    if (answer.status !== 200) return div().p(16).text_color(t.blocked).child(answer.body?.message ?? `tkt answered ${answer.status}`);
+    if (answer.status !== 200) return div().p(16).text_color(t.blocked).child(problemOf(answer.body?.message ?? `tkt answered ${answer.status}`, this.machine));
+    if (this.tab === "sprint" && (answer.body.sections ?? []).length === 0) return div().p(16).text_color(t.muted).child("No tickets on the board: nothing assigned to you in an open sprint.");
     if (this.tab === "sprint" && this.view === "columns") return this.columns(t, answer.body);
     if (this.tab === "sprint") return this.list(t, answer.body);
     return div().p(16).text_color(t.muted).child(`${(answer.body.sections ?? answer.body.groups ?? []).length} groups`);
@@ -305,7 +346,12 @@ export default class Tkt extends View {
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => this.pick(cx))
         .child(where))
-      .child(div().flex_1().truncate().text_color(this.error ? t.blocked : t.dim).child(this.error ?? ""));
+      .child(div().flex_1().truncate().text_color(this.error ? t.blocked : t.dim).child(this.error ? problemOf(this.error, this.machine) : ""))
+      .child(div().text_color(t.dim).child(this.answers.sprint?.body?.sync_label ?? ""))
+      .child(div().id("sync").px(6).rounded(4).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => this.sync(cx))
+        .child("↻"));
   }
 
   render(_cx) {
@@ -313,6 +359,8 @@ export default class Tkt extends View {
     return v_flex().id("root").size_full().bg(t.surface).text_size(13)
       .child(this.header(t))
       .child(this.body(t))
+      .when(this.tab === "sprint" && !this.choices, (el) => el.child(this.preview(t, this.answers.sprint?.body)))
+      .child(this.legend(t))
       .child(this.status(t));
   }
 }

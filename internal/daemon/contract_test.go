@@ -50,7 +50,7 @@ func TestContractBoard(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			seed := contractBoard()
-			s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour, Seed: &seed, State: func() board.ViewState { return tt.state }})
+			s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour, Seed: &seed, State: func() board.ViewState { return tt.state }, Now: func() time.Time { return seed.FetchedAt.Add(3 * time.Minute) }})
 			if err != nil {
 				t.Fatal(err)
 			}

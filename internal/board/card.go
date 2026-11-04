@@ -17,10 +17,14 @@ type Card struct {
 	Progress  string   `json:"progress,omitempty"`
 	// TypeKind is the Jira type as bug, epic, subtask, story, task or other, for its icon.
 	TypeKind string `json:"type_kind,omitempty"`
+	// Details and Hint are the preview's second line for the ticket when it is selected.
+	Details []string `json:"details,omitempty"`
+	Hint    string   `json:"hint,omitempty"`
 }
 
-func CardOf(t ticket.Ticket) Card {
-	c := Card{Points: PointsText(t.Points), Who: ShortName(t.Assignee), TypeKind: TypeKind(t.Type)}
+// CardOf is t's card; hasAgent says an agent works on it in the Herdr the card is drawn for.
+func CardOf(t ticket.Ticket, hasAgent bool) Card {
+	c := Card{Points: PointsText(t.Points), Who: ShortName(t.Assignee), TypeKind: TypeKind(t.Type), Details: PreviewParts(t), Hint: ActionHint(t, hasAgent)}
 	for _, r := range t.Attention() {
 		c.Attention = append(c.Attention, string(r))
 	}
