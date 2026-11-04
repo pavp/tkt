@@ -18,6 +18,7 @@ import { detailView, neighbors, detailsKey } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
+import { stripChips, atTop } from "./lib/strip.js";
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction } from "./lib/nav.js";
 
 const TABS = [
@@ -64,6 +65,8 @@ export default class Tkt extends View {
     this.range = { start: 0, end: 0 };
     this.shownRange = { start: 0, end: 0 };
     this.selected = null;
+    this.inStrip = false;
+    this.stripSel = 0;
     this.bots = false;
     this.panel = null;
     this.refreshBacklog = false;
@@ -954,6 +957,11 @@ export default class Tkt extends View {
       if (this.tab === "prs") return this.patchState({ team_prs: !this.answers.prs?.body?.team_prs }, cx);
       return this.toggleTeam(cx);
     }
+    if (this.inStrip && action === "menu") {
+      const chip = stripChips(this.answers.sprint?.body?.reviews, 6).chips[this.stripSel];
+      if (chip) this.menu = { ...prMenu(chip.row, {}), sel: 0 };
+      return;
+    }
     const c = this.current();
     if (!c) return;
     const t = c.ticket ?? {};
@@ -1004,6 +1012,17 @@ export default class Tkt extends View {
     const body = this.answers[this.tab]?.body;
     if (!d || !body) return;
     const at = targets(this.tab, this.view, body);
+    const chips = this.tab === "sprint" ? stripChips(body.reviews, 6).chips : [];
+    if (this.inStrip) {
+      if (d[1] > 0 || chips.length === 0) this.inStrip = false;
+      else this.stripSel = Math.max(0, Math.min(chips.length - 1, this.stripSel + d[0]));
+      return;
+    }
+    if (d[1] < 0 && chips.length > 0 && atTop(at, this.selected)) {
+      this.inStrip = true;
+      this.stripSel = 0;
+      return;
+    }
     if (at.cols) {
       this.selected = stepColumns(at.cols, this.selected, d[0], d[1]);
       return;
@@ -1057,8 +1076,25 @@ export default class Tkt extends View {
 
   select(id, cx) {
     this.tab = id;
+    this.inStrip = false;
     this.load(cx);
     cx.notify();
+  }
+
+  /** The review requests over the Sprint's tickets, each chip opening the PRs tab's menu for it. */
+  strip(t, board) {
+    const { chips, more } = stripChips(board?.reviews, 6);
+    if (chips.length === 0) return div();
+    return h_flex().id("strip").px(12).pt(8).gap(8).items_center().text_size(12)
+      .child(div().text_color(t.dim).child("Review requested"))
+      .children(chips.map((c, i) => {
+        const on = this.inStrip && this.stripSel === i;
+        return h_flex().id(`chip-${i}`).gap(4).px(8).py(2).rounded(10).border(1).border_color(on ? t.accent : t.ansi5 ?? t.border)
+          .hover((s) => s.bg(t.hover)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => { this.menu = { ...prMenu(c.row, {}), sel: 0 }; cx.notify(); })
+          .child(div().text_color(on ? t.accent : t.ansi3 ?? t.working).child(on ? "▸" : "!")).child(div().text_color(t.foreground).child(c.label));
+      }))
+      .when(Boolean(more), (el) => el.child(div().text_color(t.dim).child(more)));
   }
 
   /** The line under the tabs: the tab summed up, and on its right the filter's notice, which a click opens. */
@@ -1216,8 +1252,8 @@ export default class Tkt extends View {
     if (answer.status === 503) return div().p(16).text_color(t.muted).child("tkt is syncing the board for the first time…");
     if (answer.status !== 200) return div().p(16).text_color(t.blocked).child(problemOf(answer.body?.message ?? `tkt answered ${answer.status}`, this.machine));
     if (this.tab === "sprint" && (answer.body.sections ?? []).length === 0) return div().p(16).text_color(t.muted).child("No tickets on the board: nothing assigned to you in an open sprint.");
-    if (this.tab === "sprint" && this.view === "columns") return this.columns(t, answer.body);
-    if (this.tab === "sprint") return this.list(t, answer.body);
+    if (this.tab === "sprint") return v_flex().flex_1().min_h_0().child(this.strip(t, answer.body))
+      .child(this.view === "columns" ? this.columns(t, answer.body) : this.list(t, answer.body));
     if (this.tab === "prs") return this.prsList(t, answer.body);
     if (this.tab === "backlog") return this.backlogList(t, answer.body);
     return div().p(16).text_color(t.muted).child(`${(answer.body.sections ?? answer.body.groups ?? []).length} groups`);

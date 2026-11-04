@@ -155,3 +155,28 @@ func TestTheBoardSaysItsOpenSprintsAsTheTUIsContextLine(t *testing.T) {
 		t.Errorf("sprints = %s, want %s", got, want)
 	}
 }
+
+func TestTheBoardCarriesItsReviewRequestsForTheStrip(t *testing.T) {
+	seed := contractBoard()
+	seed.Reviews = []ticket.PullRequest{
+		{Repo: "example-org/web", Number: 51, Title: "Add dark mode", URL: "https://github.com/example-org/web/pull/51", State: ticket.PROpen, Branch: "feature/DEMO-142-dark-mode", Author: "grace"},
+		{Repo: "example-org/api", Number: 52, Title: "Bump deps", URL: "https://github.com/example-org/api/pull/52", State: ticket.PROpen, Branch: "chore/bump"},
+	}
+	s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour, Seed: &seed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, body := get(t, s.Handler(), http.MethodGet, "/v1/board", s.token)
+	reviews, _ := body["reviews"].([]any)
+	if len(reviews) != 2 {
+		t.Fatalf("reviews = %v, want 2", body["reviews"])
+	}
+	first := reviews[0].(map[string]any)
+	row := first["row"].(map[string]any)
+	if first["label"] != "#51 · DEMO-142" || row["key"] != "#51" || row["review"] != true || row["status"] != "Review requested" {
+		t.Errorf("first review = %v, want label #51 · DEMO-142 and a review row", first)
+	}
+	if reviews[1].(map[string]any)["label"] != "#52" {
+		t.Errorf("second review label = %v, want #52 (no ticket key in its branch)", reviews[1].(map[string]any)["label"])
+	}
+}
