@@ -1,18 +1,21 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pavp/tkt/internal/ticket"
 )
@@ -142,12 +145,26 @@ func (s *Server) mutating(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
+		body, _ := io.ReadAll(io.LimitReader(r.Body, maxLoggedBody+1))
+		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), r.Body))
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next(rec, r)
 		if s.opts.Log != nil {
-			s.opts.Log("write %s %s → %d\n", r.Method, strconv.Quote(r.URL.Path), rec.status)
+			s.opts.Log("%s write %s %s %s → %d\n", s.now().UTC().Format(time.RFC3339), r.Method, strconv.Quote(r.URL.Path), loggedBody(body), rec.status)
 		}
 	})
+}
+
+// maxLoggedBody bounds how much of a write's body the log keeps.
+const maxLoggedBody = 300
+
+// loggedBody is a request body on one line, cut at maxLoggedBody, for the write log.
+func loggedBody(b []byte) string {
+	text := strings.Join(strings.Fields(string(b)), " ")
+	if len(text) > maxLoggedBody {
+		text = text[:maxLoggedBody] + "…"
+	}
+	return text
 }
 
 type statusRecorder struct {
