@@ -31,7 +31,9 @@ var desktopKinds = []string{"pi", "claude", "codex", "gemini", "cursor", "devin"
 func (a *App) agentKinds(ctx context.Context) ([]string, error) {
 	if ch, err := a.whichHerdr(ctx); err == nil && ch.flavor == herdrDesktop {
 		if known := a.loadAgentKinds(); len(known) > 0 {
-			return a.installedKinds(known, herdrDesktop)
+			if kinds, err := a.installedKinds(known, herdrDesktop); err == nil {
+				return kinds, nil
+			}
 		}
 		return a.installedKinds(desktopKinds, herdrDesktop)
 	}
