@@ -18,7 +18,7 @@ test("the menu's footer offers c to copy the link of an item that opens one", ()
 
 test("a pull request's menu names who approved it and who asked for changes, as the TUI's", () => {
   assert.deepEqual(reviewersOf({ approved_by: ["ana", "sam"], changes_requested_by: ["luis"] }), [
-    { text: "✓ ana", tone: "ansi2" }, { text: "✓ sam", tone: "ansi2" }, { text: "✗ luis", tone: "ansi3" },
+    { text: "✓ ana", tone: "ansi2" }, { text: "✓ sam", tone: "ansi2" }, { text: "✗ luis", tone: "peach" },
   ]);
   assert.deepEqual(reviewersOf({}), []);
   const m = prMenu({ key: "#5", pr: { number: 5, repo: "example-org/web", approved_by: ["ana"] }, review: true });

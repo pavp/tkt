@@ -8,8 +8,8 @@ const AGENT_WORDS = { working: "● working", blocked: "● needs you", done: "�
 /** The gutter before a row: ▸ when selected, ! when it needs you (with its status mark's icon), else the mark. */
 export function gutterOf({ selected = false, attention = "", needsYou = false, mark = null }) {
   if (selected) return { text: "▸", tone: "accent" };
-  if (needsYou) return { text: "!", tone: "ansi3" };
-  if (attention) return { text: mark ? `!${mark.glyph}` : "!", tone: "ansi3" };
+  if (needsYou) return { text: "!", tone: "peach" };
+  if (attention) return { text: mark ? `!${mark.glyph}` : "!", tone: "peach" };
   if (mark) return { text: mark.glyph, tone: mark.tone };
   return { text: "", tone: "dim" };
 }
@@ -23,7 +23,7 @@ export function statusTone(category) {
 export function prStatusTone(row) {
   const pr = row.pr ?? {};
   if (row.review) return "ansi5";
-  if (row.needs_you) return "ansi3";
+  if (row.needs_you) return "peach";
   if (pr.draft) return "dim";
   if (pr.merge === "ready" || pr.review === "approved") return "ansi2";
   if (pr.review === "review_required") return "ansi5";

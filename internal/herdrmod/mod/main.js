@@ -7,7 +7,7 @@ import { exec, machines, knownAgents, theme, props, closeOverlay, appHome } from
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
-import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN } from "./lib/columns.js";
+import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN, withPeach } from "./lib/columns.js";
 import { gutterOf, statusTone, prStatusTone, agentWord, prRefs, listColumns, pointsText } from "./lib/rows.js";
 import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview, prsToggle } from "./lib/prs.js";
@@ -20,6 +20,7 @@ import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows 
 import { MOD_VERSION } from "./lib/version.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
 import { stripChips, atTop } from "./lib/strip.js";
+import { packCache, unpackCache, cachedLabel } from "./lib/cache.js";
 import { scrolled, menuHeight, MENU_ROW, cardHeight, revealed } from "./lib/scroll.js";
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget, listKey, sectionAfter } from "./lib/nav.js";
 
@@ -44,6 +45,12 @@ export default class Tkt extends View {
   init(_props, cx) {
     this.tab = "sprint";
     this.answers = {};
+    this.cachedAt = null;
+    const cached = unpackCache(localStorage.getItem("board"), remembered());
+    if (cached) {
+      this.answers = cached.answers;
+      this.cachedAt = cached.at;
+    }
     this.error = null;
     this.machine = undefined;
     this.choices = null;
@@ -71,7 +78,7 @@ export default class Tkt extends View {
     this.view = "columns";
     this.range = { start: 0, end: 0 };
     this.shownRange = { start: 0, end: 0 };
-    this.selected = null;
+    this.selected = this.answers.sprint?.body ? firstTarget(targets("sprint", "columns", this.answers.sprint.body)) : null;
     this.inStrip = false;
     this.stripSel = 0;
     this.bots = false;
@@ -210,6 +217,13 @@ export default class Tkt extends View {
       try {
         const answers = await Promise.all(routes.map(([, route]) => this.call("GET", route)));
         routes.forEach(([id], i) => { this.answers[id] = answers[i]; });
+        this.cachedAt = null;
+        if (Date.now() - (this.cacheSaved ?? 0) > 60000) {
+          this.cacheSaved = Date.now();
+          try {
+            localStorage.setItem("board", packCache(this.machine, this.answers, this.cacheSaved));
+          } catch {}
+        }
         const body = this.answers[this.tab]?.body;
         if (body && !this.selected) this.selected = firstTarget(targets(this.tab, this.view, body));
         if (this.jobs.length > 0) await this.followJobs();
@@ -259,8 +273,13 @@ export default class Tkt extends View {
     });
   }
 
+  checkbox(t, on) {
+    return h_flex().w(18).h(18).flex_none().rounded(4).border(1).border_color(on ? t.accent : t.muted).bg(on ? t.accent : t.popover)
+      .items_center().justify_center().text_size(13).font_semibold().text_color(t.background).child(on ? "✓" : "");
+  }
+
   toggle(id, on, onClick) {
-    const t = theme();
+    const t = withPeach(theme());
     return div().id(id).px(10).py(2).rounded(5).border(1).border_color(on ? t.accent : t.border)
       .text_color(on ? t.foreground : t.muted).bg(on ? t.selected : t.chrome).hover((s) => s.bg(t.hover))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
@@ -286,7 +305,7 @@ export default class Tkt extends View {
       .children(items.map((r, i) =>
         h_flex().id(`${field}-${r.name}`).gap(8).px(8).py(4).rounded(5).bg(i === Math.min(this.panelSel ?? 0, items.length - 1) ? t.selected : t.popover).hover((s) => s.bg(t.hover))
           .on_click((_e, cx) => this.patchState({ [field]: toggled(hidden, r.name) }, cx))
-          .child(div().w(14).text_color(t.accent).child(r.hidden ? "☐" : "☑"))
+          .child(this.checkbox(t, !r.hidden))
           .child(div().flex_1().truncate().text_color(r.hidden ? t.muted : t.foreground).child(r.name))
           .child(div().text_color(t.dim).child(String(r.prs ?? r.tickets ?? "")))));
   }
@@ -797,7 +816,7 @@ export default class Tkt extends View {
           };
           const lit = focusable(toggle);
           return h_flex().id(`b-${sp.key}-${b.id}`).gap(8).py(2).px(4).rounded(4).bg(lit ? t.selected : t.surface).on_click((_e, cx) => toggle(cx))
-            .child(div().w(14).text_color(t.accent).child(on ? "☑" : "☐")).child(div().text_color(t.foreground).child(b.name));
+            .child(this.checkbox(t, on)).child(div().text_color(t.foreground).child(b.name));
         }))
         .when(!st.boards[sp.key], (el) => el.child(link(`lb-${sp.key}`, "Choose from Jira's boards…", (cx) => this.attempt(async () => { st.boards[sp.key] = (await this.lookup("boards", sp.key)).boards; }, cx))))));
     } else if (st.section === "statuses") {
@@ -920,7 +939,7 @@ export default class Tkt extends View {
                 cx.notify();
               } else this.choose([r.value], r, cx);
             })
-            .when(Boolean(p.multi), (el) => el.child(div().w(14).text_color(t.accent).child(p.checked.has(r.value) ? "☑" : "☐")))
+            .when(Boolean(p.multi), (el) => el.child(this.checkbox(t, p.checked.has(r.value))))
             .child(div().flex_1().truncate().text_color(t.foreground).child(r.label))
             .when(Boolean(r.hint), (el) => el.child(div().text_color(t.dim).child(r.hint)))))
         .child(h_flex().pt(8).gap(8).justify_end()
@@ -1206,7 +1225,7 @@ export default class Tkt extends View {
         return h_flex().id(`chip-${i}`).gap(4).px(8).py(2).rounded(10).border(1).border_color(on ? t.accent : t.ansi5 ?? t.border)
           .hover((s) => s.bg(t.hover)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click((_e, cx) => { this.menu = { ...prMenu(c.row, {}), sel: 0 }; cx.notify(); })
-          .child(div().text_color(on ? t.accent : t.ansi3 ?? t.working).child(on ? "▸" : "!")).child(div().text_color(t.foreground).child(c.label));
+          .child(div().text_color(on ? t.accent : t.peach).child(on ? "▸" : "!")).child(div().text_color(t.foreground).child(c.label));
       }))
       .when(Boolean(more), (el) => el.child(div().text_color(t.dim).child(more)));
   }
@@ -1248,11 +1267,11 @@ export default class Tkt extends View {
       .child(div().id("gear").px(8).py(3).rounded(6).text_color(this.settings ? t.foreground : t.muted).hover((s) => s.bg(t.hover))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => { if (this.settings) { this.settings = null; cx.notify(); } else this.attempt(() => this.openSettings(), cx); })
-        .child("⚙"))
+        .text_size(18).child("⚙"))
       .child(div().id("close").px(8).py(3).rounded(6).text_color(t.muted).hover((s) => s.bg(t.hover))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click(() => close())
-        .child("✕"));
+        .text_size(16).child("✕"));
   }
 
   chooser(t) {
@@ -1416,7 +1435,7 @@ export default class Tkt extends View {
         .on_click((_e, cx) => this.pick(cx))
         .child(where))
       .child(div().flex_1().truncate().text_color(this.error ? t.blocked : t.dim).child(this.error ? problemOf(this.error, this.machine) : this.notice))
-      .child(((label) => div().text_color(t[syncTone(label)] ?? t.dim).child(label))(this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.answers[this.tab]?.body?.sync_label ?? ""))
+      .child(((label) => div().text_color(t[syncTone(label)] ?? t.dim).child(label))(this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.cachedAt ? cachedLabel(this.cachedAt) : this.answers[this.tab]?.body?.sync_label ?? ""))
       .child(div().id("sync").px(6).rounded(4).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => this.sync(cx))
@@ -1424,7 +1443,7 @@ export default class Tkt extends View {
   }
 
   render(_cx) {
-    const t = theme();
+    const t = withPeach(theme());
     return v_flex().id("root").relative().size_full().bg(t.surface).text_size(13)
       .key_context("TktMod").track_focus(this.focus).on_key_down((e, cx) => this.key(e, cx))
       .on_action("tkt::NextTab", (_e, cx) => this.key({ key: "tab", keystroke: "tab", modifiers: {} }, cx))

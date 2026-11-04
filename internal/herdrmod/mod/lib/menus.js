@@ -148,5 +148,5 @@ export function menuFooter(item) {
 
 /** Who approved a pull request and who asked for changes, as the TUI's PR menu names them. */
 export function reviewersOf(pr) {
-  return [...(pr?.approved_by ?? []).map((n) => ({ text: `✓ ${n}`, tone: "ansi2" })), ...(pr?.changes_requested_by ?? []).map((n) => ({ text: `✗ ${n}`, tone: "ansi3" }))];
+  return [...(pr?.approved_by ?? []).map((n) => ({ text: `✓ ${n}`, tone: "ansi2" })), ...(pr?.changes_requested_by ?? []).map((n) => ({ text: `✗ ${n}`, tone: "peach" }))];
 }

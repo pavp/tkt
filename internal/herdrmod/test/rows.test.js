@@ -5,10 +5,10 @@ import { gutterOf, statusTone, prStatusTone, agentWord, prRefs, listColumns, poi
 test("a row's gutter says it is selected, needs you, or carries a status mark, as the TUI's list does", () => {
   const mark = { glyph: "◇", tone: "ansi4" };
   assert.deepEqual(gutterOf({ selected: true, attention: "CI failing", mark }), { text: "▸", tone: "accent" });
-  assert.deepEqual(gutterOf({ attention: "CI failing", mark }), { text: "!◇", tone: "ansi3" });
-  assert.deepEqual(gutterOf({ attention: "CI failing" }), { text: "!", tone: "ansi3" });
+  assert.deepEqual(gutterOf({ attention: "CI failing", mark }), { text: "!◇", tone: "peach" });
+  assert.deepEqual(gutterOf({ attention: "CI failing" }), { text: "!", tone: "peach" });
   assert.deepEqual(gutterOf({ mark }), { text: "◇", tone: "ansi4" });
-  assert.deepEqual(gutterOf({ needsYou: true }), { text: "!", tone: "ansi3" });
+  assert.deepEqual(gutterOf({ needsYou: true }), { text: "!", tone: "peach" });
   assert.deepEqual(gutterOf({}), { text: "", tone: "dim" });
 });
 
@@ -18,7 +18,7 @@ test("a ticket's status takes its column's color, a pull request's where it stan
   assert.equal(statusTone("review"), "ansi5");
   assert.equal(statusTone("done"), "ansi2");
   assert.equal(prStatusTone({ review: true }), "ansi5");
-  assert.equal(prStatusTone({ needs_you: true, pr: {} }), "ansi3");
+  assert.equal(prStatusTone({ needs_you: true, pr: {} }), "peach");
   assert.equal(prStatusTone({ pr: { draft: true } }), "dim");
   assert.equal(prStatusTone({ pr: { review: "approved" } }), "ansi2");
   assert.equal(prStatusTone({ pr: { merge: "ready" } }), "ansi2");
