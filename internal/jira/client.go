@@ -457,6 +457,12 @@ func quotedSpaces(spaces []string) string {
 	return strings.Join(quoted, ", ")
 }
 
+// TeamBoardSprintJQL is TeamSprintJQL through a board's saved filter, so a sprint shared with the board brings
+// only the tickets the board shows.
+func TeamBoardSprintJQL(filter int, spaces []string, sprintIDs []int) string {
+	return fmt.Sprintf("filter = %d AND ", filter) + TeamSprintJQL(spaces, sprintIDs)
+}
+
 // TeamSprintJQL selects the rest of the given sprints' tickets in the given spaces: assigned to someone else
 // or to nobody, leaving out what MySprintJQL already holds. The sprints are the user's own, since a space's
 // open sprints are every team's.
@@ -613,6 +619,23 @@ func (c *Client) ActiveSprints(ctx context.Context, board int) ([]int, error) {
 		ids[i] = v.ID
 	}
 	return ids, nil
+}
+
+// BoardFilter is the id of the saved filter a board shows (GET /rest/agile/1.0/board/{id}/configuration).
+func (c *Client) BoardFilter(ctx context.Context, board int) (int, error) {
+	var resp struct {
+		Filter struct {
+			ID json.Number `json:"id"`
+		} `json:"filter"`
+	}
+	if err := c.do(ctx, http.MethodGet, fmt.Sprintf("/rest/agile/1.0/board/%d/configuration", board), nil, &resp); err != nil {
+		return 0, err
+	}
+	if resp.Filter.ID == "" {
+		return 0, nil
+	}
+	id, err := resp.Filter.ID.Int64()
+	return int(id), err
 }
 
 // OpenSprints lists a board's active sprints and those not started yet, in the board's order.

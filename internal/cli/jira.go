@@ -27,6 +27,7 @@ type JiraAPI interface {
 	DevPullRequests(ctx context.Context, issueID string) ([]jira.DevPullRequest, error)
 	Download(ctx context.Context, url string, w io.Writer, maxBytes int64) error
 	ActiveSprints(ctx context.Context, board int) ([]int, error)
+	BoardFilter(ctx context.Context, board int) (int, error)
 	OpenSprints(ctx context.Context, board int) ([]jira.Sprint, error)
 	BacklogIssues(ctx context.Context, board int, fields []string) ([]jira.Issue, error)
 	MoveToSprint(ctx context.Context, sprint int, key string) error

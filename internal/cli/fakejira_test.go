@@ -100,6 +100,8 @@ func (f *fakeJira) AssignableUsers(context.Context, string, string) ([]jira.User
 	return f.users, nil
 }
 
+func (f *fakeJira) BoardFilter(context.Context, int) (int, error) { return 0, nil }
+
 func (f *fakeJira) ActiveSprints(_ context.Context, board int) ([]int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
