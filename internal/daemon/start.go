@@ -141,8 +141,22 @@ func (s *Server) mutating(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
-		next(w, r)
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next(rec, r)
+		if s.opts.Log != nil {
+			s.opts.Log("write %s %s → %d\n", r.Method, r.URL.Path, rec.status)
+		}
 	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
 }
 
 func (s *Server) start(w http.ResponseWriter, r *http.Request) {

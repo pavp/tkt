@@ -243,3 +243,18 @@ func TestALongStartAnswersAtOnceAndReportsItsEnd(t *testing.T) {
 		})
 	}
 }
+
+func TestTheDaemonLogsEveryWrite(t *testing.T) {
+	var logged []string
+	s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour,
+		Start: func(context.Context, ticket.Key, StartRequest, func()) error { return nil },
+		Log:   func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post(t, s.Handler(), "/v1/tickets/DEMO-7/start", s.token, "application/json", "", `{"herdr":"classic","agent":"claude"}`)
+	get(t, s.Handler(), http.MethodGet, "/v1/board", s.token)
+	if len(logged) != 1 || !strings.Contains(logged[0], "POST /v1/tickets/DEMO-7/start") || !strings.Contains(logged[0], "200") {
+		t.Errorf("logged %q, want the one write with its answer", logged)
+	}
+}
