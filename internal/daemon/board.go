@@ -19,6 +19,8 @@ type BoardView struct {
 	// SyncLabel says how fresh the board is, as the TUI's status line does.
 	SyncLabel string `json:"sync_label"`
 	board.ViewState
+	// Sprints are the open sprints as the TUI's context line words them: "DEMO · Sprint 12 · 3d left".
+	Sprints    []string          `json:"sprints"`
 	Boards     []BoardFilter     `json:"boards"`
 	Columns    []BoardColumn     `json:"columns"`
 	Sections   []BoardSection    `json:"sections"`
@@ -74,8 +76,11 @@ func (s *Server) board(w http.ResponseWriter, r *http.Request) {
 	}
 	hidden := setOf(state.HiddenBoards)
 	view := BoardView{FetchedAt: snap.FetchedAt, Partial: snap.Partial, Syncing: syncing, SyncError: syncErr, ViewState: state,
-		Boards: []BoardFilter{}, Columns: []BoardColumn{}, Sections: []BoardSection{}, Agents: agents, LabelField: snap.LabelField, Warnings: snap.Warnings}
+		Sprints: []string{}, Boards: []BoardFilter{}, Columns: []BoardColumn{}, Sections: []BoardSection{}, Agents: agents, LabelField: snap.LabelField, Warnings: snap.Warnings}
 	view.HiddenBoards = orNone(view.HiddenBoards)
+	for _, sp := range snap.Sprints {
+		view.Sprints = append(view.Sprints, sp.Space+" · "+board.SprintLabel(sp, snap.FetchedAt))
+	}
 	for name, n := range board.BoardCounts(snap.Tickets, state.Team) {
 		view.Boards = append(view.Boards, BoardFilter{Name: name, Tickets: n, Hidden: hidden[name]})
 	}

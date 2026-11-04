@@ -17,6 +17,7 @@ import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./l
 import { detailView, neighbors, detailsKey } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
+import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction } from "./lib/nav.js";
 
 const TABS = [
@@ -193,15 +194,12 @@ export default class Tkt extends View {
   }
 
   load(cx) {
-    const tab = TABS.find((t) => t.id === this.tab);
-    let route = tab.id === "prs" && this.bots ? `${tab.route}?bots=true` : tab.route;
-    if (tab.id === "backlog" && this.refreshBacklog) {
-      route = `${tab.route}?refresh=true`;
-      this.refreshBacklog = false;
-    }
+    const routes = routesFor(TABS, this.tab, { bots: this.bots, refreshBacklog: this.refreshBacklog });
+    if (this.tab === "backlog") this.refreshBacklog = false;
     cx.spawn(async (cx) => {
       try {
-        this.answers[tab.id] = await this.call("GET", route);
+        const answers = await Promise.all(routes.map(([, route]) => this.call("GET", route)));
+        routes.forEach(([id], i) => { this.answers[id] = answers[i]; });
         if (this.jobs.length > 0) await this.followJobs();
         this.error = null;
         if (this.pendingUse) {
@@ -326,8 +324,9 @@ export default class Tkt extends View {
         .on_click((_e, cx) => this.patchState({ backlog_merged: merged }, cx))
         .child(title);
     };
-    return h_flex().gap(6).child(this.boardsChip(t))
-      .child(h_flex().p(2).gap(2).rounded(7).border(1).border_color(t.border).child(option(false, "Split")).child(option(true, "Merged")));
+    return h_flex().gap(6)
+      .child(h_flex().p(2).gap(2).rounded(7).border(1).border_color(t.border).child(option(false, "Split")).child(option(true, "Merged")))
+      .child(this.boardsChip(t));
   }
 
   backlogRow(t, r) {
@@ -1062,6 +1061,18 @@ export default class Tkt extends View {
     cx.notify();
   }
 
+  /** The line under the tabs: the tab summed up, and on its right the filter's notice, which a click opens. */
+  contextLine(t) {
+    const body = this.answers[this.tab]?.body;
+    const notice = scopeNotice(this.tab, body);
+    return h_flex().px(12).py(3).gap(12).text_size(12).border_b(1).border_color(t.border)
+      .child(div().flex_1().truncate().text_color(t.muted).child(contextText(this.tab, body, { loading: this.tab === "backlog" && !body }) || " "))
+      .when(Boolean(notice), (el) => el.child(h_flex().id("scope-notice").hover((s) => s.bg(t.hover))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { this.panel = this.tab === "prs" ? "repos" : "boards"; cx.notify(); })
+        .child(div().text_color(t.dim).child(notice.text)).child(div().text_color(t.accent).child(notice.key)).child(div().text_color(t.dim).child(notice.after))));
+  }
+
   header(t) {
     const close = () => {
       const id = props()?.overlay;
@@ -1069,20 +1080,21 @@ export default class Tkt extends View {
     };
     return h_flex().px(12).py(8).gap(6).items_center().bg(t.chrome).border_b(1).border_color(t.border)
       .child(div().font_semibold().text_color(t.foreground).pr(10).child("tkt"))
-      .children(TABS.map((tab) => {
+      .children(TABS.map((tab, i) => {
         const on = tab.id === this.tab;
-        return div().id(`tab-${tab.id}`).px(10).py(3).rounded(6)
-          .bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
-          .hover((s) => s.bg(t.hover))
+        const count = tabCount(tab.id, this.answers[tab.id]?.body);
+        return h_flex().id(`tab-${tab.id}`).gap(6).px(8).py(2).rounded(6).border(1).border_color(on ? t.accent : t.border)
+          .bg(t.chrome).hover((s) => s.bg(t.hover))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click((_e, cx) => this.select(tab.id, cx))
-          .child(tab.title);
+          .child(div().text_color(t.dim).child(String(i + 1)))
+          .child(div().text_color(on ? t.foreground : t.muted).when(on, (el) => el.font_semibold()).child(tab.title))
+          .when(count !== "", (el) => el.child(div().px(5).rounded(4).text_size(11).bg(on ? t.solid : t.raised).text_color(on ? t.solid_foreground : t.foreground).child(count)));
       }))
       .child(div().flex_1())
-      .when(this.tab === "sprint", (el) => el.child(this.viewSwitch(t)))
+      .when(this.tab === "sprint", (el) => el.child(this.viewSwitch(t)).child(this.boardsChip(t)).child(this.teamToggle(t)))
       .when(this.tab === "prs", (el) => el.child(this.prControls(t)))
       .when(this.tab === "backlog", (el) => el.child(this.backlogControls(t)))
-      .when(this.tab === "sprint", (el) => el.child(this.teamToggle(t)).child(this.boardsChip(t)))
       .child(div().id("gear").px(8).py(3).rounded(6).text_color(this.settings ? t.foreground : t.muted).hover((s) => s.bg(t.hover))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => { if (this.settings) { this.settings = null; cx.notify(); } else this.attempt(() => this.openSettings(), cx); })
@@ -1109,16 +1121,11 @@ export default class Tkt extends View {
   }
 
   viewSwitch(t) {
-    const option = (id, title) => {
-      const on = this.view === id;
-      return div().id(`view-${id}`).px(10).py(2).rounded(5)
-        .bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => this.setView(id, cx))
-        .child(title);
-    };
-    return h_flex().p(2).gap(2).rounded(7).border(1).border_color(t.border)
-      .child(option("columns", "◫ Columns")).child(option("list", "≣ List"));
+    const b = viewButton(this.view);
+    return div().id("view").px(10).py(2).rounded(6).border(1).border_color(t.border).text_color(t.foreground).hover((s) => s.bg(t.hover))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => this.setView(b.next, cx))
+      .child(b.label);
   }
 
   card(t, c) {
@@ -1237,6 +1244,7 @@ export default class Tkt extends View {
       .track_focus(this.focus).on_key_down((e, cx) => this.key(e, cx))
       .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
       .child(this.header(t))
+      .when(!this.choices && !this.details && !this.settings, (el) => el.child(this.contextLine(t)))
       .when(Boolean(warningsLine(this.answers.sprint?.body?.warnings)), (el) => el.child(div().px(12).py(3).truncate().text_size(12).text_color(t.working).child(warningsLine(this.answers.sprint.body.warnings))))
       .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
       .when((this.tab === "sprint" || this.tab === "prs") && !this.choices && !this.details && !this.settings, (el) => el.child(this.preview(t, this.answers[this.tab]?.body)))

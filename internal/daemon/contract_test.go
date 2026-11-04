@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/ticket"
 )
 
@@ -133,5 +135,23 @@ func assertContract(t *testing.T, h http.Handler, path, token, name string) {
 	}
 	if !bytes.Equal(rec.Body.Bytes(), want) {
 		t.Errorf("GET %s differs from %s:\n got %s\nwant %s", path, file, rec.Body, want)
+	}
+}
+
+func TestTheBoardSaysItsOpenSprintsAsTheTUIsContextLine(t *testing.T) {
+	seed := contractBoard()
+	seed.Sprints = []jira.Sprint{
+		{Space: "DEMO", Name: "Sprint 12", End: fetched.Add(60 * time.Hour)},
+		{Space: "OPS", Name: "Ops 3", End: fetched.Add(-time.Hour)},
+		{Space: "DEMO", Name: "Kanban"},
+	}
+	s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour, Seed: &seed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, body := get(t, s.Handler(), http.MethodGet, "/v1/board", s.token)
+	got, _ := json.Marshal(body["sprints"])
+	if want := `["DEMO · Sprint 12 · 3d left","OPS · Ops 3 · overdue","DEMO · Kanban"]`; string(got) != want {
+		t.Errorf("sprints = %s, want %s", got, want)
 	}
 }
