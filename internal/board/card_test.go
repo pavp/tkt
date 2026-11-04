@@ -26,7 +26,9 @@ func TestACardSaysWhatTheTUIsCardSays(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := board.CardOf(tt.t); !reflect.DeepEqual(got, tt.want) {
+			got := board.CardOf(tt.t, false)
+			got.Details, got.Hint = nil, ""
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("CardOf = %+v, want %+v", got, tt.want)
 			}
 		})

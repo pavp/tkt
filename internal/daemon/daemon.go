@@ -94,6 +94,8 @@ type Options struct {
 	StateFile  string
 	ConfigFile string
 	WatchEvery time.Duration
+	// Now is the clock for what answers say about time, such as how long ago the board synced; nil is time.Now.
+	Now func() time.Time
 	// Log records each write a request made (method, path and answer); nil logs nothing.
 	Log func(format string, args ...any)
 }

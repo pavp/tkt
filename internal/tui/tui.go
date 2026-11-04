@@ -1768,24 +1768,11 @@ func (m Model) syncLabel() string {
 	if m.filter == FilterBacklog {
 		return m.backlogLabel()
 	}
-	switch {
-	case m.loading && m.snap.Partial:
-		return spinFrames[m.spin%len(spinFrames)] + " updating PRs…"
-	case m.loading:
-		return spinFrames[m.spin%len(spinFrames)] + " refreshing…"
-	case m.snap.FetchedAt.IsZero():
-		return "not synced yet"
-	case m.stale != nil:
-		return "! cached · " + m.snap.FetchedAt.Local().Format("15:04")
+	label := board.SyncLabel(board.SyncState{Loading: m.loading, Partial: m.snap.Partial, Failed: m.stale != nil, FetchedAt: m.snap.FetchedAt}, m.now())
+	if m.loading {
+		return spinFrames[m.spin%len(spinFrames)] + " " + label
 	}
-	d := m.now().Sub(m.snap.FetchedAt)
-	switch {
-	case d < time.Minute:
-		return "✓ synced just now"
-	case d < time.Hour:
-		return fmt.Sprintf("✓ synced %d min ago", int(d.Minutes()))
-	}
-	return "✓ synced " + m.snap.FetchedAt.Local().Format("15:04")
+	return label
 }
 
 // backlogLabel is the Backlog's own state in the sync corner, which `g` and its timer refresh apart from the sprint.
@@ -2831,32 +2818,13 @@ func (m Model) preview() string {
 	}
 	t := it.ticket
 	title := truncate(titleStyle.Render(string(t.Key))+" "+statusBadge(*t)+titleStyle.Render(" · "+t.Summary), m.width)
-	parts := []string{cmp.Or(t.Assignee, "unassigned")}
-	switch {
-	case t.Points == 1:
-		parts = append([]string{"1 point"}, parts...)
-	case t.Points != 0:
-		parts = append([]string{strconv.FormatFloat(t.Points, 'f', -1, 64) + " points"}, parts...)
-	}
-	for _, r := range t.Attention() {
-		parts = append(parts, string(r))
-	}
-	if len(t.Attention()) == 0 && t.Checks() == ticket.ChecksPass {
-		parts = append(parts, "checks pass")
-	}
-	for _, pr := range t.PRs {
-		if pr.State == ticket.PROpen {
-			parts = append(parts, pr.Repo+"#"+fmt.Sprint(pr.Number))
-		}
-	}
-	hint := actionHint(*t)
+	parts := board.PreviewParts(*t)
+	hint := board.ActionHint(*t, m.snap.Agents[string(t.Key)] != "")
 	switch {
 	case m.filter == FilterBacklog:
 		hint = "enter for actions"
 	case strings.HasPrefix(hint, "f sends") && !m.actions.InHerdr():
 		hint = "f copies the feedback prompt"
-	case strings.HasPrefix(hint, "f sends") && m.snap.Agents[string(t.Key)] == "":
-		hint = strings.Replace(hint, "to the agent", "to an agent", 1)
 	}
 	if hint != "" {
 		parts = append(parts, hint)
@@ -2878,24 +2846,6 @@ func ciWord(c ticket.CheckState) string {
 		return "passing ✓"
 	}
 	return "not reported"
-}
-
-// actionHint tells what the most useful key does for this ticket, as the mockup's preview line does.
-func actionHint(t ticket.Ticket) string {
-	reasons := t.Attention()
-	switch {
-	case t.Team:
-		return "enter for details"
-	case len(reasons) > 0 && reasons[0] == ticket.ReasonCIFailing:
-		return "f sends the failure to the agent"
-	case len(reasons) > 0:
-		return "f sends the review comments to the agent"
-	case len(t.PRs) == 0 && t.Category == ticket.ToDo:
-		return "enter asks for repos and opens an agent"
-	case len(t.PRs) == 0:
-		return "enter opens the agent"
-	}
-	return "p opens the PR ↗"
 }
 
 var keyStyle = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
