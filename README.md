@@ -94,6 +94,7 @@ links the tkt plugin into the running Herdr (0.9.5 or later); after an upgrade t
 ```bash
 go build -o tkt ./cmd/tkt
 go test ./...
+node --test 'internal/herdrmod/test/*.test.js'   # the Herdr desktop mod's logic (Node 22, no npm packages)
 ```
 
 ## License
