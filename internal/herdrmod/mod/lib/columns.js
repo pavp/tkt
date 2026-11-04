@@ -28,6 +28,7 @@ export function cardOf(row, agents) {
     label: t.label ?? "",
     agent: agents?.[row.key] ?? "",
     prs: (t.prs ?? []).filter((p) => p.state !== "merged" && p.state !== "closed").map(prMark),
+    finished: card.finished ?? "",
   };
 }
 
