@@ -66,7 +66,7 @@ export function wrapWords(text, width, max) {
 // The TUI's status marks (internal/tui markIcons): an icon, and the theme color nearest the TUI's.
 const MARKS = {
   diamond: ["◇", "ansi4"],
-  blocked: ["⊘", "ansi3"],
+  blocked: ["⊘", "peach"],
   clock: ["◷", "ansi6"],
   flag: ["⚑", "ansi5"],
   star: ["★", "ansi11"],
@@ -101,3 +101,10 @@ export function cardFlag(attention, mark, room = Infinity) {
 }
 
 export const EMPTY_COLUMN = "— nothing here";
+
+/** The TUI's peach (Catppuccin), which no ANSI color matches: blocked marks and what needs you use it. */
+export const PEACH = "#fab387";
+
+export function withPeach(theme) {
+  return { ...theme, peach: PEACH };
+}

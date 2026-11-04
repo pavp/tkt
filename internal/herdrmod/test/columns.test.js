@@ -33,7 +33,7 @@ test("a summary wraps on words into at most the lines it has", () => {
 test("a status mark shows as the TUI's icon before the status, never its name", async () => {
   const { markOf } = await import("../mod/lib/columns.js");
   assert.deepEqual(markOf("diamond", "Ready for Testing"), { glyph: "◇", word: "◇ Ready for Testing", tone: "ansi4" });
-  assert.deepEqual(markOf("blocked", "Blocked"), { glyph: "⊘", word: "⊘ Blocked", tone: "ansi3" });
+  assert.deepEqual(markOf("blocked", "Blocked"), { glyph: "⊘", word: "⊘ Blocked", tone: "peach" });
   assert.equal(markOf("none", "To Do"), null);
   assert.equal(markOf("", "To Do"), null);
   assert.equal(markOf("unknown", "To Do"), null);
@@ -43,4 +43,10 @@ test("a card's pull requests end with its finished ones, as the TUI words them",
   const c = cardOf({ key: "DEMO-9", ticket: { key: "DEMO-9", prs: [{ number: 1, state: "merged" }] }, card: { finished: "#1 merged" } }, {});
   assert.deepEqual(c.prs, []);
   assert.equal(c.finished, "#1 merged");
+});
+
+test("the palette adds the TUI's peach to Herdr's theme, for blocked marks and what needs you", async () => {
+  const { withPeach, PEACH } = await import("../mod/lib/columns.js");
+  assert.equal(PEACH, "#fab387");
+  assert.deepEqual(withPeach({ ansi3: "#f9e2af" }), { ansi3: "#f9e2af", peach: "#fab387" });
 });
