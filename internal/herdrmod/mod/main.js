@@ -9,7 +9,7 @@ import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tk
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords, markOf } from "./lib/columns.js";
 import { previewOf, legendFor, problemOf } from "./lib/footer.js";
-import { prRows, toggled, reposChip } from "./lib/prs.js";
+import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
 import { backlogRows, badges } from "./lib/backlog.js";
 import { ticketMenu, prMenu } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker } from "./lib/start.js";
@@ -916,7 +916,7 @@ export default class Tkt extends View {
   }
 
   preview(t, board) {
-    const p = previewOf(this.selectedRow(board));
+    const p = this.tab === "prs" ? prPreview(prRows(board).find((r) => r.kind === "row" && r.key + r.group === this.selected)) : previewOf(this.selectedRow(board));
     if (!p) return div().px(12).py(6).text_size(12).text_color(t.dim).child("nothing selected");
     return v_flex().px(12).py(6).gap(2).border_t(1).border_color(t.border)
       .child(div().truncate().font_semibold().text_color(t.foreground).child(p.title))
@@ -1111,7 +1111,7 @@ export default class Tkt extends View {
       .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
       .child(this.header(t))
       .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
-      .when(this.tab === "sprint" && !this.choices && !this.details && !this.settings, (el) => el.child(this.preview(t, this.answers.sprint?.body)))
+      .when((this.tab === "sprint" || this.tab === "prs") && !this.choices && !this.details && !this.settings, (el) => el.child(this.preview(t, this.answers[this.tab]?.body)))
       .child(this.legend(t))
       .child(this.status(t))
       .when(Boolean(this.openPanel()), (el) => { const p = this.openPanel(); return el.child(this.filterPanel(t, p.items, p.hidden, p.field)); })

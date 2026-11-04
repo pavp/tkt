@@ -39,3 +39,18 @@ export function reposChip(repos) {
   const shown = (repos ?? []).filter((r) => !r.hidden).length;
   return shown === all ? "Repos" : `Repos ${shown}/${all}`;
 }
+
+const CI = { fail: "failing ✕", pending: "running …", pass: "passing ✓" };
+
+/** The preview of a selected PRs-tab row, worded as the TUI's (its preview for pull requests). */
+export function prPreview(row) {
+  if (!row || row.kind !== "row") return null;
+  const pr = row.raw?.pr ?? {};
+  const ci = `CI ${CI[pr.checks] ?? "not reported"}`;
+  if (!row.other && !row.review && row.ticketKey) {
+    return { title: `${row.key} · ${row.ticketKey} · ${row.title}`, line: `${row.status} in ${row.repo} · ${ci} · enter for actions` };
+  }
+  const how = row.other ? "opened by" : "review requested by";
+  const approvals = row.approvals ? ` · ${row.approvals}` : "";
+  return { title: `${row.key} · ${pr.title || row.title}`, line: `${how} ${row.who || "—"} in ${row.repo}${approvals} · ${ci} · enter for actions` };
+}
