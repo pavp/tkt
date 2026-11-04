@@ -231,6 +231,9 @@ func (s *Server) runJob(w http.ResponseWriter, r *http.Request, j job, run func(
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"id": id, "state": "finished"})
 	case <-settled:
+		s.mu.Lock()
+		s.recordJob(id, jobEnd{Kind: j.kind, Subject: j.subject, State: "running"})
+		s.mu.Unlock()
 		writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "state": "started"})
 		go func() {
 			err := <-done
@@ -238,9 +241,11 @@ func (s *Server) runJob(w http.ResponseWriter, r *http.Request, j job, run func(
 			defer s.mu.Unlock()
 			delete(s.running, busy)
 			if err != nil {
+				s.recordJob(id, jobEnd{Kind: j.kind, Subject: j.subject, State: "failed", Message: err.Error()})
 				s.publish(j.kind+".failed", map[string]string{"id": id, j.field: j.subject, "message": err.Error()})
 				return
 			}
+			s.recordJob(id, jobEnd{Kind: j.kind, Subject: j.subject, State: "finished"})
 			s.publish(j.kind+".finished", map[string]string{"id": id, j.field: j.subject})
 		}()
 	}
