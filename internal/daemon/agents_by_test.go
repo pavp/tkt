@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pavp/tkt/internal/board"
+	"github.com/pavp/tkt/internal/ticket"
 )
 
 func TestEachHerdrsAgentsStayApart(t *testing.T) {
@@ -45,5 +46,27 @@ func TestEachHerdrsAgentsStayApart(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestBoardRowsCarryTheirCard(t *testing.T) {
+	snap := &board.Snapshot{Tickets: []ticket.Ticket{{Key: "DEMO-1", Type: "Bug", Points: 2, Assignee: "Ada Lovelace", Category: ticket.InProgress}}}
+	s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour, Seed: snap})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, body := get(t, s.Handler(), http.MethodGet, "/v1/board", s.token)
+	cols, _ := body["columns"].([]any)
+	if code != http.StatusOK || len(cols) == 0 {
+		t.Fatalf("GET /v1/board = %d %v", code, body)
+	}
+	var card map[string]any
+	for _, c := range cols {
+		for _, r := range c.(map[string]any)["rows"].([]any) {
+			card, _ = r.(map[string]any)["card"].(map[string]any)
+		}
+	}
+	if card["who"] != "Ada L." || card["points"] != "2pt" || card["type_kind"] != "bug" {
+		t.Errorf("card = %v, want the TUI card's words", card)
 	}
 }

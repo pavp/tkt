@@ -2915,7 +2915,7 @@ func TestTicketsShowTheirAssignee(t *testing.T) {
 
 func TestShortName(t *testing.T) {
 	for in, want := range map[string]string{"Ana López": "Ana L.", "Ana María López Ruiz": "Ana R.", "dev": "dev", "": "unassigned"} {
-		if got := shortName(in); got != want {
+		if got := board.ShortName(in); got != want {
 			t.Errorf("shortName(%q) = %q, want %q", in, got, want)
 		}
 	}

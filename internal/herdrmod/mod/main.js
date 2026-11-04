@@ -6,6 +6,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay } from "herdr";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed } from "./lib/client.js";
 import { listRows } from "./lib/list.js";
+import { columnCards, wrapWords } from "./lib/columns.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -32,6 +33,8 @@ export default class Tkt extends View {
     this.choices = null;
     this.failures = 0;
     this.found = [];
+    this.view = "columns";
+    this.loadView(cx);
     this.load(cx);
     cx.timer.every(POLL, (cx) => this.load(cx));
   }
@@ -120,6 +123,27 @@ export default class Tkt extends View {
     });
   }
 
+  loadView(cx) {
+    cx.spawn(async (cx) => {
+      try {
+        const a = await this.call("GET", "/v1/board/state");
+        if (a.status === 200 && a.body?.view) this.view = a.body.view;
+      } catch {}
+      cx.notify();
+    });
+  }
+
+  /** Columns or list, saved as the board's view, which the TUI reads when it opens. */
+  setView(view, cx) {
+    this.view = view;
+    cx.spawn(async () => {
+      try {
+        await this.call("PATCH", "/v1/board/state", { view });
+      } catch {}
+    });
+    cx.notify();
+  }
+
   select(id, cx) {
     this.tab = id;
     this.load(cx);
@@ -143,6 +167,7 @@ export default class Tkt extends View {
           .child(tab.title);
       }))
       .child(div().flex_1())
+      .when(this.tab === "sprint", (el) => el.child(this.viewSwitch(t)))
       .child(div().id("close").px(8).py(3).rounded(6).text_color(t.muted).hover((s) => s.bg(t.hover))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click(() => close())
@@ -164,12 +189,56 @@ export default class Tkt extends View {
           .child("Keep the current one")));
   }
 
+  viewSwitch(t) {
+    const option = (id, title) => {
+      const on = this.view === id;
+      return div().id(`view-${id}`).px(10).py(2).rounded(5)
+        .bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => this.setView(id, cx))
+        .child(title);
+    };
+    return h_flex().p(2).gap(2).rounded(7).border(1).border_color(t.border)
+      .child(option("columns", "◫ Columns")).child(option("list", "≣ List"));
+  }
+
+  card(t, c) {
+    const flag = c.attention ? `! ${c.attention}` : c.mark ? `${c.mark} ${c.status}` : "";
+    const lines = wrapWords(c.summary, 34, 2);
+    return v_flex().id(`card-${c.key}`).p(8).gap(3).rounded(8).border(1)
+      .border_color(c.attention ? t.blocked : t.border).bg(t.raised).hover((s) => s.border_color(t.accent))
+      .child(h_flex().gap(6).items_center()
+        .child(div().text_color(t.dim).child(c.subtask ? `↳ ${c.key}` : c.key))
+        .when(Boolean(c.points), (el) => el.child(div().text_color(t.dim).child(c.points)))
+        .child(div().flex_1())
+        .when(Boolean(flag), (el) => el.child(div().text_color(c.attention ? t.blocked : t.muted).child(flag)))
+        .when(Boolean(c.agent), (el) => el.child(div().text_color(t[c.agent] ?? t.unknown).child("●"))))
+      .children(lines.map((l, i) => div().id(`card-${c.key}-l${i}`).font_semibold().text_color(c.team ? t.muted : t.foreground).child(l)))
+      .child(h_flex().gap(6).text_size(12).children(c.prs.length === 0 ? [div().text_color(t.dim).child("—")] :
+        c.prs.map((p, i) => h_flex().id(`card-${c.key}-pr${i}`).gap(3).child(div().text_color(t.muted).child(p.ref)).child(div().text_color(t[p.tone] ?? t.dim).child(p.mark)))))
+      .when(Boolean(c.label), (el) => el.child(div().text_size(12).text_color(t.accent).child(c.label)))
+      .child(div().text_size(12).text_color(t.dim).truncate().child([c.info, c.who].filter(Boolean).join(" · ")));
+  }
+
+  columns(t, board) {
+    return h_flex().id("columns").flex_1().gap(10).p(10).items_start().children(
+      columnCards(board).map((col) =>
+        v_flex().id(`col-${col.category}`).flex_1().min_w(220).h_full().gap(6)
+          .child(h_flex().px(4).pb(4).border_b(1).border_color(t.border)
+            .child(div().font_semibold().text_color(t.foreground).child(col.title))
+            .child(div().flex_1())
+            .child(div().text_color(t.dim).child([String(col.count), col.points].filter(Boolean).join(" · "))))
+          .child(v_flex().id(`col-${col.category}-cards`).flex_1().overflow_y_scrollbar().gap(6)
+            .children(col.cards.map((c) => this.card(t, c))))));
+  }
+
   body(t) {
     if (this.choices) return this.chooser(t);
     const answer = this.answers[this.tab];
     if (!answer) return div().p(16).text_color(t.muted).child(this.error ? "" : "Loading…");
     if (answer.status === 503) return div().p(16).text_color(t.muted).child("tkt is syncing the board for the first time…");
     if (answer.status !== 200) return div().p(16).text_color(t.blocked).child(answer.body?.message ?? `tkt answered ${answer.status}`);
+    if (this.tab === "sprint" && this.view === "columns") return this.columns(t, answer.body);
     if (this.tab !== "sprint") return div().p(16).text_color(t.muted).child(`${(answer.body.sections ?? answer.body.groups ?? []).length} groups`);
     return v_flex().id("rows").flex_1().overflow_y_scrollbar().px(12).py(8).gap(2).children(
       listRows(answer.body.sections).map((r, i) =>
