@@ -9,6 +9,7 @@ import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords } from "./lib/columns.js";
 import { previewOf, legendFor, problemOf } from "./lib/footer.js";
 import { prRows, toggled, reposChip } from "./lib/prs.js";
+import { backlogRows, badges } from "./lib/backlog.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -41,7 +42,8 @@ export default class Tkt extends View {
     this.shownRange = { start: 0, end: 0 };
     this.selected = null;
     this.bots = false;
-    this.reposOpen = false;
+    this.panel = null;
+    this.refreshBacklog = false;
     // The list learns what is on screen while it lays out, where it may not ask for a render; the pinned title and
     // the "N more" hints follow on this tick instead.
     cx.timer.every(150, (cx) => {
@@ -124,7 +126,11 @@ export default class Tkt extends View {
 
   load(cx) {
     const tab = TABS.find((t) => t.id === this.tab);
-    const route = tab.id === "prs" && this.bots ? `${tab.route}?bots=true` : tab.route;
+    let route = tab.id === "prs" && this.bots ? `${tab.route}?bots=true` : tab.route;
+    if (tab.id === "backlog" && this.refreshBacklog) {
+      route = `${tab.route}?refresh=true`;
+      this.refreshBacklog = false;
+    }
     cx.spawn(async (cx) => {
       try {
         this.answers[tab.id] = await this.call("GET", route);
@@ -190,20 +196,83 @@ export default class Tkt extends View {
       .child(this.toggle("team-prs", view.team_prs, (cx) => this.patchState({ team_prs: !view.team_prs }, cx)).child("Team"))
       .when(showBots, (el) => el.child(this.toggle("bots", this.bots, (cx) => { this.bots = !this.bots; this.load(cx); cx.notify(); })
         .child(this.bots ? "Bots" : `Bots ${view.hidden_bots}`)))
-      .when((view.repos ?? []).length > 0, (el) => el.child(this.toggle("repos", this.reposOpen, (cx) => { this.reposOpen = !this.reposOpen; cx.notify(); })
+      .when((view.repos ?? []).length > 0, (el) => el.child(this.toggle("repos", this.panel === "repos", (cx) => { this.panel = this.panel === "repos" ? null : "repos"; cx.notify(); })
         .child(`${reposChip(view.repos)} ▾`)));
   }
 
-  reposPanel(t) {
-    const view = this.answers.prs?.body;
-    return v_flex().id("repos-panel").absolute().top(44).right(48).w(280).p(6).gap(2).rounded(8).bg(t.popover).border(1).border_color(t.border)
+  /** A filter's checkbox panel under the header: each name with its count, a click hides or shows it. */
+  filterPanel(t, items, hidden, field) {
+    return v_flex().id(`${field}-panel`).absolute().top(44).right(48).w(280).p(6).gap(2).rounded(8).bg(t.popover).border(1).border_color(t.border)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .children((view?.repos ?? []).map((r) =>
-        h_flex().id(`repo-${r.name}`).gap(8).px(8).py(4).rounded(5).hover((s) => s.bg(t.hover))
-          .on_click((_e, cx) => this.patchState({ hidden_repos: toggled(view.hidden_repos, r.name) }, cx))
+      .children(items.map((r) =>
+        h_flex().id(`${field}-${r.name}`).gap(8).px(8).py(4).rounded(5).hover((s) => s.bg(t.hover))
+          .on_click((_e, cx) => this.patchState({ [field]: toggled(hidden, r.name) }, cx))
           .child(div().w(14).text_color(t.accent).child(r.hidden ? "☐" : "☑"))
           .child(div().flex_1().truncate().text_color(r.hidden ? t.muted : t.foreground).child(r.name))
-          .child(div().text_color(t.dim).child(String(r.prs)))));
+          .child(div().text_color(t.dim).child(String(r.prs ?? r.tickets ?? "")))));
+  }
+
+  openPanel() {
+    const view = this.answers[this.tab]?.body;
+    if (!this.panel || !view) return null;
+    if (this.panel === "repos") return { items: view.repos ?? [], hidden: view.hidden_repos, field: "hidden_repos" };
+    return { items: view.boards ?? [], hidden: view.hidden_boards, field: "hidden_boards" };
+  }
+
+  boardsChip(t) {
+    const boards = this.answers[this.tab]?.body?.boards ?? [];
+    if (boards.length === 0) return div();
+    const shown = boards.filter((b) => !b.hidden).length;
+    return this.toggle("boards", this.panel === "boards", (cx) => { this.panel = this.panel === "boards" ? null : "boards"; cx.notify(); })
+      .child(`${shown === boards.length ? "Boards" : `Boards ${shown}/${boards.length}`} ▾`);
+  }
+
+  backlogControls(t) {
+    const view = this.answers.backlog?.body;
+    if (!view) return div();
+    const option = (merged, title) => {
+      const on = Boolean(view.merged) === merged;
+      return div().id(`merge-${merged}`).px(10).py(2).rounded(5).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => this.patchState({ backlog_merged: merged }, cx))
+        .child(title);
+    };
+    return h_flex().gap(6).child(this.boardsChip(t))
+      .child(h_flex().p(2).gap(2).rounded(7).border(1).border_color(t.border).child(option(false, "Split")).child(option(true, "Merged")));
+  }
+
+  backlogRow(t, r) {
+    if (r.kind === "title") {
+      const b = badges(r.points);
+      const tone = { todo: t.unknown, doing: t.working, done: t.done };
+      return h_flex().h(ROW).px(12).gap(8).items_end().pb(3).text_color(t.foreground)
+        .child(div().text_color(t.dim).child(r.collapsed ? "▸" : "▾"))
+        .child(div().font_semibold().child(r.title))
+        .when(Boolean(r.board), (el) => el.child(div().text_color(t.muted).child(r.board)))
+        .when(Boolean(r.dates), (el) => el.child(div().text_color(t.dim).child(r.dates)))
+        .child(div().text_color(t.dim).child(String(r.count)))
+        .child(div().flex_1())
+        .when(Boolean(b?.unestimated), (el) => el.child(div().text_color(t.dim).child(b.unestimated)))
+        .when(Boolean(b), (el) => el.children(b.stages.map(([stage, n]) => div().px(5).rounded(3).bg(tone[stage]).text_color(t.background).child(n))));
+    }
+    return this.listRow(t, r, { agents: {} });
+  }
+
+  backlogList(t, view) {
+    if (view.no_team_boards) return div().p(16).text_color(t.muted).child("No team boards set: choose them in Settings › Team boards to see their sprints and backlog here.");
+    const rows = backlogRows(view);
+    return v_flex().id("backlog").relative().flex_1().min_h_0()
+      .child(v_virtual_list("backlog-rows", rows.length, ROW, (i) => `${i}`, (range) =>
+        rows.slice(range.start, range.end).map((r) => this.backlogRow(t, r))).size_full().on_item_click((key, cx) => {
+        const r = rows[Number(key)];
+        if (!r) return;
+        if (r.kind === "title") this.patchState({ collapsed: toggled(view.collapsed, r.group) }, cx);
+        else {
+          this.selected = r.key;
+          cx.notify();
+        }
+      }))
+      .child(Scrollbar.vertical("backlog-rows").absolute().inset_0());
   }
 
   prRow(t, r) {
@@ -240,6 +309,11 @@ export default class Tkt extends View {
   }
 
   sync(cx) {
+    if (this.tab === "backlog") {
+      this.refreshBacklog = true;
+      this.load(cx);
+      return;
+    }
     cx.spawn(async (cx) => {
       try {
         await this.call("POST", "/v1/sync", {});
@@ -300,6 +374,8 @@ export default class Tkt extends View {
       .child(div().flex_1())
       .when(this.tab === "sprint", (el) => el.child(this.viewSwitch(t)))
       .when(this.tab === "prs", (el) => el.child(this.prControls(t)))
+      .when(this.tab === "backlog", (el) => el.child(this.backlogControls(t)))
+      .when(this.tab === "sprint", (el) => el.child(this.boardsChip(t)))
       .child(div().id("close").px(8).py(3).rounded(6).text_color(t.muted).hover((s) => s.bg(t.hover))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click(() => close())
@@ -420,6 +496,7 @@ export default class Tkt extends View {
     if (this.tab === "sprint" && this.view === "columns") return this.columns(t, answer.body);
     if (this.tab === "sprint") return this.list(t, answer.body);
     if (this.tab === "prs") return this.prsList(t, answer.body);
+    if (this.tab === "backlog") return this.backlogList(t, answer.body);
     return div().p(16).text_color(t.muted).child(`${(answer.body.sections ?? answer.body.groups ?? []).length} groups`);
   }
 
@@ -431,7 +508,7 @@ export default class Tkt extends View {
         .on_click((_e, cx) => this.pick(cx))
         .child(where))
       .child(div().flex_1().truncate().text_color(this.error ? t.blocked : t.dim).child(this.error ? problemOf(this.error, this.machine) : ""))
-      .child(div().text_color(t.dim).child(this.answers.sprint?.body?.sync_label ?? ""))
+      .child(div().text_color(t.dim).child(this.tab === "backlog" ? (this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : "") : this.answers.sprint?.body?.sync_label ?? ""))
       .child(div().id("sync").px(6).rounded(4).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => this.sync(cx))
@@ -441,12 +518,12 @@ export default class Tkt extends View {
   render(_cx) {
     const t = theme();
     return v_flex().id("root").relative().size_full().bg(t.surface).text_size(13)
-      .on_mouse_down("left", (_e, cx) => { if (this.reposOpen) { this.reposOpen = false; cx.notify(); } })
+      .on_mouse_down("left", (_e, cx) => { if (this.panel) { this.panel = null; cx.notify(); } })
       .child(this.header(t))
       .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
       .when(this.tab === "sprint" && !this.choices, (el) => el.child(this.preview(t, this.answers.sprint?.body)))
       .child(this.legend(t))
       .child(this.status(t))
-      .when(this.tab === "prs" && Boolean(this.reposOpen), (el) => el.child(this.reposPanel(t)));
+      .when(Boolean(this.openPanel()), (el) => { const p = this.openPanel(); return el.child(this.filterPanel(t, p.items, p.hidden, p.field)); });
   }
 }

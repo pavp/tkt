@@ -180,7 +180,8 @@ func (s *Server) backlog(w http.ResponseWriter, r *http.Request) {
 			sec.Points = &p
 		}
 		for _, t := range g.Tickets {
-			sec.Rows = append(sec.Rows, board.Row{Key: t.Key, Ticket: &t})
+			c := board.CardOf(t, false)
+			sec.Rows = append(sec.Rows, board.Row{Key: t.Key, Ticket: &t, Card: &c})
 		}
 		view.Groups = append(view.Groups, sec)
 	}
