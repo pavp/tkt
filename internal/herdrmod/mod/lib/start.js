@@ -59,3 +59,15 @@ export function taskPicker(view) {
   rows.push({ label: "A new agent ▸", hint: "", kinds: view.kinds ?? [], last: view.last_agent });
   return { step: "task", title: `Send ${view.phrase} to`, question: "", sel: 0, rows };
 }
+
+/** What a key does in a picker: move the highlight, tick a row of a multiple choice, or go on with the choice. */
+export function pickerKey(p, k) {
+  const last = p.rows.length - 1;
+  if (k === "down" || k === "up") return { kind: "move", sel: Math.max(0, Math.min(last, p.sel + (k === "down" ? 1 : -1))) };
+  if (k === " " && p.multi) return p.rows[p.sel] ? { kind: "toggle", value: p.rows[p.sel].value } : null;
+  if (k === "enter") {
+    if (p.multi) return p.checked.size > 0 ? { kind: "next" } : null;
+    return p.rows[p.sel] ? { kind: "choose", index: p.sel } : null;
+  }
+  return null;
+}

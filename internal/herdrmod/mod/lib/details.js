@@ -30,3 +30,10 @@ export function neighbors(keys, key) {
   if (i < 0) return { prev: null, next: null };
   return { prev: keys[i - 1] ?? null, next: keys[i + 1] ?? null };
 }
+
+/** What a key does on the details screen, as the TUI's: back to the board, or copy the ticket as markdown. */
+export function detailsKey(k) {
+  if (["escape", "i", "left", "h"].includes(k)) return "back";
+  if (k === "c") return "copy";
+  return null;
+}
