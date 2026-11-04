@@ -65,3 +65,25 @@ test("one of your pull requests acts on it, then on its ticket", () => {
   assert.equal(m.title, "Pull request #12");
   assert.deepEqual(labels(m).slice(0, 5), ["Open #12 in GitHub ↗", "Send the CI failure to the agent", "Send its feedback to another agent ▸", "Review with ▸", "Go to the agent in Herdr"]);
 });
+
+test("a backlog ticket offers its board's current sprint, asking first, unless it is already in one", async () => {
+  const { sprintMoveItem } = await import("../mod/lib/menus.js");
+  const backlog = {
+    groups: [
+      { group: "sprint:Sprint 12", title: "Sprint 12", sprints: [11, 21], active: true, rows: [{ key: "DEMO-20" }] },
+      { group: "backlog:", title: "Backlog", rows: [{ key: "DEMO-40" }] },
+    ],
+    activeSprints: [{ id: 11, name: "Sprint 12", board: "Web" }, { id: 31, name: "Ops 3", board: "Ops" }, { id: 32, name: "Ops 4", board: "Ops" }],
+  };
+  const one = sprintMoveItem({ key: "DEMO-40", board: "Web" }, backlog);
+  assert.equal(one.label, "Move to current sprint");
+  assert.equal(one.menu.title, "Move DEMO-40 to Sprint 12?");
+  assert.deepEqual(one.menu.items.map((i) => i.label), ["Yes, move it", "Cancel"]);
+  assert.deepEqual([one.menu.items[0].action, one.menu.items[0].sprint], ["moveToSprint", 11]);
+  const several = sprintMoveItem({ key: "DEMO-41", board: "Ops" }, backlog);
+  assert.equal(several.label, "Move to current sprint ▸");
+  assert.equal(several.menu.title, "Move DEMO-41 to which sprint?");
+  assert.deepEqual(several.menu.items.map((i) => i.menu.title), ["Move DEMO-41 to Ops 3?", "Move DEMO-41 to Ops 4?"]);
+  assert.equal(sprintMoveItem({ key: "DEMO-20", board: "Web" }, backlog), null);
+  assert.equal(sprintMoveItem({ key: "DEMO-40", board: "Core" }, backlog), null);
+});

@@ -7,7 +7,7 @@ import { exec, machines, knownAgents, theme, props, closeOverlay, appHome } from
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
-import { columnCards, cardOf, wrapWords, markOf } from "./lib/columns.js";
+import { columnCards, cardOf, wrapWords, markOf, prCell } from "./lib/columns.js";
 import { previewOf, legendFor, problemOf } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
 import { backlogRows, badges } from "./lib/backlog.js";
@@ -399,7 +399,7 @@ export default class Tkt extends View {
   menuFor(row) {
     if (this.tab === "prs") return prMenu(row.raw, { agent: this.answers.sprint?.body?.agents?.[row.ticketKey] });
     const agents = this.answers.sprint?.body?.agents ?? {};
-    if (this.tab === "backlog") return ticketMenu(row.ticket, { backlog: true, me: this.answers.backlog?.body?.me, agent: agents[row.key] });
+    if (this.tab === "backlog") return ticketMenu(row.ticket, { backlog: true, me: this.answers.backlog?.body?.me, agent: agents[row.key], groups: this.answers.backlog?.body?.groups, activeSprints: this.answers.backlog?.body?.active_sprints });
     return ticketMenu(row.ticket, { agent: agents[row.key], attention: row.card?.attention });
   }
 
@@ -427,6 +427,14 @@ export default class Tkt extends View {
             if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
             await this.local('printf %s "$1" | (pbcopy 2>/dev/null || wl-copy 2>/dev/null || xclip -selection clipboard)', a.body.text);
             this.notice = `copied the context of ${item.key}`;
+            break;
+          }
+          case "moveToSprint": {
+            const a = await this.call("POST", `/v1/tickets/${item.key}/sprint`, { sprint: item.sprint });
+            if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+            this.notice = `moved ${item.key} to ${item.name}`;
+            this.refreshBacklog = true;
+            this.load(cx);
             break;
           }
           case "settingsPatch":
@@ -1025,14 +1033,14 @@ export default class Tkt extends View {
     }
     const c = cardOf(r, board.agents);
     const sel = this.selected === r.key;
-    const pr = c.prs[0];
+    const pr = prCell(c);
     return h_flex().h(ROW).px(12).gap(10).items_center().bg(sel ? t.selected : t.surface)
       .child(div().w(96).text_color(sel ? t.foreground : t.dim).child(c.subtask ? `↳ ${c.key}` : c.key))
       .child(div().w(110).truncate().text_color(c.attention ? t.blocked : t.muted).child(c.attention ? `! ${c.attention}` : markOf(c.mark, c.status)?.word ?? c.status))
       .child(div().w(40).text_color(t.dim).child(c.points))
       .child(div().w(80).truncate().text_color(t.muted).child(c.who))
       .child(div().w(16).text_color(t[c.agent] ?? t.dim).child(c.agent ? "●" : ""))
-      .child(div().w(60).text_color(pr ? t[pr.tone] ?? t.dim : t.dim).child(pr ? `${pr.ref} ${pr.mark}` : "—"))
+      .child(div().w(60).truncate().text_color(t[pr.tone] ?? t.dim).child(pr.text))
       .child(div().flex_1().truncate().text_color(c.team ? t.muted : t.foreground).child(c.summary));
   }
 

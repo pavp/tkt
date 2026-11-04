@@ -274,3 +274,18 @@ func TestTheWriteLogCannotBeForgedByThePath(t *testing.T) {
 		}
 	}
 }
+
+func TestTheWriteLogSaysWhenAndWhatChanged(t *testing.T) {
+	var logged []string
+	at := time.Date(2026, 11, 4, 18, 12, 22, 0, time.UTC)
+	s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour, Now: func() time.Time { return at },
+		Start: func(context.Context, ticket.Key, StartRequest, func()) error { return nil },
+		Log:   func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post(t, s.Handler(), "/v1/tickets/DEMO-7/start", s.token, "application/json", "", "{\"herdr\": \"classic\",\n \"agent\": \"claude\"}")
+	if len(logged) != 1 || !strings.HasPrefix(logged[0], "2026-11-04T18:12:22Z ") || !strings.Contains(logged[0], `{"herdr": "classic", "agent": "claude"}`) {
+		t.Errorf("logged %q, want the time and the request's change on one line", logged)
+	}
+}
