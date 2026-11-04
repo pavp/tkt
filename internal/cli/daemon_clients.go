@@ -88,6 +88,14 @@ func (a *App) followDaemon(ctx context.Context, b *boardActions, send func(tea.M
 					if snap, err := c.Tickets(ctx); err == nil {
 						send(tui.SnapshotMsg{Snap: snap, Quiet: true})
 					}
+				case "state.updated":
+					if st, changed := b.stateChanged(); changed {
+						send(tui.BoardStateMsg{State: st})
+					}
+				case "settings.updated":
+					if c, changed := b.configChanged(); changed {
+						send(tui.SettingsChangedMsg{Config: c})
+					}
 				case "sync.started":
 					send(tui.SyncingMsg{})
 				case "sync.failed":

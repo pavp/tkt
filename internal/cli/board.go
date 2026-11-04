@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -62,8 +63,9 @@ func newBoardCmd(a *App) *cobra.Command {
 			if !pane {
 				defer a.claimBoardPane()()
 			}
-			actions := &boardActions{a: a, c: c, ctx: cmd.Context(), pane: pane}
-			prog := tea.NewProgram(tui.New(snap, have, actions, a.boardView(view)).WithState(a.loadBoardState()), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
+			state := a.loadBoardState()
+			actions := &boardActions{a: a, c: c, ctx: cmd.Context(), pane: pane, base: state}
+			prog := tea.NewProgram(tui.New(snap, have, actions, a.boardView(view)).WithState(state), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithInput(a.Stdin), tea.WithOutput(a.Stdout), tea.WithContext(cmd.Context()))
 			actions.send = prog.Send
 			if notice := a.takeHerdrNotice(); notice != "" {
 				go prog.Send(tui.StatusMsg(notice))
@@ -132,6 +134,10 @@ type boardActions struct {
 	send func(tea.Msg)
 	// pane marks a board kept in a pane, which stays open after handing work to an agent instead of closing.
 	pane bool
+	// base is board-state.json as this board last read or wrote it, and cfgBase config.toml, so a save keeps
+	// what another program, such as the Herdr desktop mod, changed meanwhile.
+	base    tui.BoardState
+	cfgBase *config.Config
 }
 
 // handedOff closes a popup board once its agent comes forward; a board in a pane stays and says so.
@@ -164,6 +170,10 @@ func (b *boardActions) cfg() *config.Config {
 // user's paths portable; the board itself runs on an expanded copy.
 func (b *boardActions) Config() config.Config {
 	if c, err := b.a.savedConfig(); err == nil {
+		b.mu.Lock()
+		saved := c.Clone()
+		b.cfgBase = &saved
+		b.mu.Unlock()
 		return c
 	}
 	return b.cfg().Clone()
@@ -324,11 +334,54 @@ func (b *boardActions) Transition(key ticket.Key, id, to string, values []tui.Va
 
 func (b *boardActions) SaveState(s tui.BoardState) tea.Cmd {
 	return func() tea.Msg {
-		if err := b.a.saveBoardState(s); err != nil {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		merged := board.MergeSaved(b.base, s, b.a.loadBoardState())
+		if err := b.a.saveBoardState(merged); err != nil {
 			return tui.StatusMsg("could not remember the board's filters: " + err.Error())
+		}
+		b.base = merged
+		if !reflect.DeepEqual(merged, board.MergeSaved(s, s, s)) {
+			return tui.BoardStateMsg{State: merged}
 		}
 		return nil
 	}
+}
+
+// stateChanged is the board's filters when another program saved them, false when they are this board's own.
+func (b *boardActions) stateChanged() (tui.BoardState, bool) {
+	st := b.a.loadBoardState()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if reflect.DeepEqual(st, b.base) {
+		return st, false
+	}
+	b.base = st
+	return st, true
+}
+
+// configChanged is config.toml when another program saved it, false when it is as this board left it.
+func (b *boardActions) configChanged() (config.Config, bool) {
+	disk, err := b.a.savedConfig()
+	if err != nil {
+		return config.Config{}, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.cfgBase != nil && reflect.DeepEqual(disk, *b.cfgBase) {
+		return disk, false
+	}
+	b.adoptConfig(disk)
+	return disk, true
+}
+
+// adoptConfig makes c, as config.toml holds it, the board's configuration; callers hold b.mu.
+func (b *boardActions) adoptConfig(c config.Config) {
+	saved := c.Clone()
+	b.cfgBase = &saved
+	inUse := c.Clone()
+	b.a.expandPaths(&inUse)
+	b.c = &inUse
 }
 
 func (b *boardActions) JiraFields() tea.Cmd {
@@ -364,18 +417,23 @@ func listDirs(dir string) (names, broken []string, err error) {
 	return names, broken, nil
 }
 
-func (b *boardActions) SaveConfig(c config.Config) tea.Cmd {
+func (b *boardActions) SaveConfig(base, c config.Config) tea.Cmd {
 	return func() tea.Msg {
-		c, err := b.a.saveConfig(c)
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if disk, err := b.a.savedConfig(); err == nil && !reflect.DeepEqual(disk, base) {
+			b.adoptConfig(disk)
+			return tui.SettingsChangedMsg{Config: disk, Conflict: true}
+		}
+		saved, err := b.a.saveConfig(c)
 		if err != nil {
 			return tui.SettingsSavedMsg{Err: err}
 		}
-		inUse := c.Clone()
-		b.a.expandPaths(&inUse)
-		b.mu.Lock()
-		b.c = &inUse
-		b.mu.Unlock()
-		return tui.SettingsSavedMsg{Config: c.Clone()}
+		if disk, err := b.a.savedConfig(); err == nil {
+			saved = disk
+		}
+		b.adoptConfig(saved)
+		return tui.SettingsSavedMsg{Config: saved.Clone()}
 	}
 }
 

@@ -1,5 +1,7 @@
 package board
 
+import "slices"
+
 const (
 	ViewColumns = "columns"
 	ViewList    = "list"
@@ -31,4 +33,43 @@ func (s SavedState) TeamPRsShown() bool {
 		return *s.TeamPRs
 	}
 	return s.Team
+}
+
+// MergeSaved is mine saved over theirs, the file as another program left it since base was read: each field
+// mine did not change from base keeps theirs, and the lists keep the other side's additions and removals.
+func MergeSaved(base, mine, theirs SavedState) SavedState {
+	out := theirs
+	out.HiddenRepos = mergeSet(base.HiddenRepos, mine.HiddenRepos, theirs.HiddenRepos)
+	out.HiddenBoards = mergeSet(base.HiddenBoards, mine.HiddenBoards, theirs.HiddenBoards)
+	out.Collapsed = mergeSet(base.Collapsed, mine.Collapsed, theirs.Collapsed)
+	if mine.View != base.View {
+		out.View = mine.View
+	}
+	if mine.Team != base.Team {
+		out.Team = mine.Team
+	}
+	if mine.TeamPRsShown() != base.TeamPRsShown() || (mine.TeamPRs == nil) != (base.TeamPRs == nil) {
+		out.TeamPRs = mine.TeamPRs
+	}
+	if mine.BacklogMerged != base.BacklogMerged {
+		out.BacklogMerged = mine.BacklogMerged
+	}
+	return out
+}
+
+func mergeSet(base, mine, theirs []string) []string {
+	in := func(list []string, v string) bool { return slices.Contains(list, v) }
+	var out []string
+	for _, v := range theirs {
+		if !in(base, v) || in(mine, v) {
+			out = append(out, v)
+		}
+	}
+	for _, v := range mine {
+		if !in(base, v) && !in(out, v) {
+			out = append(out, v)
+		}
+	}
+	slices.Sort(out)
+	return out
 }

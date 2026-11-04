@@ -194,7 +194,7 @@ func (r *recorder) PickFolder(start string) tea.Cmd {
 }
 
 func (r *recorder) Config() config.Config { return r.cfg.Clone() }
-func (r *recorder) SaveConfig(c config.Config) tea.Cmd {
+func (r *recorder) SaveConfig(_, c config.Config) tea.Cmd {
 	r.calls = append(r.calls, "save")
 	return func() tea.Msg {
 		if r.saveErr != nil {
