@@ -34,3 +34,20 @@ func TestACardSaysWhatTheTUIsCardSays(t *testing.T) {
 		})
 	}
 }
+
+func TestPointSumsHaveNoFloatingPointNoise(t *testing.T) {
+	var ts []ticket.Ticket
+	for _, p := range []float64{0.1, 0.2} {
+		ts = append(ts, ticket.Ticket{Points: p, Category: ticket.InProgress})
+	}
+	if _, doing, _, _ := board.PointsByStage(ts); doing != 0.3 {
+		t.Errorf("PointsByStage doing = %v, want 0.3", doing)
+	}
+	var rows []board.Row
+	for i := range ts {
+		rows = append(rows, board.Row{Ticket: &ts[i]})
+	}
+	if got := board.Points(rows); got != 0.3 {
+		t.Errorf("Points = %v, want 0.3", got)
+	}
+}

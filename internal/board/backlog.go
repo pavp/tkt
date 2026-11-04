@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"sync"
 	"time"
@@ -177,5 +178,8 @@ func PointsByStage(ts []ticket.Ticket) (todo, doing, done float64, unestimated i
 			todo += t.Points
 		}
 	}
-	return todo, doing, done, unestimated
+	return roundPoints(todo), roundPoints(doing), roundPoints(done), unestimated
 }
+
+// roundPoints drops the floating-point noise sums of fractional estimates leave, such as 19.400000000000027.
+func roundPoints(p float64) float64 { return math.Round(p*100) / 100 }
