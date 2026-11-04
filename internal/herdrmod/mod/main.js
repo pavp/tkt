@@ -8,7 +8,7 @@ import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed } f
 import { listRows } from "./lib/list.js";
 
 const TABS = [
-  { id: "sprint", title: "Sprint", route: "/v1/board" },
+  { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
   { id: "prs", title: "PRs", route: "/v1/prs" },
   { id: "backlog", title: "Backlog", route: "/v1/backlog" },
 ];

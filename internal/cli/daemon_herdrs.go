@@ -112,6 +112,16 @@ func (m *agentMerge) set(flavor herdrFlavor, agents map[string]string) {
 	} else {
 		m.parts[flavor] = agents
 	}
+	if d, ok := m.d.(interface {
+		SetAgentsBy(map[string]map[string]string)
+	}); ok {
+		by := map[string]map[string]string{}
+		for f, p := range m.parts {
+			by[f.wire()] = p
+		}
+		d.SetAgentsBy(by)
+		return
+	}
 	parts := make([]map[string]string, 0, len(m.parts))
 	for _, p := range m.parts {
 		parts = append(parts, p)

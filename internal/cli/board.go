@@ -99,7 +99,7 @@ func (a *App) boardStart(ctx context.Context, c *config.Config) (board.Snapshot,
 			return snap, false, false, err
 		}
 	}
-	return snap, have, true, nil
+	return a.boardAgentsHere(snap), have, true, nil
 }
 
 func (a *App) ensureJiraToken(ctx context.Context, c *config.Config) (bool, error) {
