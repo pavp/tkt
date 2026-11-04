@@ -90,3 +90,9 @@ export function boardAction(k, tab) {
   if (k === "b" && tab === "prs") return "bots";
   return null;
 }
+
+/** What the board selects when nothing is: the first card of the first column with cards, or the first row. */
+export function firstTarget(targets) {
+  if (targets.cols) return targets.cols.find((c) => c.length > 0)?.[0] ?? null;
+  return targets.ids[0] ?? null;
+}

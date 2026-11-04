@@ -46,3 +46,9 @@ test("a sync label that warns ('! cached …') shows in the warning color, the o
   assert.equal(syncTone("! cached · 10:30"), "ansi3");
   assert.equal(syncTone("✓ synced 3 min ago"), "dim");
 });
+
+test("the legend also names the filter and closing keys, as the TUI's", () => {
+  assert.ok(legendFor("sprint", "columns", {}).some(([k, w]) => k === "B" && w === "boards"));
+  assert.ok(legendFor("prs", "list", {}).some(([k, w]) => k === "R" && w === "repos"));
+  assert.ok(legendFor("backlog", "list", {}).some(([k, w]) => k === "q" && w === "close"));
+});

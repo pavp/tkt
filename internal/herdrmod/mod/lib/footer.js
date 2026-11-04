@@ -23,7 +23,7 @@ export function legendFor(tab, view, { strip = false, bots = 0, merged = false }
   else legend.push(["f", "send feedback"], ["i", "details"], ["o", "Jira ↗"], ["p", "PR ↗"], ["O P", "copy link"], ["tab 1-3", "switch tab"]);
   if (tab === "sprint") legend.push(["v", "view"]);
   if (tab !== "backlog") legend.push(["t", tab === "prs" ? "requested" : "team"]);
-  legend.push(["g", "refresh"], [",", "settings"]);
+  legend.push(tab === "prs" ? ["R", "repos"] : ["B", "boards"], ["g", "refresh"], [",", "settings"], ["q", "close"]);
   return legend;
 }
 

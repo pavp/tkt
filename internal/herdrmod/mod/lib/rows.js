@@ -52,13 +52,13 @@ export function prRefs(prs) {
   return parts.join(" ");
 }
 
-/** Which optional columns a list shows: SP when a ticket is estimated, ASSIGNEE when one is not yours, AGENT when
- *  an agent runs. */
+/** Which optional columns a list shows: SP when a ticket is estimated, ASSIGNEE whenever tickets show (the TUI
+ *  hides it only on your own pull requests), AGENT when an agent runs. */
 export function listColumns(rows, agents) {
   const tickets = rows.map((r) => r.ticket ?? {});
   return {
     points: tickets.some((t) => t.points),
-    assignee: tickets.some((t) => t.team),
+    assignee: tickets.length > 0,
     agent: Object.keys(agents ?? {}).length > 0,
   };
 }

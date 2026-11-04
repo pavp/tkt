@@ -20,7 +20,7 @@ import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows 
 import { MOD_VERSION } from "./lib/version.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
 import { stripChips, atTop } from "./lib/strip.js";
-import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction } from "./lib/nav.js";
+import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget } from "./lib/nav.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -204,6 +204,8 @@ export default class Tkt extends View {
       try {
         const answers = await Promise.all(routes.map(([, route]) => this.call("GET", route)));
         routes.forEach(([id], i) => { this.answers[id] = answers[i]; });
+        const body = this.answers[this.tab]?.body;
+        if (body && !this.selected) this.selected = firstTarget(targets(this.tab, this.view, body));
         if (this.jobs.length > 0) await this.followJobs();
         this.error = null;
         if (this.pendingUse) {
@@ -1108,6 +1110,7 @@ export default class Tkt extends View {
   select(id, cx) {
     this.tab = id;
     this.inStrip = false;
+    this.selected = null;
     this.load(cx);
     cx.notify();
   }
@@ -1197,7 +1200,7 @@ export default class Tkt extends View {
 
   card(t, c, labelField) {
     const mark = markOf(c.mark, c.status);
-    const flag = cardFlag(c.attention, mark);
+    const flag = cardFlag(c.attention, mark, c.points ? 11 : 14);
     const lines = wrapWords(c.summary, 34, 2);
     const sel = this.selected === c.key && !this.inStrip;
     const icon = typeIcon(c.typeKind);
