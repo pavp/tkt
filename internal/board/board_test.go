@@ -32,8 +32,11 @@ type stubJira struct {
 	handedOff []jira.Issue
 	jqls      []string
 	panels    []string
-	// sprints answers ActiveSprints per board.
-	sprints map[int][]int
+	// sprints answers ActiveSprints per board; filters answers BoardFilter per board, and teamByFilter the team
+	// search that names that filter, as Jira answers a board's own query.
+	sprints      map[int][]int
+	filters      map[int]int
+	teamByFilter map[int][]jira.Issue
 	// teamGate, when set, holds the team search until the GitHub listing starts; teamStalled records a
 	// search that gave up waiting, as one that held the listing back would.
 	teamGate    chan struct{}
@@ -55,6 +58,11 @@ func (s *stubJira) Search(_ context.Context, jql string, fields []string) ([]jir
 		return s.handedOff, nil
 	}
 	if strings.Contains(jql, "assignee != currentUser()") {
+		for f, is := range s.teamByFilter {
+			if strings.Contains(jql, fmt.Sprintf("filter = %d ", f)) {
+				return is, nil
+			}
+		}
 		gate := s.teamGate
 		s.mu.Unlock()
 		if gate != nil {
@@ -71,6 +79,12 @@ func (s *stubJira) Search(_ context.Context, jql string, fields []string) ([]jir
 	}
 	s.jql, s.fields = jql, fields
 	return s.issues, s.err
+}
+
+func (s *stubJira) BoardFilter(_ context.Context, board int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.filters[board], nil
 }
 
 func (s *stubJira) ActiveSprints(_ context.Context, board int) ([]int, error) {
@@ -1130,6 +1144,62 @@ func TestAFinishedTicketHeldButNeverMovedIsTheUsersOnlyWithTheirPullRequest(t *t
 		}
 		if team && (seen["DEMO-3"] != 1 || !byKey["DEMO-3"].Team) || !team && seen["DEMO-3"] != 0 {
 			t.Errorf("team %v: a ticket only held a moment is the team's: %+v", team, snap.Tickets)
+		}
+	}
+}
+
+// A sprint another board shares with a team board brings only the tickets that board's own query shows, as Jira's
+// board view does, never the whole sprint.
+func TestATeamBoardShowsOnlyItsOwnTicketsOfASharedSprint(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	js := &stubJira{
+		issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate", Assignee: "Dev Example"}},
+		team: []jira.Issue{{ID: "9", Key: "DEMO-900", Summary: "Another team's ticket in the shared sprint", Status: "To Do", StatusCategory: "new",
+			Sprints: []jira.Sprint{{ID: 10733, Space: "DEMO", Name: "004", State: "active", Board: 261}}}},
+		teamByFilter: map[int][]jira.Issue{24845: {{ID: "5", Key: "DEMO-500", Summary: "On this board", Status: "To Do", StatusCategory: "new",
+			Sprints: []jira.Sprint{{ID: 10733, Space: "DEMO", Name: "004", State: "active", Board: 261}}}}},
+		sprints: map[int][]int{5205: {10733}},
+		filters: map[int]int{5205: 24845},
+		linked:  map[string][]jira.DevPullRequest{},
+	}
+	snap, err := FetchWith(context.Background(), teamCfg(), js, &stubGitHub{}, now, Snapshot{}, Options{Team: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var team []ticket.Key
+	for _, tk := range snap.Tickets {
+		if tk.Team {
+			team = append(team, tk.Key)
+		}
+	}
+	if len(team) != 1 || team[0] != "DEMO-500" {
+		t.Errorf("team tickets = %v, want only the board's own DEMO-500", team)
+	}
+	if !slices.ContainsFunc(js.jqls, func(q string) bool { return strings.HasPrefix(q, "filter = 24845 AND sprint in (10733)") }) {
+		t.Errorf("team searches %q, want one through the board's filter", js.jqls)
+	}
+}
+
+func TestASprintTwoTeamBoardsShowIsNamedAfterTheFirstConfigured(t *testing.T) {
+	for range 20 {
+		js := &stubJira{
+			issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "To Do", StatusCategory: "new", Assignee: "Dev Example"}},
+			team: []jira.Issue{{ID: "7", Key: "DEMO-7", Summary: "Theirs", Status: "To Do", StatusCategory: "new",
+				Sprints: []jira.Sprint{{ID: 11804, Space: "DEMO", Name: "015", State: "active"}}}},
+			sprints: map[int][]int{4775: {11804}, 418: {11804}},
+			linked:  map[string][]jira.DevPullRequest{},
+		}
+		cfg := teamCfg()
+		cfg.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 4775, Name: "Customer & Vehicle Center"}, {ID: 418, Name: "User Access Center"}}
+		snap, err := FetchWith(context.Background(), cfg, js, &stubGitHub{}, time.Now(), Snapshot{}, Options{Team: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		first := "Customer & Vehicle Center"
+		for _, tk := range snap.Tickets {
+			if tk.Key == "DEMO-7" && tk.Board != first {
+				t.Fatalf("DEMO-7's board = %q, want the first configured %q", tk.Board, first)
+			}
 		}
 	}
 }

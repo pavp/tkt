@@ -628,3 +628,29 @@ func TestARejectedWriteNamesItsFields(t *testing.T) {
 		t.Errorf("rejection = %d %q %v", status, msgs, fields)
 	}
 }
+
+func TestBoardFilterIsTheBoardsSavedFilter(t *testing.T) {
+	tests := []struct {
+		name, body string
+		want       int
+	}{
+		{"an id Jira sends as text", `{"id":418,"filter":{"id":"24845","self":"https://example.atlassian.net/rest/api/2/filter/24845"}}`, 24845},
+		{"an id sent as a number", `{"id":418,"filter":{"id":24845}}`, 24845},
+		{"a board with no filter", `{"id":418}`, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := server(t, map[string]string{"GET /rest/agile/1.0/board/418/configuration": tt.body})
+			if got, err := c.BoardFilter(context.Background(), 418); err != nil || got != tt.want {
+				t.Errorf("BoardFilter = %d, %v; want %d", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestTeamBoardSprintJQLGoesThroughTheBoardsFilter(t *testing.T) {
+	got := TeamBoardSprintJQL(24845, []string{"DEMO"}, []int{10733, 11804})
+	if !strings.HasPrefix(got, "filter = 24845 AND sprint in (10733, 11804) AND project in (\"DEMO\")") {
+		t.Errorf("jql = %s", got)
+	}
+}

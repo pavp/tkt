@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -61,6 +60,8 @@ type JiraSource interface {
 	BrowseURL(key string) string
 	DevPullRequests(ctx context.Context, issueID string) ([]jira.DevPullRequest, error)
 	ActiveSprints(ctx context.Context, board int) ([]int, error)
+	// BoardFilter is the id of the saved filter a board shows; 0 when it has none.
+	BoardFilter(ctx context.Context, board int) (int, error)
 }
 
 type GitHubSource interface {
@@ -118,13 +119,7 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 	if opts.Team && len(boards) > 0 {
 		teamDone = make(chan teamResult, 1)
 		go func() {
-			sprints, err := activeSprints(ctx, js, boards)
-			if err != nil || len(sprints) == 0 {
-				teamDone <- teamResult{err: err}
-				return
-			}
-			ids := slices.Sorted(maps.Keys(sprints))
-			is, err := js.Search(ctx, jira.TeamSprintJQL(c.SpaceKeys(), ids), fields)
+			is, sprints, err := teamIssues(ctx, js, c.SpaceKeys(), boards, fields)
 			teamDone <- teamResult{is, sprints, err}
 		}()
 	}
@@ -423,32 +418,63 @@ func issueFields(ctx context.Context, c *config.Config, js interface {
 
 // activeSprints asks each team board for its active sprints, all at once, and maps each sprint to its
 // board's name.
-func activeSprints(ctx context.Context, js JiraSource, boards []config.TeamBoard) (map[int]string, error) {
-	var mu sync.Mutex
+// teamIssues reads each team board's active sprints through the board's own query: a sprint another board
+// shares with it (Jira shows it once one of its tickets matches the board) brings only the tickets the board
+// shows, never the whole sprint. A board whose query cannot be read falls back to its sprints' tickets.
+func teamIssues(ctx context.Context, js JiraSource, spaces []string, boards []config.TeamBoard, fields []string) ([]jira.Issue, map[int]string, error) {
+	type result struct {
+		ids    []int
+		issues []jira.Issue
+		err    error
+	}
+	results := make([]result, len(boards))
 	var wg sync.WaitGroup
-	out := map[int]string{}
-	var firstErr error
-	for _, b := range boards {
+	for n, b := range boards {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			ids, err := js.ActiveSprints(ctx, b.ID)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				firstErr = cmp.Or(firstErr, fmt.Errorf("board %s: %w", b.Name, err))
+			if err != nil || len(ids) == 0 {
+				results[n] = result{err: err}
 				return
 			}
-			for _, id := range ids {
-				out[id] = b.Name
+			jql := jira.TeamSprintJQL(spaces, ids)
+			if filter, ferr := js.BoardFilter(ctx, b.ID); ferr == nil && filter > 0 {
+				jql = jira.TeamBoardSprintJQL(filter, spaces, ids)
 			}
+			is, err := js.Search(ctx, jql, fields)
+			results[n] = result{ids: ids, issues: is, err: err}
 		}()
 	}
 	wg.Wait()
-	if len(out) == 0 {
-		return nil, firstErr
+	// A sprint two team boards show is named after the first of them in the configuration, every time.
+	sprints := map[int]string{}
+	seen := map[string]bool{}
+	var out []jira.Issue
+	var firstErr error
+	answered := 0
+	for n, r := range results {
+		if r.err != nil {
+			firstErr = cmp.Or(firstErr, fmt.Errorf("board %s: %w", boards[n].Name, r.err))
+			continue
+		}
+		answered++
+		for _, id := range r.ids {
+			if _, ok := sprints[id]; !ok {
+				sprints[id] = boards[n].Name
+			}
+		}
+		for _, i := range r.issues {
+			if !seen[i.Key] {
+				seen[i.Key] = true
+				out = append(out, i)
+			}
+		}
 	}
-	return out, nil
+	if answered == 0 {
+		return nil, nil, firstErr
+	}
+	return out, sprints, nil
 }
 
 // partialBoard is the board as Jira tells it before GitHub answers: each ticket keeps the previous board's
