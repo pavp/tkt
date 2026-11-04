@@ -35,7 +35,7 @@ export function ticketMenu(t, opts = {}) {
     items.push({ label: "Assign to… ▸", action: "assignMenu", key, now: t.assignee ?? "" });
     if (t.url) items.push(copy("Copy the Jira link", t.url));
     items.push(copy(`Copy the key ${key}`, key));
-    return { title: `Actions for ${key}`, subtitle: [t.status, who, t.board].filter(Boolean).join(" · "), items };
+    return keyed({ title: `Actions for ${key}`, subtitle: [t.status, who, t.board].filter(Boolean).join(" · "), items });
   }
   if (t.team) {
     const items = [{ label: "Show details", action: "details", key }];
@@ -43,7 +43,7 @@ export function ticketMenu(t, opts = {}) {
     items.push({ label: "Assign to… ▸", action: "assignMenu", key, now: t.assignee ?? "" });
     if (t.url) items.push(copy("Copy the Jira link", t.url));
     items.push(copy(`Copy the key ${key}`, key));
-    return { title: `Actions for ${key}`, subtitle: `${t.status} · ${who}`, items };
+    return keyed({ title: `Actions for ${key}`, subtitle: `${t.status} · ${who}`, items });
   }
   const prs = t.prs ?? [];
   const items = [startItem(key, opts.agent), { label: "Show details", action: "details", key }];
@@ -59,7 +59,7 @@ export function ticketMenu(t, opts = {}) {
   if (prs.length === 1 && prs[0].url) items.push(copy("Copy the PR link", prs[0].url));
   if (t.url) items.push(copy("Copy the Jira link", t.url));
   items.push(copy(`Copy the key ${key}`, key), { label: "Copy the ticket context (.ticket.md)", action: "copyContext", key });
-  return { title: `Actions for ${key}`, subtitle: t.status, items };
+  return keyed({ title: `Actions for ${key}`, subtitle: t.status, items });
 }
 
 // Without the daemon's card, a ticket's first reason is read from its pull requests as the card would say it.
@@ -73,11 +73,12 @@ export function prMenu(row, opts = {}) {
   const pr = row.pr;
   if (row.other || row.review || !row.ticket) {
     const how = [pr.author || "unknown author", row.review ? "review requested" : ""].filter(Boolean).join(" · ");
-    return {
+    return keyed({
       title: `Pull request #${pr.number}`,
       subtitle: `${pr.repo || "unknown repository"} · ${how}`,
       items: [{ label: "Open in GitHub ↗", action: "open", url: pr.url }, { label: "Review with ▸", action: "review", pr }, copy("Copy the PR link", pr.url)],
-    };
+      reviewers: reviewersOf(pr),
+    });
   }
   const t = row.ticket;
   const items = [{ label: `Open #${pr.number} in GitHub ↗`, action: "open", url: pr.url }];
@@ -88,7 +89,7 @@ export function prMenu(row, opts = {}) {
   if (pr.url) items.push(copy("Copy the PR link", pr.url));
   if (t.url) items.push(copy("Copy the Jira link", t.url));
   items.push(copy(`Copy the key ${t.key}`, t.key));
-  return { title: `Pull request #${pr.number}`, subtitle: `${t.key} · ${t.status}`, items };
+  return keyed({ title: `Pull request #${pr.number}`, subtitle: `${t.key} · ${t.status}`, items, reviewers: reviewersOf(pr) });
 }
 
 /** The Backlog's Move to current sprint for a ticket, as the TUI offers it: its board's active sprints, asking
@@ -128,4 +129,24 @@ export function backOf(menu) {
 /** Settings asks before removing, as the TUI does: question names what goes and from where. */
 export function confirmRemove(question, change) {
   return { title: question, items: [{ label: "Yes, remove it", action: "settingsPatch", change }, { label: "Cancel", action: "cancel" }] };
+}
+
+const KEYS = [[/^Show details/, "i"], [/in Jira ↗$/, "o"], [/in GitHub ↗$/, "p"], [/^Pull requests \(/, "p"]];
+
+/** The menu with each item that a board key also runs naming that key, as the TUI's menus do. */
+function keyed(menu) {
+  return { ...menu, items: menu.items.map((item) => {
+    const k = KEYS.find(([re]) => re.test(item.label));
+    return k ? { ...item, keyHint: k[1] } : item;
+  }) };
+}
+
+/** The keys under a menu: c copies the link of an item that opens one. */
+export function menuFooter(item) {
+  return item?.action === "open" && item.url ? "enter run · c copy link · esc close" : "enter run · esc close";
+}
+
+/** Who approved a pull request and who asked for changes, as the TUI's PR menu names them. */
+export function reviewersOf(pr) {
+  return [...(pr?.approved_by ?? []).map((n) => ({ text: `✓ ${n}`, tone: "ansi2" })), ...(pr?.changes_requested_by ?? []).map((n) => ({ text: `✗ ${n}`, tone: "ansi3" }))];
 }

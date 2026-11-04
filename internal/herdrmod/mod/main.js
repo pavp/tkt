@@ -9,10 +9,10 @@ import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tk
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN } from "./lib/columns.js";
 import { gutterOf, statusTone, prStatusTone, agentWord, prRefs, listColumns, pointsText } from "./lib/rows.js";
-import { previewOf, legendFor, problemOf, warningsLine } from "./lib/footer.js";
+import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview, prsToggle } from "./lib/prs.js";
 import { backlogRows, badges } from "./lib/backlog.js";
-import { ticketMenu, prMenu, withBack, backOf, confirmRemove } from "./lib/menus.js";
+import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors, detailsKey } from "./lib/details.js";
@@ -898,17 +898,29 @@ export default class Tkt extends View {
 
   menuBox(t) {
     const m = this.menu;
-    return v_flex().id("menu").absolute().top(70).left(0).right(0).items_center()
-      .child(v_flex().id("menu-box").w(380).p(10).gap(2).rounded(10).bg(t.popover).border(1).border_color(t.accent)
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .child(div().font_semibold().text_color(t.foreground).child(m.title))
-        .when(Boolean(m.subtitle), (el) => el.child(div().pb(6).text_size(12).text_color(t.dim).child(m.subtitle)))
-        .children(m.items.map((item, i) =>
-          div().id(`menu-${i}`).px(8).py(4).rounded(5).bg(i === m.sel ? t.selected : t.popover).text_color(t.foreground)
-            .hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => this.act(item, cx))
-            .child(item.label))));
+    return div().id("menu").absolute().inset_0()
+      .child(div().absolute().inset_0().bg(t.background).opacity(0.55))
+      .child(v_flex().absolute().inset_0().items_center().justify_center()
+        .child(v_flex().id("menu-box").w(420).p(10).gap(2).rounded(10).bg(t.popover).border(1).border_color(t.border)
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .child(h_flex().gap(6)
+            .when(Boolean(m.back), (el) => el.child(div().id("menu-back").text_color(t.dim).hover((s) => s.text_color(t.foreground))
+              .on_click((_e, cx) => { this.menu = backOf(this.menu); cx.notify(); }).child("‹")))
+            .child(div().font_semibold().text_color(t.foreground).child(m.title)))
+          .when(Boolean(m.subtitle), (el) => el.child(div().text_size(12).text_color(t.dim).child(m.subtitle)))
+          .when((m.reviewers ?? []).length > 0, (el) => el.child(h_flex().flex_wrap().gap(10).text_size(12)
+            .children(m.reviewers.map((r, i) => div().id(`rev-${i}`).text_color(t[r.tone] ?? t.foreground).child(r.text)))))
+          .child(div().h(6))
+          .children(m.items.map((item, i) =>
+            h_flex().id(`menu-${i}`).gap(6).px(8).py(4).rounded(5).bg(i === m.sel ? t.selected : t.popover).text_color(t.foreground)
+              .hover((s) => s.bg(t.hover))
+              .on_click((_e, cx) => this.act(item, cx))
+              .child(div().w(10).text_color(t.accent).child(i === m.sel ? "▸" : ""))
+              .child(div().flex_1().truncate().child(item.label))
+              .when(Boolean(item.keyHint), (el) => el.child(div().text_color(t.accent).child(item.keyHint)))))
+          .child(div().pt(6).text_size(11).text_color(t.dim).child(menuFooter(m.items[m.sel])))));
   }
+
 
   key(e, cx) {
     const k = e.key;
@@ -917,6 +929,8 @@ export default class Tkt extends View {
       if (k === "down") this.menu.sel = Math.min(this.menu.items.length - 1, this.menu.sel + 1);
       if (k === "up") this.menu.sel = Math.max(0, this.menu.sel - 1);
       if (k === "enter") return this.act(this.menu.items[this.menu.sel], cx);
+      const item = this.menu?.items[this.menu.sel];
+      if (keyOf(e) === "c" && item?.action === "open" && item.url) return this.act({ action: "copy", value: item.url, label: "copy" }, cx);
     } else if (this.picker) {
       this.pickerKeyDown(keyOf(e), cx);
     } else if (this.details && !this.prompt) {
@@ -1072,15 +1086,22 @@ export default class Tkt extends View {
   preview(t, board) {
     const p = this.tab === "prs" ? prPreview(prRows(board).find((r) => r.kind === "row" && r.key + r.group === this.selected)) : previewOf(this.selectedRow(board));
     if (!p) return div().px(12).py(6).text_size(12).text_color(t.dim).child("nothing selected");
+    const badge = this.tab === "prs" ? null : previewBadge(this.selectedRow(board));
     return v_flex().px(12).py(6).gap(2).border_t(1).border_color(t.border)
-      .child(div().truncate().font_semibold().text_color(t.foreground).child(p.title))
+      .child(badge ? h_flex().gap(6).items_center()
+        .child(div().font_semibold().text_color(t.foreground).child(badge.key))
+        .child(div().px(5).rounded(4).text_size(12).bg(t[badge.tone] ?? t.raised).text_color(t.background).child(badge.status))
+        .child(div().flex_1().truncate().text_color(t.foreground).child(`· ${badge.summary}`))
+        : div().truncate().font_semibold().text_color(t.foreground).child(p.title))
       .child(h_flex().gap(6).text_size(12)
-        .when(Boolean(p.label), (el) => el.child(div().px(4).rounded(3).bg(t.raised).text_color(t.accent).child(p.label)))
+        .when(Boolean(p.label), (el) => el.child(div().px(5).rounded(4).bg(t.chrome).text_color(t.foreground).child(p.label)))
         .child(div().flex_1().truncate().text_color(t.dim).child(p.line)));
   }
 
   legend(t) {
-    return h_flex().px(12).py(4).gap(14).text_size(11).children(legendFor(this.tab, this.view).map(([k, what], i) =>
+    const body = this.answers[this.tab]?.body;
+    const opts = { strip: (this.answers.sprint?.body?.reviews ?? []).length > 0, bots: body?.hidden_bots ?? 0, merged: Boolean(body?.merged) };
+    return h_flex().flex_wrap().px(12).py(4).gap(14).text_size(11).children(legendFor(this.tab, this.view, opts).map(([k, what], i) =>
       h_flex().id(`legend-${i}`).gap(4).child(div().text_color(t.accent).child(k)).child(div().text_color(t.dim).child(what))));
   }
 
@@ -1307,7 +1328,7 @@ export default class Tkt extends View {
         .on_click((_e, cx) => this.pick(cx))
         .child(where))
       .child(div().flex_1().truncate().text_color(this.error ? t.blocked : t.dim).child(this.error ? problemOf(this.error, this.machine) : this.notice))
-      .child(div().text_color(t.dim).child(this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.answers[this.tab]?.body?.sync_label ?? ""))
+      .child(((label) => div().text_color(t[syncTone(label)] ?? t.dim).child(label))(this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.answers[this.tab]?.body?.sync_label ?? ""))
       .child(div().id("sync").px(6).rounded(4).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => this.sync(cx))
