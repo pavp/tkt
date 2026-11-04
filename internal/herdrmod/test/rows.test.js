@@ -42,10 +42,11 @@ test("the PR / CI cell lists every open pull request, then the finished ones, as
   assert.equal(prRefs([{ number: 3, state: "merged" }, { number: 4, state: "merged" }, { number: 5, state: "closed" }]), "2 merged · 1 closed");
 });
 
-test("SP, ASSIGNEE and AGENT show only when some row has them, and points read as numbers", () => {
+test("SP and AGENT show only when some row has them, ASSIGNEE whenever tickets show (as the TUI's), and points read as numbers", () => {
   const rows = [{ ticket: { points: 3 } }, { ticket: { team: true, assignee: "Alan Turing" } }];
   assert.deepEqual(listColumns(rows, { "DEMO-1": "working" }), { points: true, assignee: true, agent: true });
-  assert.deepEqual(listColumns([{ ticket: {} }], {}), { points: false, assignee: false, agent: false });
+  assert.deepEqual(listColumns([{ ticket: {} }], {}), { points: false, assignee: true, agent: false });
+  assert.deepEqual(listColumns([], {}), { points: false, assignee: false, agent: false });
   assert.equal(pointsText(3), "3");
   assert.equal(pointsText(0.5), "0.5");
   assert.equal(pointsText(0), "");

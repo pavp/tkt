@@ -94,9 +94,10 @@ export function agentGlyph(status) {
 }
 
 /** The top right of a card: why it needs you with its status mark's icon, else the mark with its status. */
-export function cardFlag(attention, mark) {
+export function cardFlag(attention, mark, room = Infinity) {
   if (attention) return mark ? `! ${attention} ${mark.glyph}` : `! ${attention}`;
-  return mark ? mark.word : "";
+  if (!mark) return "";
+  return mark.word.length > room ? mark.glyph : mark.word;
 }
 
 export const EMPTY_COLUMN = "— nothing here";

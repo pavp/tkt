@@ -27,3 +27,9 @@ test("a card that needs you keeps its status mark's icon after the reason, as th
   assert.equal(cardFlag("", null), "");
   assert.equal(EMPTY_COLUMN, "— nothing here");
 });
+
+test("a long status mark on a card falls back to its icon, as the TUI's narrow cards do", () => {
+  const long = { glyph: "◇", word: "◇ Ready for Testing", tone: "ansi4" };
+  assert.equal(cardFlag("", long, 12), "◇");
+  assert.equal(cardFlag("", { glyph: "⊘", word: "⊘ Blocked", tone: "ansi3" }, 12), "⊘ Blocked");
+});

@@ -56,3 +56,10 @@ test("the selectable items follow the tab and view: cards by column, list rows, 
   const backlog = { groups: [{ group: "sprint:1", title: "S1", rows: [{ key: "C" }] }] };
   assert.deepEqual(targets("backlog", "columns", backlog), { ids: ["C"], at: [1], list: "backlog-rows" });
 });
+
+test("the board opens with its first ticket selected, as the TUI's does", async () => {
+  const { firstTarget } = await import("../mod/lib/nav.js");
+  assert.equal(firstTarget({ cols: [[], ["B1"], ["C1"]] }), "B1");
+  assert.equal(firstTarget({ ids: ["A", "B"] }), "A");
+  assert.equal(firstTarget({ ids: [] }), null);
+});
