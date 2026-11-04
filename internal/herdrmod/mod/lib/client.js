@@ -26,3 +26,21 @@ export function machineOrder(machines, last) {
   for (const n of [null, ...names]) if (!order.includes(n)) order.push(n);
   return order;
 }
+
+/** The agents to tell tkt about: Herdr desktop's installed agents (knownAgents), by key, most picked first. */
+export function agentKinds(known) {
+  const kinds = [];
+  for (const p of known ?? []) {
+    if (p.agent && p.installed && !kinds.includes(p.key)) kinds.push(p.key);
+  }
+  return kinds;
+}
+
+/** Which machine's tkt to use, given the machines it was found on: the only one, the one chosen before while
+ *  it still has tkt, else {choose} so the person picks; looking never starts a daemon anywhere. */
+export function pickMachine(found, chosen) {
+  if (found.length === 0) return { none: true };
+  if (found.length === 1) return { machine: found[0] };
+  if (chosen !== undefined && found.includes(chosen)) return { machine: chosen };
+  return { choose: found };
+}

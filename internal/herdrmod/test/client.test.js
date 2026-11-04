@@ -22,3 +22,25 @@ test("machines are tried as remembered, then this computer, then the others", ()
   assert.deepEqual(machineOrder(machines, "wsl-dev"), ["wsl-dev", null, "build"]);
   assert.deepEqual(machineOrder(machines, "gone"), [null, "wsl-dev", "build"]);
 });
+
+test("the agents to save are Herdr's installed agents, by key, once each", async () => {
+  const { agentKinds } = await import("../mod/lib/client.js");
+  const known = [
+    { key: "claude", agent: true, installed: true },
+    { key: "codex", agent: true, installed: false },
+    { key: "nvim", agent: false, installed: true },
+    { key: "claude", agent: true, installed: true },
+    { key: "opencode", agent: true, installed: true },
+  ];
+  assert.deepEqual(agentKinds(known), ["claude", "opencode"]);
+  assert.deepEqual(agentKinds(undefined), []);
+});
+
+test("tkt found on one machine is used; on several, the person chooses unless one was chosen before", async () => {
+  const { pickMachine } = await import("../mod/lib/client.js");
+  assert.deepEqual(pickMachine([null], undefined), { machine: null });
+  assert.deepEqual(pickMachine(["wsl-dev"], null), { machine: "wsl-dev" });
+  assert.deepEqual(pickMachine([null, "wsl-dev"], undefined), { choose: [null, "wsl-dev"] });
+  assert.deepEqual(pickMachine([null, "wsl-dev"], "wsl-dev"), { machine: "wsl-dev" });
+  assert.deepEqual(pickMachine([], undefined), { none: true });
+});
