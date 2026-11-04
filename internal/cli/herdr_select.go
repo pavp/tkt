@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"github.com/pavp/tkt/internal/board"
 	"time"
 
 	"github.com/pavp/tkt/internal/herdr"
@@ -16,6 +17,36 @@ const (
 	herdrClassic herdrFlavor = "Herdr"
 	herdrDesktop herdrFlavor = "Herdr desktop"
 )
+
+// wire is the flavor as the daemon API names it.
+func (f herdrFlavor) wire() string {
+	if f == herdrDesktop {
+		return "desktop"
+	}
+	return "classic"
+}
+
+// terminalHerdr is the Herdr whose terminal runs tkt, as the daemon API names it; empty outside both.
+func (a *App) terminalHerdr() string {
+	switch {
+	case a.inDesktopTerminal():
+		return "desktop"
+	case a.Env.Getenv("HERDR_ENV") == "1":
+		return "classic"
+	}
+	return ""
+}
+
+// agentsHere keeps only the agents of the Herdr tkt runs in: each Herdr's agents are its own, and a terminal
+// of neither shows none.
+func (a *App) agentsHere(snap *board.Snapshot) {
+	switch here := a.terminalHerdr(); {
+	case here == "":
+		snap.Agents = nil
+	case snap.AgentsBy != nil:
+		snap.Agents = snap.AgentsBy[here]
+	}
+}
 
 type herdrChoice struct {
 	flavor herdrFlavor

@@ -286,6 +286,9 @@ func (s *Server) syncOnce(ctx context.Context) {
 		if p.Agents == nil {
 			p.Agents = s.snap.Agents
 		}
+		if p.AgentsBy == nil {
+			p.AgentsBy = s.snap.AgentsBy
+		}
 		s.snap, s.have, painted = p, true, true
 		s.publish("snapshot", public(p))
 	})
@@ -308,10 +311,13 @@ func (s *Server) syncOnce(ctx context.Context) {
 		// The sync could not read Herdr; the agents it last reported still stand.
 		snap.Agents = old.Agents
 	}
+	if snap.AgentsBy == nil {
+		snap.AgentsBy = old.AgentsBy
+	}
 	s.snap, s.have = snap, true
 	s.publishChanges(old, had, snap)
 	if had && !maps.Equal(old.Agents, snap.Agents) {
-		s.publish("agent.updated", map[string]any{"agents": snap.Agents})
+		s.publish("agent.updated", map[string]any{"agents": snap.Agents, "agents_by": snap.AgentsBy})
 	}
 	s.publish("sync.finished", map[string]any{"fetched_at": snap.FetchedAt})
 }
@@ -332,7 +338,25 @@ func (s *Server) SetAgents(agents map[string]string) {
 		return
 	}
 	s.snap.Agents = agents
-	s.publish("agent.updated", map[string]any{"agents": agents})
+	s.publish("agent.updated", map[string]any{"agents": agents, "agents_by": s.snap.AgentsBy})
+}
+
+// SetAgentsBy records each Herdr's agent states apart, with their most urgent union as Agents, and tells
+// clients when they changed.
+func (s *Server) SetAgentsBy(by map[string]map[string]string) {
+	union := map[string]string{}
+	for _, part := range by {
+		for key, state := range part {
+			union[key] = board.MostUrgentAgent([]string{union[key], state})
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if maps.Equal(s.snap.Agents, union) && maps.EqualFunc(s.snap.AgentsBy, by, maps.Equal) {
+		return
+	}
+	s.snap.Agents, s.snap.AgentsBy = union, by
+	s.publish("agent.updated", map[string]any{"agents": union, "agents_by": by})
 }
 
 func (s *Server) Handler() http.Handler {
