@@ -2,6 +2,7 @@ package board_test
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/pavp/tkt/internal/board"
@@ -72,5 +73,25 @@ func TestACardSummarizesItsFinishedPullRequests(t *testing.T) {
 				t.Errorf("Finished = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestACardListsItsPullRequestsAsTheTUIsSubmenuDoes(t *testing.T) {
+	prs := []ticket.PullRequest{
+		{Number: 3, Repo: "example-org/web", State: ticket.PRMerged, URL: "https://github.com/example-org/web/pull/3"},
+		{Number: 7, Repo: "example-org/api", State: ticket.PROpen, Review: ticket.ReviewApproved, URL: "https://github.com/example-org/api/pull/7"},
+		{Number: 9, Repo: "example-org/api", State: ticket.PROpen, Checks: ticket.ChecksFail, URL: "https://github.com/example-org/api/pull/9"},
+	}
+	got := board.CardOf(ticket.Ticket{Key: "DEMO-1", PRs: prs}, false).PullRequests
+	want := []board.CardPR{
+		{Number: 9, Label: "#9 CI failing · api", URL: "https://github.com/example-org/api/pull/9"},
+		{Number: 7, Label: "#7 Approved · api", URL: "https://github.com/example-org/api/pull/7"},
+		{Number: 3, Label: "#3 merged · web", URL: "https://github.com/example-org/web/pull/3"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("PullRequests = %+v, want %+v", got, want)
+	}
+	if got := board.CardOf(ticket.Ticket{Key: "DEMO-2"}, false).PullRequests; got != nil {
+		t.Errorf("PullRequests without pull requests = %+v, want none", got)
 	}
 }

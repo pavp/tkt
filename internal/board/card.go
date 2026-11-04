@@ -22,6 +22,15 @@ type Card struct {
 	Hint    string   `json:"hint,omitempty"`
 	// Finished words the merged and closed pull requests: "#12 merged" for one, else "7 merged · 1 closed".
 	Finished string `json:"finished,omitempty"`
+	// PullRequests are the ticket's pull requests as its "Pull requests (N)" submenu lists them.
+	PullRequests []CardPR `json:"pull_requests,omitempty"`
+}
+
+// CardPR is one line of a ticket's "Pull requests (N)" submenu: "#12 CI failing · web".
+type CardPR struct {
+	Number int    `json:"number"`
+	Label  string `json:"label"`
+	URL    string `json:"url,omitempty"`
 }
 
 // CardOf is t's card; hasAgent says an agent works on it in the Herdr the card is drawn for.
@@ -34,7 +43,39 @@ func CardOf(t ticket.Ticket, hasAgent bool) Card {
 		c.Progress = SubtaskProgress(t)
 	}
 	c.Finished = finishedPRs(t.PRs)
+	c.PullRequests = PRLines(t.PRs)
 	return c
+}
+
+// PRLines lists prs as a ticket's pull requests submenu does: those that need the user first, finished ones last.
+func PRLines(prs []ticket.PullRequest) []CardPR {
+	if len(prs) == 0 {
+		return nil
+	}
+	sorted := slices.Clone(prs)
+	rank := func(pr ticket.PullRequest) int {
+		switch {
+		case pr.State != ticket.PROpen:
+			return 2
+		case NeedsYou(pr):
+			return 0
+		}
+		return 1
+	}
+	slices.SortStableFunc(sorted, func(x, y ticket.PullRequest) int { return rank(x) - rank(y) })
+	lines := make([]CardPR, 0, len(sorted))
+	for _, pr := range sorted {
+		status := PRStatus(pr)
+		if pr.State != ticket.PROpen {
+			status = string(pr.State)
+		}
+		label := fmt.Sprintf("#%d %s", pr.Number, status)
+		if _, repo, _ := strings.Cut(pr.Repo, "/"); repo != "" {
+			label += " · " + repo
+		}
+		lines = append(lines, CardPR{Number: pr.Number, Label: label, URL: pr.URL})
+	}
+	return lines
 }
 
 func finishedPRs(prs []ticket.PullRequest) string {

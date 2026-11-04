@@ -276,31 +276,12 @@ func (m Model) sprintMoveItem(t ticket.Ticket) (menuItem, bool) {
 // prsMenu lists a ticket's pull requests to open one, those that need the user first and finished ones last.
 func (m Model) prsMenu(t ticket.Ticket) *menu {
 	a := m.actions
-	prs := slices.Clone(t.PRs)
-	rank := func(pr ticket.PullRequest) int {
-		switch {
-		case pr.State != ticket.PROpen:
-			return 2
-		case needsYou(pr):
-			return 0
-		}
-		return 1
-	}
-	slices.SortStableFunc(prs, func(x, y ticket.PullRequest) int { return rank(x) - rank(y) })
+	lines := board.PRLines(t.PRs)
 	var items []menuItem
-	for _, pr := range prs {
-		status := prStatus(pr)
-		if pr.State != ticket.PROpen {
-			status = string(pr.State)
-		}
-		_, repo, _ := strings.Cut(pr.Repo, "/")
-		label := fmt.Sprintf("#%d %s", pr.Number, status)
-		if repo != "" {
-			label += " · " + repo
-		}
-		items = append(items, menuItem{label: label, link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }})
+	for _, pr := range lines {
+		items = append(items, menuItem{label: pr.Label, link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }})
 	}
-	for _, pr := range prs {
+	for _, pr := range lines {
 		if pr.URL != "" {
 			items = append(items, menuItem{label: fmt.Sprintf("Copy the link of #%d", pr.Number), run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
 		}

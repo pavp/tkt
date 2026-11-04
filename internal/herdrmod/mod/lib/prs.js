@@ -54,3 +54,8 @@ export function prPreview(row) {
   const approvals = row.approvals ? ` · ${row.approvals}` : "";
   return { title: `${row.key} · ${pr.title || row.title}`, line: `${how} ${row.who || "—"} in ${row.repo}${approvals} · ${ci} · enter for actions` };
 }
+
+/** The PRs tab's toggle, as the TUI's: Requested, lit while it narrows the list (team_prs off). */
+export function prsToggle(teamPRs) {
+  return { label: "Requested", on: !teamPRs };
+}

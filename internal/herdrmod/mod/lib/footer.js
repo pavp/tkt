@@ -25,3 +25,8 @@ export function problemOf(message, machine) {
   }
   return message;
 }
+
+/** The sync's warnings on one line, as the TUI's header shows them. */
+export function warningsLine(warnings) {
+  return warnings?.length ? `! ${warnings.join(" · ")}` : "";
+}
