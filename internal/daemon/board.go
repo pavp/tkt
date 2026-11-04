@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -20,13 +21,21 @@ type BoardView struct {
 	SyncLabel string `json:"sync_label"`
 	board.ViewState
 	// Sprints are the open sprints as the TUI's context line words them: "DEMO · Sprint 12 · 3d left".
-	Sprints    []string          `json:"sprints"`
+	Sprints []string `json:"sprints"`
+	// Reviews are the review requests the strip above the Sprint shows, each with the PRs tab's row for its menu.
+	Reviews    []ReviewChip      `json:"reviews"`
 	Boards     []BoardFilter     `json:"boards"`
 	Columns    []BoardColumn     `json:"columns"`
 	Sections   []BoardSection    `json:"sections"`
 	Agents     map[string]string `json:"agents,omitempty"`
 	LabelField string            `json:"label_field,omitempty"`
 	Warnings   []string          `json:"warnings,omitempty"`
+}
+
+// ReviewChip is one review request of the Sprint's strip: "#51 · DEMO-142" (the branch's ticket key, when it has one).
+type ReviewChip struct {
+	Label string `json:"label"`
+	Row   PRRow  `json:"row"`
 }
 
 // BoardFilter is one team board the Boards filter offers, with the tickets it holds.
@@ -76,8 +85,17 @@ func (s *Server) board(w http.ResponseWriter, r *http.Request) {
 	}
 	hidden := setOf(state.HiddenBoards)
 	view := BoardView{FetchedAt: snap.FetchedAt, Partial: snap.Partial, Syncing: syncing, SyncError: syncErr, ViewState: state,
-		Sprints: []string{}, Boards: []BoardFilter{}, Columns: []BoardColumn{}, Sections: []BoardSection{}, Agents: agents, LabelField: snap.LabelField, Warnings: snap.Warnings}
+		Sprints: []string{}, Reviews: []ReviewChip{}, Boards: []BoardFilter{}, Columns: []BoardColumn{}, Sections: []BoardSection{}, Agents: agents, LabelField: snap.LabelField, Warnings: snap.Warnings}
 	view.HiddenBoards = orNone(view.HiddenBoards)
+	for _, pr := range board.Reviews(snap, board.PRFilter{}) {
+		label := fmt.Sprintf("#%d", pr.Number)
+		if keys := ticket.BranchKeys(pr.Branch); len(keys) > 0 {
+			label += " · " + string(keys[0])
+		}
+		row := board.PRRow{PR: &pr}
+		view.Reviews = append(view.Reviews, ReviewChip{Label: label, Row: PRRow{Key: fmt.Sprintf("#%d", pr.Number), PR: &pr, Review: true, Status: row.Status(),
+			Approvals: pr.ApprovalsText(), NeedsYou: board.NeedsYou(pr), Attention: reasons(pr.Attention())}})
+	}
 	for _, sp := range snap.Sprints {
 		view.Sprints = append(view.Sprints, sp.Space+" · "+board.SprintLabel(sp, snap.FetchedAt))
 	}
