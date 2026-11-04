@@ -60,4 +60,27 @@ test("a machine's tkt is ready, too old for the mod, or absent", async () => {
   assert.equal(tktOn(null), "none");
   assert.equal(outdatedNote(["wsl-dev"]), "tkt on wsl-dev is too old for Herdr desktop: update tkt there (it needs `tkt api`)");
   assert.equal(outdatedNote([null]), "tkt on this computer is too old for Herdr desktop: update tkt (it needs `tkt api`)");
+  assert.equal(outdatedNote([null, "wsl-dev"]), "tkt on this computer and wsl-dev are too old for Herdr desktop: update tkt there (it needs `tkt api`)");
+});
+
+test("the mod updates itself only from a released tkt whose version differs", async () => {
+  const { needsUpdate } = await import("../mod/lib/client.js");
+  assert.equal(needsUpdate("0.18.0", "0.19.0"), true);
+  assert.equal(needsUpdate("0.18.0", "0.18.0"), false);
+  assert.equal(needsUpdate("dev", "0.19.0"), false);
+  assert.equal(needsUpdate("0.18.0", "dev"), false);
+  assert.equal(needsUpdate("0.18.0", undefined), false);
+});
+
+test("an update writes only inside the mod's folder", async () => {
+  const { safeModPath } = await import("../mod/lib/client.js");
+  for (const ok of ["main.js", "lib/menus.js", "mod.json"]) assert.equal(safeModPath(ok), true, ok);
+  for (const bad of ["../../keys.json", "lib/../../escaped.js", "/etc/x", "", "lib\\..\\x", "./main.js", "lib//x.js"]) assert.equal(safeModPath(bad), false, bad);
+});
+
+test("tkt's path on a machine is the last absolute path a shell printed", async () => {
+  const { tktPathFrom } = await import("../mod/lib/client.js");
+  assert.equal(tktPathFrom("/home/linuxbrew/.linuxbrew/bin/tkt\n"), "/home/linuxbrew/.linuxbrew/bin/tkt");
+  assert.equal(tktPathFrom("welcome to zsh\n/home/x/bin/tkt\n"), "/home/x/bin/tkt");
+  assert.equal(tktPathFrom("tkt not found\n"), null);
 });

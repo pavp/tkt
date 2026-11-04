@@ -143,6 +143,7 @@ func newHerdrCmd(a *App) *cobra.Command {
 	installCmd.Flags().BoolVar(&sidebarFlag, "sidebar", false, "add the sidebar rows without asking")
 	installCmd.Flags().BoolVar(&noSidebar, "no-sidebar", false, "do not add sidebar rows")
 
+	cmd.AddCommand(newExportModCmd(a))
 	cmd.AddCommand(
 		start,
 		installCmd,
@@ -191,7 +192,11 @@ func newHerdrCmd(a *App) *cobra.Command {
 
 func (a *App) herdrInstall(cmd *cobra.Command, keys, noKeys, sidebar, noSidebar bool) error {
 	if ch, err := a.whichHerdr(cmd.Context()); err == nil && ch.flavor == herdrDesktop {
-		return a.installDesktopMod(cmd.Context())
+		installed, err := a.installDesktopMod(cmd.Context())
+		if err != nil || !installed || noKeys {
+			return err
+		}
+		return a.addDesktopKey(keys)
 	}
 	exe, err := a.Executable()
 	if err != nil {
