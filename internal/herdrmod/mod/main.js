@@ -285,6 +285,19 @@ export default class Tkt extends View {
     return { items: view.boards ?? [], hidden: view.hidden_boards, field: "hidden_boards" };
   }
 
+  /** The Sprint's Team toggle: the team's tickets come with a sync, so the change asks for one, as the TUI's t does. */
+  teamToggle(t) {
+    const view = this.answers.sprint?.body;
+    if (!view) return div();
+    return this.toggle("team", Boolean(view.team), (cx) => this.attempt(async () => {
+      const a = await this.call("PATCH", "/v1/board/state", { team: !view.team });
+      if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+      await this.call("POST", "/v1/sync", {});
+      this.notice = view.team ? "only your tickets" : "with the team's tickets · syncing…";
+      this.load(cx);
+    }, cx)).child("Team");
+  }
+
   boardsChip(t) {
     const boards = this.answers[this.tab]?.body?.boards ?? [];
     if (boards.length === 0) return div();
@@ -943,7 +956,7 @@ export default class Tkt extends View {
       .when(this.tab === "sprint", (el) => el.child(this.viewSwitch(t)))
       .when(this.tab === "prs", (el) => el.child(this.prControls(t)))
       .when(this.tab === "backlog", (el) => el.child(this.backlogControls(t)))
-      .when(this.tab === "sprint", (el) => el.child(this.boardsChip(t)))
+      .when(this.tab === "sprint", (el) => el.child(this.teamToggle(t)).child(this.boardsChip(t)))
       .child(div().id("gear").px(8).py(3).rounded(6).text_color(this.settings ? t.foreground : t.muted).hover((s) => s.bg(t.hover))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => { if (this.settings) { this.settings = null; cx.notify(); } else this.attempt(() => this.openSettings(), cx); })
