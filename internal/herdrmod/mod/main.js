@@ -8,10 +8,10 @@ import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords, markOf, prCell } from "./lib/columns.js";
-import { previewOf, legendFor, problemOf } from "./lib/footer.js";
-import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
+import { previewOf, legendFor, problemOf, warningsLine } from "./lib/footer.js";
+import { prRows, toggled, reposChip, prPreview, prsToggle } from "./lib/prs.js";
 import { backlogRows, badges } from "./lib/backlog.js";
-import { ticketMenu, prMenu } from "./lib/menus.js";
+import { ticketMenu, prMenu, withBack, backOf, confirmRemove } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors } from "./lib/details.js";
@@ -259,7 +259,7 @@ export default class Tkt extends View {
     if (!view) return div();
     const showBots = this.bots || view.hidden_bots > 0;
     return h_flex().gap(6)
-      .child(this.toggle("team-prs", view.team_prs, (cx) => this.patchState({ team_prs: !view.team_prs }, cx)).child("Team"))
+      .child(this.toggle("team-prs", prsToggle(view.team_prs).on, (cx) => this.patchState({ team_prs: !view.team_prs }, cx)).child(prsToggle(view.team_prs).label))
       .when(showBots, (el) => el.child(this.toggle("bots", this.bots, (cx) => { this.bots = !this.bots; this.load(cx); cx.notify(); })
         .child(this.bots ? "Bots" : `Bots ${view.hidden_bots}`)))
       .when((view.repos ?? []).length > 0, (el) => el.child(this.toggle("repos", this.panel === "repos", (cx) => { this.panel = this.panel === "repos" ? null : "repos"; cx.notify(); })
@@ -399,8 +399,8 @@ export default class Tkt extends View {
   menuFor(row) {
     if (this.tab === "prs") return prMenu(row.raw, { agent: this.answers.sprint?.body?.agents?.[row.ticketKey] });
     const agents = this.answers.sprint?.body?.agents ?? {};
-    if (this.tab === "backlog") return ticketMenu(row.ticket, { backlog: true, me: this.answers.backlog?.body?.me, agent: agents[row.key], groups: this.answers.backlog?.body?.groups, activeSprints: this.answers.backlog?.body?.active_sprints });
-    return ticketMenu(row.ticket, { agent: agents[row.key], attention: row.card?.attention });
+    if (this.tab === "backlog") return ticketMenu(row.ticket, { backlog: true, me: this.answers.backlog?.body?.me, agent: agents[row.key], groups: this.answers.backlog?.body?.groups, activeSprints: this.answers.backlog?.body?.active_sprints, prLines: row.card?.pull_requests });
+    return ticketMenu(row.ticket, { agent: agents[row.key], attention: row.card?.attention, prLines: row.card?.pull_requests });
   }
 
   async local(script, arg) {
@@ -410,6 +410,7 @@ export default class Tkt extends View {
 
   /** Runs a menu item; the screens Start, Move, Assign, details and feedback open come with their own tasks. */
   act(item, cx) {
+    const from = this.menu;
     this.menu = null;
     cx.spawn(async (cx) => {
       try {
@@ -532,6 +533,7 @@ export default class Tkt extends View {
       } catch (e) {
         this.notice = `could not: ${e.message}`;
       }
+      this.menu = withBack(this.menu, from);
       cx.notify();
     });
     cx.notify();
@@ -726,14 +728,18 @@ export default class Tkt extends View {
         .child(heading([sp.key, sp.name].filter(Boolean).join(" · ")))
         .children(sp.repos.map((r) => h_flex().id(`repo-${sp.key}-${r.repo}`).gap(10).py(2)
           .child(div().w(260).truncate().text_color(t.foreground).child(r.repo)).child(div().flex_1().truncate().text_color(t.dim).child(r.path))
-          .child(link(`rm-${sp.key}-${r.repo}`, "remove", (cx) => this.attempt(() => this.patchSettings(reposPatch(sp, { remove: r.repo })), cx), t.muted))))
+          .child(link(`rm-${sp.key}-${r.repo}`, "remove", (cx) => { this.menu = { ...confirmRemove(`Remove ${r.repo} from ${sp.key}?`, reposPatch(sp, { remove: r.repo })), sel: 0 }; cx.notify(); }, t.muted))))
         .when(sp.inferred.length > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(`also seen in its pull requests: ${sp.inferred.join(", ")}`)))
         .child(link(`add-${sp.key}`, "+ Add a repository", (cx) => { this.ask({ kind: "addRepo", title: `Add to ${sp.key}: owner/name, then its folder`, space: sp }); cx.notify(); }))));
     } else if (st.section === "boards") {
       content = v_flex().children(d.spaces.map((sp) => v_flex().id(`bs-${sp.key}`).pb(8).child(heading(sp.key))
         .children((st.boards[sp.key] ?? sp.team_boards).map((b) => {
           const on = sp.team_boards.some((x) => x.id === b.id);
-          return h_flex().id(`b-${sp.key}-${b.id}`).gap(8).py(2).on_click((_e, cx) => this.attempt(() => this.patchSettings(boardsPatch(sp, b.id)), cx))
+          return h_flex().id(`b-${sp.key}-${b.id}`).gap(8).py(2).on_click((_e, cx) => {
+            if (!on) return this.attempt(() => this.patchSettings(boardsPatch(sp, b.id)), cx);
+            this.menu = { ...confirmRemove(`Remove the team board ${b.name} from ${sp.key}?`, boardsPatch(sp, b.id)), sel: 0 };
+            cx.notify();
+          })
             .child(div().w(14).text_color(t.accent).child(on ? "☑" : "☐")).child(div().text_color(t.foreground).child(b.name));
         }))
         .when(!st.boards[sp.key], (el) => el.child(link(`lb-${sp.key}`, "Choose from Jira's boards…", (cx) => this.attempt(async () => { st.boards[sp.key] = (await this.lookup("boards", sp.key)).boards; }, cx))))));
@@ -751,7 +757,7 @@ export default class Tkt extends View {
     } else if (st.section === "clones") {
       content = v_flex().child(heading("Folders tkt looks for clones in; the first one is where new clones go"))
         .children(d.repo_roots.map((root) => h_flex().id(`root-${root}`).gap(10).py(2).child(div().flex_1().text_color(t.foreground).child(root))
-          .child(link(`rmr-${root}`, "remove", (cx) => this.attempt(() => this.patchSettings(rootsPatch(d.repo_roots, { remove: root })), cx), t.muted))))
+          .child(link(`rmr-${root}`, "remove", (cx) => { this.menu = { ...confirmRemove(`Remove the folder ${root}?`, rootsPatch(d.repo_roots, { remove: root })), sel: 0 }; cx.notify(); }, t.muted))))
         .child(link("add-root", "+ Add a folder", (cx) => { this.ask({ kind: "addRoot", title: "A folder for clones, such as ~/src" }); cx.notify(); }));
     } else if (st.section === "board") {
       const pick = (field, title) => (cx) => this.attempt(async () => {
@@ -885,7 +891,7 @@ export default class Tkt extends View {
   key(e, cx) {
     const k = e.key;
     if (this.menu) {
-      if (k === "escape") this.menu = null;
+      if (k === "escape") this.menu = backOf(this.menu);
       if (k === "down") this.menu.sel = Math.min(this.menu.items.length - 1, this.menu.sel + 1);
       if (k === "up") this.menu.sel = Math.max(0, this.menu.sel - 1);
       if (k === "enter") return this.act(this.menu.items[this.menu.sel], cx);
@@ -1119,6 +1125,7 @@ export default class Tkt extends View {
       .track_focus(this.focus).on_key_down((e, cx) => this.key(e, cx))
       .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
       .child(this.header(t))
+      .when(Boolean(warningsLine(this.answers.sprint?.body?.warnings)), (el) => el.child(div().px(12).py(3).truncate().text_size(12).text_color(t.working).child(warningsLine(this.answers.sprint.body.warnings))))
       .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
       .when((this.tab === "sprint" || this.tab === "prs") && !this.choices && !this.details && !this.settings, (el) => el.child(this.preview(t, this.answers[this.tab]?.body)))
       .child(this.legend(t))

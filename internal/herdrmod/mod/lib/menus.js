@@ -49,7 +49,10 @@ export function ticketMenu(t, opts = {}) {
   const items = [startItem(key, opts.agent), { label: "Show details", action: "details", key }];
   if (t.url) items.push({ label: "Open in Jira ↗", action: "open", url: t.url });
   if (prs.length === 1) items.push({ label: `Open #${prs[0].number} in GitHub ↗`, action: "open", url: prs[0].url });
-  if (prs.length > 1) items.push({ label: `Pull requests (${prs.length}) ▸`, action: "prs", key });
+  if (prs.length > 1) {
+    const lines = opts.prLines ?? prs.map((p) => ({ number: p.number, label: `#${p.number}`, url: p.url }));
+    items.push({ label: `Pull requests (${prs.length}) ▸`, action: "submenu", menu: prsSubmenu(key, lines) });
+  }
   const reason = opts.attention?.[0] ?? attentionOf(t);
   if (reason) items.push(...feedbackItems(key, reason, opts.agent));
   items.push({ label: "Move to… ▸", action: "move", key }, { label: "Assign to… ▸", action: "assignMenu", key, now: t.assignee ?? "" });
@@ -103,4 +106,26 @@ export function sprintMoveItem(t, { groups = [], activeSprints = [] } = {}) {
     label: "Move to current sprint ▸", action: "submenu",
     menu: { title: `Move ${t.key} to which sprint?`, items: mine.map((sp) => ({ label: sp.name, action: "submenu", menu: confirm(sp) })) },
   };
+}
+
+/** A ticket's "Pull requests (N)" submenu from its card's lines: open each, then copy each link. */
+export function prsSubmenu(key, lines) {
+  const items = lines.map((l) => ({ label: l.label, action: "open", url: l.url }));
+  for (const l of lines) if (l.url) items.push(copy(`Copy the link of #${l.number}`, l.url));
+  return { title: `Pull requests of ${key}`, items };
+}
+
+/** The menu next opens from from, so esc goes back to from; a menu reopened under its own title keeps from's way back. */
+export function withBack(next, from) {
+  if (!next || !from || next === from) return next;
+  return { ...next, back: next.title === from.title ? from.back ?? null : from };
+}
+
+export function backOf(menu) {
+  return menu?.back ?? null;
+}
+
+/** Settings asks before removing, as the TUI does: question names what goes and from where. */
+export function confirmRemove(question, change) {
+  return { title: question, items: [{ label: "Yes, remove it", action: "settingsPatch", change }, { label: "Cancel", action: "cancel" }] };
 }
