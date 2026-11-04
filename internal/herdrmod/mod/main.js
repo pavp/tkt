@@ -21,7 +21,7 @@ import { MOD_VERSION } from "./lib/version.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
 import { stripChips, atTop } from "./lib/strip.js";
 import { scrolled, menuHeight, MENU_ROW, cardHeight, revealed } from "./lib/scroll.js";
-import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget } from "./lib/nav.js";
+import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget, listKey, sectionAfter } from "./lib/nav.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -283,8 +283,8 @@ export default class Tkt extends View {
   filterPanel(t, items, hidden, field) {
     return v_flex().id(`${field}-panel`).absolute().top(44).right(48).w(280).p(6).gap(2).rounded(8).bg(t.popover).border(1).border_color(t.border)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .children(items.map((r) =>
-        h_flex().id(`${field}-${r.name}`).gap(8).px(8).py(4).rounded(5).hover((s) => s.bg(t.hover))
+      .children(items.map((r, i) =>
+        h_flex().id(`${field}-${r.name}`).gap(8).px(8).py(4).rounded(5).bg(i === Math.min(this.panelSel ?? 0, items.length - 1) ? t.selected : t.popover).hover((s) => s.bg(t.hover))
           .on_click((_e, cx) => this.patchState({ [field]: toggled(hidden, r.name) }, cx))
           .child(div().w(14).text_color(t.accent).child(r.hidden ? "☐" : "☑"))
           .child(div().flex_1().truncate().text_color(r.hidden ? t.muted : t.foreground).child(r.name))
@@ -345,7 +345,7 @@ export default class Tkt extends View {
     if (r.kind === "title") {
       const b = badges(r.points);
       const tone = { todo: t.ansi8 ?? t.unknown, doing: t.ansi4 ?? t.working, done: t.ansi2 ?? t.done };
-      return h_flex().h(ROW).px(12).gap(8).items_end().pb(3).text_color(t.foreground)
+      return h_flex().h(ROW).px(12).gap(8).items_end().pb(3).text_color(t.foreground).bg(this.selected === `group:${r.group}` ? t.selected : t.surface)
         .child(div().text_color(t.dim).child(r.collapsed ? "▸" : "▾"))
         .child(div().font_semibold().child(r.title))
         .when(Boolean(r.board), (el) => el.child(div().px(5).rounded(4).bg(t.chrome).text_color(t.foreground).font_weight(400).child(r.board)))
@@ -379,7 +379,7 @@ export default class Tkt extends View {
 
   prRow(t, r) {
     if (r.kind === "title") {
-      return h_flex().h(ROW).px(12).gap(8).items_end().pb(3).font_semibold().text_color(t.foreground)
+      return h_flex().h(ROW).px(12).gap(8).items_end().pb(3).font_semibold().text_color(t.foreground).bg(this.selected === `group:${r.group}` ? t.selected : t.surface)
         .child(div().text_color(t.dim).child(r.collapsed ? "▸" : "▾"))
         .child(div().child(r.title))
         .child(div().text_color(t.dim).child(r.needs ? `${r.count} · ${r.needs} need you` : String(r.count)));
@@ -760,13 +760,23 @@ export default class Tkt extends View {
   settingsScreen(t) {
     const st = this.settings;
     const d = st.data;
-    const link = (id, text, onClick, tone) => div().id(id).px(6).py(1).rounded(4).text_color(tone ?? t.accent).hover((s) => s.bg(t.hover))
-      .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => onClick(cx)).child(text);
+    // Every control registers in the order it is drawn, so up, down and enter reach them as the TUI's rows.
+    const controls = [];
+    const focusable = (onClick) => {
+      controls.push(onClick);
+      return controls.length - 1 === (st.sel ?? 0);
+    };
+    const link = (id, text, onClick, tone) => {
+      const on = focusable(onClick);
+      return div().id(id).px(6).py(1).rounded(4).bg(on ? t.selected : t.surface).text_color(tone ?? t.accent).hover((s) => s.bg(t.hover))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => onClick(cx)).child(on ? `▸ ${text}` : text);
+    };
+    st.controls = controls;
     const heading = (text) => div().pt(10).pb(4).font_semibold().text_color(t.foreground).child(text);
     const side = v_flex().id("settings-side").w(200).p(8).gap(2).border_r(1).border_color(t.border).children(SECTIONS.map((sec) =>
       div().id(`sec-${sec.id}`).px(10).py(5).rounded(6).bg(st.section === sec.id ? t.selected : t.surface).text_color(st.section === sec.id ? t.foreground : t.muted)
         .hover((s) => s.bg(t.hover)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => { st.section = sec.id; cx.notify(); }).child(sec.title)));
+        .on_click((_e, cx) => { st.section = sec.id; st.sel = 0; cx.notify(); }).child(sec.title)));
     let content = v_flex();
     if (st.section === "spaces") {
       content = v_flex().children(d.spaces.map((sp) => v_flex().id(`sp-${sp.key}`).pb(8)
@@ -780,11 +790,13 @@ export default class Tkt extends View {
       content = v_flex().children(d.spaces.map((sp) => v_flex().id(`bs-${sp.key}`).pb(8).child(heading(sp.key))
         .children((st.boards[sp.key] ?? sp.team_boards).map((b) => {
           const on = sp.team_boards.some((x) => x.id === b.id);
-          return h_flex().id(`b-${sp.key}-${b.id}`).gap(8).py(2).on_click((_e, cx) => {
+          const toggle = (cx) => {
             if (!on) return this.attempt(() => this.patchSettings(boardsPatch(sp, b.id)), cx);
             this.menu = { ...confirmRemove(`Remove the team board ${b.name} from ${sp.key}?`, boardsPatch(sp, b.id)), sel: 0 };
             cx.notify();
-          })
+          };
+          const lit = focusable(toggle);
+          return h_flex().id(`b-${sp.key}-${b.id}`).gap(8).py(2).px(4).rounded(4).bg(lit ? t.selected : t.surface).on_click((_e, cx) => toggle(cx))
             .child(div().w(14).text_color(t.accent).child(on ? "☑" : "☐")).child(div().text_color(t.foreground).child(b.name));
         }))
         .when(!st.boards[sp.key], (el) => el.child(link(`lb-${sp.key}`, "Choose from Jira's boards…", (cx) => this.attempt(async () => { st.boards[sp.key] = (await this.lookup("boards", sp.key)).boards; }, cx))))));
@@ -967,23 +979,42 @@ export default class Tkt extends View {
     } else if (this.details && !this.prompt) {
       const kk = keyOf(e);
       const a = detailsKey(kk);
-      const to = scrolled(this.panes.details, kk === "pagedown" || kk === "pageup" ? kk : e.keystroke === "space" ? " " : kk);
+      const to = scrolled(this.panes.details, kk);
       if (a === "back") this.details = null;
       else if (a === "copy") this.act({ action: "copyContext", key: this.details.key, label: "copy" }, cx);
       else if (kk === "enter" && this.details.ticket) this.menu = { ...ticketMenu(this.details.ticket, {}), sel: 0 };
       else if (to !== null) this.panes.details.offset = to;
     } else if (this.settings && !this.prompt) {
+      const st = this.settings;
+      const kk = keyOf(e);
+      const section = sectionAfter(SECTIONS.map((x) => x.id), st.section, kk);
+      const to = listKey(st.sel ?? 0, (st.controls ?? []).length, kk);
       if (k === "escape") this.settings = null;
+      else if (section) { st.section = section; st.sel = 0; this.panes.settings.offset = 0; }
+      else if (to !== null) st.sel = to;
+      else if ((kk === "enter" || kk === " ") && st.controls?.[st.sel ?? 0]) st.controls[st.sel ?? 0](cx);
       else {
-        const to = scrolled(this.panes.settings, keyOf(e));
-        if (to !== null) this.panes.settings.offset = to;
+        const off = scrolled(this.panes.settings, kk);
+        if (off !== null) this.panes.settings.offset = off;
       }
-    } else if (k === "escape" && this.panel) {
-      this.panel = null;
+    } else if (this.panel && this.openPanel()) {
+      this.panelKey(keyOf(e), cx);
     } else if (!this.prompt && !this.choices && !this.details && !this.settings && !this.picker && !this.panel) {
       this.boardKey(e, cx);
     }
     cx.notify();
+  }
+
+  /** The Boards and Repos filters from the keyboard: up and down move, space or enter ticks, a ticks all or none. */
+  panelKey(k, cx) {
+    const p = this.openPanel();
+    const sel = Math.min(this.panelSel ?? 0, Math.max(0, p.items.length - 1));
+    if (k === "escape") { this.panel = null; return; }
+    const to = listKey(sel, p.items.length, k);
+    if (to !== null) { this.panelSel = to; return; }
+    const item = p.items[sel];
+    if ((k === " " || k === "enter") && item) return this.patchState({ [p.field]: toggled(p.hidden, item.name) }, cx);
+    if (k === "a") return this.patchState({ [p.field]: (p.hidden ?? []).length > 0 ? [] : p.items.map((r) => r.name) }, cx);
   }
 
   pickerKeyDown(k, cx) {
@@ -1019,6 +1050,10 @@ export default class Tkt extends View {
     if (action === "team") {
       if (this.tab === "prs") return this.patchState({ team_prs: !this.answers.prs?.body?.team_prs }, cx);
       return this.toggleTeam(cx);
+    }
+    if (action === "menu" && this.selected?.startsWith("group:")) {
+      const body = this.answers[this.tab]?.body;
+      return this.patchState({ collapsed: toggled(body?.collapsed, this.selected.slice("group:".length)) }, cx);
     }
     if (this.inStrip && action === "menu") {
       const chip = stripChips(this.answers.sprint?.body?.reviews, 6).chips[this.stripSel];

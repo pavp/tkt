@@ -52,14 +52,35 @@ test("the selectable items follow the tab and view: cards by column, list rows, 
   assert.deepEqual(targets("sprint", "columns", board), { cols: [["A"], ["B"]] });
   assert.deepEqual(targets("sprint", "list", board), { ids: ["A", "B"], at: [1, 2], list: "rows" });
   const prs = { sections: [{ group: "mine:web", title: "web", rows: [{ key: "#1" }] }, { group: "review:web", title: "web", collapsed: true, rows: [{ key: "#2" }] }] };
-  assert.deepEqual(targets("prs", "columns", prs), { ids: ["#1mine:web"], at: [1], list: "pr-rows" });
+  assert.deepEqual(targets("prs", "columns", prs), { ids: ["group:mine:web", "#1mine:web", "group:review:web"], at: [0, 1, 2], list: "pr-rows" });
   const backlog = { groups: [{ group: "sprint:1", title: "S1", rows: [{ key: "C" }] }] };
-  assert.deepEqual(targets("backlog", "columns", backlog), { ids: ["C"], at: [1], list: "backlog-rows" });
+  assert.deepEqual(targets("backlog", "columns", backlog), { ids: ["group:sprint:1", "C"], at: [0, 1], list: "backlog-rows" });
 });
 
 test("the board opens with its first ticket selected, as the TUI's does", async () => {
   const { firstTarget } = await import("../mod/lib/nav.js");
   assert.equal(firstTarget({ cols: [[], ["B1"], ["C1"]] }), "B1");
   assert.equal(firstTarget({ ids: ["A", "B"] }), "A");
+  assert.equal(firstTarget({ ids: ["group:mine:web", "#1mine:web"] }), "#1mine:web");
   assert.equal(firstTarget({ ids: [] }), null);
+});
+
+test("a list of options moves with up and down and stops at its ends", async () => {
+  const { listKey } = await import("../mod/lib/nav.js");
+  assert.equal(listKey(0, 3, "down"), 1);
+  assert.equal(listKey(2, 3, "j"), 2);
+  assert.equal(listKey(1, 3, "up"), 0);
+  assert.equal(listKey(0, 3, "k"), 0);
+  assert.equal(listKey(0, 3, "x"), null);
+  assert.equal(listKey(0, 0, "down"), 0);
+});
+
+test("Settings' sections follow tab and right, shift-tab and left back, as the TUI's", async () => {
+  const { sectionAfter } = await import("../mod/lib/nav.js");
+  const ids = ["spaces", "boards", "statuses"];
+  assert.equal(sectionAfter(ids, "spaces", "tab"), "boards");
+  assert.equal(sectionAfter(ids, "statuses", "right"), "spaces");
+  assert.equal(sectionAfter(ids, "spaces", "shift-tab"), "statuses");
+  assert.equal(sectionAfter(ids, "boards", "left"), "spaces");
+  assert.equal(sectionAfter(ids, "boards", "x"), null);
 });
