@@ -8,6 +8,7 @@ import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed } f
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords } from "./lib/columns.js";
 import { previewOf, legendFor, problemOf } from "./lib/footer.js";
+import { prRows, toggled, reposChip } from "./lib/prs.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -39,6 +40,8 @@ export default class Tkt extends View {
     this.range = { start: 0, end: 0 };
     this.shownRange = { start: 0, end: 0 };
     this.selected = null;
+    this.bots = false;
+    this.reposOpen = false;
     // The list learns what is on screen while it lays out, where it may not ask for a render; the pinned title and
     // the "N more" hints follow on this tick instead.
     cx.timer.every(150, (cx) => {
@@ -121,9 +124,10 @@ export default class Tkt extends View {
 
   load(cx) {
     const tab = TABS.find((t) => t.id === this.tab);
+    const route = tab.id === "prs" && this.bots ? `${tab.route}?bots=true` : tab.route;
     cx.spawn(async (cx) => {
       try {
-        this.answers[tab.id] = await this.call("GET", tab.route);
+        this.answers[tab.id] = await this.call("GET", route);
         this.error = null;
         if (this.pendingUse) {
           this.pendingUse = false;
@@ -155,6 +159,84 @@ export default class Tkt extends View {
       } catch {}
     });
     cx.notify();
+  }
+
+  /** Changes the board's saved view (shared with the TUI) and reads the shown tab again. */
+  patchState(change, cx) {
+    cx.spawn(async (cx) => {
+      try {
+        await this.call("PATCH", "/v1/board/state", change);
+      } catch (e) {
+        this.error = e.message;
+      }
+      this.load(cx);
+      cx.notify();
+    });
+  }
+
+  toggle(id, on, onClick) {
+    const t = theme();
+    return div().id(id).px(10).py(2).rounded(5).border(1).border_color(on ? t.accent : t.border)
+      .text_color(on ? t.foreground : t.muted).bg(on ? t.selected : t.chrome).hover((s) => s.bg(t.hover))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => onClick(cx));
+  }
+
+  prControls(t) {
+    const view = this.answers.prs?.body;
+    if (!view) return div();
+    const showBots = this.bots || view.hidden_bots > 0;
+    return h_flex().gap(6)
+      .child(this.toggle("team-prs", view.team_prs, (cx) => this.patchState({ team_prs: !view.team_prs }, cx)).child("Team"))
+      .when(showBots, (el) => el.child(this.toggle("bots", this.bots, (cx) => { this.bots = !this.bots; this.load(cx); cx.notify(); })
+        .child(this.bots ? "Bots" : `Bots ${view.hidden_bots}`)))
+      .when((view.repos ?? []).length > 0, (el) => el.child(this.toggle("repos", this.reposOpen, (cx) => { this.reposOpen = !this.reposOpen; cx.notify(); })
+        .child(`${reposChip(view.repos)} ▾`)));
+  }
+
+  reposPanel(t) {
+    const view = this.answers.prs?.body;
+    return v_flex().id("repos-panel").absolute().top(44).right(48).w(280).p(6).gap(2).rounded(8).bg(t.popover).border(1).border_color(t.border)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .children((view?.repos ?? []).map((r) =>
+        h_flex().id(`repo-${r.name}`).gap(8).px(8).py(4).rounded(5).hover((s) => s.bg(t.hover))
+          .on_click((_e, cx) => this.patchState({ hidden_repos: toggled(view.hidden_repos, r.name) }, cx))
+          .child(div().w(14).text_color(t.accent).child(r.hidden ? "☐" : "☑"))
+          .child(div().flex_1().truncate().text_color(r.hidden ? t.muted : t.foreground).child(r.name))
+          .child(div().text_color(t.dim).child(String(r.prs)))));
+  }
+
+  prRow(t, r) {
+    if (r.kind === "title") {
+      return h_flex().h(ROW).px(12).gap(8).items_end().pb(3).font_semibold().text_color(t.foreground)
+        .child(div().text_color(t.dim).child(r.collapsed ? "▸" : "▾"))
+        .child(div().child(r.title))
+        .child(div().text_color(t.dim).child(r.needs ? `${r.count} · ${r.needs} need you` : String(r.count)));
+    }
+    const sel = this.selected === r.key + r.group;
+    return h_flex().h(ROW).px(12).gap(10).items_center().bg(sel ? t.selected : t.surface)
+      .child(div().w(60).text_color(t.dim).child(r.key))
+      .child(div().w(96).text_color(t.dim).child(r.ticketKey))
+      .child(div().w(140).truncate().text_color(r.needsYou ? t.blocked : t.muted).child(r.needsYou ? `! ${r.status}` : r.status))
+      .child(div().w(90).truncate().text_color(t.muted).child(r.who))
+      .child(div().flex_1().truncate().text_color(t.foreground).child(r.title));
+  }
+
+  prsList(t, view) {
+    const rows = prRows(view);
+    if (rows.length === 0) return div().p(16).text_color(t.muted).child("No pull requests: none of yours open, and no review requested.");
+    return v_flex().id("prs").relative().flex_1().min_h_0()
+      .child(v_virtual_list("pr-rows", rows.length, ROW, (i) => `${i}`, (range) =>
+        rows.slice(range.start, range.end).map((r) => this.prRow(t, r))).size_full().on_item_click((key, cx) => {
+        const r = rows[Number(key)];
+        if (!r) return;
+        if (r.kind === "title") this.patchState({ collapsed: toggled(view.collapsed, r.group) }, cx);
+        else {
+          this.selected = r.key + r.group;
+          cx.notify();
+        }
+      }))
+      .child(Scrollbar.vertical("pr-rows").absolute().inset_0());
   }
 
   sync(cx) {
@@ -217,6 +299,7 @@ export default class Tkt extends View {
       }))
       .child(div().flex_1())
       .when(this.tab === "sprint", (el) => el.child(this.viewSwitch(t)))
+      .when(this.tab === "prs", (el) => el.child(this.prControls(t)))
       .child(div().id("close").px(8).py(3).rounded(6).text_color(t.muted).hover((s) => s.bg(t.hover))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click(() => close())
@@ -336,6 +419,7 @@ export default class Tkt extends View {
     if (this.tab === "sprint" && (answer.body.sections ?? []).length === 0) return div().p(16).text_color(t.muted).child("No tickets on the board: nothing assigned to you in an open sprint.");
     if (this.tab === "sprint" && this.view === "columns") return this.columns(t, answer.body);
     if (this.tab === "sprint") return this.list(t, answer.body);
+    if (this.tab === "prs") return this.prsList(t, answer.body);
     return div().p(16).text_color(t.muted).child(`${(answer.body.sections ?? answer.body.groups ?? []).length} groups`);
   }
 
@@ -356,11 +440,13 @@ export default class Tkt extends View {
 
   render(_cx) {
     const t = theme();
-    return v_flex().id("root").size_full().bg(t.surface).text_size(13)
+    return v_flex().id("root").relative().size_full().bg(t.surface).text_size(13)
+      .on_mouse_down("left", (_e, cx) => { if (this.reposOpen) { this.reposOpen = false; cx.notify(); } })
       .child(this.header(t))
-      .child(this.body(t))
+      .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
       .when(this.tab === "sprint" && !this.choices, (el) => el.child(this.preview(t, this.answers.sprint?.body)))
       .child(this.legend(t))
-      .child(this.status(t));
+      .child(this.status(t))
+      .when(this.tab === "prs" && Boolean(this.reposOpen), (el) => el.child(this.reposPanel(t)));
   }
 }
