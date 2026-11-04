@@ -2,7 +2,7 @@
 // core runs tkt, so it works whether tkt runs here or on a machine reached over SSH.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input } from "gpui-base";
+import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay } from "herdr";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
@@ -13,6 +13,7 @@ import { backlogRows, badges } from "./lib/backlog.js";
 import { ticketMenu, prMenu } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
+import { detailView, neighbors } from "./lib/details.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -43,6 +44,7 @@ export default class Tkt extends View {
     this.menu = null;
     this.picker = null;
     this.jobs = [];
+    this.details = null;
     this.prompt = null;
     this.form = null;
     this.input = InputState.new({ placeholder: "" });
@@ -381,6 +383,9 @@ export default class Tkt extends View {
             this.notice = `copied the context of ${item.key}`;
             break;
           }
+          case "details":
+            await this.openDetails(item.key);
+            break;
           case "start":
             await this.openStart(item.key);
             break;
@@ -523,6 +528,74 @@ export default class Tkt extends View {
             .on_click((_e, cx) => { this.prompt = null; cx.notify(); }).child("Cancel"))
           .child(div().id("prompt-ok").px(10).py(3).rounded(5).bg(t.solid).text_color(t.solid_foreground)
             .on_click((_e, cx) => this.answerPrompt(cx)).child(p.kind === "comment" ? "Done" : "Search"))));
+  }
+
+  /** The keys of the shown tab's tickets, in its order, for the details' arrows. */
+  shownKeys() {
+    const body = this.answers[this.tab]?.body;
+    if (this.tab === "prs") return [...new Set(prRows(body).filter((r) => r.kind === "row" && r.ticketKey).map((r) => r.ticketKey))];
+    if (this.tab === "backlog") return backlogRows(body).filter((r) => r.kind === "row").map((r) => r.key);
+    return listRows(body?.sections).filter((r) => r.kind === "row").map((r) => r.key);
+  }
+
+  async openDetails(key) {
+    const keys = this.details?.keys ?? this.shownKeys();
+    this.details = { key, keys, view: null };
+    const a = await this.call("GET", `/v1/tickets/${key}`);
+    if (a.status !== 200) {
+      this.details = null;
+      throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+    }
+    this.details = { key, keys, view: detailView(a.body, TABS.find((t) => t.id === this.tab).title), ticket: a.body.ticket };
+  }
+
+  goDetails(key, cx) {
+    cx.spawn(async (cx) => {
+      try {
+        await this.openDetails(key);
+      } catch (e) {
+        this.notice = `could not: ${e.message}`;
+      }
+      cx.notify();
+    });
+  }
+
+  detailsScreen(t) {
+    const d = this.details;
+    const v = d.view;
+    const { prev, next } = neighbors(d.keys, d.key);
+    const button = (id, text, on, onClick) => div().id(id).px(8).py(2).rounded(5).text_color(on ? t.foreground : t.dim).hover((s) => s.bg(t.hover))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => { if (on) onClick(cx); }).child(text);
+    const nav = h_flex().px(12).py(6).gap(8).items_center().border_b(1).border_color(t.border)
+      .child(button("back", "‹ Back", true, (cx) => { this.details = null; cx.notify(); }))
+      .child(div().text_color(t.muted).child(v ? v.breadcrumb : `› ${d.key}`))
+      .child(div().flex_1())
+      .child(button("prev", "◀", Boolean(prev), (cx) => this.goDetails(prev, cx)))
+      .child(button("next", "▶", Boolean(next), (cx) => this.goDetails(next, cx)));
+    if (!v) return v_flex().flex_1().child(nav).child(div().p(16).text_color(t.muted).child("Loading…"));
+    const heading = (text) => div().pt(10).pb(4).font_semibold().text_color(t.foreground).child(text);
+    const left = v_flex().id("details-left").flex_1().min_w_0().min_h_0().overflow_y_scrollbar().p(14).gap(4)
+      .child(div().text_size(16).font_semibold().text_color(t.foreground).child(v.title))
+      .child(h_flex().gap(14).text_size(12).children(v.fields.map(([k, val], i) => h_flex().id(`f-${i}`).gap(4).child(div().text_color(t.dim).child(k)).child(div().text_color(t.foreground).child(val)))))
+      .when(Boolean(v.attention), (el) => el.child(div().text_color(t.blocked).child(`! ${v.attention}`)))
+      .child(heading("Description"))
+      .child(v.description ? TextView.markdown("desc", v.description) : div().text_color(t.dim).child("—"))
+      .when(Boolean(v.acceptance), (el) => el.child(heading("Acceptance criteria")).child(TextView.markdown("acc", v.acceptance)))
+      .when(v.subtasks.length > 0, (el) => el.child(heading(`Subtasks · ${v.subtasks.length}`)).children(v.subtasks.map((st) =>
+        h_flex().id(`st-${st.key}`).gap(10).child(div().w(96).text_color(t.dim).child(st.key)).child(div().w(110).text_color(t.muted).child(st.status)).child(div().flex_1().truncate().text_color(t.foreground).child(st.summary)))))
+      .when(v.comments.length > 0, (el) => el.child(heading(`Comments · ${v.comments.length}`)).children(v.comments.map((c, i) =>
+        v_flex().id(`c-${i}`).pb(6).child(div().text_size(12).text_color(t.dim).child(`${c.who} · ${c.when}`)).child(TextView.markdown(`cbody-${i}`, c.body || "")))));
+    const menu = ticketMenu(d.ticket, { agent: v.agent, attention: v.attention ? [v.attention] : [] });
+    const right = v_flex().id("details-right").w(300).min_h_0().overflow_y_scrollbar().p(12).gap(4).border_l(1).border_color(t.border)
+      .child(heading("Agent")).child(div().text_color(v.agent ? t[v.agent] ?? t.foreground : t.dim).child(v.agent ? `● ${v.agent}` : "no agent"))
+      .child(heading("Pull requests")).children(v.prs.length === 0 ? [div().text_color(t.dim).child("—")] : v.prs.map((p, i) =>
+        h_flex().id(`dpr-${i}`).gap(6).child(div().text_color(t[p.tone] ?? t.dim).child(p.mark)).child(div().flex_1().truncate().text_color(t.foreground).child(p.ref))))
+      .child(heading("Actions")).children(menu.items.filter((it) => it.action !== "details").map((it, i) =>
+        div().id(`dact-${i}`).px(8).py(3).rounded(5).text_color(t.foreground).hover((s) => s.bg(t.hover))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(it, cx)).child(it.label)))
+      .child(heading("Work")).children(v.work.length === 0 ? [div().text_color(t.dim).child("no worktree linked")] : v.work.map((w, i) =>
+        v_flex().id(`w-${i}`).child(div().text_color(t.foreground).child(w.where)).child(div().text_size(11).text_color(t.dim).truncate().child(w.path))));
+    return v_flex().id("details").flex_1().min_h_0().child(nav).child(h_flex().flex_1().min_h_0().items_start().child(left).child(right));
   }
 
   async openStart(key) {
@@ -829,6 +902,7 @@ export default class Tkt extends View {
 
   body(t) {
     if (this.choices) return this.chooser(t);
+    if (this.details) return this.detailsScreen(t);
     const answer = this.answers[this.tab];
     if (!answer) return div().p(16).text_color(this.error ? t.blocked : t.muted).child(this.error ? problemOf(this.error, this.machine) : "Loading…");
     if (answer.status === 503) return div().p(16).text_color(t.muted).child("tkt is syncing the board for the first time…");
@@ -863,7 +937,7 @@ export default class Tkt extends View {
       .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
       .child(this.header(t))
       .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
-      .when(this.tab === "sprint" && !this.choices, (el) => el.child(this.preview(t, this.answers.sprint?.body)))
+      .when(this.tab === "sprint" && !this.choices && !this.details, (el) => el.child(this.preview(t, this.answers.sprint?.body)))
       .child(this.legend(t))
       .child(this.status(t))
       .when(Boolean(this.openPanel()), (el) => { const p = this.openPanel(); return el.child(this.filterPanel(t, p.items, p.hidden, p.field)); })
