@@ -42,6 +42,7 @@ export default class Tkt extends View {
     this.found = [];
     this.menu = null;
     this.picker = null;
+    this.jobs = [];
     this.prompt = null;
     this.form = null;
     this.input = InputState.new({ placeholder: "" });
@@ -142,6 +143,17 @@ export default class Tkt extends View {
     }
   }
 
+  /** Asks how the Starts and tasks answered 202 ended, since no event stream reaches a mod. */
+  async followJobs() {
+    for (const job of [...this.jobs]) {
+      const a = await this.call("GET", `/v1/jobs/${job.id}`);
+      if (a.status === 200 && a.body.state === "running") continue;
+      this.jobs = this.jobs.filter((j) => j !== job);
+      if (a.status === 200 && a.body.state === "failed") this.notice = `${job.what} failed: ${a.body.message}`;
+      else if (a.status === 200) this.notice = `${job.what} finished`;
+    }
+  }
+
   load(cx) {
     const tab = TABS.find((t) => t.id === this.tab);
     let route = tab.id === "prs" && this.bots ? `${tab.route}?bots=true` : tab.route;
@@ -152,6 +164,7 @@ export default class Tkt extends View {
     cx.spawn(async (cx) => {
       try {
         this.answers[tab.id] = await this.call("GET", route);
+        if (this.jobs.length > 0) await this.followJobs();
         this.error = null;
         if (this.pendingUse) {
           this.pendingUse = false;
@@ -528,7 +541,10 @@ export default class Tkt extends View {
         rows: [{ label: "Clone them", value: true }, { label: "Skip them", value: false }] };
       return;
     }
-    if (a.status === 202) this.notice = `starting ${key}: its agent opens in Herdr`;
+    if (a.status === 202) {
+      this.notice = `starting ${key}: its agent opens in Herdr`;
+      this.jobs.push({ id: a.body.id, what: `${key}'s Start` });
+    }
     else if (a.status === 200) this.notice = `went to ${key}'s agent`;
     else throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
   }
@@ -546,6 +562,7 @@ export default class Tkt extends View {
         rows: [{ label: "Clone it", value: true }, { label: "Cancel", value: false }] };
       return;
     }
+    if (a.status === 202) this.jobs.push({ id: a.body.id, what: "the task" });
     if (a.status === 200 || a.status === 202) this.notice = "sent to the agent";
     else throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
   }

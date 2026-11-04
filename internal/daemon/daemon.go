@@ -109,6 +109,7 @@ type Info struct {
 
 type Server struct {
 	opts    Options
+	jobs    map[string]jobEnd
 	watchMu sync.Mutex
 	sums    map[string][32]byte
 	token   string
@@ -373,6 +374,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/board/state", s.authed(s.boardState))
 	mux.HandleFunc("PATCH /v1/board/state", s.mutating(s.patchBoardState))
 	mux.HandleFunc("POST /v1/herdr/agents", s.mutating(s.saveAgentKinds))
+	mux.HandleFunc("GET /v1/jobs/{id}", s.authed(s.jobState))
 	mux.HandleFunc("GET /v1/prs", s.authed(s.prs))
 	mux.HandleFunc("GET /v1/backlog", s.authed(s.backlog))
 	mux.HandleFunc("GET /v1/tickets/{key}/start", s.authed(s.startChoices))
