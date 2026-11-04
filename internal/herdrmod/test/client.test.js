@@ -44,3 +44,10 @@ test("tkt found on one machine is used; on several, the person chooses unless on
   assert.deepEqual(pickMachine([null, "wsl-dev"], "wsl-dev"), { machine: "wsl-dev" });
   assert.deepEqual(pickMachine([], undefined), { none: true });
 });
+
+test("the machine in use is looked for again after it failed a few times in a row", async () => {
+  const { failed } = await import("../mod/lib/client.js");
+  assert.deepEqual(failed(0), { failures: 1, lookAgain: false });
+  assert.deepEqual(failed(1), { failures: 2, lookAgain: false });
+  assert.deepEqual(failed(2), { failures: 0, lookAgain: true });
+});

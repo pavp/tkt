@@ -4,7 +4,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay } from "herdr";
-import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds } from "./lib/client.js";
+import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed } from "./lib/client.js";
 import { listRows } from "./lib/list.js";
 
 const TABS = [
@@ -30,6 +30,8 @@ export default class Tkt extends View {
     this.error = null;
     this.machine = undefined;
     this.choices = null;
+    this.failures = 0;
+    this.found = [];
     this.load(cx);
     cx.timer.every(POLL, (cx) => this.load(cx));
   }
@@ -47,7 +49,18 @@ export default class Tkt extends View {
         if (r.code === 0) found.push(on);
       } catch {}
     }
+    this.found = found;
     return pickMachine(found, remembered());
+  }
+
+  /** Opens the list of machines with tkt, looked for again, so the person can switch. */
+  pick(cx) {
+    cx.spawn(async (cx) => {
+      await this.discover();
+      this.choices = this.found.length > 0 ? this.found : null;
+      if (!this.choices) this.error = "tkt is not installed on this computer or on any machine connected to Herdr";
+      cx.notify();
+    });
   }
 
   use(on, cx) {
@@ -78,7 +91,16 @@ export default class Tkt extends View {
       this.machine = pick.machine;
       this.pendingUse = true;
     }
-    return this.run(apiArgs(method, path, body), this.machine);
+    try {
+      const answer = await this.run(apiArgs(method, path, body), this.machine);
+      this.failures = 0;
+      return answer;
+    } catch (e) {
+      const next = failed(this.failures ?? 0);
+      this.failures = next.failures;
+      if (next.lookAgain) this.machine = undefined;
+      throw e;
+    }
   }
 
   load(cx) {
@@ -129,12 +151,17 @@ export default class Tkt extends View {
 
   chooser(t) {
     return v_flex().p(16).gap(8).text_color(t.foreground)
-      .child(div().child("tkt is installed on more than one machine. Which one's board should this window show?"))
+      .child(div().child("tkt is installed on these machines. Which one's board should this window show?"))
       .children(this.choices.map((on) =>
         div().id(`m-${on ?? "here"}`).px(10).py(6).rounded(6).bg(t.raised).hover((s) => s.bg(t.hover))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click((_e, cx) => this.use(on, cx))
-          .child(on ?? "This computer")));
+          .child(`${on ?? "This computer"}${on === this.machine ? "  ✓" : ""}`)))
+      .when(this.machine !== undefined, (el) => el.child(
+        div().id("m-cancel").px(10).py(6).text_color(t.muted).hover((s) => s.text_color(t.foreground))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => { this.choices = null; cx.notify(); })
+          .child("Keep the current one")));
   }
 
   body(t) {
@@ -155,9 +182,12 @@ export default class Tkt extends View {
   }
 
   status(t) {
-    const where = this.machine === undefined ? "looking for tkt…" : `tkt on ${this.machine ?? "this computer"}`;
+    const where = this.machine === undefined ? "looking for tkt…" : `tkt on ${this.machine ?? "this computer"} ▾`;
     return h_flex().px(12).py(5).gap(12).bg(t.chrome).border_t(1).border_color(t.border).text_size(12)
-      .child(div().text_color(t.dim).child(where))
+      .child(div().id("machine").px(4).rounded(4).text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => this.pick(cx))
+        .child(where))
       .child(div().flex_1().truncate().text_color(this.error ? t.blocked : t.dim).child(this.error ?? ""));
   }
 

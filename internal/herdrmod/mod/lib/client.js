@@ -44,3 +44,12 @@ export function pickMachine(found, chosen) {
   if (chosen !== undefined && found.includes(chosen)) return { machine: chosen };
   return { choose: found };
 }
+
+// A machine whose tkt fails this many requests in a row is looked for again: it may have lost tkt.
+const LOOK_AGAIN = 3;
+
+/** The failure count after one more failed request, and whether to look for tkt again. */
+export function failed(failures) {
+  const n = failures + 1;
+  return n >= LOOK_AGAIN ? { failures: 0, lookAgain: true } : { failures: n, lookAgain: false };
+}
