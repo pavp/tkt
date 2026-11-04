@@ -47,7 +47,8 @@ func TestContractPRs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			seed := contractPRs()
 			s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour, Seed: &seed,
-				Lists: func() board.ListState { return tt.state }, Repos: func() []string { return []string{"example-org/api", "example-org/docs"} }})
+				Lists: func() board.ListState { return tt.state }, Repos: func() []string { return []string{"example-org/api", "example-org/docs"} },
+				Now: func() time.Time { return seed.FetchedAt.Add(3 * time.Minute) }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -99,7 +100,8 @@ func TestContractBacklog(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour,
 				State: func() board.ViewState { return tt.view }, Lists: func() board.ListState { return tt.lists },
-				Backlog: func(context.Context, bool) (board.Backlog, error) { return contractBacklog(), nil }})
+				Backlog: func(context.Context, bool) (board.Backlog, error) { return contractBacklog(), nil },
+				Now:     func() time.Time { return contractBacklog().FetchedAt.Add(4 * time.Minute) }})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -15,14 +15,16 @@ import (
 // PRsView is the PRs tab as the board lays it out: the user's pull requests, then the review requests, or every
 // open pull request while team_prs is on, in groups by repository.
 type PRsView struct {
-	FetchedAt   time.Time `json:"fetched_at"`
-	Partial     bool      `json:"partial,omitempty"`
-	Syncing     bool      `json:"syncing,omitempty"`
-	SyncError   string    `json:"sync_error,omitempty"`
-	HiddenRepos []string  `json:"hidden_repos"`
-	Collapsed   []string  `json:"collapsed"`
-	TeamPRs     bool      `json:"team_prs"`
-	Bots        bool      `json:"bots"`
+	FetchedAt time.Time `json:"fetched_at"`
+	Partial   bool      `json:"partial,omitempty"`
+	Syncing   bool      `json:"syncing,omitempty"`
+	SyncError string    `json:"sync_error,omitempty"`
+	// SyncLabel says how fresh the board is, as the TUI's status line does.
+	SyncLabel   string   `json:"sync_label"`
+	HiddenRepos []string `json:"hidden_repos"`
+	Collapsed   []string `json:"collapsed"`
+	TeamPRs     bool     `json:"team_prs"`
+	Bots        bool     `json:"bots"`
 	// HiddenBots counts the pull requests opened by bots, which bots=true shows.
 	HiddenBots int          `json:"hidden_bots"`
 	Repos      []RepoFilter `json:"repos"`
@@ -64,7 +66,9 @@ type PRRow struct {
 type BacklogView struct {
 	FetchedAt time.Time `json:"fetched_at"`
 	// Error says why the backlog could not be refreshed; the backlog is then the last copy.
-	Error        string           `json:"error,omitempty"`
+	Error string `json:"error,omitempty"`
+	// SyncLabel says how fresh the Backlog is, as the TUI's status line does on that tab.
+	SyncLabel    string           `json:"sync_label"`
 	HiddenBoards []string         `json:"hidden_boards"`
 	Merged       bool             `json:"merged"`
 	Collapsed    []string         `json:"collapsed"`
@@ -115,6 +119,7 @@ func (s *Server) prs(w http.ResponseWriter, r *http.Request) {
 	f := board.PRFilter{HiddenRepos: setOf(lists.HiddenRepos), Team: lists.TeamPRs, Bots: bots}
 	collapsed := setOf(lists.Collapsed)
 	view := PRsView{FetchedAt: snap.FetchedAt, Partial: snap.Partial, Syncing: syncing, SyncError: syncErr,
+		SyncLabel:   board.SyncLabel(board.SyncState{Loading: syncing, Partial: snap.Partial, Failed: syncErr != "", FetchedAt: snap.FetchedAt}, s.now()),
 		HiddenRepos: orNone(lists.HiddenRepos), Collapsed: orNone(lists.Collapsed), TeamPRs: lists.TeamPRs, Bots: bots,
 		HiddenBots: board.HiddenBots(snap), Repos: []RepoFilter{}, Sections: []PRSection{}, Warnings: snap.Warnings}
 	var configured []string
@@ -165,7 +170,7 @@ func (s *Server) backlog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hidden, collapsed := setOf(state.HiddenBoards), setOf(lists.Collapsed)
-	view := BacklogView{FetchedAt: bl.FetchedAt, HiddenBoards: orNone(state.HiddenBoards), Merged: lists.BacklogMerged, Collapsed: orNone(lists.Collapsed),
+	view := BacklogView{FetchedAt: bl.FetchedAt, SyncLabel: board.BacklogLabel(false, bl.FetchedAt, s.now()), HiddenBoards: orNone(state.HiddenBoards), Merged: lists.BacklogMerged, Collapsed: orNone(lists.Collapsed),
 		Boards: []BoardFilter{}, Groups: []BacklogSection{}, LabelField: bl.LabelField, Me: bl.Me, Warnings: bl.Warnings, NoTeamBoards: bl.NoTeamBoards}
 	if err != nil {
 		view.Error = err.Error()

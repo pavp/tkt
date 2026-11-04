@@ -1097,7 +1097,7 @@ export default class Tkt extends View {
         .on_click((_e, cx) => this.pick(cx))
         .child(where))
       .child(div().flex_1().truncate().text_color(this.error ? t.blocked : t.dim).child(this.error ? problemOf(this.error, this.machine) : this.notice))
-      .child(div().text_color(t.dim).child(this.tab === "backlog" ? (this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : "") : this.answers.sprint?.body?.sync_label ?? ""))
+      .child(div().text_color(t.dim).child(this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.answers[this.tab]?.body?.sync_label ?? ""))
       .child(div().id("sync").px(6).rounded(4).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => this.sync(cx))
