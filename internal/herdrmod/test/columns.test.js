@@ -44,3 +44,10 @@ test("a card's pull requests end with its finished ones, as the TUI words them",
   assert.deepEqual(c.prs, []);
   assert.equal(c.finished, "#1 merged");
 });
+
+test("a list row's pull request cell falls back to the finished ones, as the TUI's list does", async () => {
+  const { prCell } = await import("../mod/lib/columns.js");
+  assert.deepEqual(prCell({ prs: [{ ref: "#3", mark: "✓", tone: "success" }], finished: "2 merged" }), { text: "#3 ✓", tone: "success" });
+  assert.deepEqual(prCell({ prs: [], finished: "7 merged" }), { text: "7 merged", tone: "dim" });
+  assert.deepEqual(prCell({ prs: [], finished: null }), { text: "—", tone: "dim" });
+});
