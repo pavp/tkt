@@ -92,7 +92,23 @@ func (s *Server) board(w http.ResponseWriter, r *http.Request) {
 			view.Sections[last].Rows = append(view.Sections[last].Rows, rows[i])
 		}
 	}
+	for i := range view.Columns {
+		withCards(view.Columns[i].Rows)
+	}
+	for i := range view.Sections {
+		withCards(view.Sections[i].Rows)
+	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+// withCards adds each row's card; the rows are the view's own copies, so the snapshot keeps none.
+func withCards(rows []board.Row) {
+	for i := range rows {
+		if rows[i].Ticket != nil {
+			c := board.CardOf(*rows[i].Ticket)
+			rows[i].Card = &c
+		}
+	}
 }
 
 func orEmpty(rows []board.Row) []board.Row {
