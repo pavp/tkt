@@ -107,9 +107,10 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 	// The team is the active sprints of the boards the user picked; its search runs beside everything
 	// else and is joined last.
 	type teamResult struct {
-		issues []jira.Issue
-		boards map[int]string
-		err    error
+		issues   []jira.Issue
+		boards   map[int]string
+		warnings []string
+		err      error
 	}
 	var teamDone chan teamResult
 	var boards []config.TeamBoard
@@ -119,8 +120,8 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 	if opts.Team && len(boards) > 0 {
 		teamDone = make(chan teamResult, 1)
 		go func() {
-			is, sprints, err := teamIssues(ctx, js, c.SpaceKeys(), boards, fields)
-			teamDone <- teamResult{is, sprints, err}
+			is, sprints, warns, err := teamIssues(ctx, js, c.SpaceKeys(), boards, fields)
+			teamDone <- teamResult{is, sprints, warns, err}
 		}()
 	}
 	type handedOffResult struct {
@@ -241,6 +242,7 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		if r := <-teamDone; r.err != nil {
 			snap.Warnings = append(snap.Warnings, "team tickets unavailable: "+r.err.Error())
 		} else {
+			snap.Warnings = append(snap.Warnings, r.warnings...)
 			for _, is := range r.issues {
 				t := toTicket(is)
 				t.Team = true
@@ -420,11 +422,12 @@ func issueFields(ctx context.Context, c *config.Config, js interface {
 // board's name.
 // teamIssues reads each team board's active sprints through the board's own query: a sprint another board
 // shares with it (Jira shows it once one of its tickets matches the board) brings only the tickets the board
-// shows, never the whole sprint. A board whose query cannot be read falls back to its sprints' tickets.
-func teamIssues(ctx context.Context, js JiraSource, spaces []string, boards []config.TeamBoard, fields []string) ([]jira.Issue, map[int]string, error) {
+// shows, never the whole sprint. A board whose query cannot be read falls back to its sprints' tickets, and says so.
+func teamIssues(ctx context.Context, js JiraSource, spaces []string, boards []config.TeamBoard, fields []string) ([]jira.Issue, map[int]string, []string, error) {
 	type result struct {
 		ids    []int
 		issues []jira.Issue
+		warn   string
 		err    error
 	}
 	results := make([]result, len(boards))
@@ -438,12 +441,15 @@ func teamIssues(ctx context.Context, js JiraSource, spaces []string, boards []co
 				results[n] = result{err: err}
 				return
 			}
-			jql := jira.TeamSprintJQL(spaces, ids)
-			if filter, ferr := js.BoardFilter(ctx, b.ID); ferr == nil && filter > 0 {
+			jql, warn := jira.TeamSprintJQL(spaces, ids), ""
+			switch filter, ferr := js.BoardFilter(ctx, b.ID); {
+			case ferr != nil:
+				warn = fmt.Sprintf("the filter of team board %s could not be read, so its sprints show all their tickets: %v", b.Name, ferr)
+			case filter > 0:
 				jql = jira.TeamBoardSprintJQL(filter, spaces, ids)
 			}
 			is, err := js.Search(ctx, jql, fields)
-			results[n] = result{ids: ids, issues: is, err: err}
+			results[n] = result{ids: ids, issues: is, warn: warn, err: err}
 		}()
 	}
 	wg.Wait()
@@ -451,9 +457,13 @@ func teamIssues(ctx context.Context, js JiraSource, spaces []string, boards []co
 	sprints := map[int]string{}
 	seen := map[string]bool{}
 	var out []jira.Issue
+	var warnings []string
 	var firstErr error
 	answered := 0
 	for n, r := range results {
+		if r.warn != "" {
+			warnings = append(warnings, r.warn)
+		}
 		if r.err != nil {
 			firstErr = cmp.Or(firstErr, fmt.Errorf("board %s: %w", boards[n].Name, r.err))
 			continue
@@ -472,9 +482,9 @@ func teamIssues(ctx context.Context, js JiraSource, spaces []string, boards []co
 		}
 	}
 	if answered == 0 {
-		return nil, nil, firstErr
+		return nil, nil, warnings, firstErr
 	}
-	return out, sprints, nil
+	return out, sprints, warnings, nil
 }
 
 // partialBoard is the board as Jira tells it before GitHub answers: each ticket keeps the previous board's

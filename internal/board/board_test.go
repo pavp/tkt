@@ -36,6 +36,7 @@ type stubJira struct {
 	// search that names that filter, as Jira answers a board's own query.
 	sprints      map[int][]int
 	filters      map[int]int
+	filterErr    error
 	teamByFilter map[int][]jira.Issue
 	// teamGate, when set, holds the team search until the GitHub listing starts; teamStalled records a
 	// search that gave up waiting, as one that held the listing back would.
@@ -84,7 +85,7 @@ func (s *stubJira) Search(_ context.Context, jql string, fields []string) ([]jir
 func (s *stubJira) BoardFilter(_ context.Context, board int) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.filters[board], nil
+	return s.filters[board], s.filterErr
 }
 
 func (s *stubJira) ActiveSprints(_ context.Context, board int) ([]int, error) {
@@ -1201,5 +1202,24 @@ func TestASprintTwoTeamBoardsShowIsNamedAfterTheFirstConfigured(t *testing.T) {
 				t.Fatalf("DEMO-7's board = %q, want the first configured %q", tk.Board, first)
 			}
 		}
+	}
+}
+
+func TestATeamBoardWhoseFilterCannotBeReadSaysSo(t *testing.T) {
+	js := &stubJira{
+		issues:    []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "To Do", StatusCategory: "new", Assignee: "Dev Example"}},
+		team:      []jira.Issue{{ID: "7", Key: "DEMO-7", Summary: "Theirs", Status: "To Do", StatusCategory: "new"}},
+		sprints:   map[int][]int{5205: {11807}},
+		filterErr: errors.New("jira GET /rest/agile/1.0/board/5205/configuration: 403 Forbidden"),
+		linked:    map[string][]jira.DevPullRequest{},
+	}
+	snap, err := FetchWith(context.Background(), teamCfg(), js, &stubGitHub{}, time.Now(), Snapshot{}, Options{Team: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(snap.Warnings, func(w string) bool {
+		return strings.Contains(w, "Authorization Center") && strings.Contains(w, "filter") && strings.Contains(w, "403")
+	}) {
+		t.Errorf("warnings = %q, want one naming the board whose filter could not be read", snap.Warnings)
 	}
 }
