@@ -49,7 +49,8 @@ export function stepColumns(cols, current, dc, dr) {
 }
 
 /** What the arrows move between on a tab: the cards of each column, or a list's rows with their indexes in the
- *  drawn list (titles included) and that list's id, to scroll the selection into view. */
+ *  drawn list and that list's id, to scroll the selection into view; the PRs tab's and the Backlog's group titles
+ *  are stops too ("group:<key>"), which enter folds, as the TUI's. */
 export function targets(tab, view, body) {
   if (tab === "sprint" && view === "columns") return { cols: (body?.columns ?? []).map((c) => c.rows.map((r) => r.key)) };
   const [rows, id, list] = tab === "prs" ? [prRows(body), (r) => r.key + r.group, "pr-rows"]
@@ -58,8 +59,9 @@ export function targets(tab, view, body) {
   const ids = [];
   const at = [];
   rows.forEach((r, i) => {
-    if (r.kind !== "row") return;
-    ids.push(id(r));
+    if (r.kind === "row") ids.push(id(r));
+    else if (tab !== "sprint" && r.group) ids.push(`group:${r.group}`);
+    else return;
     at.push(i);
   });
   return { ids, at, list };
@@ -94,5 +96,18 @@ export function boardAction(k, tab) {
 /** What the board selects when nothing is: the first card of the first column with cards, or the first row. */
 export function firstTarget(targets) {
   if (targets.cols) return targets.cols.find((c) => c.length > 0)?.[0] ?? null;
-  return targets.ids[0] ?? null;
+  return targets.ids.find((id) => !id.startsWith("group:")) ?? null;
+}
+
+/** A highlighted option after up or down in a list of n, or null when the key moves nothing. */
+export function listKey(sel, n, k) {
+  const d = { down: 1, j: 1, s: 1, up: -1, k: -1, w: -1 }[k];
+  if (d === undefined) return null;
+  return Math.max(0, Math.min(Math.max(0, n - 1), sel + d));
+}
+
+export function sectionAfter(ids, current, k) {
+  const at = ids.indexOf(current);
+  const d = { tab: 1, right: 1, l: 1, "shift-tab": -1, left: -1, h: -1 }[k];
+  return d === undefined ? null : ids[(at + d + ids.length) % ids.length];
 }
