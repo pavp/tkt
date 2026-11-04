@@ -92,6 +92,8 @@ type Options struct {
 	StateFile  string
 	ConfigFile string
 	WatchEvery time.Duration
+	// Log records each write a request made (method, path and answer); nil logs nothing.
+	Log func(format string, args ...any)
 }
 
 // Info is what daemon.json records for clients: where the daemon listens and which process it is.
