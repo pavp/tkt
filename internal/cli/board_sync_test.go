@@ -122,3 +122,21 @@ func TestTheBoardFollowsFiltersAndSettingsSavedElsewhere(t *testing.T) {
 		t.Errorf("the board kept using %v, want the config saved elsewhere", got.RepoRoots)
 	}
 }
+
+func TestSettingsSaveAConfigWithNoSpaceYet(t *testing.T) {
+	h := newHarness(t, "repo_roots = [\"~/src\"]\n\n[jira]\nsite = \"example.atlassian.net\"\nemail = \"dev@example.com\"\n")
+	c, err := h.app.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &boardActions{a: h.app, c: c, ctx: context.Background()}
+	base := b.Config()
+	edit := base.Clone()
+	edit.RepoRoots = append(edit.RepoRoots, "/opt")
+	if msg, ok := b.SaveConfig(base.Clone(), edit)().(tui.SettingsSavedMsg); !ok || msg.Err != nil {
+		t.Errorf("SaveConfig = %#v, want it saved: nothing changed elsewhere (the TUI passes a copy)", msg)
+	}
+	if _, changed := b.configChanged(); changed {
+		t.Error("the board's own save reads as a change made elsewhere")
+	}
+}

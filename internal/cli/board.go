@@ -368,11 +368,17 @@ func (b *boardActions) configChanged() (config.Config, bool) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.cfgBase != nil && reflect.DeepEqual(disk, *b.cfgBase) {
+	if b.cfgBase != nil && sameConfig(disk, *b.cfgBase) {
 		return disk, false
 	}
 	b.adoptConfig(disk)
 	return disk, true
+}
+
+// sameConfig compares two configurations through Clone, which settles nil against empty lists, so a copy of
+// what config.toml holds equals the file.
+func sameConfig(a, b config.Config) bool {
+	return reflect.DeepEqual(a.Clone(), b.Clone())
 }
 
 // adoptConfig makes c, as config.toml holds it, the board's configuration; callers hold b.mu.
@@ -421,7 +427,7 @@ func (b *boardActions) SaveConfig(base, c config.Config) tea.Cmd {
 	return func() tea.Msg {
 		b.mu.Lock()
 		defer b.mu.Unlock()
-		if disk, err := b.a.savedConfig(); err == nil && !reflect.DeepEqual(disk, base) {
+		if disk, err := b.a.savedConfig(); err == nil && !sameConfig(disk, base) {
 			b.adoptConfig(disk)
 			return tui.SettingsChangedMsg{Config: disk, Conflict: true}
 		}
