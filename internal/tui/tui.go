@@ -43,8 +43,9 @@ type Actions interface {
 	Detail(key ticket.Key, known *ticket.Ticket) tea.Cmd
 	// Config returns a copy of the configuration in use, for the settings view to edit.
 	Config() config.Config
-	// SaveConfig writes the configuration; the outcome arrives as a SettingsSavedMsg.
-	SaveConfig(c config.Config) tea.Cmd
+	// SaveConfig writes c, the change made to base; when config.toml no longer holds base, it writes nothing and
+	// answers a SettingsChangedMsg with what the file holds, else a SettingsSavedMsg.
+	SaveConfig(base, c config.Config) tea.Cmd
 	// FindClones looks for local clones of repo ("owner/name"); they arrive as a ClonesFoundMsg.
 	FindClones(repo string) tea.Cmd
 	// RepoAt reads the GitHub repository a folder's origin points to; it arrives as a RepoFoundMsg.
@@ -115,6 +116,15 @@ type RepoFoundMsg struct {
 type FolderPickedMsg struct {
 	Path string
 	Err  error
+}
+
+// BoardStateMsg is the board's filters as saved elsewhere, such as by the Herdr desktop mod.
+type BoardStateMsg struct{ State BoardState }
+
+// SettingsChangedMsg is config.toml as saved elsewhere; Conflict marks a save refused because of it.
+type SettingsChangedMsg struct {
+	Config   config.Config
+	Conflict bool
 }
 
 // SettingsSavedMsg reports a settings save: the configuration as written, with defaults filled in, or why
@@ -827,6 +837,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reselect()
 	case SettingsSavedMsg:
 		return m.settingsSaved(msg)
+	case SettingsChangedMsg:
+		return m.settingsChanged(msg)
+	case BoardStateMsg:
+		m = m.WithState(msg.State)
+		m.reselect()
+		return m, nil
 	case ClonesFoundMsg, RepoFoundMsg, FolderPickedMsg, DirsListedMsg, ReposListedMsg, JiraFieldsListedMsg, JiraBoardsListedMsg:
 		return m.settingsLookup(msg)
 	case JiraStatusesListedMsg:

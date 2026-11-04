@@ -270,6 +270,7 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := s.settingsView(saved)
+	s.noteFile(s.opts.ConfigFile)
 	s.mu.Lock()
 	s.publish("settings.updated", v)
 	s.mu.Unlock()

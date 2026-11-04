@@ -22,6 +22,9 @@ import (
 // syncEvery is how often the daemon refreshes the board from Jira and GitHub.
 const syncEvery = time.Minute
 
+// watchEvery is how soon the daemon notices that the TUI or another program saved the board's filters or Settings.
+const watchEvery = 2 * time.Second
+
 func newDaemonCmd(a *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
@@ -83,6 +86,7 @@ func (a *App) runDaemon(ctx context.Context) error {
 		Lists: a.boardListState, SavedState: a.loadBoardState, SaveState: a.saveBoardState, Repos: a.daemonRepos, Backlog: a.daemonBacklog, StartChoices: a.daemonStartChoices, Start: a.daemonStart,
 		Transitions: a.daemonTransitions, Transition: a.daemonTransition, Users: a.daemonUsers, Assign: a.daemonAssign,
 		TaskAgents: a.daemonTaskAgents, Task: a.daemonTask,
+		StateFile: a.boardStateFile(), ConfigFile: a.ConfigPath(), WatchEvery: watchEvery,
 		Settings: a.savedConfig, SaveSettings: a.saveConfig, JiraStatuses: a.daemonStatuses, JiraBoards: a.daemonBoards, JiraFields: a.daemonFields})
 	if err != nil {
 		return err

@@ -87,6 +87,11 @@ type Options struct {
 	JiraStatuses StatusesFunc
 	JiraBoards   BoardsFunc
 	JiraFields   FieldsFunc
+	// StateFile and ConfigFile are board-state.json and config.toml, which the TUI writes too: when their content
+	// changes the daemon sends state.updated or settings.updated, checking every WatchEvery (none when zero).
+	StateFile  string
+	ConfigFile string
+	WatchEvery time.Duration
 }
 
 // Info is what daemon.json records for clients: where the daemon listens and which process it is.
@@ -97,8 +102,10 @@ type Info struct {
 }
 
 type Server struct {
-	opts  Options
-	token string
+	opts    Options
+	watchMu sync.Mutex
+	sums    map[string][32]byte
+	token   string
 
 	// mu guards the board and the clients, so a client joining between two events sees each once.
 	mu      sync.Mutex
@@ -226,6 +233,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		defer loop.Done()
 		s.syncLoop(ctx)
 	}()
+	defer s.watch()()
 
 	defer s.quitOnce.Do(func() { close(s.quit) })
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}

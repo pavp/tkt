@@ -67,7 +67,7 @@ func TestDaemonSettingsWriteWhatTheTUIsSettingsWrite(t *testing.T) {
 	sp.TeamBoards = append(sp.TeamBoards, config.TeamBoard{ID: 9, Name: "Core"})
 	board.SetStatusColumn(sp, board.Status{Name: "Testing", Category: "indeterminate"}, ticket.InReview)
 	board.SetStatusMark(sp, board.Status{Name: "To Do", Category: "new"}, ticket.MarkStar)
-	if msg := b.SaveConfig(edit)(); msg == nil {
+	if msg := b.SaveConfig(b.Config(), edit)(); msg == nil {
 		t.Fatal("the TUI's save answered nothing")
 	}
 	want, err := os.ReadFile(tui.app.ConfigPath())
