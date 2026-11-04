@@ -7,7 +7,7 @@ import { exec, machines, knownAgents, theme, props, closeOverlay, appHome } from
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
-import { columnCards, cardOf, wrapWords } from "./lib/columns.js";
+import { columnCards, cardOf, wrapWords, markOf } from "./lib/columns.js";
 import { previewOf, legendFor, problemOf } from "./lib/footer.js";
 import { prRows, toggled, reposChip } from "./lib/prs.js";
 import { backlogRows, badges } from "./lib/backlog.js";
@@ -983,7 +983,8 @@ export default class Tkt extends View {
   }
 
   card(t, c) {
-    const flag = c.attention ? `! ${c.attention}` : c.mark ? `${c.mark} ${c.status}` : "";
+    const mark = markOf(c.mark, c.status);
+    const flag = c.attention ? `! ${c.attention}` : mark ? mark.word : "";
     const lines = wrapWords(c.summary, 34, 2);
     const sel = this.selected === c.key;
     return v_flex().id(`card-${c.key}`).p(8).gap(3).rounded(8).border(1)
@@ -994,7 +995,7 @@ export default class Tkt extends View {
         .child(div().text_color(t.dim).child(c.subtask ? `↳ ${c.key}` : c.key))
         .when(Boolean(c.points), (el) => el.child(div().text_color(t.dim).child(c.points)))
         .child(div().flex_1())
-        .when(Boolean(flag), (el) => el.child(div().text_color(c.attention ? t.blocked : t.muted).child(flag)))
+        .when(Boolean(flag), (el) => el.child(div().text_color(c.attention ? t.blocked : t[mark?.tone] ?? t.muted).child(flag)))
         .when(Boolean(c.agent), (el) => el.child(div().text_color(t[c.agent] ?? t.unknown).child("●"))))
       .children(lines.map((l, i) => div().id(`card-${c.key}-l${i}`).font_semibold().text_color(c.team ? t.muted : t.foreground).child(l)))
       .child(h_flex().gap(6).text_size(12).children(c.prs.length === 0 ? [div().text_color(t.dim).child("—")] :
@@ -1013,7 +1014,7 @@ export default class Tkt extends View {
     const pr = c.prs[0];
     return h_flex().h(ROW).px(12).gap(10).items_center().bg(sel ? t.selected : t.surface)
       .child(div().w(96).text_color(sel ? t.foreground : t.dim).child(c.subtask ? `↳ ${c.key}` : c.key))
-      .child(div().w(110).truncate().text_color(c.attention ? t.blocked : t.muted).child(c.attention ? `! ${c.attention}` : c.status))
+      .child(div().w(110).truncate().text_color(c.attention ? t.blocked : t.muted).child(c.attention ? `! ${c.attention}` : markOf(c.mark, c.status)?.word ?? c.status))
       .child(div().w(40).text_color(t.dim).child(c.points))
       .child(div().w(80).truncate().text_color(t.muted).child(c.who))
       .child(div().w(16).text_color(t[c.agent] ?? t.dim).child(c.agent ? "●" : ""))
