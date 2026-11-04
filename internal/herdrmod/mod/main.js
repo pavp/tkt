@@ -7,7 +7,8 @@ import { exec, machines, knownAgents, theme, props, closeOverlay, appHome } from
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
-import { columnCards, cardOf, wrapWords, markOf, prCell, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN } from "./lib/columns.js";
+import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN } from "./lib/columns.js";
+import { gutterOf, statusTone, prStatusTone, agentWord, prRefs, listColumns, pointsText } from "./lib/rows.js";
 import { previewOf, legendFor, problemOf, warningsLine } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview, prsToggle } from "./lib/prs.js";
 import { backlogRows, badges } from "./lib/backlog.js";
@@ -335,24 +336,26 @@ export default class Tkt extends View {
   backlogRow(t, r) {
     if (r.kind === "title") {
       const b = badges(r.points);
-      const tone = { todo: t.unknown, doing: t.working, done: t.done };
+      const tone = { todo: t.ansi8 ?? t.unknown, doing: t.ansi4 ?? t.working, done: t.ansi2 ?? t.done };
       return h_flex().h(ROW).px(12).gap(8).items_end().pb(3).text_color(t.foreground)
         .child(div().text_color(t.dim).child(r.collapsed ? "▸" : "▾"))
         .child(div().font_semibold().child(r.title))
-        .when(Boolean(r.board), (el) => el.child(div().text_color(t.muted).child(r.board)))
-        .when(Boolean(r.dates), (el) => el.child(div().text_color(t.dim).child(r.dates)))
+        .when(Boolean(r.board), (el) => el.child(div().px(5).rounded(4).bg(t.chrome).text_color(t.foreground).font_weight(400).child(r.board)))
+        .when(Boolean(r.dates), (el) => el.child(div().text_color(t.muted).child(r.dates)))
         .child(div().text_color(t.dim).child(String(r.count)))
         .child(div().flex_1())
         .when(Boolean(b?.unestimated), (el) => el.child(div().text_color(t.dim).child(b.unestimated)))
         .when(Boolean(b), (el) => el.children(b.stages.map(([stage, n]) => div().px(5).rounded(3).bg(tone[stage]).text_color(t.background).child(n))));
     }
-    return this.listRow(t, r, { agents: {} });
+    return this.listRow(t, r, { agents: {} }, this.backlogCols, { backlog: true });
   }
 
   backlogList(t, view) {
     if (view.no_team_boards) return div().p(16).text_color(t.muted).child("No team boards set: choose them in Settings › Team boards to see their sprints and backlog here.");
     const rows = backlogRows(view);
+    this.backlogCols = { ...listColumns(rows.filter((r) => r.kind === "row"), {}), assignee: true };
     return v_flex().id("backlog").relative().flex_1().min_h_0()
+      .child(this.listHeader(t, ["KEY", "STATUS", ""], this.backlogCols, { backlog: true }))
       .child(v_virtual_list("backlog-rows", rows.length, ROW, (i) => `${i}`, (range) =>
         rows.slice(range.start, range.end).map((r) => this.backlogRow(t, r))).size_full().track_scroll(this.scrolls["backlog-rows"]).on_item_click((key, cx) => {
         const r = rows[Number(key)];
@@ -373,19 +376,26 @@ export default class Tkt extends View {
         .child(div().child(r.title))
         .child(div().text_color(t.dim).child(r.needs ? `${r.count} · ${r.needs} need you` : String(r.count)));
     }
-    const sel = this.selected === r.key + r.group;
+    const sel = this.selected === r.key + r.group && !this.inStrip;
+    const g = gutterOf({ selected: sel, needsYou: r.needsYou || r.review });
+    const pr = r.raw.pr ?? {};
+    const ci = { pass: ["✓", t.ansi2], fail: ["✕", t.ansi1], pending: ["…", t.accent] }[pr.checks] ?? ["—", t.dim];
     return h_flex().h(ROW).px(12).gap(10).items_center().bg(sel ? t.selected : t.surface)
-      .child(div().w(60).text_color(t.dim).child(r.key))
-      .child(div().w(96).text_color(t.dim).child(r.ticketKey))
-      .child(div().w(140).truncate().text_color(r.needsYou ? t.blocked : t.muted).child(r.needsYou ? `! ${r.status}` : r.status))
-      .child(div().w(90).truncate().text_color(t.muted).child(r.who))
+      .child(div().w(20).text_color(t[g.tone] ?? t.dim).child(g.text))
+      .child(div().w(60).text_color(sel ? t.foreground : t.dim).child(r.key))
+      .child(h_flex().w(190).gap(4).child(div().truncate().text_color(t[prStatusTone(r.raw)] ?? t.foreground).child(r.status))
+        .when(Boolean(r.approvals), (el) => el.child(div().text_color(t.dim).child(`· ${r.approvals}`))))
+      .child(div().w(90).truncate().text_color(t.muted).child(pr.author ?? ""))
+      .child(div().w(30).text_color(ci[1] ?? t.dim).child(ci[0]))
       .child(div().flex_1().truncate().text_color(t.foreground).child(r.title));
   }
 
   prsList(t, view) {
     const rows = prRows(view);
     if (rows.length === 0) return div().p(16).text_color(t.muted).child("No pull requests: none of yours open, and no review requested.");
+    const authors = rows.some((r) => r.kind === "row" && r.raw.pr?.author);
     return v_flex().id("prs").relative().flex_1().min_h_0()
+      .child(this.listHeader(t, ["PR", "STATUS", "CI"], { assignee: authors }, { prs: true }))
       .child(v_virtual_list("pr-rows", rows.length, ROW, (i) => `${i}`, (range) =>
         rows.slice(range.start, range.end).map((r) => this.prRow(t, r))).size_full().track_scroll(this.scrolls["pr-rows"]).on_item_click((key, cx) => {
         const r = rows[Number(key)];
@@ -1193,33 +1203,55 @@ export default class Tkt extends View {
         .child(div().flex_1().text_color(t.dim).truncate().child([c.info, c.who].filter(Boolean).join(" · "))));
   }
 
-  listRow(t, r, board) {
+  /** The dim header over a list's rows, naming the columns it shows, as the TUI's. */
+  listHeader(t, heads, cols, opts = {}) {
+    const cell = (w, text) => div().w(w).truncate().child(text);
+    return h_flex().h(ROW - 6).px(12).gap(10).items_center().text_size(12).text_color(t.dim).border_b(1).border_color(t.border)
+      .child(cell(20, "")).child(cell(opts.prs ? 60 : 110, heads[0])).child(cell(opts.prs ? 190 : 130, heads[1]))
+      .when(Boolean(cols.points), (el) => el.child(cell(36, "SP")))
+      .when(Boolean(opts.backlog), (el) => el.child(cell(150, "BOARD")))
+      .when(Boolean(cols.assignee), (el) => el.child(cell(90, opts.prs ? "AUTHOR" : "ASSIGNEE")))
+      .when(Boolean(cols.agent), (el) => el.child(cell(96, "AGENT")))
+      .when(Boolean(heads[2]), (el) => el.child(cell(opts.prs ? 30 : 120, heads[2])))
+      .child(div().flex_1().child("TITLE"));
+  }
+
+  listRow(t, r, board, cols = listColumns([], board.agents), opts = {}) {
     if (r.kind === "title") {
       return h_flex().h(ROW).px(12).items_end().pb(3).font_semibold().text_color(t.foreground)
         .child(div().child(r.title)).child(div().pl(8).text_color(t.dim).child(String(r.count)));
     }
     const c = cardOf(r, board.agents);
-    const sel = this.selected === r.key;
-    const pr = prCell(c);
+    const tk = r.ticket ?? {};
+    const sel = this.selected === r.key && !this.inStrip;
+    const g = gutterOf({ selected: sel, attention: c.attention, mark: markOf(c.mark, c.status) });
+    const icon = opts.backlog ? typeIcon(c.typeKind) : null;
     return h_flex().h(ROW).px(12).gap(10).items_center().bg(sel ? t.selected : t.surface)
-      .child(div().w(96).text_color(sel ? t.foreground : t.dim).child(c.subtask ? `↳ ${c.key}` : c.key))
-      .child(div().w(110).truncate().text_color(c.attention ? t.blocked : t.muted).child(c.attention ? `! ${c.attention}` : markOf(c.mark, c.status)?.word ?? c.status))
-      .child(div().w(40).text_color(t.dim).child(c.points))
-      .child(div().w(80).truncate().text_color(t.muted).child(c.who))
-      .child(div().w(16).text_color(t[c.agent] ?? t.dim).child(c.agent ? "●" : ""))
-      .child(div().w(60).truncate().text_color(t[pr.tone] ?? t.dim).child(pr.text))
+      .child(div().w(20).text_color(t[g.tone] ?? t.dim).child(g.text))
+      .child(h_flex().w(110).gap(4)
+        .when(Boolean(icon), (el) => el.child(div().text_color(t[icon?.tone] ?? t.dim).child(icon?.glyph ?? "")))
+        .when(c.subtask, (el) => el.child(div().text_color(t.ansi6 ?? t.dim).child("↳")))
+        .child(div().text_color(sel ? t.foreground : t.dim).child(c.key)))
+      .child(div().w(130).truncate().text_color(t[statusTone(tk.category)] ?? t.muted).child(c.status))
+      .when(Boolean(cols.points), (el) => el.child(div().w(36).text_color(t.dim).child(pointsText(tk.points))))
+      .when(Boolean(opts.backlog), (el) => el.child(div().w(150).child(tk.board ? div().px(5).rounded(4).bg(t.chrome).text_color(t.foreground).truncate().child(tk.board) : div())))
+      .when(Boolean(cols.assignee), (el) => el.child(div().w(90).truncate().text_color(t.muted).child(c.who)))
+      .when(Boolean(cols.agent), (el) => el.child(div().w(96).text_color(t[c.agent] ?? t.dim).child(agentWord(c.agent))))
+      .when(!opts.backlog, (el) => el.child(div().w(120).truncate().text_color(t.muted).child(prRefs(tk.prs))))
       .child(div().flex_1().truncate().text_color(c.team ? t.muted : t.foreground).child(c.summary));
   }
 
+
   list(t, board) {
     const rows = listRows(board.sections);
+    const cols = listColumns(rows.filter((r) => r.kind === "row"), board.agents);
     const sticky = stickyAt(rows, this.shownRange);
     const more = moreAround(rows, this.shownRange);
     const hint = (text) => div().absolute().right(16).px(8).py(1).rounded(10).bg(t.raised).text_size(11).text_color(t.dim).child(text);
-    return v_flex().id("list").relative().flex_1().min_h_0()
+    return v_flex().flex_1().min_h_0().child(this.listHeader(t, ["KEY", "STATUS", "PR / CI"], cols)).child(v_flex().id("list").relative().flex_1().min_h_0()
       .child(v_virtual_list("rows", rows.length, ROW, (i) => `${rows[i].kind}-${rows[i].key ?? rows[i].title}-${i}`, (range) => {
         this.range = { start: range.start, end: range.end };
-        return rows.slice(range.start, range.end).map((r) => this.listRow(t, r, board));
+        return rows.slice(range.start, range.end).map((r) => this.listRow(t, r, board, cols));
       }).size_full().track_scroll(this.scrolls.rows).on_item_click((key, cx) => {
         const [kind, ...rest] = key.split("-");
         if (kind === "row") {
@@ -1234,7 +1266,7 @@ export default class Tkt extends View {
         .child(div().child(sticky.title)).child(div().pl(8).text_color(t.dim).child(String(sticky.count)))))
       .when(more.above > 0 && !sticky, (el) => el.child(hint(`↑ ${more.above} more`).top(6)))
       .when(more.above > 0 && Boolean(sticky), (el) => el.child(hint(`↑ ${more.above} more`).top(ROW + 6)))
-      .when(more.below > 0, (el) => el.child(hint(`↓ ${more.below} more`).bottom(6)));
+      .when(more.below > 0, (el) => el.child(hint(`↓ ${more.below} more`).bottom(6))));
   }
 
   columns(t, board) {
