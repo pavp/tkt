@@ -79,12 +79,6 @@ export function markOf(mark, status) {
   return m ? { glyph: m[0], word: `${m[0]} ${status}`, tone: m[1] } : null;
 }
 
-/** A list row's PR cell: its first open pull request, else its finished ones, as the TUI's list column says. */
-export function prCell(c) {
-  const pr = c.prs[0];
-  if (pr) return { text: `${pr.ref} ${pr.mark}`, tone: pr.tone ?? "dim" };
-  return { text: c.finished || "—", tone: "dim" };
-}
 
 const TYPE_ICONS = { bug: ["●", "ansi1"], epic: ["◆", "ansi5"], subtask: ["■", "ansi6"], story: ["■", "ansi2"], task: ["■", "ansi4"] };
 
