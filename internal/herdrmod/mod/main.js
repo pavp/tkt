@@ -2,11 +2,11 @@
 // core runs tkt, so it works whether tkt runs here or on a machine reached over SSH.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, v_virtual_list, Scrollbar } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay } from "herdr";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed } from "./lib/client.js";
-import { listRows } from "./lib/list.js";
-import { columnCards, wrapWords } from "./lib/columns.js";
+import { listRows, stickyAt, moreAround } from "./lib/list.js";
+import { columnCards, cardOf, wrapWords } from "./lib/columns.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -15,6 +15,7 @@ const TABS = [
 ];
 // No event stream reaches a mod, so the shown tab is read again this often.
 const POLL = 5000;
+const ROW = 28;
 
 function remembered() {
   try {
@@ -34,6 +35,17 @@ export default class Tkt extends View {
     this.failures = 0;
     this.found = [];
     this.view = "columns";
+    this.range = { start: 0, end: 0 };
+    this.shownRange = { start: 0, end: 0 };
+    this.selected = null;
+    // The list learns what is on screen while it lays out, where it may not ask for a render; the pinned title and
+    // the "N more" hints follow on this tick instead.
+    cx.timer.every(150, (cx) => {
+      if (this.range.start !== this.shownRange.start || this.range.end !== this.shownRange.end) {
+        this.shownRange = { ...this.range };
+        cx.notify();
+      }
+    });
     this.loadView(cx);
     this.load(cx);
     cx.timer.every(POLL, (cx) => this.load(cx));
@@ -220,6 +232,49 @@ export default class Tkt extends View {
       .child(div().text_size(12).text_color(t.dim).truncate().child([c.info, c.who].filter(Boolean).join(" · ")));
   }
 
+  listRow(t, r, board) {
+    if (r.kind === "title") {
+      return h_flex().h(ROW).px(12).items_end().pb(3).font_semibold().text_color(t.foreground)
+        .child(div().child(r.title)).child(div().pl(8).text_color(t.dim).child(String(r.count)));
+    }
+    const c = cardOf(r, board.agents);
+    const sel = this.selected === r.key;
+    const pr = c.prs[0];
+    return h_flex().h(ROW).px(12).gap(10).items_center().bg(sel ? t.selected : t.surface)
+      .child(div().w(96).text_color(sel ? t.foreground : t.dim).child(c.subtask ? `↳ ${c.key}` : c.key))
+      .child(div().w(110).truncate().text_color(c.attention ? t.blocked : t.muted).child(c.attention ? `! ${c.attention}` : c.status))
+      .child(div().w(40).text_color(t.dim).child(c.points))
+      .child(div().w(80).truncate().text_color(t.muted).child(c.who))
+      .child(div().w(16).text_color(t[c.agent] ?? t.dim).child(c.agent ? "●" : ""))
+      .child(div().w(60).text_color(pr ? t[pr.tone] ?? t.dim : t.dim).child(pr ? `${pr.ref} ${pr.mark}` : "—"))
+      .child(div().flex_1().truncate().text_color(c.team ? t.muted : t.foreground).child(c.summary));
+  }
+
+  list(t, board) {
+    const rows = listRows(board.sections);
+    const sticky = stickyAt(rows, this.shownRange);
+    const more = moreAround(rows, this.shownRange);
+    const hint = (text) => div().absolute().right(16).px(8).py(1).rounded(10).bg(t.raised).text_size(11).text_color(t.dim).child(text);
+    return v_flex().id("list").relative().flex_1()
+      .child(v_virtual_list("rows", rows.length, ROW, (i) => `${rows[i].kind}-${rows[i].key ?? rows[i].title}-${i}`, (range) => {
+        this.range = { start: range.start, end: range.end };
+        return rows.slice(range.start, range.end).map((r) => this.listRow(t, r, board));
+      }).size_full().on_item_click((key, cx) => {
+        const [kind, ...rest] = key.split("-");
+        if (kind === "row") {
+          this.selected = rest.slice(0, -1).join("-");
+          cx.notify();
+        }
+      }))
+      .child(Scrollbar.vertical("rows").absolute().inset_0())
+      .when(Boolean(sticky), (el) => el.child(h_flex().absolute().top(0).left(0).right(0).h(ROW).px(12).items_end().pb(3)
+        .bg(t.surface).border_b(1).border_color(t.border).font_semibold().text_color(t.foreground)
+        .child(div().child(sticky.title)).child(div().pl(8).text_color(t.dim).child(String(sticky.count)))))
+      .when(more.above > 0 && !sticky, (el) => el.child(hint(`↑ ${more.above} more`).top(6)))
+      .when(more.above > 0 && Boolean(sticky), (el) => el.child(hint(`↑ ${more.above} more`).top(ROW + 6)))
+      .when(more.below > 0, (el) => el.child(hint(`↓ ${more.below} more`).bottom(6)));
+  }
+
   columns(t, board) {
     return h_flex().id("columns").flex_1().gap(10).p(10).items_start().children(
       columnCards(board).map((col) =>
@@ -239,15 +294,8 @@ export default class Tkt extends View {
     if (answer.status === 503) return div().p(16).text_color(t.muted).child("tkt is syncing the board for the first time…");
     if (answer.status !== 200) return div().p(16).text_color(t.blocked).child(answer.body?.message ?? `tkt answered ${answer.status}`);
     if (this.tab === "sprint" && this.view === "columns") return this.columns(t, answer.body);
-    if (this.tab !== "sprint") return div().p(16).text_color(t.muted).child(`${(answer.body.sections ?? answer.body.groups ?? []).length} groups`);
-    return v_flex().id("rows").flex_1().overflow_y_scrollbar().px(12).py(8).gap(2).children(
-      listRows(answer.body.sections).map((r, i) =>
-        r.kind === "title"
-          ? div().id(`r-${i}`).pt(10).pb(4).font_semibold().text_color(t.foreground).child(`${r.title} · ${r.count}`)
-          : h_flex().id(`r-${i}`).gap(10).px(6).py(3).rounded(4).hover((s) => s.bg(t.hover))
-              .child(div().w(90).text_color(t.accent).child(r.key))
-              .child(div().flex_1().truncate().text_color(t.foreground).child(r.ticket?.summary ?? ""))
-              .child(div().text_color(t.dim).child(r.ticket?.status ?? ""))));
+    if (this.tab === "sprint") return this.list(t, answer.body);
+    return div().p(16).text_color(t.muted).child(`${(answer.body.sections ?? answer.body.groups ?? []).length} groups`);
   }
 
   status(t) {
