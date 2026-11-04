@@ -30,7 +30,7 @@ export function ticketMenu(t, opts = {}) {
     const items = [notYours ? { label: startItem(key, opts.agent).label, action: "notYours", key } : startItem(key, opts.agent)];
     items.push({ label: "Show details", action: "details", key });
     if (t.url) items.push({ label: "Open in Jira ↗", action: "open", url: t.url });
-    items.push({ label: "Assign to… ▸", action: "assign", key });
+    items.push({ label: "Assign to… ▸", action: "assignMenu", key, now: t.assignee ?? "" });
     if (t.url) items.push(copy("Copy the Jira link", t.url));
     items.push(copy(`Copy the key ${key}`, key));
     return { title: `Actions for ${key}`, subtitle: [t.status, who, t.board].filter(Boolean).join(" · "), items };
@@ -38,7 +38,7 @@ export function ticketMenu(t, opts = {}) {
   if (t.team) {
     const items = [{ label: "Show details", action: "details", key }];
     if (t.url) items.push({ label: "Open in Jira ↗", action: "open", url: t.url });
-    items.push({ label: "Assign to… ▸", action: "assign", key });
+    items.push({ label: "Assign to… ▸", action: "assignMenu", key, now: t.assignee ?? "" });
     if (t.url) items.push(copy("Copy the Jira link", t.url));
     items.push(copy(`Copy the key ${key}`, key));
     return { title: `Actions for ${key}`, subtitle: `${t.status} · ${who}`, items };
@@ -50,7 +50,7 @@ export function ticketMenu(t, opts = {}) {
   if (prs.length > 1) items.push({ label: `Pull requests (${prs.length}) ▸`, action: "prs", key });
   const reason = opts.attention?.[0] ?? attentionOf(t);
   if (reason) items.push(...feedbackItems(key, reason, opts.agent));
-  items.push({ label: "Move to… ▸", action: "move", key }, { label: "Assign to… ▸", action: "assign", key });
+  items.push({ label: "Move to… ▸", action: "move", key }, { label: "Assign to… ▸", action: "assignMenu", key, now: t.assignee ?? "" });
   if (prs.length === 1 && prs[0].url) items.push(copy("Copy the PR link", prs[0].url));
   if (t.url) items.push(copy("Copy the Jira link", t.url));
   items.push(copy(`Copy the key ${key}`, key), { label: "Copy the ticket context (.ticket.md)", action: "copyContext", key });
@@ -79,7 +79,7 @@ export function prMenu(row, opts = {}) {
   if (row.attention?.length) items.push(...feedbackItems(t.key, row.attention[0], opts.agent));
   items.push({ label: "Review with ▸", action: "review", pr }, startItem(t.key, opts.agent), { label: `Show details of ${t.key}`, action: "details", key: t.key });
   if (t.url) items.push({ label: `Open ${t.key} in Jira ↗`, action: "open", url: t.url });
-  items.push({ label: "Move to… ▸", action: "move", key: t.key }, { label: "Assign to… ▸", action: "assign", key: t.key });
+  items.push({ label: "Move to… ▸", action: "move", key: t.key }, { label: "Assign to… ▸", action: "assignMenu", key: t.key, now: t.assignee ?? "" });
   if (pr.url) items.push(copy("Copy the PR link", pr.url));
   if (t.url) items.push(copy("Copy the Jira link", t.url));
   items.push(copy(`Copy the key ${t.key}`, t.key));

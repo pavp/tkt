@@ -2,7 +2,7 @@
 // core runs tkt, so it works whether tkt runs here or on a machine reached over SSH.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, v_virtual_list, Scrollbar } from "gpui-base";
+import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay } from "herdr";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
@@ -12,6 +12,7 @@ import { prRows, toggled, reposChip } from "./lib/prs.js";
 import { backlogRows, badges } from "./lib/backlog.js";
 import { ticketMenu, prMenu } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker } from "./lib/start.js";
+import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -41,6 +42,9 @@ export default class Tkt extends View {
     this.found = [];
     this.menu = null;
     this.picker = null;
+    this.prompt = null;
+    this.form = null;
+    this.input = InputState.new({ placeholder: "" });
     this.notice = "";
     this.lastClick = { key: null, at: 0 };
     this.focus = cx.focus_handle();
@@ -390,7 +394,63 @@ export default class Tkt extends View {
             await this.openTask({ review: { repo: item.pr.repo, number: item.pr.number } }, `repo=${encodeURIComponent(item.pr.repo)}&number=${item.pr.number}`);
             break;
           case "cancel":
+            this.form = null;
             break;
+          case "submenu":
+            this.menu = { ...item.menu, sel: 0 };
+            break;
+          case "move": {
+            const a = await this.call("GET", `/v1/tickets/${item.key}/transitions`);
+            if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+            this.menu = { ...moveMenu(item.key, a.body), sel: 0 };
+            break;
+          }
+          case "form":
+            this.form = { key: item.key ?? this.formKey(item), move: item.move, values: {}, comment: "" };
+            this.menu = { ...formMenu(this.form.key, item.move, this.form), sel: 0 };
+            break;
+          case "fieldValue":
+            if (item.value) this.form.values[item.field.id] = item.value;
+            else delete this.form.values[item.field.id];
+            this.menu = { ...formMenu(this.form.key, this.form.move, this.form), sel: 0 };
+            break;
+          case "comment":
+            this.ask({ kind: "comment", title: "Comment", value: this.form.comment });
+            break;
+          case "fieldUser":
+            this.ask({ kind: "fieldUser", title: `${item.field.name}: search someone`, field: item.field, key: this.form.key });
+            break;
+          case "transition": {
+            const missing = missingField(item.move, item.values);
+            if (missing) {
+              this.notice = missing;
+              this.menu = { ...formMenu(this.form.key, this.form.move, this.form), sel: 0 };
+              break;
+            }
+            const values = Object.fromEntries(Object.entries(item.values).map(([id, v]) => [id, v.id]));
+            const a = await this.call("POST", `/v1/tickets/${item.key}/transitions`, { id: item.move.id, values, comment: item.comment });
+            if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+            this.form = null;
+            this.notice = `moved ${item.key} to ${item.move.to}`;
+            this.load(cx);
+            break;
+          }
+          case "assignMenu":
+            this.menu = { ...assignMenu(item.key, item.now), sel: 0 };
+            break;
+          case "confirmAssign":
+            this.menu = { ...confirmAssign(item.key, item.who), sel: 0 };
+            break;
+          case "searchUser":
+            this.ask({ kind: "assignUser", title: `Assign ${item.key} to`, key: item.key });
+            break;
+          case "assign": {
+            const a = await this.call("PUT", `/v1/tickets/${item.key}/assignee`, item.who);
+            if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+            this.notice = `assigned ${item.key} to ${item.who.to === "me" ? "you" : item.who.to === "nobody" ? "nobody" : item.who.name}`;
+            this.load(cx);
+            break;
+          }
           default:
             this.notice = `${item.label.replace(" ▸", "")}: not in the Herdr desktop window yet`;
         }
@@ -400,6 +460,56 @@ export default class Tkt extends View {
       cx.notify();
     });
     cx.notify();
+  }
+
+  formKey() {
+    return this.form?.key;
+  }
+
+  /** Opens the text prompt: a comment, or a name to search people by. */
+  ask(prompt) {
+    this.prompt = prompt;
+    this.input.set_value(prompt.value ?? "");
+  }
+
+  answerPrompt(cx) {
+    const p = this.prompt;
+    const text = this.input.value().trim();
+    this.prompt = null;
+    cx.spawn(async (cx) => {
+      try {
+        if (p.kind === "comment") {
+          this.form.comment = text;
+          this.menu = { ...formMenu(this.form.key, this.form.move, this.form), sel: 0 };
+        } else {
+          const a = await this.call("GET", `/v1/tickets/${p.key}/users?query=${encodeURIComponent(text)}`);
+          if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+          const users = a.body.users ?? [];
+          if (users.length === 0) throw new Error(text.length < 2 ? "type at least two letters" : `nobody in Jira matches ${text}`);
+          this.menu = p.kind === "assignUser"
+            ? { title: `Assign ${p.key} to`, sel: 0, items: users.map((u) => ({ label: u.name, action: "confirmAssign", key: p.key, who: { to: "user", account_id: u.id, name: u.name } })) }
+            : { title: p.field.name, sel: 0, items: users.map((u) => ({ label: u.name, action: "fieldValue", field: p.field, value: { id: u.id, name: u.name } })) };
+        }
+      } catch (e) {
+        this.notice = `could not: ${e.message}`;
+      }
+      cx.notify();
+    });
+    cx.notify();
+  }
+
+  promptBox(t) {
+    const p = this.prompt;
+    return v_flex().id("prompt").absolute().top(70).left(0).right(0).items_center()
+      .child(v_flex().id("prompt-box").w(420).p(12).gap(8).rounded(10).bg(t.popover).border(1).border_color(t.accent)
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .child(div().font_semibold().text_color(t.foreground).child(p.title))
+        .child(Input.new(this.input))
+        .child(h_flex().gap(8).justify_end()
+          .child(div().id("prompt-cancel").px(10).py(3).rounded(5).text_color(t.muted).hover((s) => s.bg(t.hover))
+            .on_click((_e, cx) => { this.prompt = null; cx.notify(); }).child("Cancel"))
+          .child(div().id("prompt-ok").px(10).py(3).rounded(5).bg(t.solid).text_color(t.solid_foreground)
+            .on_click((_e, cx) => this.answerPrompt(cx)).child(p.kind === "comment" ? "Done" : "Search"))));
   }
 
   async openStart(key) {
@@ -741,6 +851,7 @@ export default class Tkt extends View {
       .child(this.status(t))
       .when(Boolean(this.openPanel()), (el) => { const p = this.openPanel(); return el.child(this.filterPanel(t, p.items, p.hidden, p.field)); })
       .when(Boolean(this.menu), (el) => el.child(this.menuBox(t)))
-      .when(Boolean(this.picker), (el) => el.child(this.pickerBox(t)));
+      .when(Boolean(this.picker), (el) => el.child(this.pickerBox(t)))
+      .when(Boolean(this.prompt), (el) => el.child(this.promptBox(t)));
   }
 }
