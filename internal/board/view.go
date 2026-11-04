@@ -91,7 +91,7 @@ func Points(rows []Row) float64 {
 			points += r.Ticket.Points
 		}
 	}
-	return points
+	return roundPoints(points)
 }
 
 // ListRows orders the list: the user's tickets sorted, then the team's sorted and grouped by board, each
