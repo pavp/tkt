@@ -12,12 +12,12 @@ import { previewOf, legendFor, problemOf, warningsLine } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview, prsToggle } from "./lib/prs.js";
 import { backlogRows, badges } from "./lib/backlog.js";
 import { ticketMenu, prMenu, withBack, backOf, confirmRemove } from "./lib/menus.js";
-import { firstPicker, answer, taskPicker } from "./lib/start.js";
+import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
-import { detailView, neighbors } from "./lib/details.js";
+import { detailView, neighbors, detailsKey } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
-import { direction, tabAfter, stepList, stepColumns, targets } from "./lib/nav.js";
+import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction } from "./lib/nav.js";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -292,13 +292,20 @@ export default class Tkt extends View {
   teamToggle(t) {
     const view = this.answers.sprint?.body;
     if (!view) return div();
-    return this.toggle("team", Boolean(view.team), (cx) => this.attempt(async () => {
+    return this.toggle("team", Boolean(view.team), (cx) => this.toggleTeam(cx)).child("Team");
+  }
+
+  /** Turns the team's tickets on or off on the Sprint, then syncs, since they come from Jira. */
+  toggleTeam(cx) {
+    const view = this.answers.sprint?.body;
+    if (!view) return;
+    this.attempt(async () => {
       const a = await this.call("PATCH", "/v1/board/state", { team: !view.team });
       if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
       await this.call("POST", "/v1/sync", {});
       this.notice = view.team ? "only your tickets" : "with the team's tickets · syncing…";
       this.load(cx);
-    }, cx)).child("Team");
+    }, cx);
   }
 
   boardsChip(t) {
@@ -898,8 +905,14 @@ export default class Tkt extends View {
       if (k === "down") this.menu.sel = Math.min(this.menu.items.length - 1, this.menu.sel + 1);
       if (k === "up") this.menu.sel = Math.max(0, this.menu.sel - 1);
       if (k === "enter") return this.act(this.menu.items[this.menu.sel], cx);
-    } else if (this.picker && k === "escape") {
-      this.picker = null;
+    } else if (this.picker) {
+      this.pickerKeyDown(keyOf(e), cx);
+    } else if (this.details && !this.prompt) {
+      const a = detailsKey(keyOf(e));
+      if (a === "back") this.details = null;
+      if (a === "copy") this.act({ action: "copyContext", key: this.details.key, label: "copy" }, cx);
+    } else if (this.settings && !this.prompt && k === "escape") {
+      this.settings = null;
     } else if (k === "escape" && this.panel) {
       this.panel = null;
     } else if (!this.prompt && !this.choices && !this.details && !this.settings && !this.picker && !this.panel) {
@@ -908,16 +921,87 @@ export default class Tkt extends View {
     cx.notify();
   }
 
+  pickerKeyDown(k, cx) {
+    const p = this.picker;
+    if (k === "escape") { this.picker = null; return; }
+    const r = pickerKey(p, k);
+    if (r?.kind === "move") p.sel = r.sel;
+    if (r?.kind === "toggle") { if (p.checked.has(r.value)) p.checked.delete(r.value); else p.checked.add(r.value); }
+    if (r?.kind === "next") this.choose([...p.checked], null, cx);
+    if (r?.kind === "choose") this.choose([p.rows[r.index].value], p.rows[r.index], cx);
+  }
+
+  /** The selected row of the tab in view, with its ticket and, on the PRs tab, its pull request. */
+  current() {
+    const body = this.answers[this.tab]?.body;
+    if (!this.selected || !body) return null;
+    if (this.tab === "prs") {
+      const row = prRows(body).find((r) => r.kind === "row" && r.key + r.group === this.selected);
+      return row ? { row, key: row.ticketKey, ticket: row.raw.ticket, pr: row.raw.pr } : null;
+    }
+    const row = this.tab === "backlog" ? backlogRows(body).find((r) => r.kind === "row" && r.key === this.selected) : this.selectedRow(body);
+    return row ? { row, key: row.key, ticket: row.ticket, pr: null } : null;
+  }
+
+  /** What a board key does to the selection, as the TUI's keys do. */
+  runKey(action, cx) {
+    const close = () => { const id = props()?.overlay; if (id) closeOverlay(id); };
+    if (action === "close") return close();
+    if (action === "refresh") return this.sync(cx);
+    if (action === "settings") return this.attempt(() => this.openSettings(), cx);
+    if (action === "boards" || action === "repos") { this.panel = this.panel === action ? null : action; return; }
+    if (action === "bots") { this.bots = !this.bots; return this.load(cx); }
+    if (action === "team") {
+      if (this.tab === "prs") return this.patchState({ team_prs: !this.answers.prs?.body?.team_prs }, cx);
+      return this.toggleTeam(cx);
+    }
+    const c = this.current();
+    if (!c) return;
+    const t = c.ticket ?? {};
+    switch (action) {
+      case "menu":
+        this.menu = { ...this.menuFor(c.row), sel: 0 };
+        return;
+      case "details":
+        if (c.key) this.goDetails(c.key, cx);
+        return;
+      case "openJira":
+      case "copyJira":
+        if (t.url) this.act(action === "openJira" ? { action: "open", url: t.url } : { action: "copy", value: t.url, label: "copy" }, cx);
+        return;
+      case "openPR":
+      case "copyPR": {
+        const prs = t.prs ?? [];
+        if (!c.pr && prs.length > 1) {
+          const item = this.menuFor(c.row).items.find((i) => i.label.startsWith("Pull requests ("));
+          if (item) this.menu = { ...item.menu, sel: 0 };
+          return;
+        }
+        const url = c.pr?.url ?? prs[0]?.url ?? "";
+        if (!url) { this.notice = `${c.key} has no pull request yet`; return; }
+        this.act(action === "openPR" ? { action: "open", url } : { action: "copy", value: url, label: "copy" }, cx);
+        return;
+      }
+      case "feedback":
+        if (t.team) { this.notice = `${c.key} is ${t.assignee || "nobody"}'s ticket`; return; }
+        this.act({ action: this.answers.sprint?.body?.agents?.[c.key] ? "fix" : "feedbackTo", key: c.key, label: "feedback" }, cx);
+        return;
+    }
+  }
+
   /** The board's keys, as the TUI's: tabs, the view, and moving the selection. */
   boardKey(e, cx) {
-    const tab = tabAfter(e.keystroke, this.tab);
+    const k = keyOf(e);
+    const tab = tabAfter(k, this.tab);
     if (tab) return this.select(tab, cx);
-    if (e.keystroke === "v") {
+    const action = boardAction(k, this.tab);
+    if (action) return this.runKey(action, cx);
+    if (k === "v") {
       if (this.tab === "backlog") return this.patchState({ backlog_merged: !this.answers.backlog?.body?.merged }, cx);
       if (this.tab === "sprint") return this.setView(this.view === "columns" ? "list" : "columns", cx);
       return;
     }
-    const d = direction(e.keystroke);
+    const d = direction(k);
     const body = this.answers[this.tab]?.body;
     if (!d || !body) return;
     const at = targets(this.tab, this.view, body);

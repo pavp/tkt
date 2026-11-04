@@ -64,3 +64,29 @@ export function targets(tab, view, body) {
   });
   return { ids, at, list };
 }
+
+/** A key event as the TUI's bindings spell it: the character it types (B, ",", " "), else its keystroke. */
+export function keyOf(e) {
+  const m = e.modifiers ?? {};
+  const c = e.key_char;
+  if (c && c.length === 1 && c > " " || c === " ") {
+    if (!m.platform && !m.control && !m.alt) return c;
+  }
+  return e.keystroke;
+}
+
+const ACTIONS = {
+  enter: "menu", " ": "menu", i: "details", o: "openJira", O: "copyJira", p: "openPR", P: "copyPR",
+  g: "refresh", ",": "settings", q: "close", escape: "close",
+};
+
+/** The action a key runs on the board's tab, as the TUI binds it; null when it runs none there. */
+export function boardAction(k, tab) {
+  if (ACTIONS[k]) return ACTIONS[k];
+  if (k === "t" && tab !== "backlog") return "team";
+  if (k === "f" && tab !== "backlog") return "feedback";
+  if (k === "B" && tab !== "prs") return "boards";
+  if (k === "R" && tab === "prs") return "repos";
+  if (k === "b" && tab === "prs") return "bots";
+  return null;
+}
