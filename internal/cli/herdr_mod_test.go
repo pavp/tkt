@@ -91,6 +91,7 @@ func TestHerdrInstallOnDesktopBindsCmdJToTheMod(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, home := desktopModHarness(t)
+			h.app.OS = "darwin"
 			path := filepath.Join(home, "keys.json")
 			if tt.keys != "" {
 				if err := os.WriteFile(path, []byte(tt.keys), 0o644); err != nil {
@@ -163,5 +164,37 @@ func TestExportModAsJSONGivesTheFilesAndVersion(t *testing.T) {
 	}
 	if got.Version != Version || !strings.Contains(got.Files["main.js"], "export default class") || !strings.Contains(got.Files["lib/version.js"], Version) {
 		t.Errorf("export = version %q, %d files", got.Version, len(got.Files))
+	}
+}
+
+func TestHerdrInstallBindsCtrlShiftJWhereThereIsNoCmdKey(t *testing.T) {
+	for _, goos := range []string{"windows", "linux"} {
+		t.Run(goos, func(t *testing.T) {
+			h, home := desktopModHarness(t)
+			h.app.OS = goos
+			if code := h.exec("herdr", "install", "--keys"); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.errOut)
+			}
+			b, _ := os.ReadFile(filepath.Join(home, "keys.json"))
+			if !strings.Contains(string(b), `"ctrl-shift-j": "mod.open:tkt"`) || strings.Contains(string(b), "cmd-j") {
+				t.Errorf("keys.json = %s, want ctrl-shift-j bound to the mod", b)
+			}
+			if !strings.Contains(h.out.String(), "ctrl-shift-j opens tkt") {
+				t.Errorf("install said %q, want it to name ctrl-shift-j", h.out.String())
+			}
+		})
+	}
+}
+
+func TestHerdrUninstallRemovesTheModKeyWhicheverItIs(t *testing.T) {
+	h, home := desktopModHarness(t)
+	path := filepath.Join(home, "keys.json")
+	if err := os.WriteFile(path, []byte(`{"global":{"cmd-t":"tab.new","ctrl-shift-j":"mod.open:tkt"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.app.OS = "darwin"
+	h.exec("herdr", "uninstall")
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "mod.open:tkt") || !strings.Contains(string(b), `"cmd-t": "tab.new"`) {
+		t.Errorf("keys.json after uninstall = %s", b)
 	}
 }
