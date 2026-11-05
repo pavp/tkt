@@ -251,17 +251,26 @@ func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string, _ bool)
 // to start; any other kind is prompted once ready.
 var promptArgs = map[string]bool{"claude": true, "codex": true}
 
-// OpenAgentSpace opens a space at folder whose first terminal runs kind, given task as its first message. It returns
-// the space and the agent's terminal.
+// OpenAgentSpace opens a space at folder on a shell, as Herdr's own worktree spaces open, with kind beside it given
+// task as its first message, so the space outlives the agent. It returns the space and the agent's terminal.
 func (c *Client) OpenAgentSpace(ctx context.Context, folder, name, kind, task string) (herdrport.Workspace, herdrport.Pane, error) {
 	argv := c.argvOf(kind)
 	prompts := promptArgs[c.programKind(kind)]
 	if prompts {
 		argv = append(argv, task)
 	}
-	ws, pane, err := c.newSpace(ctx, folder, name, argv)
-	if err != nil || prompts {
-		return ws, pane, err
+	ws, shell, labels, err := c.newSpaceLabels(ctx, folder, name, nil)
+	if err != nil {
+		return ws, herdrport.Pane{}, err
+	}
+	address, err := c.start(ctx, runReq{argv: argv, cwd: folder, labels: labels})
+	if err != nil {
+		_ = c.ClosePane(ctx, shell)
+		return ws, herdrport.Pane{}, err
+	}
+	pane := herdrport.Pane{ID: address, WorkspaceID: ws.ID, Cwd: folder}
+	if prompts {
+		return ws, pane, nil
 	}
 	err = c.ready(ctx, pane.ID, kind)
 	if errors.Is(err, herdrport.ErrNotReady) {
@@ -274,15 +283,26 @@ func (c *Client) OpenAgentSpace(ctx context.Context, folder, name, kind, task st
 }
 
 func (c *Client) newSpace(ctx context.Context, cwd, label string, argv []string) (herdrport.Workspace, herdrport.Pane, error) {
-	id := c.newID("sp")
-	address, err := c.start(ctx, runReq{argv: argv, cwd: cwd, labels: map[string]string{labelSpace: id, labelTab: c.newID("tb")}})
+	ws, address, _, err := c.newSpaceLabels(ctx, cwd, label, argv)
 	if err != nil {
-		return herdrport.Workspace{}, herdrport.Pane{}, err
+		return ws, herdrport.Pane{}, err
+	}
+	return ws, herdrport.Pane{ID: address, WorkspaceID: ws.ID, Cwd: cwd}, nil
+}
+
+// newSpaceLabels starts a new space's first terminal and returns its address with the labels that put another
+// terminal in the same space and tab.
+func (c *Client) newSpaceLabels(ctx context.Context, cwd, label string, argv []string) (herdrport.Workspace, string, map[string]string, error) {
+	id := c.newID("sp")
+	labels := map[string]string{labelSpace: id, labelTab: c.newID("tb")}
+	address, err := c.start(ctx, runReq{argv: argv, cwd: cwd, labels: labels})
+	if err != nil {
+		return herdrport.Workspace{}, "", nil, err
 	}
 	if label != "" && c.window(ctx) == nil {
 		_ = c.doSettled(ctx, "space.rename", map[string]any{"id": id, "name": label})
 	}
-	return herdrport.Workspace{ID: id, Label: label}, herdrport.Pane{ID: address, WorkspaceID: id, Cwd: cwd}, nil
+	return herdrport.Workspace{ID: id, Label: label}, address, labels, nil
 }
 
 // newID makes an id like the window's own (sp, tb), which it cannot know yet.
