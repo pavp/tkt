@@ -206,12 +206,35 @@ func (c *Client) spaces(ctx context.Context) ([]space, error) {
 // calls it. Herdr desktop manages no worktrees, so none has one: callers find work through pane folders.
 func (c *Client) Workspaces(ctx context.Context) ([]herdrport.Workspace, error) {
 	ss, err := c.spaces(ctx)
+	if errors.Is(err, ErrNoWindow) {
+		return c.workspacesFromTerminals(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
 	out := make([]herdrport.Workspace, len(ss))
 	for i, s := range ss {
 		out[i] = herdrport.Workspace{ID: s.ID, Label: cmp.Or(s.Name, filepath.Base(s.Folder)), Folder: s.Folder}
+	}
+	return out, nil
+}
+
+// workspacesFromTerminals are the spaces the terminals' labels name, in the order their first terminal comes, each
+// called after its first terminal's folder (the window's names repeat the repository's on a worktree's space): a
+// machine of the core whose Herdr window runs on another computer has no window here to ask.
+func (c *Client) workspacesFromTerminals(ctx context.Context) ([]herdrport.Workspace, error) {
+	ts, err := c.Terminals(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []herdrport.Workspace
+	seen := map[string]bool{}
+	for _, t := range ts {
+		if t.Space == "" || seen[t.Space] || t.State == "finished" {
+			continue
+		}
+		seen[t.Space] = true
+		out = append(out, herdrport.Workspace{ID: t.Space, Label: filepath.Base(t.Cwd), Folder: t.Cwd})
 	}
 	return out, nil
 }

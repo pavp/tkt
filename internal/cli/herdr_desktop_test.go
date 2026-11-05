@@ -25,6 +25,8 @@ type desktopHerdr struct {
 	agents   []herdrport.Agent
 	wss      []herdrport.Workspace
 	window   error
+	// focusErr is the window refusing to show a space herdr-core still lists, as on a machine with no window.
+	focusErr error
 	calls    []string
 	texts    []string
 	spaceErr error
@@ -79,6 +81,9 @@ func (d *desktopHerdr) FocusPane(_ context.Context, pane string) error {
 }
 func (d *desktopHerdr) FocusWorkspace(_ context.Context, id string) error {
 	d.did("focus workspace %s", id)
+	if d.focusErr != nil {
+		return d.focusErr
+	}
 	return d.window
 }
 func (d *desktopHerdr) ClosePane(_ context.Context, pane string) error {
@@ -442,5 +447,22 @@ func TestAnAgentHerdrStartsThroughAnotherProgramCountsWhenThatProgramIsInstalled
 	}
 	if run := h.app.agentRun("pi"); !reflect.DeepEqual(run, []string{"gentle-shell", "--agent", "pi"}) {
 		t.Errorf("agentRun(pi) = %q", run)
+	}
+}
+
+// On a machine of the core with no Herdr window (WSL reached from another computer), the worktree's space is found but
+// cannot be shown; with no agent in it, Start opens one beside its shell rather than doing nothing.
+func TestHerdrStartWithNoWindowStartsAnAgentInTheWorktreesBareSpace(t *testing.T) {
+	h, d := desktopHarness(t)
+	h.clone(t, "web")
+	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1\nHEAD a\nbranch refs/heads/feature/DEMO-1-filter\n"
+	d.wss = []herdrport.Workspace{{ID: "sp3", Label: "web-DEMO-1", Folder: "/src/web-DEMO-1"}}
+	d.panes = []herdrport.Pane{{ID: "t4", WorkspaceID: "sp3", Cwd: "/src/web-DEMO-1"}}
+	d.focusErr = herdrcore.ErrNoWindow
+	if code := h.exec("herdr", "start", "DEMO-1"); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.errOut)
+	}
+	if !slices.ContainsFunc(d.calls, func(c string) bool { return strings.HasPrefix(c, "start ") && strings.HasSuffix(c, " t4") }) {
+		t.Errorf("calls = %q, want an agent started beside the space's shell t4", d.calls)
 	}
 }

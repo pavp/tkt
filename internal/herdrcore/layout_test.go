@@ -133,8 +133,8 @@ func TestLayoutErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := herdrcore.NewWithApp(newFake(), &fakeApp{outs: []herdrcore.Output{tt.out, tt.out}})
 			herdrcore.SetSettle(c, 0, 1)
-			if _, err := c.Workspaces(ctx); err == nil || tt.sentinel != nil && !errors.Is(err, tt.sentinel) {
-				t.Errorf("Workspaces = %v", err)
+			if _, err := c.Workspaces(ctx); tt.sentinel == nil && err == nil {
+				t.Errorf("Workspaces = %v, want the window's refusal", err)
 			}
 			err := c.FocusWorkspace(ctx, "sp9")
 			if err == nil || tt.sentinel != nil && !errors.Is(err, tt.sentinel) {
@@ -163,5 +163,21 @@ func TestWorkspaceMetadataAndNotify(t *testing.T) {
 	}
 	if len(app.calls) != 0 {
 		t.Errorf("calls = %q", app.calls)
+	}
+}
+
+// A machine of the core without a Herdr window of its own (WSL, reached from a window on another computer) still has
+// spaces: its terminals carry them as labels, so tkt finds them there rather than failing to tell tickets' agents.
+func TestWorkspacesWithoutAWindowComeFromTheTerminals(t *testing.T) {
+	f := newFake()
+	f.out = herdrcore.Output{Stdout: []byte(terminalList)}
+	c := herdrcore.NewWithApp(f, &fakeApp{outs: []herdrcore.Output{{Stderr: []byte(noWindow), Code: 1}}})
+	wss, err := c.Workspaces(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []herdrport.Workspace{{ID: "sp1", Label: "web", Folder: "/home/dev/code/web"}, {ID: "sp2", Label: "web-DEMO-123", Folder: "/home/dev/code/web-DEMO-123"}}
+	if !reflect.DeepEqual(wss, want) {
+		t.Errorf("Workspaces = %+v, want %+v", wss, want)
 	}
 }
