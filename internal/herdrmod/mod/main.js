@@ -328,7 +328,7 @@ export default class Tkt extends View {
   toggleTeam(cx) {
     const view = this.answers.sprint?.body;
     if (!view) return;
-    this.attempt(async () => {
+    this.attempt(async (cx) => {
       const a = await this.call("PATCH", "/v1/board/state", { team: !view.team });
       if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
       await this.call("POST", "/v1/sync", {});
@@ -758,10 +758,11 @@ export default class Tkt extends View {
   }
 
   /** Runs fn in a task, telling its error, then renders. */
+  /** Runs fn in a task, handing it the task's cx: a cx from the click that started it is gone once fn awaits. */
   attempt(fn, cx) {
     cx.spawn(async (cx) => {
       try {
-        await fn();
+        await fn(cx);
       } catch (e) {
         this.notice = `could not: ${e.message}`;
       }
