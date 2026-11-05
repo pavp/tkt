@@ -36,3 +36,14 @@ test("feedback goes to an open agent, or to a new one of a kind", () => {
   assert.deepEqual(p.rows[0].task, { to: "open", pane: "t1" });
   assert.equal(p.rows[2].kinds.length, 2);
 });
+
+test("a Start with nothing to choose but the agent asks for it, or starts at once, as the TUI's Start does", async () => {
+  const { firstPicker } = await import("../mod/lib/start.js");
+  const asks = firstPicker("DEMO-1", { opens: true, worktrees: [], repos: [], agents: ["claude", "pi"], last_agent: "pi" });
+  assert.equal(asks.step, "agent");
+  assert.equal(asks.question, "Which agent?");
+  assert.deepEqual(asks.rows.map((r) => r.value), ["claude", "pi"]);
+  assert.equal(asks.sel, 1);
+  assert.deepEqual(firstPicker("DEMO-1", { opens: true, worktrees: [], repos: [], agents: ["claude"] }), { post: { herdr: "desktop", agent: "claude" } });
+  assert.deepEqual(firstPicker("DEMO-1", { opens: false, worktrees: [], repos: [], agents: ["claude", "pi"] }), { post: { herdr: "desktop" } });
+});

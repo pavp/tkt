@@ -10,7 +10,8 @@ function agentPicker(key, choices, base) {
   };
 }
 
-/** The first picker a Start shows for choices from GET /v1/tickets/{key}/start. */
+/** The first picker a Start shows for choices from GET /v1/tickets/{key}/start, or {post} when it asks nothing (one
+ *  worktree or one repository, and one agent or none to open). */
 export function firstPicker(key, choices) {
   if ((choices.agents ?? []).length === 0 && choices.agents_error) return { error: choices.agents_error };
   const ws = choices.worktrees ?? [];
@@ -25,6 +26,11 @@ export function firstPicker(key, choices) {
         opens: !w.agent,
       })),
     };
+  }
+  if ((choices.repos ?? []).length === 0) {
+    const kinds = choices.agents ?? [];
+    if (choices.opens && kinds.length > 1) return agentPicker(key, choices, {});
+    return { post: { herdr: "desktop", ...(choices.opens && kinds.length === 1 ? { agent: kinds[0] } : {}) } };
   }
   return {
     step: "repos", key, title: `Start ${key}`, question: "Which repositories?", multi: true, sel: 0,
