@@ -51,6 +51,8 @@ type App struct {
 	// herdrOf opens a client for one Herdr; the daemon, which follows every running Herdr, uses it.
 	herdrOf    func(herdrFlavor) HerdrAPI
 	Executable func() (string, error)
+	// OS is the operating system tkt runs on as runtime.GOOS names it; empty means runtime.GOOS.
+	OS string
 	// OrgMember reports whether a gh token belongs to an active member of a GitHub organization.
 	OrgMember func(ctx context.Context, token, org string) (bool, error)
 	// StartDetached starts a program that outlives tkt, writing its output to logPath, and returns its pid.

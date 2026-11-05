@@ -3,7 +3,8 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView, VirtualListScrollHandle } from "gpui-base";
-import { exec, machines, knownAgents, theme, props, closeOverlay, appHome } from "herdr";
+import { exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile } from "herdr";
+import * as os from "os";
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
@@ -18,6 +19,7 @@ import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./l
 import { detailView, neighbors, detailsKey } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
+import { modKeyFor, withModKey } from "./lib/modkey.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
 import { stripChips, atTop } from "./lib/strip.js";
 import { packCache, unpackCache, cachedLabel } from "./lib/cache.js";
@@ -93,6 +95,7 @@ export default class Tkt extends View {
       }
     });
     this.loadView(cx);
+    this.offerModKey(cx);
     this.load(cx);
     cx.timer.every(POLL, (cx) => this.load(cx));
   }
@@ -457,6 +460,31 @@ export default class Tkt extends View {
     if (r.code !== 0) throw new Error((r.stderr || "it did not run").trim());
   }
 
+  /** Offers once to bind the key that opens tkt in this window's keys.json, when no key opens it yet: install
+   *  binds it only where tkt runs, and Herdr desktop's window may run on another machine (such as Windows). */
+  offerModKey(cx) {
+    if (localStorage.getItem("modKeyOffer") === "declined") return;
+    cx.spawn(async (cx) => {
+      try {
+        const path = `${appHome()}/keys.json`;
+        const before = await readTextFile(path);
+        const keyName = modKeyFor(os.platform());
+        const r = withModKey(before, keyName);
+        if (r.status !== "added" || this.menu) return;
+        this.menu = {
+          title: `Open tkt with ${keyName}?`,
+          subtitle: "keys.json gets this one binding; Herdr then stops adding its own new default keys to that file.",
+          sel: 0,
+          items: [
+            { label: `Yes, bind ${keyName}`, action: "bindModKey", path, before, after: r.text, keyName },
+            { label: "No thanks", action: "declineModKey", keyName },
+          ],
+        };
+        cx.notify();
+      } catch {}
+    });
+  }
+
   /** Runs a menu item; the screens Start, Move, Assign, details and feedback open come with their own tasks. */
   act(item, cx) {
     const from = this.menu;
@@ -487,6 +515,14 @@ export default class Tkt extends View {
             this.load(cx);
             break;
           }
+          case "bindModKey":
+            await writeTextFile(item.path, item.after, item.before);
+            this.notice = `${item.keyName} opens tkt`;
+            break;
+          case "declineModKey":
+            localStorage.setItem("modKeyOffer", "declined");
+            this.notice = `no key bound; bind ${item.keyName} to mod.open:tkt in keys.json any time`;
+            break;
           case "settingsPatch":
             await this.patchSettings(item.change);
             break;

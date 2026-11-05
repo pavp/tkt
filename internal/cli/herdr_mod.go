@@ -2,6 +2,7 @@ package cli
 
 import (
 	"archive/tar"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -17,8 +19,16 @@ import (
 	"github.com/pavp/tkt/internal/herdrmod"
 )
 
-// modKey opens the mod in Herdr desktop; Herdr desktop takes cmd chords only, and cmd-t is its new tab.
-const modKey, modCommand = "cmd-j", "mod.open:tkt"
+const modCommand = "mod.open:tkt"
+
+// modKey opens the mod in Herdr desktop: cmd-j on macOS, where Herdr desktop takes cmd chords (cmd-t is its new tab);
+// ctrl-shift-j elsewhere, where cmd is the Windows or Super key, which the system keeps for itself.
+func (a *App) modKey() string {
+	if cmp.Or(a.OS, runtime.GOOS) == "darwin" {
+		return "cmd-j"
+	}
+	return "ctrl-shift-j"
+}
 
 // herdrAppHome is Herdr desktop's app folder on this machine: HERDR_APP_HOME, else ~/.config/herdr-app.
 func (a *App) herdrAppHome() string {
@@ -55,7 +65,8 @@ func (a *App) installDesktopMod(ctx context.Context) (bool, error) {
 	if _, err := os.Stat(home); err != nil {
 		a.printf("Herdr desktop's window runs on another machine (no %s here). In a terminal of that machine, run:\n\n"+
 			"  hc exec --on <this machine's name in Herdr> -- tkt herdr export-mod | tar -x -C ~/.config/herdr-app/mods\n\n"+
-			"then press %s there to open tkt; the mod keeps itself in step with this tkt afterwards.\n", home, modKey)
+			"then press cmd-j there to open tkt (ctrl-shift-j on Windows or Linux; the mod offers to bind it when it first opens); "+
+			"the mod keeps itself in step with this tkt afterwards.\n", home)
 		return false, nil
 	}
 	dir := a.herdrModDir()
@@ -133,8 +144,9 @@ func (a *App) writeDesktopKeys(keys map[string]map[string]string, before []byte)
 	return os.WriteFile(path, append(b, '\n'), 0o644)
 }
 
-// addDesktopKey binds cmd-j to open the mod, asking first unless yes, and never replacing a key in use.
+// addDesktopKey binds the mod's key to open it, asking first unless yes, and never replacing a key in use.
 func (a *App) addDesktopKey(yes bool) error {
+	modKey := a.modKey()
 	keys, before, err := a.readDesktopKeys()
 	if err != nil {
 		return err
@@ -144,7 +156,7 @@ func (a *App) addDesktopKey(yes bool) error {
 		a.printf("✓ Already bound: %s opens tkt\n", modKey)
 		return nil
 	case now != "":
-		a.printf("! %s is taken by %q; bind %s to another cmd key in %s yourself to open tkt\n", modKey, now, modCommand, a.desktopKeysPath())
+		a.printf("! %s is taken by %q; bind %s to another key in %s yourself to open tkt\n", modKey, now, modCommand, a.desktopKeysPath())
 		return nil
 	}
 	if !yes {
@@ -165,12 +177,22 @@ func (a *App) addDesktopKey(yes bool) error {
 	return nil
 }
 
+// removeDesktopKey unbinds whichever key opens the mod, the one install chose or one the mod bound itself.
 func (a *App) removeDesktopKey() error {
 	keys, before, err := a.readDesktopKeys()
-	if err != nil || keys["global"][modKey] != modCommand {
+	if err != nil {
 		return err
 	}
-	delete(keys["global"], modKey)
+	removed := false
+	for k, command := range keys["global"] {
+		if command == modCommand {
+			delete(keys["global"], k)
+			removed = true
+		}
+	}
+	if !removed {
+		return nil
+	}
 	return a.writeDesktopKeys(keys, before)
 }
 
