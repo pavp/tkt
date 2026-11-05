@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -47,9 +48,10 @@ func TestStartInHerdrRunsTheAnswersGiven(t *testing.T) {
 				h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-7-a\nHEAD a\nbranch refs/heads/feature/DEMO-7-a\n\n" +
 					"worktree /src/web-DEMO-7-b\nHEAD b\nbranch refs/heads/feature/DEMO-7-b\n"
 				d.wss = []herdrport.Workspace{{ID: "sp3", Label: "web-DEMO-7-a", Folder: "/src/web-DEMO-7-a"}, {ID: "sp4", Label: "web-DEMO-7-b", Folder: "/src/web-DEMO-7-b"}}
+				d.panes = []herdrport.Pane{{ID: "t4", WorkspaceID: "sp4", Cwd: "/src/web-DEMO-7-b"}}
 				return h, func(t *testing.T) {
-					if want := []string{"focus workspace sp4"}; !reflect.DeepEqual(d.calls, want) {
-						t.Errorf("calls = %q, want %q", d.calls, want)
+					if !slices.Contains(d.calls, "start pi t4") || slices.ContainsFunc(d.calls, func(c string) bool { return strings.HasPrefix(c, "workspace ") }) {
+						t.Errorf("calls = %q, want an agent beside the chosen worktree's shell t4, in its space", d.calls)
 					}
 				}
 			},

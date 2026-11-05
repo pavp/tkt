@@ -186,19 +186,17 @@ func TestHerdrStartCreatesWorkspacesWithAgents(t *testing.T) {
 	}
 }
 
-func TestHerdrStartFocusesExistingWorktree(t *testing.T) {
+func TestHerdrStartOpensAnAgentInAnExistingWorktreeWithoutOne(t *testing.T) {
 	h, f, _ := herdrHarness(t)
 	h.clone(t, "web")
 	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1\nHEAD a\nbranch refs/heads/feature/DEMO-1-filter\n"
 	f.Results["workspace.list"] = `{"type":"workspace_list","workspaces":[{"workspace_id":"w3","label":"web-DEMO-1","worktree":{"checkout_path":"/src/web-DEMO-1/"}}]}`
+	f.Results["pane.list"] = `{"type":"pane_list","panes":[{"pane_id":"w3:p1","workspace_id":"w3","cwd":"/src/web-DEMO-1/"}]}`
 	if code := h.exec("herdr", "start", "DEMO-1"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	if got := f.Last("workspace.focus"); got["workspace_id"] != "w3" {
-		t.Errorf("focus = %v", got)
-	}
-	if count(f, "agent.start") != 0 {
-		t.Error("started a second agent")
+	if count(f, "agent.start") != 1 || count(f, "workspace.create") != 0 {
+		t.Errorf("agent.start %d, workspace.create %d; want one agent in the worktree's workspace w3", count(f, "agent.start"), count(f, "workspace.create"))
 	}
 }
 
