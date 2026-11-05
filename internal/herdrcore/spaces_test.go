@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -29,6 +30,7 @@ func appCmds(app *fakeApp) []string {
 var (
 	appStatus  = ok(`{"space":"sp1","focused_pane":"p77","errors":[]}`)
 	appRemote  = herdrcore.Output{Stderr: []byte("herdr-app: cannot connect to /home/dev/.config/herdr-app/app.sock\n"), Code: 1}
+	ranShell   = `{"jsonrpc":"2.0","id":1,"result":{"address":"t11","name":null,"cwd":"/home/dev/code/api","state":"live","labels":{}}}`
 	runNewArgs = []string{"run", "--bg", "--json", "--no-parent", "--cwd", "/home/dev/code/api", "--label", "herdr.space=spnew", "--label", "herdr.tab=tbnew"}
 )
 
@@ -62,7 +64,9 @@ func TestCreateWorkspaceStartsAShellLabelledWithANewSpace(t *testing.T) {
 	}
 }
 
-func TestOpenAgentSpaceRunsTheAgentAsTheSpacesFirstTerminal(t *testing.T) {
+// The space opens on a shell with the agent beside it, as Herdr's own worktree spaces do, so closing the agent leaves
+// the space (a worktree's, nested under its repository's) in the sidebar.
+func TestOpenAgentSpaceOpensAShellThenTheAgentBesideIt(t *testing.T) {
 	task := "Work on DEMO-123\nthen tkt link DEMO-123"
 	tests := []struct {
 		name, kind string
@@ -70,9 +74,9 @@ func TestOpenAgentSpaceRunsTheAgentAsTheSpacesFirstTerminal(t *testing.T) {
 		wantArgv   []string
 		wantSend   bool
 	}{
-		{"claude gets its task as its first message", "claude", []string{ran}, []string{"claude", task}, false},
-		{"codex too, with what it needs under hc", "codex", []string{ran}, []string{"codex", "--no-daemon", task}, false},
-		{"another agent is prompted once ready", "pi", []string{ran, got("t12", status("idle"), placed), got("t12", status("idle"), placed), rpc(`{"started":true}`)}, []string{"pi"}, true},
+		{"claude gets its task as its first message", "claude", []string{ranShell, ran}, []string{"claude", task}, false},
+		{"codex too, with what it needs under hc", "codex", []string{ranShell, ran}, []string{"codex", "--no-daemon", task}, false},
+		{"another agent is prompted once ready", "pi", []string{ranShell, ran, got("t12", status("idle"), placed), got("t12", status("idle"), placed), rpc(`{"started":true}`)}, []string{"pi"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -86,8 +90,11 @@ func TestOpenAgentSpaceRunsTheAgentAsTheSpacesFirstTerminal(t *testing.T) {
 				t.Errorf("OpenAgentSpace = %+v, %+v", ws, pane)
 			}
 			calls := hcArgs(hc)
-			if want := append(append(append([]string{}, runNewArgs...), "--"), tt.wantArgv...); len(calls) == 0 || !reflect.DeepEqual(calls[0], want) {
-				t.Errorf("hc run = %q\nwant     %q", calls, want)
+			if len(calls) < 2 || !reflect.DeepEqual(calls[0], runNewArgs) {
+				t.Errorf("first hc run = %q\nwant           %q (the space's shell)", calls, runNewArgs)
+			}
+			if want := append(append(append([]string{}, runNewArgs...), "--"), tt.wantArgv...); len(calls) < 2 || !reflect.DeepEqual(calls[1], want) {
+				t.Errorf("second hc run = %q\nwant            %q (the agent, in the same space and tab)", calls, want)
 			}
 			sent := len(hc.calls) > 0 && strings.Contains(hc.calls[len(hc.calls)-1].stdin, `"terminal.send"`)
 			if sent != tt.wantSend {
@@ -217,4 +224,19 @@ func TestFocusWaitsForTheWindowToShowANewSpace(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkDos(t, app.calls, []doWant{{"space.select", map[string]any{"id": "spnew"}}, {"space.select", map[string]any{"id": "spnew"}}})
+}
+
+// When the agent cannot start beside it, the space's lone shell goes too, so no empty space is left named after the
+// ticket.
+func TestOpenAgentSpaceRemovesItsShellWhenTheAgentFails(t *testing.T) {
+	hc := &seqHC{outs: []string{ranShell, rpcErr("io"), `{}`, `{}`}}
+	c := idsClient(hc, &fakeApp{outs: []herdrcore.Output{appStatus}})
+	herdrcore.SetSettle(c, 0, 1)
+	if _, _, err := c.OpenAgentSpace(context.Background(), "/home/dev/code/api", "DEMO-123 · api", "claude", "task"); err == nil {
+		t.Fatal("OpenAgentSpace succeeded with the agent failing")
+	}
+	calls := hcArgs(hc)
+	if !slices.ContainsFunc(calls, func(a []string) bool { return len(a) > 0 && a[0] == "kill" && slices.Contains(a, "t11") }) {
+		t.Errorf("hc calls = %q, want the shell t11 killed", calls)
+	}
 }

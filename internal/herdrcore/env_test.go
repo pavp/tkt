@@ -78,7 +78,7 @@ func TestTerminalsTktStartsGetItsEnvironment(t *testing.T) {
 			_, _, err := c.CreateWorkspace(ctx, "/home/dev/code/web", "", false)
 			return err
 		}},
-		{"the handoff agent", []string{ran}, func(c *herdrcore.Client) error {
+		{"the handoff agent", []string{ran, ran}, func(c *herdrcore.Client) error {
 			_, _, err := c.OpenAgentSpace(ctx, "/home/dev/code/web-DEMO-1", "", "claude", "Work on DEMO-1")
 			return err
 		}},
