@@ -85,10 +85,22 @@ func (a *App) installedKinds(ctx context.Context, all []string, flavor herdrFlav
 
 // agentInstalled reports whether an agent's executable is in PATH, or in the PATH of the user's interactive shell.
 func (a *App) agentInstalled(ctx context.Context, kind string) bool {
-	if _, err := a.Run.LookPath(kind); err == nil {
-		return true
+	_, err := a.agentPath(ctx, kind)
+	return err == nil
+}
+
+// agentPath is an agent's executable in PATH, or else in the PATH of the user's interactive shell, where herdr-core,
+// which starts terminals with its own PATH, cannot find it by name.
+func (a *App) agentPath(ctx context.Context, kind string) (string, error) {
+	if p, err := a.Run.LookPath(kind); err == nil {
+		return p, nil
 	}
-	return executableIn(a.shellPath(ctx), kind)
+	for _, d := range a.shellPath(ctx) {
+		if p := filepath.Join(d, kind); executableIn([]string{d}, kind) {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("agent %s is not installed (not found in PATH)", kind)
 }
 
 // shellPathCache keeps the interactive shell's PATH for a while, as asking takes a shell start on every Start.

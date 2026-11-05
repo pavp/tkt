@@ -110,6 +110,7 @@ func (a *App) newHerdrOf(flavor herdrFlavor) HerdrAPI {
 		if err != nil {
 			return failingHerdr{err}
 		}
+		c.LookAgentsWith(func(kind string) (string, error) { return a.agentPath(context.Background(), kind) })
 		return c
 	}
 	return herdr.New(herdr.SocketPath(a.Env.Getenv, a.Env.Home))

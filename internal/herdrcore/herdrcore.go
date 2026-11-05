@@ -57,6 +57,9 @@ type Client struct {
 	windowAt  time.Time
 }
 
+// LookAgentsWith makes the client find agents with f, which returns an agent's executable, rather than tkt's PATH.
+func (c *Client) LookAgentsWith(f func(kind string) (string, error)) { c.lookPath = f }
+
 // New finds hc, and herdr-app when it is there, on PATH.
 func New() (*Client, error) {
 	path, err := exec.LookPath("hc")
