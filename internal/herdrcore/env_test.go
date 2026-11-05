@@ -108,3 +108,20 @@ func TestTerminalsTktStartsGetItsEnvironment(t *testing.T) {
 		})
 	}
 }
+
+func TestAnAgentsTerminalGetsTheInteractiveShellsPath(t *testing.T) {
+	c := herdrcore.NewWith(&seqHC{})
+	herdrcore.SetEnviron(c, func() []string { return []string{"PATH=/usr/bin:/home/u/.local/bin", "TKT_PROFILE=work"} })
+	c.PathFrom(func() string { return "/home/linuxbrew/.linuxbrew/bin:/usr/bin" })
+	env := herdrcore.Env(c)
+	if want := "/home/linuxbrew/.linuxbrew/bin:/usr/bin:/home/u/.local/bin"; env["PATH"] != want {
+		t.Errorf("PATH = %q, want %q: the shell's PATH first (as Herdr starts agents), then tkt's own", env["PATH"], want)
+	}
+	if env["TKT_PROFILE"] != "work" {
+		t.Errorf("env = %v, lost tkt's own variables", env)
+	}
+	c.PathFrom(func() string { return "" })
+	if env := herdrcore.Env(c); env["PATH"] != "/usr/bin:/home/u/.local/bin" {
+		t.Errorf("PATH without a shell answer = %q, want tkt's own", env["PATH"])
+	}
+}

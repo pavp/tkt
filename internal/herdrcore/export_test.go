@@ -22,3 +22,6 @@ func SetEnviron(c *Client, f func() []string) { c.environ = f }
 
 // Argv is the command line the client starts for an agent kind, before a Start's own arguments.
 func Argv(c *Client, kind string) []string { return c.argvOf(kind) }
+
+// Env is what the terminals the client starts take from tkt.
+func Env(c *Client) map[string]string { return c.env() }
