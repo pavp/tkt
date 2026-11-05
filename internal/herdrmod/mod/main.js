@@ -23,6 +23,7 @@ import { modKeyFor, withModKey } from "./lib/modkey.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
 import { stripChips, atTop } from "./lib/strip.js";
 import { packCache, unpackCache, cachedLabel } from "./lib/cache.js";
+import { machineKey, stashed, restored } from "./lib/machines.js";
 import { scrolled, menuHeight, MENU_ROW, cardHeight, revealed } from "./lib/scroll.js";
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget, listKey, sectionAfter } from "./lib/nav.js";
 
@@ -48,8 +49,13 @@ export default class Tkt extends View {
     this.tab = "sprint";
     this.answers = {};
     this.cachedAt = null;
-    const cached = unpackCache(localStorage.getItem("board"), remembered());
+    this.states = {};
+    try {
+      localStorage.removeItem("board");
+    } catch {}
+    const cached = unpackCache(localStorage.getItem(`board:${machineKey(remembered())}`), remembered());
     if (cached) {
+      this.tab = cached.tab;
       this.answers = cached.answers;
       this.cachedAt = cached.at;
     }
@@ -80,7 +86,7 @@ export default class Tkt extends View {
     this.view = "columns";
     this.range = { start: 0, end: 0 };
     this.shownRange = { start: 0, end: 0 };
-    this.selected = this.answers.sprint?.body ? firstTarget(targets("sprint", "columns", this.answers.sprint.body)) : null;
+    this.selected = this.answers[this.tab]?.body ? firstTarget(targets(this.tab, "columns", this.answers[this.tab].body)) : null;
     this.inStrip = false;
     this.stripSel = 0;
     this.bots = false;
@@ -149,7 +155,17 @@ export default class Tkt extends View {
   }
 
   use(on, cx) {
+    const switched = this.machine !== undefined && machineKey(this.machine) !== machineKey(on);
+    if (switched) {
+      this.states[machineKey(this.machine)] = stashed(this);
+      Object.assign(this, restored(this.states, on, unpackCache(localStorage.getItem(`board:${machineKey(on)}`), on)));
+      this.details = null;
+      this.menu = null;
+      this.panel = null;
+      this.cacheSaved = 0;
+    }
     this.machine = on;
+    if (switched) this.loadView(cx);
     this.choices = null;
     try {
       localStorage.setItem("machine", JSON.stringify(on));
@@ -224,7 +240,7 @@ export default class Tkt extends View {
         if (Date.now() - (this.cacheSaved ?? 0) > 60000) {
           this.cacheSaved = Date.now();
           try {
-            localStorage.setItem("board", packCache(this.machine, this.answers, this.cacheSaved));
+            localStorage.setItem(`board:${machineKey(this.machine)}`, packCache(this.machine, this.answers, this.cacheSaved, this.tab));
           } catch {}
         }
         const body = this.answers[this.tab]?.body;
@@ -1245,6 +1261,7 @@ export default class Tkt extends View {
 
   select(id, cx) {
     this.tab = id;
+    this.cacheSaved = 0;
     this.inStrip = false;
     this.selected = null;
     this.load(cx);
