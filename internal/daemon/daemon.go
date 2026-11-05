@@ -84,7 +84,7 @@ type Options struct {
 	Settings     func() (config.Config, error)
 	SaveSettings func(config.Config) (config.Config, error)
 	// SaveAgentKinds keeps the agents Herdr desktop knows, which the Herdr desktop mod sends, for agent kinds.
-	SaveAgentKinds func([]string) error
+	SaveAgentKinds func(kinds []string, runs map[string][]string) error
 	// MoveToSprint moves a Backlog ticket into a sprint, for POST /v1/tickets/{key}/sprint.
 	MoveToSprint func(ctx context.Context, key ticket.Key, sprint int) error
 	// JiraStatuses, JiraBoards and JiraFields list what Settings offers from Jira.

@@ -330,7 +330,7 @@ func TestFixOnDesktopFindsTheUnnamedHandoffAgent(t *testing.T) {
 func TestAgentKindsOnDesktopPreferTheAgentsHerdrDesktopKnows(t *testing.T) {
 	h, _ := desktopHarness(t)
 	h.run.missing["herdr"] = true
-	if err := h.app.saveAgentKinds([]string{"opencode", "aider", "claude"}); err != nil {
+	if err := h.app.saveAgentKinds([]string{"opencode", "aider", "claude"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	h.run.missing["aider"] = true
@@ -338,7 +338,7 @@ func TestAgentKindsOnDesktopPreferTheAgentsHerdrDesktopKnows(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(kinds, []string{"opencode", "claude"}) {
 		t.Errorf("agentKinds = %q, %v; want Herdr desktop's installed agents in its order", kinds, err)
 	}
-	if err := h.app.saveAgentKinds([]string{}); err != nil {
+	if err := h.app.saveAgentKinds([]string{}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if kinds, err := h.app.agentKinds(context.Background()); err != nil || len(kinds) < 2 || kinds[0] != "pi" {
@@ -349,7 +349,7 @@ func TestAgentKindsOnDesktopPreferTheAgentsHerdrDesktopKnows(t *testing.T) {
 func TestAgentKindsOnDesktopFallBackWhenNoSavedAgentIsInstalled(t *testing.T) {
 	h, _ := desktopHarness(t)
 	h.run.missing["herdr"] = true
-	if err := h.app.saveAgentKinds([]string{"onlymissing"}); err != nil {
+	if err := h.app.saveAgentKinds([]string{"onlymissing"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	h.run.missing["onlymissing"] = true
@@ -423,5 +423,24 @@ func TestAnAgentOnlyTheInteractiveShellFindsStartsByItsFullPath(t *testing.T) {
 	}
 	if _, err := h.app.agentPath(context.Background(), "codex"); err == nil {
 		t.Errorf("agentPath(codex) found an agent installed nowhere")
+	}
+}
+
+func TestAnAgentHerdrStartsThroughAnotherProgramCountsWhenThatProgramIsInstalled(t *testing.T) {
+	h, _ := desktopHarness(t)
+	h.run.missing["herdr"] = true
+	if err := h.app.saveAgentKinds([]string{"claude", "pi", "gentle-shell"}, map[string][]string{"pi": {"gentle-shell", "--agent", "pi"}}); err != nil {
+		t.Fatal(err)
+	}
+	h.run.missing["pi"] = true
+	kinds, err := h.app.agentKinds(context.Background())
+	if err != nil || !reflect.DeepEqual(kinds, []string{"claude", "pi", "gentle-shell"}) {
+		t.Errorf("agentKinds = %q, %v; want pi, whose run starts gentle-shell, beside claude and gentle-shell", kinds, err)
+	}
+	if got, err := h.app.chooseAgent(context.Background(), "pi"); err != nil || got != "pi" {
+		t.Errorf("chooseAgent(pi) = %q, %v; want pi, started as gentle-shell", got, err)
+	}
+	if run := h.app.agentRun("pi"); !reflect.DeepEqual(run, []string{"gentle-shell", "--agent", "pi"}) {
+		t.Errorf("agentRun(pi) = %q", run)
 	}
 }

@@ -307,3 +307,20 @@ func TestRunDetached(t *testing.T) {
 		t.Errorf("calls = %+v\nwant %q", f.calls, want)
 	}
 }
+
+func TestAnAgentStartsAsHerdrsRunSays(t *testing.T) {
+	c := herdrcore.NewWith(&seqHC{})
+	herdrcore.SetLookPath(c, func(name string) (string, error) { return "/opt/bin/" + name, nil })
+	c.RunAgentsAs(func(kind string) []string {
+		if kind == "pi" {
+			return []string{"gentle-shell", "--agent", "pi"}
+		}
+		return nil
+	})
+	if got, want := herdrcore.Argv(c, "pi"), []string{"/opt/bin/gentle-shell", "--agent", "pi"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Argv(pi) = %q, want %q", got, want)
+	}
+	if got, want := herdrcore.Argv(c, "codex"), []string{"/opt/bin/codex", "--no-daemon"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Argv(codex) = %q, want %q: an agent without a run keeps tkt's own way", got, want)
+	}
+}

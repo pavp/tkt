@@ -66,14 +66,18 @@ func (a *App) installedKinds(ctx context.Context, all []string, flavor herdrFlav
 	var shellDirs []string
 	asked := false
 	for _, k := range all {
-		if _, err := a.Run.LookPath(k); err == nil {
+		program := k
+		if run := a.agentRun(k); flavor == herdrDesktop && len(run) > 0 {
+			program = run[0]
+		}
+		if _, err := a.Run.LookPath(program); err == nil {
 			kinds = append(kinds, k)
 			continue
 		}
 		if !asked {
 			shellDirs, asked = a.shellPath(ctx), true
 		}
-		if executableIn(shellDirs, k) {
+		if executableIn(shellDirs, program) {
 			kinds = append(kinds, k)
 		}
 	}
@@ -81,6 +85,16 @@ func (a *App) installedKinds(ctx context.Context, all []string, flavor herdrFlav
 		return nil, fmt.Errorf("no agent %s can start is installed; install one of: %s", flavor, strings.Join(all, ", "))
 	}
 	return kinds, nil
+}
+
+// startsOnDesktop reports whether the agent being chosen opens in Herdr desktop, whose programs.json may start it
+// through another program.
+func (a *App) startsOnDesktop(ctx context.Context) bool {
+	if u, ok := unattendedOf(ctx); ok {
+		return u.flavor == herdrDesktop
+	}
+	ch, err := a.whichHerdr(ctx)
+	return err == nil && ch.flavor == herdrDesktop
 }
 
 // agentInstalled reports whether an agent's executable is in PATH, or in the PATH of the user's interactive shell.
@@ -193,7 +207,14 @@ func (a *App) chooseAgent(ctx context.Context, asked string) (string, error) {
 				return "", fmt.Errorf("%q is not an agent kind: use one of %s", asked, strings.Join(kinds, ", "))
 			}
 		}
-		if !a.agentInstalled(ctx, asked) {
+		program := asked
+		if run := a.agentRun(asked); len(run) > 0 && a.startsOnDesktop(ctx) {
+			program = run[0]
+		}
+		if !a.agentInstalled(ctx, program) {
+			if program != asked {
+				return "", fmt.Errorf("agent %s starts %s, which is not installed (not found in PATH)", asked, program)
+			}
 			return "", fmt.Errorf("agent %s is not installed (not found in PATH)", asked)
 		}
 		return asked, nil
@@ -253,10 +274,11 @@ func (a *App) agentChoices(ctx context.Context) (kinds []string, last string, er
 func (a *App) agentKindsFile() string { return filepath.Join(a.Env.DataDir(), "herdr-agents.json") }
 
 // saveAgentKinds keeps the agents Herdr desktop knows, as its tkt mod reads them, most picked first.
-func (a *App) saveAgentKinds(kinds []string) error {
+func (a *App) saveAgentKinds(kinds []string, runs map[string][]string) error {
 	b, err := json.Marshal(struct {
-		Agents []string `json:"agents"`
-	}{kinds})
+		Agents []string            `json:"agents"`
+		Runs   map[string][]string `json:"runs,omitempty"`
+	}{kinds, runs})
 	if err != nil {
 		return err
 	}
@@ -264,11 +286,23 @@ func (a *App) saveAgentKinds(kinds []string) error {
 }
 
 func (a *App) loadAgentKinds() []string {
+	agents, _ := a.loadSavedAgents()
+	return agents
+}
+
+// agentRun is how Herdr desktop starts an agent, as the mod saved it from programs.json, or nil for its own name.
+func (a *App) agentRun(kind string) []string {
+	_, runs := a.loadSavedAgents()
+	return runs[kind]
+}
+
+func (a *App) loadSavedAgents() ([]string, map[string][]string) {
 	var saved struct {
-		Agents []string `json:"agents"`
+		Agents []string            `json:"agents"`
+		Runs   map[string][]string `json:"runs"`
 	}
 	if b, err := os.ReadFile(a.agentKindsFile()); err != nil || json.Unmarshal(b, &saved) != nil {
-		return nil
+		return nil, nil
 	}
-	return saved.Agents
+	return saved.Agents, saved.Runs
 }

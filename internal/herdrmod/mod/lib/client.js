@@ -27,6 +27,15 @@ export function machineOrder(machines, last) {
   return order;
 }
 
+/** How Herdr starts each installed agent whose programs.json `run` is not just its own name, by key. */
+export function agentRuns(known) {
+  const runs = {};
+  for (const p of known ?? []) {
+    if (p.agent && p.installed && p.run?.length && !(p.run.length === 1 && p.run[0] === p.key)) runs[p.key] = p.run;
+  }
+  return runs;
+}
+
 /** The agents to tell tkt about: Herdr desktop's installed agents (knownAgents), by key, most picked first. */
 export function agentKinds(known) {
   const kinds = [];

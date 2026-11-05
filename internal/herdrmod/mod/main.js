@@ -6,7 +6,7 @@ import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView,
 import { exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile } from "herdr";
 import * as os from "os";
 import * as fs from "fs/promises";
-import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
+import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN, withPeach } from "./lib/columns.js";
 import { gutterOf, statusTone, prStatusTone, agentWord, prRefs, listColumns, pointsText } from "./lib/rows.js";
@@ -186,7 +186,8 @@ export default class Tkt extends View {
       } catch {}
       try {
         const known = await knownAgents(on ? { on } : {});
-        await this.call("POST", "/v1/herdr/agents", { agents: agentKinds(known) });
+        const runs = agentRuns(known);
+        await this.call("POST", "/v1/herdr/agents", Object.keys(runs).length > 0 ? { agents: agentKinds(known), runs } : { agents: agentKinds(known) });
       } catch {}
     });
     this.load(cx);

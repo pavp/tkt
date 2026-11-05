@@ -49,6 +49,8 @@ type Client struct {
 	settleTries int
 	// lookPath finds an agent on tkt's PATH: herdr-core starts terminals with its own PATH, which may lack it.
 	lookPath func(string) (string, error)
+	// runOf is how Herdr desktop starts an agent, from programs.json's run, or nil to start it by its kind.
+	runOf func(kind string) []string
 	// environ is tkt's environment, part of which the terminals it starts get over herdr-core's own.
 	environ func() []string
 
@@ -56,6 +58,9 @@ type Client struct {
 	windowErr error
 	windowAt  time.Time
 }
+
+// RunAgentsAs makes the client start an agent as f says Herdr desktop does (programs.json's run), when f returns one.
+func (c *Client) RunAgentsAs(f func(kind string) []string) { c.runOf = f }
 
 // LookAgentsWith makes the client find agents with f, which returns an agent's executable, rather than tkt's PATH.
 func (c *Client) LookAgentsWith(f func(kind string) (string, error)) { c.lookPath = f }
