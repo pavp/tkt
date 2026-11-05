@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/pavp/tkt/internal/workspace"
 )
@@ -31,11 +34,11 @@ var desktopKinds = []string{"pi", "claude", "codex", "gemini", "cursor", "devin"
 func (a *App) agentKinds(ctx context.Context) ([]string, error) {
 	if ch, err := a.whichHerdr(ctx); err == nil && ch.flavor == herdrDesktop {
 		if known := a.loadAgentKinds(); len(known) > 0 {
-			if kinds, err := a.installedKinds(known, herdrDesktop); err == nil {
+			if kinds, err := a.installedKinds(ctx, known, herdrDesktop); err == nil {
 				return kinds, nil
 			}
 		}
-		return a.installedKinds(desktopKinds, herdrDesktop)
+		return a.installedKinds(ctx, desktopKinds, herdrDesktop)
 	}
 	if _, err := a.Run.LookPath("herdr"); err != nil {
 		return nil, errors.New("cannot tell which agents are installed: tkt learns them from Herdr (`herdr agent start --help`), which is not in PATH")
@@ -52,13 +55,25 @@ func (a *App) agentKinds(ctx context.Context) ([]string, error) {
 	if len(all) == 0 {
 		return nil, errors.New("cannot tell which agents Herdr can start: `herdr agent start --help` lists none; update Herdr")
 	}
-	return a.installedKinds(all, herdrClassic)
+	return a.installedKinds(ctx, all, herdrClassic)
 }
 
-func (a *App) installedKinds(all []string, flavor herdrFlavor) ([]string, error) {
+// installedKinds are the kinds of all found in PATH, or else in the PATH of the user's interactive shell, where
+// Herdr starts agents: tkt started by the mod or the daemon may run with a shorter PATH, as Homebrew on Linux adds
+// itself only in .bashrc.
+func (a *App) installedKinds(ctx context.Context, all []string, flavor herdrFlavor) ([]string, error) {
 	var kinds []string
+	var shellDirs []string
+	asked := false
 	for _, k := range all {
 		if _, err := a.Run.LookPath(k); err == nil {
+			kinds = append(kinds, k)
+			continue
+		}
+		if !asked {
+			shellDirs, asked = a.shellPath(ctx), true
+		}
+		if executableIn(shellDirs, k) {
 			kinds = append(kinds, k)
 		}
 	}
@@ -66,6 +81,80 @@ func (a *App) installedKinds(all []string, flavor herdrFlavor) ([]string, error)
 		return nil, fmt.Errorf("no agent %s can start is installed; install one of: %s", flavor, strings.Join(all, ", "))
 	}
 	return kinds, nil
+}
+
+// agentInstalled reports whether an agent's executable is in PATH, or in the PATH of the user's interactive shell.
+func (a *App) agentInstalled(ctx context.Context, kind string) bool {
+	if _, err := a.Run.LookPath(kind); err == nil {
+		return true
+	}
+	return executableIn(a.shellPath(ctx), kind)
+}
+
+// shellPathCache keeps the interactive shell's PATH for a while, as asking takes a shell start on every Start.
+type shellPathCache struct {
+	mu   sync.Mutex
+	dirs []string
+	at   time.Time
+}
+
+const shellPathTTL = 10 * time.Minute
+
+// shellPath is PATH as the user's interactive shell sets it, or nothing when that shell does not answer in time. The
+// shell writes it to a file rather than to tkt's pipe, so a job its rc file leaves running cannot hold tkt waiting.
+func (a *App) shellPath(ctx context.Context) []string {
+	if c := a.shellCache; c != nil {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if !c.at.IsZero() && a.Now().Sub(c.at) < shellPathTTL {
+			return c.dirs
+		}
+	}
+	dirs := a.askShellPath(ctx)
+	if c := a.shellCache; c != nil {
+		c.dirs, c.at = dirs, a.Now()
+	}
+	return dirs
+}
+
+func (a *App) askShellPath(ctx context.Context) []string {
+	file := filepath.Join(a.Env.DataDir(), "shell-path-"+strconv.Itoa(os.Getpid()))
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := a.Run.Run(ctx, "", "sh", []string{"-c", shellPathScript(cmp.Or(a.Env.Getenv("SHELL"), "sh"), file)}, nil); err != nil {
+		return nil
+	}
+	b, err := os.ReadFile(file)
+	_ = os.Remove(file)
+	if err != nil {
+		return nil
+	}
+	var dirs []string
+	for _, d := range filepath.SplitList(strings.TrimSpace(string(b))) {
+		if filepath.IsAbs(d) {
+			dirs = append(dirs, d)
+		}
+	}
+	return dirs
+}
+
+// shellPathScript runs the interactive shell with its output going to file and nothing tied to tkt's pipes.
+func shellPathScript(shell, file string) string {
+	return fmt.Sprintf(`%s -ic 'printf %%s "$PATH"' >%s 2>/dev/null </dev/null`, shellQuote(shell), shellQuote(file))
+}
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+func executableIn(dirs []string, name string) bool {
+	for _, d := range dirs {
+		if info, err := os.Stat(filepath.Join(d, name)); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // pickAgent is the agent a Start opens: the one asked for, the only one installed, or the one the user picks, the
@@ -92,7 +181,7 @@ func (a *App) chooseAgent(ctx context.Context, asked string) (string, error) {
 				return "", fmt.Errorf("%q is not an agent kind: use one of %s", asked, strings.Join(kinds, ", "))
 			}
 		}
-		if _, err := a.Run.LookPath(asked); err != nil {
+		if !a.agentInstalled(ctx, asked) {
 			return "", fmt.Errorf("agent %s is not installed (not found in PATH)", asked)
 		}
 		return asked, nil

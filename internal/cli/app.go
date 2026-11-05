@@ -53,6 +53,8 @@ type App struct {
 	Executable func() (string, error)
 	// OS is the operating system tkt runs on as runtime.GOOS names it; empty means runtime.GOOS.
 	OS string
+	// shellCache keeps the interactive shell's PATH across agent lookups; nil asks every time.
+	shellCache *shellPathCache
 	// OrgMember reports whether a gh token belongs to an active member of a GitHub organization.
 	OrgMember func(ctx context.Context, token, org string) (bool, error)
 	// StartDetached starts a program that outlives tkt, writing its output to logPath, and returns its pid.
@@ -110,6 +112,7 @@ func NewApp() (*App, error) {
 	a.StartDetached = startDetached
 	a.Signal = syscall.Kill
 	a.Executable = executable
+	a.shellCache = &shellPathCache{}
 	return a, nil
 }
 

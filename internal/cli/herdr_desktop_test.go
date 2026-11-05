@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -352,5 +355,55 @@ func TestAgentKindsOnDesktopFallBackWhenNoSavedAgentIsInstalled(t *testing.T) {
 	h.run.missing["onlymissing"] = true
 	if kinds, err := h.app.agentKinds(context.Background()); err != nil || len(kinds) == 0 || kinds[0] != "pi" {
 		t.Errorf("agentKinds = %q, %v; want the fixed list's installed agents", kinds, err)
+	}
+}
+
+// shellPathHarness is a desktop harness whose agents are all missing from tkt's own PATH, with an interactive shell
+// whose PATH holds bin; the shell's answer is the file it writes, which the fake runner cannot, so the test writes it.
+func shellPathHarness(t *testing.T, bin string) *harness {
+	t.Helper()
+	h, _ := desktopHarness(t)
+	h.run.missing["herdr"] = true
+	for _, k := range desktopKinds {
+		h.run.missing[k] = true
+	}
+	h.env["SHELL"] = "/bin/bash"
+	file := filepath.Join(h.app.Env.DataDir(), "shell-path-"+strconv.Itoa(os.Getpid()))
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	h.run.out["sh -c "+shellPathScript("/bin/bash", file)] = ""
+	if err := os.WriteFile(file, []byte("/nowhere:"+bin), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+func TestAgentKindsFindAgentsInTheInteractiveShellsPath(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "codex"), []byte("not runnable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := shellPathHarness(t, bin)
+	kinds, err := h.app.agentKinds(context.Background())
+	if err != nil || !reflect.DeepEqual(kinds, []string{"claude"}) {
+		t.Errorf("agentKinds = %q, %v; want claude, found through the interactive shell's PATH as Herdr starts agents", kinds, err)
+	}
+}
+
+func TestStartTakesAnAgentFoundInTheInteractiveShellsPath(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h := shellPathHarness(t, bin)
+	if got, err := h.app.chooseAgent(context.Background(), "claude"); err != nil || got != "claude" {
+		t.Errorf("chooseAgent(claude) = %q, %v; want claude, as the mod asks for it by name", got, err)
+	}
+	if _, err := h.app.chooseAgent(context.Background(), "codex"); err == nil || !strings.Contains(err.Error(), "agent codex is not installed") {
+		t.Errorf("chooseAgent(codex) = %v; want codex not installed", err)
 	}
 }
