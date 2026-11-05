@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"github.com/pavp/tkt/internal/board"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/pavp/tkt/internal/herdr"
@@ -112,6 +114,7 @@ func (a *App) newHerdrOf(flavor herdrFlavor) HerdrAPI {
 		}
 		c.LookAgentsWith(func(kind string) (string, error) { return a.agentPath(context.Background(), kind) })
 		c.RunAgentsAs(a.agentRun)
+		c.PathFrom(func() string { return strings.Join(a.shellPath(context.Background()), string(os.PathListSeparator)) })
 		return c
 	}
 	return herdr.New(herdr.SocketPath(a.Env.Getenv, a.Env.Home))

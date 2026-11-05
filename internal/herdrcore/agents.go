@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -119,13 +122,34 @@ func (c *Client) env() map[string]string {
 		k, v, ok := strings.Cut(kv, "=")
 		switch {
 		case !ok || v == "":
-		case k == "PATH", k == "XDG_CONFIG_HOME", k == "XDG_DATA_HOME", k == "HERDR_APP_HOME":
+		case k == "PATH":
+			out[k] = c.withShellPath(v)
+		case k == "XDG_CONFIG_HOME", k == "XDG_DATA_HOME", k == "HERDR_APP_HOME":
 			out[k] = v
 		case strings.HasPrefix(k, "TKT_") && !secretName(k):
 			out[k] = v
 		}
 	}
 	return out
+}
+
+// withShellPath is the interactive shell's PATH, where agents' own tools live (Homebrew on Linux adds itself only in
+// .bashrc), followed by own's entries it lacks; own alone when the shell's is unknown.
+func (c *Client) withShellPath(own string) string {
+	if c.shellPath == nil {
+		return own
+	}
+	shell := c.shellPath()
+	if shell == "" {
+		return own
+	}
+	dirs := filepath.SplitList(shell)
+	for _, d := range filepath.SplitList(own) {
+		if !slices.Contains(dirs, d) {
+			dirs = append(dirs, d)
+		}
+	}
+	return strings.Join(dirs, string(os.PathListSeparator))
 }
 
 func secretName(k string) bool {

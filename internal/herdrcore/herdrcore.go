@@ -53,11 +53,16 @@ type Client struct {
 	runOf func(kind string) []string
 	// environ is tkt's environment, part of which the terminals it starts get over herdr-core's own.
 	environ func() []string
+	// shellPath is the PATH of the user's interactive shell, where Herdr starts agents, or "" when unknown.
+	shellPath func() string
 
 	mu        sync.Mutex
 	windowErr error
 	windowAt  time.Time
 }
+
+// PathFrom makes the terminals the client starts take f's PATH first, the interactive shell's, then tkt's own.
+func (c *Client) PathFrom(f func() string) { c.shellPath = f }
 
 // RunAgentsAs makes the client start an agent as f says Herdr desktop does (programs.json's run), when f returns one.
 func (c *Client) RunAgentsAs(f func(kind string) []string) { c.runOf = f }
