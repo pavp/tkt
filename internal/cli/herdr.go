@@ -418,7 +418,8 @@ func (a *App) startInHerdr(ctx context.Context, key ticket.Key, o workspace.Star
 	return a.herdrStart(ctx, []string{string(key)}, opts)
 }
 
-// herdrStart opens one Herdr workspace with an agent per repository, or focuses the ticket's worktree.
+// herdrStart opens one Herdr workspace with an agent per repository, focuses the agent of the ticket's worktree, or
+// opens one there when it has none.
 func (a *App) herdrStart(ctx context.Context, args []string, opts startOpts) error {
 	h := a.startHerdr(ctx)
 	opts.prefer = func(ws []workspace.Work) (workspace.Work, bool) { return workWithAgent(ctx, h, ws) }
@@ -427,31 +428,25 @@ func (a *App) herdrStart(ctx context.Context, args []string, opts startOpts) err
 		return err
 	}
 	if plan.Existing != nil {
-		ws, wsOK := workspaceAt(ctx, h, plan.Existing.Path)
-		ag, agOK := agentAt(ctx, h, plan.Existing.Path)
-		if wsOK || agOK {
-			if wsOK {
+		// A running agent is focused; a worktree without one gets one, which is also how its agent is changed (close it,
+		// Start again, pick another), beside the space's shell when it has one.
+		if ag, ok := agentAt(ctx, h, plan.Existing.Path); ok {
+			ws, wsOK := workspaceAt(ctx, h, plan.Existing.Path)
+			if wsOK && ws.ID == ag.WorkspaceID {
 				a.printf("Focusing %s\n", ws.Label)
 			} else {
 				ws.ID = ag.WorkspaceID
 				a.printf("Focusing the agent of %s\n", plan.Key)
 			}
-			err := h.FocusWorkspace(ctx, ws.ID)
-			switch {
-			// With no window to show the space, a space without an agent gets one beside its shell, as Start would.
-			case errors.Is(err, herdrcore.ErrNoWindow) && !agOK:
-			case errors.Is(err, herdrcore.ErrNoWindow):
+			if err := h.FocusWorkspace(ctx, ws.ID); errors.Is(err, herdrcore.ErrNoWindow) {
 				a.printf("! %v\n", err)
 				return nil
-			case err != nil:
+			} else if err != nil {
 				return err
-			default:
-				// The workspace alone may show another tab; the agent's pane brings its own tab forward.
-				if agOK && ag.WorkspaceID == ws.ID {
-					_ = h.FocusPane(ctx, ag.PaneID)
-				}
-				return nil
 			}
+			// The workspace alone may show another tab; the agent's pane brings its own tab forward.
+			_ = h.FocusPane(ctx, ag.PaneID)
+			return nil
 		}
 		kind, err := a.pickAgent(ctx, opts.agent)
 		if err != nil {

@@ -915,6 +915,7 @@ export default class Tkt extends View {
     if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
     const p = firstPicker(key, a.body);
     if (p.error) throw new Error(p.error);
+    if (p.post) return this.postStart(key, p.post);
     this.choices_ = a.body;
     this.picker = { ...p, checked: new Set(p.rows.filter((r) => r.checked).map((r) => r.value)) };
   }

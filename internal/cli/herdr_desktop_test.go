@@ -154,16 +154,19 @@ func TestBoardTaskOnDesktopGoesToTheAgentsOwnTerminal(t *testing.T) {
 	}
 }
 
-func TestHerdrStartOnDesktopFindsTheSpaceByItsFolder(t *testing.T) {
+// A worktree's space without an agent (its agent closed, its shell left) gets one beside the shell: Start is also how
+// the agent is changed.
+func TestHerdrStartOnDesktopOpensAnAgentInTheWorktreesSpace(t *testing.T) {
 	h, d := desktopHarness(t)
 	h.clone(t, "web")
 	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-1\nHEAD a\nbranch refs/heads/feature/DEMO-1-filter\n"
 	d.wss = []herdrport.Workspace{{ID: "sp3", Label: "web-DEMO-1", Folder: "/src/web-DEMO-1/"}}
+	d.panes = []herdrport.Pane{{ID: "t4", WorkspaceID: "sp3", Cwd: "/src/web-DEMO-1"}}
 	if code := h.exec("herdr", "start", "DEMO-1"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	if want := []string{"focus workspace sp3"}; !reflect.DeepEqual(d.calls, want) {
-		t.Errorf("calls = %q, want %q", d.calls, want)
+	if !slices.Contains(d.calls, "start pi t4") || slices.ContainsFunc(d.calls, func(c string) bool { return strings.HasPrefix(c, "workspace ") }) {
+		t.Errorf("calls = %q, want an agent beside the worktree's shell t4, in its space", d.calls)
 	}
 }
 

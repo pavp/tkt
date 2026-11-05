@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -131,12 +132,26 @@ func TestAnUnattendedStartFocusesARunningAgentWithoutSettling(t *testing.T) {
 	h.clone(t, "web")
 	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-7-a\nHEAD a\nbranch refs/heads/feature/DEMO-7-a\n"
 	d.wss = []herdrport.Workspace{{ID: "sp3", Label: "web-DEMO-7-a", Folder: "/src/web-DEMO-7-a"}}
+	d.agents = []herdrport.Agent{{PaneID: "t9", WorkspaceID: "sp3", Agent: "claude", Status: "idle", Cwd: "/src/web-DEMO-7-a"}}
 	settled := false
 	if err := h.app.daemonStart(context.Background(), "DEMO-7", daemon.StartRequest{Herdr: "desktop"}, func() { settled = true }); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"focus workspace sp3"}; !reflect.DeepEqual(d.calls, want) || settled {
-		t.Errorf("calls %q settled %v, want %q unsettled", d.calls, settled, want)
+	if !slices.Contains(d.calls, "focus workspace sp3") || settled {
+		t.Errorf("calls %q settled %v, want sp3 focused, unsettled", d.calls, settled)
+	}
+}
+
+// A worktree whose agent closed asks which agent to open, as a new Start does, so the agent can be changed.
+func TestAnUnattendedStartAsksForTheAgentOfAWorktreeWithoutOne(t *testing.T) {
+	h, d := daemonDesktop(t)
+	h.clone(t, "web")
+	h.run.out["git worktree list --porcelain"] = "worktree /src/web-DEMO-7-a\nHEAD a\nbranch refs/heads/feature/DEMO-7-a\n"
+	d.wss = []herdrport.Workspace{{ID: "sp3", Label: "web-DEMO-7-a", Folder: "/src/web-DEMO-7-a"}}
+	err := h.app.daemonStart(context.Background(), "DEMO-7", daemon.StartRequest{Herdr: "desktop"}, func() {})
+	var need daemon.NeedsAnswerError
+	if !errors.As(err, &need) || need.Need != "agent" {
+		t.Errorf("daemonStart = %v, want it to ask which agent", err)
 	}
 }
 
