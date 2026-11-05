@@ -148,6 +148,7 @@ func startDetached(name string, args []string, logPath string) (int, error) {
 	defer log.Close()
 	cmd := exec.Command(name, args...)
 	cmd.Stdout, cmd.Stderr = log, log
+	cmd.Env = detachedEnv(os.Environ())
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return 0, err
@@ -155,6 +156,12 @@ func startDetached(name string, args []string, logPath string) (int, error) {
 	// Waiting in the background reaps the daemon when it exits before this process does.
 	go func() { _ = cmd.Wait() }()
 	return cmd.Process.Pid, nil
+}
+
+// detachedEnv is env without HC_SCOPE: herdr-core ends every process carrying it once the remote command that set it
+// (`hc exec`) returns, setsid or not, so a daemon started from the Herdr desktop mod would die after each call.
+func detachedEnv(env []string) []string {
+	return slices.DeleteFunc(slices.Clone(env), func(kv string) bool { return strings.HasPrefix(kv, "HC_SCOPE=") })
 }
 
 func (a *App) daemonStatus(ctx context.Context) error {

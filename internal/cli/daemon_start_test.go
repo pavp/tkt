@@ -359,3 +359,14 @@ func TestDaemonHandsOverToTheNewerBinaryAnUpgradeLeft(t *testing.T) {
 		}
 	}
 }
+
+func TestTheDetachedDaemonDropsHerdrCoresScope(t *testing.T) {
+	env := []string{"PATH=/usr/bin", "HC_SCOPE=s-42", "HC_TERMINAL_ID=t1", "HOME=/home/u"}
+	got := detachedEnv(env)
+	if want := []string{"PATH=/usr/bin", "HC_TERMINAL_ID=t1", "HOME=/home/u"}; !slices.Equal(got, want) {
+		t.Errorf("detachedEnv = %q, want %q: herdr-core ends processes carrying HC_SCOPE when hc exec returns", got, want)
+	}
+	if !slices.Contains(env, "HC_SCOPE=s-42") {
+		t.Errorf("detachedEnv changed its argument: %q", env)
+	}
+}
