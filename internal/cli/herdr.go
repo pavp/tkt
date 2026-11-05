@@ -436,17 +436,22 @@ func (a *App) herdrStart(ctx context.Context, args []string, opts startOpts) err
 				ws.ID = ag.WorkspaceID
 				a.printf("Focusing the agent of %s\n", plan.Key)
 			}
-			if err := h.FocusWorkspace(ctx, ws.ID); errors.Is(err, herdrcore.ErrNoWindow) {
+			err := h.FocusWorkspace(ctx, ws.ID)
+			switch {
+			// With no window to show the space, a space without an agent gets one beside its shell, as Start would.
+			case errors.Is(err, herdrcore.ErrNoWindow) && !agOK:
+			case errors.Is(err, herdrcore.ErrNoWindow):
 				a.printf("! %v\n", err)
 				return nil
-			} else if err != nil {
+			case err != nil:
 				return err
+			default:
+				// The workspace alone may show another tab; the agent's pane brings its own tab forward.
+				if agOK && ag.WorkspaceID == ws.ID {
+					_ = h.FocusPane(ctx, ag.PaneID)
+				}
+				return nil
 			}
-			// The workspace alone may show another tab; the agent's pane brings its own tab forward.
-			if agOK && ag.WorkspaceID == ws.ID {
-				_ = h.FocusPane(ctx, ag.PaneID)
-			}
-			return nil
 		}
 		kind, err := a.pickAgent(ctx, opts.agent)
 		if err != nil {
