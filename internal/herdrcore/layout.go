@@ -231,12 +231,13 @@ var promptArgs = map[string]bool{"claude": true, "codex": true}
 // OpenAgentSpace opens a space at folder whose first terminal runs kind, given task as its first message. It returns
 // the space and the agent's terminal.
 func (c *Client) OpenAgentSpace(ctx context.Context, folder, name, kind, task string) (herdrport.Workspace, herdrport.Pane, error) {
-	argv := append([]string{c.program(kind)}, kindArgs[kind]...)
-	if promptArgs[kind] {
+	argv := c.argvOf(kind)
+	prompts := promptArgs[c.programKind(kind)]
+	if prompts {
 		argv = append(argv, task)
 	}
 	ws, pane, err := c.newSpace(ctx, folder, name, argv)
-	if err != nil || promptArgs[kind] {
+	if err != nil || prompts {
 		return ws, pane, err
 	}
 	err = c.ready(ctx, pane.ID, kind)

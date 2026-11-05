@@ -19,3 +19,6 @@ func Program(c *Client, kind string) string { return c.program(kind) }
 
 // SetEnviron sets the environment the client hands, in part, to the terminals it starts.
 func SetEnviron(c *Client, f func() []string) { c.environ = f }
+
+// Argv is the command line the client starts for an agent kind, before a Start's own arguments.
+func Argv(c *Client, kind string) []string { return c.argvOf(kind) }

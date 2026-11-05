@@ -50,7 +50,7 @@ func (c *Client) StartAgent(ctx context.Context, paneID, kind, name string, args
 	if err != nil {
 		return err
 	}
-	argv := append(append([]string{c.program(kind)}, kindArgs[kind]...), args...)
+	argv := append(c.argvOf(kind), args...)
 	address, err := c.start(ctx, runReq{argv: argv, cwd: pane.Cwd, name: name, labels: placedLike(pane)})
 	if err != nil {
 		return err
@@ -296,6 +296,28 @@ func (c *Client) RunDetached(ctx context.Context, cwd string, argv []string) err
 }
 
 // program is the program to run for an agent kind: its full path when tkt finds it, else the name for herdr-core to look up.
+// argvOf is the command line that starts an agent: Herdr desktop's run for it when there is one, else its program
+// with the arguments tkt gives that kind.
+func (c *Client) argvOf(kind string) []string {
+	if c.runOf != nil {
+		if run := c.runOf(kind); len(run) > 0 {
+			return append([]string{c.program(run[0])}, run[1:]...)
+		}
+	}
+	return append([]string{c.program(kind)}, kindArgs[kind]...)
+}
+
+// programKind is the agent kind of the program that starts kind: its run's first word when Herdr desktop starts it
+// through another agent, else kind itself; it decides whether the task goes on the command line.
+func (c *Client) programKind(kind string) string {
+	if c.runOf != nil {
+		if run := c.runOf(kind); len(run) > 0 {
+			return run[0]
+		}
+	}
+	return kind
+}
+
 func (c *Client) program(kind string) string {
 	if c.lookPath != nil {
 		if p, err := c.lookPath(kind); err == nil {
