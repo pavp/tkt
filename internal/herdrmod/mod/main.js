@@ -12,7 +12,7 @@ import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag,
 import { gutterOf, statusTone, prStatusTone, agentWord, prRefs, listColumns, pointsText } from "./lib/rows.js";
 import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview, prsToggle } from "./lib/prs.js";
-import { backlogRows, badges } from "./lib/backlog.js";
+import { backlogRows, badges, backlogAgents } from "./lib/backlog.js";
 import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
@@ -393,13 +393,13 @@ export default class Tkt extends View {
         .when(Boolean(b?.unestimated), (el) => el.child(div().text_color(t.dim).child(b.unestimated)))
         .when(Boolean(b), (el) => el.children(b.stages.map(([stage, n]) => div().px(5).rounded(3).bg(tone[stage]).text_color(t.background).child(n))));
     }
-    return this.listRow(t, r, { agents: {} }, this.backlogCols, { backlog: true });
+    return this.listRow(t, r, { agents: backlogAgents(this.answers) }, this.backlogCols, { backlog: true });
   }
 
   backlogList(t, view) {
     if (view.no_team_boards) return div().p(16).text_color(t.muted).child("No team boards set: choose them in Settings › Team boards to see their sprints and backlog here.");
     const rows = backlogRows(view);
-    this.backlogCols = { ...listColumns(rows.filter((r) => r.kind === "row"), {}), assignee: true };
+    this.backlogCols = { ...listColumns(rows.filter((r) => r.kind === "row"), backlogAgents(this.answers)), assignee: true };
     return v_flex().id("backlog").relative().flex_1().min_h_0()
       .child(this.listHeader(t, ["KEY", "STATUS", ""], this.backlogCols, { backlog: true }))
       .child(v_virtual_list("backlog-rows", rows.length, ROW, (i) => `${i}`, (range) =>

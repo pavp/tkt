@@ -20,3 +20,14 @@ test("a group's points are its three stage badges, after how many have no estima
   assert.deepEqual(badges({ todo: 2, doing: 0, done: 0, unestimated: 0 }), { unestimated: "", stages: [["todo", "2"], ["doing", "0"], ["done", "0"]] });
   assert.equal(badges(undefined), null);
 });
+
+test("the Backlog shows each ticket's agent, from the agents the board knows, as the TUI's AGENT column does", async () => {
+  const { backlogAgents } = await import("../mod/lib/backlog.js");
+  const { listColumns, agentWord } = await import("../mod/lib/rows.js");
+  const { cardOf } = await import("../mod/lib/columns.js");
+  const agents = backlogAgents({ sprint: { status: 200, body: { agents: { "DEMO-40": "working" } } } });
+  assert.deepEqual(agents, { "DEMO-40": "working" });
+  assert.equal(listColumns([{ ticket: {} }], agents).agent, true);
+  assert.equal(agentWord(cardOf({ key: "DEMO-40", ticket: {} }, agents).agent), "● working");
+  assert.deepEqual(backlogAgents({}), {});
+});

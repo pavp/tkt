@@ -18,3 +18,8 @@ export function badges(points) {
     stages: [["todo", String(points.todo)], ["doing", String(points.doing)], ["done", String(points.done)]],
   };
 }
+
+/** The agents to show on the Backlog: the board's (GET /v1/board knows each ticket's agent in this Herdr). */
+export function backlogAgents(answers) {
+  return answers?.sprint?.body?.agents ?? {};
+}
