@@ -407,3 +407,21 @@ func TestStartTakesAnAgentFoundInTheInteractiveShellsPath(t *testing.T) {
 		t.Errorf("chooseAgent(codex) = %v; want codex not installed", err)
 	}
 }
+
+func TestAnAgentOnlyTheInteractiveShellFindsStartsByItsFullPath(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h := shellPathHarness(t, bin)
+	if got, err := h.app.agentPath(context.Background(), "claude"); err != nil || got != filepath.Join(bin, "claude") {
+		t.Errorf("agentPath(claude) = %q, %v; want %s, since herdr-core starts terminals with a PATH that lacks it", got, err, filepath.Join(bin, "claude"))
+	}
+	h.run.missing["claude"] = false
+	if got, _ := h.app.agentPath(context.Background(), "claude"); got != "/usr/local/bin/claude" {
+		t.Errorf("agentPath(claude) in tkt's own PATH = %q, want /usr/local/bin/claude", got)
+	}
+	if _, err := h.app.agentPath(context.Background(), "codex"); err == nil {
+		t.Errorf("agentPath(codex) found an agent installed nowhere")
+	}
+}
