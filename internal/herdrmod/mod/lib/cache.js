@@ -3,17 +3,18 @@
 
 const KEPT = ["sprint", "prs"];
 
-export function packCache(machine, answers, now) {
+/** The copy to keep for machine: its Sprint and PRs answers and the tab it was on. */
+export function packCache(machine, answers, now, tab = "sprint") {
   const kept = {};
   for (const id of KEPT) if (answers[id]?.status === 200) kept[id] = answers[id];
-  return JSON.stringify({ machine: machine ?? null, at: now, answers: kept });
+  return JSON.stringify({ machine: machine ?? null, at: now, tab, answers: kept });
 }
 
 /** The kept copy for machine, or null when there is none for it. */
 export function unpackCache(raw, machine) {
   try {
     const c = JSON.parse(raw ?? "null");
-    return c && c.machine === (machine ?? null) ? { at: c.at, answers: c.answers ?? {} } : null;
+    return c && c.machine === (machine ?? null) ? { at: c.at, tab: c.tab ?? "sprint", answers: c.answers ?? {} } : null;
   } catch {
     return null;
   }
