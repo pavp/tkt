@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -225,6 +226,36 @@ func (a *App) daemonRepos() []string {
 	return names
 }
 
+// slowSync is how long a sync takes before the daemon's log says so; quicker ones, every minute, leave no line.
+const slowSync = 5 * time.Second
+
+// timingsText is " (mine 0.8s, team 2.1s, …)", the parts of a slow sync, or nothing when none were timed.
+func timingsText(parts []board.Timing) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		out[i] = fmt.Sprintf("%s %.1fs", p.Name, p.Took.Seconds())
+	}
+	return " (" + strings.Join(out, ", ") + ")"
+}
+
+// logLine is a warning on one line of at most logLimit bytes: an error can carry a whole HTML page.
+func logLine(w string) string {
+	w = strings.Join(strings.Fields(w), " ")
+	if len(w) <= logLimit {
+		return w
+	}
+	cut := logLimit
+	for cut > 0 && !utf8.RuneStart(w[cut]) {
+		cut--
+	}
+	return w[:cut] + "…"
+}
+
+const logLimit = 300
+
 // logNewWarnings writes each sync warning the previous sync did not have to the daemon's log, so a failure
 // that empties part of the board leaves a trace without repeating itself every sync.
 func (a *App) logNewWarnings(warnings []string) {
@@ -232,7 +263,7 @@ func (a *App) logNewWarnings(warnings []string) {
 	defer a.warnMu.Unlock()
 	for _, w := range warnings {
 		if !slices.Contains(a.syncWarnings, w) {
-			fmt.Fprintf(a.Stderr, "%s sync: %s\n", a.Now().UTC().Format(time.RFC3339), w)
+			fmt.Fprintf(a.Stderr, "%s sync: %s\n", a.Now().UTC().Format(time.RFC3339), logLine(w))
 		}
 	}
 	a.syncWarnings = slices.Clone(warnings)
@@ -242,6 +273,13 @@ func (a *App) logNewWarnings(warnings []string) {
 // restart, fails when the fetch does, so the daemon keeps its last good board, and rewrites the Herdr
 // sidebar with the new board when Herdr runs, reading agent states from every Herdr it follows.
 func (a *App) daemonSync(ctx context.Context, partial func(board.Snapshot)) (board.Snapshot, error) {
+	start := a.Now()
+	var parts []board.Timing
+	defer func() {
+		if took := a.Now().Sub(start); took >= slowSync {
+			fmt.Fprintf(a.Stderr, "%s sync: took %.1fs%s\n", a.Now().UTC().Format(time.RFC3339), took.Seconds(), timingsText(parts))
+		}
+	}()
 	c, err := a.LoadConfig()
 	if err != nil {
 		return board.Snapshot{}, err
@@ -254,6 +292,7 @@ func (a *App) daemonSync(ctx context.Context, partial func(board.Snapshot)) (boa
 		return board.Snapshot{}, stale
 	}
 	a.logNewWarnings(snap.Warnings)
+	parts = snap.Timings
 	hctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var agents []map[string]string

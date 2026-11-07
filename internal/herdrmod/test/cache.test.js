@@ -23,3 +23,23 @@ test("while the window shows its last copy, the sync label says so as the TUI's 
   const at = new Date(2026, 10, 4, 10, 30).getTime();
   assert.equal(cachedLabel(at), "! cached · 10:30");
 });
+
+test("an answer saying the daemon is still syncing never replaces a board already shown", async () => {
+  const { keptAnswer } = await import("../mod/lib/cache.js");
+  const good = { status: 200, body: { columns: [] } };
+  const syncing = { status: 503, body: { message: "the first sync has not finished" } };
+  assert.equal(keptAnswer(good, syncing), good, "the cached board stays on screen and in the next save");
+  assert.equal(keptAnswer(undefined, syncing), syncing, "with nothing shown, the screen says it syncs");
+  assert.equal(keptAnswer(good, { status: 500, body: {} }).status, 500, "a real failure still shows");
+  const fresh = { status: 200, body: { columns: [1] } };
+  assert.equal(keptAnswer(good, fresh), fresh);
+});
+
+test("while the daemon syncs, the board is asked again sooner than the usual poll", async () => {
+  const { pollAfter } = await import("../mod/lib/cache.js");
+  assert.equal(pollAfter({ status: 200, body: { syncing: true } }), 1500);
+  assert.equal(pollAfter({ status: 200, body: { partial: true } }), 1500);
+  assert.equal(pollAfter({ status: 503, body: {} }), 1500, "the first sync is still running");
+  assert.equal(pollAfter({ status: 200, body: {} }), null);
+  assert.equal(pollAfter(undefined), null);
+});

@@ -24,3 +24,15 @@ export function cachedLabel(at) {
   const d = new Date(at);
   return `! cached · ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
+
+/** The answer to show for a route: a 503 (the daemon's first sync still running) never replaces a board already
+ *  shown, so the window keeps its last copy instead of saying it syncs. */
+export function keptAnswer(shown, fresh) {
+  return fresh?.status === 503 && shown?.status === 200 ? shown : fresh;
+}
+
+/** How soon to ask for the board again while the daemon is still filling it, else null for the usual poll. */
+export function pollAfter(answer) {
+  if (!answer) return null;
+  return answer.status === 503 || answer.body?.syncing || answer.body?.partial ? 1500 : null;
+}

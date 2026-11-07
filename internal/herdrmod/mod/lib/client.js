@@ -96,3 +96,12 @@ export function tktPathFrom(stdout) {
   const lines = (stdout ?? "").split("\n").map((l) => l.trim()).filter((l) => l.startsWith("/"));
   return lines.length > 0 ? lines[lines.length - 1] : null;
 }
+
+/** fn, with the calls made while one runs sharing its answer; a call after it settled runs fn again. */
+export function shared(fn) {
+  let running = null;
+  return () => {
+    if (!running) running = Promise.resolve().then(fn).finally(() => { running = null; });
+    return running;
+  };
+}

@@ -141,3 +141,33 @@ func SectionAt(rows []Row, i int) (title string, n int, ok bool) {
 	}
 	return "", 0, false
 }
+
+// ForTeam is the snapshot the board shows: with the team on, the team tickets kept while it was off join the
+// user's, each under its parent; with it off, the user's tickets alone, as fetched.
+func ForTeam(snap Snapshot, team bool) Snapshot {
+	kept := snap.KeptTeam
+	snap.KeptTeam = nil
+	if !team || len(kept) == 0 {
+		return snap
+	}
+	var flat []ticket.Ticket
+	present := map[ticket.Key]bool{}
+	var walk func([]ticket.Ticket)
+	walk = func(ts []ticket.Ticket) {
+		for _, t := range ts {
+			subs := t.Subtasks
+			t.Subtasks = nil
+			flat = append(flat, t)
+			present[t.Key] = true
+			walk(subs)
+		}
+	}
+	walk(snap.Tickets)
+	for _, t := range kept {
+		if !present[t.Key] {
+			flat = append(flat, t)
+		}
+	}
+	snap.Tickets = ticket.GroupSubtasks(flat)
+	return snap
+}

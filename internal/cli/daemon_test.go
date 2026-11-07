@@ -169,3 +169,65 @@ func TestDaemonReposAreTheConfiguredOnes(t *testing.T) {
 		t.Errorf("repos without a configuration = %v", got)
 	}
 }
+
+func TestDaemonSyncLogsAnErrorPageAsOneShortLine(t *testing.T) {
+	h := daemonHarness(t)
+	page := "504 <!DOCTYPE html>\n<html>\n  <head><title>Unicorn!</title></head>\n" + strings.Repeat("<p>base64 image data</p>\n", 200)
+	h.app.NewGitHub = func(*config.Config) GitHubAPI { return &fakeGitHub{err: errors.New(page)} }
+	if _, err := h.app.daemonSync(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(h.errOut.String()), "\n") {
+		if len(line) > 400 {
+			t.Errorf("a log line stays short, got %d bytes: %.120s…", len(line), line)
+		}
+	}
+	if !strings.Contains(h.errOut.String(), "sync: pull requests unavailable: 504 <!DOCTYPE html> <html> <head><title>Unicorn!</title></head>") {
+		t.Errorf("the line keeps the start of the error on one line:\n%.400s", h.errOut.String())
+	}
+}
+
+func TestDaemonSyncLogsHowLongASlowSyncTook(t *testing.T) {
+	h := daemonHarness(t)
+	start := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	for _, took := range []time.Duration{2 * time.Second, 7500 * time.Millisecond} {
+		calls := 0
+		h.app.Now = func() time.Time {
+			calls++
+			if calls == 1 {
+				return start
+			}
+			return start.Add(took)
+		}
+		h.errOut.Reset()
+		if _, err := h.app.daemonSync(context.Background(), nil); err != nil {
+			t.Fatal(err)
+		}
+		logged := strings.Contains(h.errOut.String(), "sync: took 7.5s")
+		if took < 5*time.Second && strings.Contains(h.errOut.String(), "sync: took") {
+			t.Errorf("a quick sync leaves no line:\n%s", h.errOut.String())
+		}
+		if took >= 5*time.Second && !logged {
+			t.Errorf("a slow sync says how long it took:\n%s", h.errOut.String())
+		}
+	}
+}
+
+func TestASlowSyncLineSaysWhereTheTimeWent(t *testing.T) {
+	h := daemonHarness(t)
+	start := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	calls := 0
+	h.app.Now = func() time.Time {
+		calls++
+		if calls == 1 {
+			return start
+		}
+		return start.Add(6 * time.Second)
+	}
+	if _, err := h.app.daemonSync(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.errOut.String(), "sync: took 6.0s (mine ") {
+		t.Errorf("the slow line names each part's time:\n%s", h.errOut.String())
+	}
+}

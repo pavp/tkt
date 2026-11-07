@@ -427,13 +427,13 @@ func (m Model) boardTickets() map[string]int {
 		}
 		return m.backlog.BoardCounts()
 	}
-	return board.BoardCounts(m.snap.Tickets, m.team)
+	return board.BoardCounts(board.ForTeam(m.snap, m.team).Tickets, m.team)
 }
 
 // shownTickets are the user's tickets the board filter leaves.
 // Team tickets show only while the team is on, after the user's own.
 func (m Model) shownTickets() []ticket.Ticket {
-	return board.ShownTickets(m.snap.Tickets, m.hiddenBoards, m.team)
+	return board.ShownTickets(board.ForTeam(m.snap, m.team).Tickets, m.hiddenBoards, m.team)
 }
 
 // boardRepos counts, per repository the board knows (the configured ones and any with pull requests), its
@@ -444,7 +444,7 @@ func (m Model) boardRepos() map[string]int {
 	for _, r := range cfg.Repos() {
 		names = append(names, r.Name)
 	}
-	return board.Repos(m.snap, names)
+	return board.Repos(board.ForTeam(m.snap, m.team), names)
 }
 
 // repoNotice says how many repositories the filter leaves; it is empty while every one shows.

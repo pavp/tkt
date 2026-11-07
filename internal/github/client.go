@@ -251,56 +251,68 @@ func (n prNode) toPR() ticket.PullRequest {
 	return pr
 }
 
-// PullRequests returns open and recently merged PRs of repos ("owner/name"), batching one GraphQL query
-// per owner because each owner may need a different gh account.
+const prQueriesAtOnce = 4
+
+// PullRequests returns open and recently merged PRs of repos ("owner/name") in their order, one GraphQL query
+// per repository with the gh account of its owner.
 func (c *Client) PullRequests(ctx context.Context, repos []string) ([]ticket.PullRequest, error) {
-	byOwner := map[string][]string{}
-	for _, r := range repos {
-		owner, _, _ := strings.Cut(r, "/")
-		byOwner[owner] = append(byOwner[owner], r)
+	type answer struct {
+		prs []ticket.PullRequest
+		err error
 	}
-	owners := make([]string, 0, len(byOwner))
-	for o := range byOwner {
-		owners = append(owners, o)
-	}
-	sort.Strings(owners)
-	var out []ticket.PullRequest
-	for _, owner := range owners {
-		var b strings.Builder
-		b.WriteString("query {\n  viewer { login }\n")
-		for i, r := range byOwner[owner] {
+	answers := make([]answer, len(repos))
+	var wg sync.WaitGroup
+	// One query per repository, a few at a time: GitHub answers several small ones together faster than one
+	// that names every repository, which it often cuts off with a 502 or 504.
+	slots := make(chan struct{}, prQueriesAtOnce)
+	for i, r := range repos {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
 			o, name, _ := strings.Cut(r, "/")
-			fmt.Fprintf(&b, "  r%d: repository(owner: %q, name: %q) {\n", i, o, name)
+			var b strings.Builder
+			b.WriteString("query {\n  viewer { login }\n")
+			fmt.Fprintf(&b, "  r0: repository(owner: %q, name: %q) {\n", o, name)
 			fmt.Fprintf(&b, "    open: pullRequests(states: OPEN, first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { %s } }\n", prFields)
 			fmt.Fprintf(&b, "    merged: pullRequests(states: MERGED, first: 20, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { %s } }\n", mergedFields)
-			b.WriteString("  }\n")
-		}
-		b.WriteString("}")
-		var data map[string]json.RawMessage
-		if err := c.query(ctx, owner, b.String(), nil, &data); err != nil {
-			return nil, fmt.Errorf("pull requests of %s: %w", owner, err)
-		}
-		var viewer struct{ Login string }
-		_ = json.Unmarshal(data["viewer"], &viewer)
-		for i, r := range byOwner[owner] {
+			b.WriteString("  }\n}")
+			var data map[string]json.RawMessage
+			if err := c.query(ctx, o, b.String(), nil, &data); err != nil {
+				answers[i].err = fmt.Errorf("pull requests of %s: %w", r, err)
+				return
+			}
+			var viewer struct{ Login string }
+			_ = json.Unmarshal(data["viewer"], &viewer)
 			var repo *struct {
 				Open   struct{ Nodes []prNode } `json:"open"`
 				Merged struct{ Nodes []prNode } `json:"merged"`
 			}
-			if raw, ok := data[fmt.Sprintf("r%d", i)]; ok {
+			if raw, ok := data["r0"]; ok {
 				if err := json.Unmarshal(raw, &repo); err != nil {
-					return nil, fmt.Errorf("pull requests of %s: %w", r, err)
+					answers[i].err = fmt.Errorf("pull requests of %s: %w", r, err)
+					return
 				}
 			}
 			if repo == nil {
-				return nil, fmt.Errorf("repository %s not found or not visible to the gh account", r)
+				answers[i].err = fmt.Errorf("repository %s not found or not visible to the gh account", r)
+				return
 			}
 			for _, n := range append(repo.Open.Nodes, repo.Merged.Nodes...) {
 				pr := n.toPR()
 				pr.Yours = viewer.Login != "" && n.Author != nil && strings.EqualFold(n.Author.Login, viewer.Login)
-				out = append(out, pr)
+				answers[i].prs = append(answers[i].prs, pr)
 			}
+		}()
+	}
+	wg.Wait()
+	var out []ticket.PullRequest
+	for _, a := range answers {
+		if a.err != nil {
+			return nil, a.err
 		}
+		out = append(out, a.prs...)
 	}
 	return out, nil
 }

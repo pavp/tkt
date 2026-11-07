@@ -38,6 +38,11 @@ type Snapshot struct {
 	Panels map[string]DevPanel `json:"panels,omitempty"`
 	// Partial marks a board painted before GitHub answered: Jira's tickets with earlier pull request data.
 	Partial bool `json:"partial,omitempty"`
+	// KeptTeam is the team tickets last found while the team is off, apart from Tickets so the board without
+	// the team stays exactly the user's; ForTeam joins them in when the team is turned on.
+	KeptTeam []ticket.Ticket `json:"kept_team,omitempty"`
+	// Timings says how long each part of the fetch took, for the daemon's log; never saved.
+	Timings []Timing `json:"-"`
 	// LabelField names the Jira field whose value each ticket's Label holds, when one is configured and found.
 	LabelField string `json:"label_field,omitempty"`
 }
@@ -82,6 +87,12 @@ func FetchSince(ctx context.Context, c *config.Config, js JiraSource, gh GitHubS
 	return FetchWith(ctx, c, js, gh, now, prev, Options{})
 }
 
+// Timing is how long one part of a fetch took: mine, panels, team, github or reviews.
+type Timing struct {
+	Name string
+	Took time.Duration
+}
+
 // Options choose what a fetch includes beyond the user's own tickets.
 type Options struct {
 	// Team adds the open sprints' tickets assigned to others or to nobody, marked Team. They cost one more
@@ -111,6 +122,7 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		boards   map[int]string
 		warnings []string
 		err      error
+		took     time.Duration
 	}
 	var teamDone chan teamResult
 	var boards []config.TeamBoard
@@ -120,8 +132,9 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 	if opts.Team && len(boards) > 0 {
 		teamDone = make(chan teamResult, 1)
 		go func() {
+			began := time.Now()
 			is, sprints, warns, err := teamIssues(ctx, js, c.SpaceKeys(), boards, fields)
-			teamDone <- teamResult{is, sprints, warns, err}
+			teamDone <- teamResult{is, sprints, warns, err, time.Since(began)}
 		}()
 	}
 	type handedOffResult struct {
@@ -133,10 +146,12 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 		is, err := js.Search(ctx, jira.HandedOffSprintJQL(c.SpaceKeys()), fields)
 		handedOffDone <- handedOffResult{is, err}
 	}()
+	began := time.Now()
 	issues, err := js.Search(ctx, jira.MySprintJQL(c.SpaceKeys()), fields)
 	if err != nil {
 		return snap, err
 	}
+	snap.Timings = append(snap.Timings, Timing{"mine", time.Since(began)})
 	tickets := make([]ticket.Ticket, 0, len(issues))
 	ids := make(map[ticket.Key]string, len(issues))
 	updated := make(map[ticket.Key]time.Time, len(issues))
@@ -182,10 +197,12 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 	linked := map[ticket.Key][]jira.DevPullRequest{}
 	devFailed := map[ticket.Key]bool{}
 	ignoredAny := map[string]bool{}
+	began = time.Now()
 	panels := devPanels(ctx, js, tickets, ids, func(t ticket.Ticket) (DevPanel, bool) {
 		p, ok := prev.Panels[string(t.Key)]
 		return p, ok && p.Updated.Equal(updated[t.Key]) && now.Sub(p.Asked) < panelTTL
 	})
+	snap.Timings = append(snap.Timings, Timing{"panels", time.Since(began)})
 	for i, t := range tickets {
 		l, err := panels[i].prs, panels[i].err
 		if err == nil {
@@ -208,60 +225,96 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 	names := allRepos(snap.Repos)
 	// Review requests need only the repositories, so they load while the pull requests do.
 	type reviewResult struct {
-		prs []ticket.PullRequest
-		err error
+		prs  []ticket.PullRequest
+		err  error
+		took time.Duration
 	}
 	var reviewsDone chan reviewResult
 	if mode := c.ReviewMode(); mode != config.ReviewsOff && len(names) > 0 {
 		reviewsDone = make(chan reviewResult, 1)
 		go func() {
+			began := time.Now()
 			r, err := gh.ReviewRequests(ctx, names, mode == config.ReviewsDirect)
-			reviewsDone <- reviewResult{r, err}
+			reviewsDone <- reviewResult{r, err, time.Since(began)}
 		}()
 	}
 	type prsResult struct {
-		prs []ticket.PullRequest
-		err error
+		prs  []ticket.PullRequest
+		err  error
+		took time.Duration
 	}
 	prsDone := make(chan prsResult, 1)
 	if len(names) > 0 {
 		go func() {
+			began := time.Now()
 			p, err := gh.PullRequests(ctx, names)
-			prsDone <- prsResult{p, err}
+			prsDone <- prsResult{p, err, time.Since(began)}
 		}()
 	} else {
 		prsDone <- prsResult{}
 	}
-	var team []ticket.Ticket
+	var team, kept []ticket.Ticket
 	joined := false
-	joinTeam := func() {
-		if joined || teamDone == nil {
+	takeTeam := func(r teamResult) {
+		joined = true
+		snap.Timings = append(snap.Timings, Timing{"team", r.took})
+		if r.err != nil {
+			snap.Warnings = append(snap.Warnings, "team tickets unavailable: "+r.err.Error())
 			return
 		}
-		joined = true
-		if r := <-teamDone; r.err != nil {
-			snap.Warnings = append(snap.Warnings, "team tickets unavailable: "+r.err.Error())
-		} else {
-			snap.Warnings = append(snap.Warnings, r.warnings...)
-			for _, is := range r.issues {
-				t := toTicket(is)
-				t.Team = true
-				for _, sp := range is.Sprints {
-					if name, ok := r.boards[sp.ID]; ok {
-						t.Board = name
-						break
-					}
+		snap.Warnings = append(snap.Warnings, r.warnings...)
+		for _, is := range r.issues {
+			t := toTicket(is)
+			t.Team = true
+			for _, sp := range is.Sprints {
+				if name, ok := r.boards[sp.ID]; ok {
+					t.Board = name
+					break
 				}
-				team = append(team, t)
 			}
+			team = append(team, t)
 		}
 	}
+	joinTeam := func() {
+		if joined {
+			return
+		}
+		if teamDone == nil {
+			joined = true
+			// Turning the team on then shows these at once, while the sync that reads them again runs.
+			if len(boards) > 0 {
+				kept = keptTeam(prev)
+			}
+			return
+		}
+		takeTeam(<-teamDone)
+	}
 	if opts.Partial != nil {
-		joinTeam()
-		opts.Partial(partialBoard(snap, tickets, team, linked, prev))
+		partialTeam := keptTeam(prev)
+		if teamDone == nil || len(partialTeam) == 0 {
+			joinTeam()
+			partialTeam = team
+		} else {
+			// The first paint waits for the team search only when no earlier team tickets can stand in.
+			select {
+			case r := <-teamDone:
+				takeTeam(r)
+				partialTeam = team
+			default:
+			}
+		}
+		yours := map[ticket.Key]bool{}
+		for _, t := range tickets {
+			yours[t.Key] = true
+		}
+		partialTeam = slices.DeleteFunc(slices.Clone(partialTeam), func(t ticket.Ticket) bool { return yours[t.Key] })
+		opts.Partial(partialBoard(snap, tickets, partialTeam, linked, prev))
 	}
 	r := <-prsDone
 	prs, prErr := r.prs, r.err
+	if len(names) > 0 {
+		snap.Timings = append(snap.Timings, Timing{"github", r.took})
+	}
 	if prErr != nil {
 		snap.Warnings = append(snap.Warnings, "pull requests unavailable: "+prErr.Error())
 	}
@@ -328,10 +381,14 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 	}
 	team = slices.DeleteFunc(team, func(t ticket.Ticket) bool { return mine[t.Key] })
 	snap.Tickets = ticket.GroupSubtasks(append(tickets, ticket.AttachPRs(team, prs)...))
+	if kept = slices.DeleteFunc(kept, func(t ticket.Ticket) bool { return mine[t.Key] }); len(kept) > 0 {
+		snap.KeptTeam = ticket.AttachPRs(kept, prs)
+	}
 
 	if reviewsDone != nil {
 		r := <-reviewsDone
 		reviews, err := r.prs, r.err
+		snap.Timings = append(snap.Timings, Timing{"reviews", r.took})
 		if err != nil {
 			// An empty list would read as no request at all; the last ones found stay until a search works.
 			snap.Warnings = append(snap.Warnings, "review requests unavailable, showing the last ones found: "+err.Error())
@@ -884,4 +941,27 @@ func (s Snapshot) Find(key ticket.Key) (ticket.Ticket, bool) {
 		}
 	}
 	return ticket.Ticket{}, false
+}
+
+// keptTeam is the team tickets of an earlier snapshot, those on its board and those it kept, subtasks
+// included, flat and without the pull requests attached to them, which this fetch attaches again.
+func keptTeam(prev Snapshot) []ticket.Ticket {
+	var out []ticket.Ticket
+	var walk func([]ticket.Ticket)
+	walk = func(ts []ticket.Ticket) {
+		for _, t := range ts {
+			if t.Team {
+				kept := t
+				kept.PRs, kept.Subtasks = nil, nil
+				out = append(out, kept)
+			}
+			walk(t.Subtasks)
+		}
+	}
+	walk(prev.Tickets)
+	for _, t := range prev.KeptTeam {
+		t.PRs, t.Subtasks = nil, nil
+		out = append(out, t)
+	}
+	return out
 }
