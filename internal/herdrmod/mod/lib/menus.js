@@ -48,7 +48,7 @@ export function ticketMenu(t, opts = {}) {
   if (t.url) items.push({ label: "Open in Jira ↗", action: "open", url: t.url });
   if (prs.length === 1) items.push({ label: `Open #${prs[0].number} in GitHub ↗`, action: "open", url: prs[0].url });
   if (prs.length > 1) {
-    const lines = opts.prLines ?? prs.map((p) => ({ number: p.number, label: `#${p.number}`, url: p.url }));
+    const lines = opts.prLines ?? prs.map((p) => ({ number: p.number, label: `#${p.number} ${p.title ?? ""}`.trim(), url: p.url }));
     items.push({ label: `Pull requests (${prs.length}) ▸`, action: "submenu", menu: prsSubmenu(key, lines) });
   }
   const reason = opts.attention?.[0] ?? attentionOf(t);

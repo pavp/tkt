@@ -108,3 +108,11 @@ test("the menu's key line reads as keys and what they do", async () => {
   const { footerKeys } = await import("../mod/lib/menus.js");
   assert.deepEqual(footerKeys("enter run · c copy link · esc close"), [["enter", "run"], ["c", "copy link"], ["esc", "close"]]);
 });
+
+test("a ticket's pull requests submenu names each one by number and title", () => {
+  const t = { key: "DEMO-5", status: "In Progress", url: "u", prs: [{ number: 12, title: "Add the filter", url: "a" }, { number: 13, title: "Fix the date range", url: "b" }] };
+  const m = ticketMenu(t, {});
+  const prs = m.items.find((i) => i.label === "Pull requests (2) ▸");
+  assert.deepEqual(prs.menu.items.map((i) => i.label), ["#12 Add the filter", "#13 Fix the date range"]);
+  assert.deepEqual(ticketMenu({ ...t, prs: [{ number: 12, url: "a" }, { number: 13, url: "b" }] }, {}).items.find((i) => i.action === "submenu").menu.items.map((i) => i.label), ["#12", "#13"], "a pull request without a title keeps its number");
+});
