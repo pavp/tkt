@@ -85,3 +85,11 @@ test("the theme adds a sunken well behind columns and a pill tone over cards, fr
   assert.notEqual(t.pill, t.raised);
   assert.ok(contrast(t.muted, t.pill) >= 4.5, "text on a pill reads");
 });
+
+test("your cards take a tint of Herdr's accent instead of plain gray, and text reads on them", async () => {
+  const { tktTheme, contrast } = await import("../mod/lib/theme.js");
+  const t = tktTheme(herdrDark);
+  assert.notEqual(t.card, t.raised);
+  assert.notEqual(t.card, t.surface);
+  for (const k of ["foreground", "muted", "dim"]) assert.ok(contrast(t[k], t.card) >= 4.5, `${k} reads at ${contrast(t[k], t.card)} on a card`);
+});

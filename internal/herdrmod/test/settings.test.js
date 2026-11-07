@@ -62,3 +62,24 @@ test("the mark picker offers every mark with its icon, none first", async () => 
   assert.deepEqual(marks.map((m) => m.glyph), ["—", "◇", "⊘", "◷", "⚑", "★", "▲"]);
   assert.equal(marks[0].name, "none");
 });
+
+test("a status drag starts once the pointer travels a few pixels, so a click stays a click", async () => {
+  const { dragStarted } = await import("../mod/lib/settings.js");
+  const press = { x: 100, y: 200 };
+  assert.equal(dragStarted(press, { x: 102, y: 201 }), false);
+  assert.equal(dragStarted(press, { x: 105, y: 200 }), true);
+  assert.equal(dragStarted(press, { x: 100, y: 194 }), true);
+  assert.equal(dragStarted(null, { x: 300, y: 300 }), false);
+});
+
+test("the column under the pointer is read from where it is across the row of equal columns, none in a gap", async () => {
+  const { laneAt } = await import("../mod/lib/settings.js");
+  const row = { width: 430, count: 4, gap: 10 };
+  assert.equal(laneAt(0, row), 0);
+  assert.equal(laneAt(99, row), 0);
+  assert.equal(laneAt(105, row), -1, "the gap between two columns is no column");
+  assert.equal(laneAt(111, row), 1);
+  assert.equal(laneAt(429, row), 3);
+  assert.equal(laneAt(-5, row), -1);
+  assert.equal(laneAt(431, row), -1);
+});

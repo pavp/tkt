@@ -74,3 +74,19 @@ const MARK_GLYPHS = { none: "—", diamond: "◇", blocked: "⊘", clock: "◷",
 export function markChoices(marks) {
   return (marks ?? []).map((name) => ({ name, glyph: MARK_GLYPHS[name] ?? "·" }));
 }
+
+const DRAG_SLOP = 4;
+
+/** Whether a press on a status has travelled far enough from where it went down to be a drag. */
+export function dragStarted(press, pos) {
+  if (!press) return false;
+  return Math.abs(pos.x - press.x) >= DRAG_SLOP || Math.abs(pos.y - press.y) >= DRAG_SLOP;
+}
+
+/** The index of the column at x across a row of `count` equal columns `gap` apart, or -1 in a gap or outside. */
+export function laneAt(x, { width, count, gap }) {
+  if (count <= 0 || x < 0 || x >= width) return -1;
+  const lane = (width - gap * (count - 1)) / count;
+  const i = Math.floor(x / (lane + gap));
+  return x - i * (lane + gap) < lane && i < count ? i : -1;
+}
