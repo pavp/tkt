@@ -1816,7 +1816,7 @@ export default class Tkt extends View {
       .child(top)
       .children(lines.map((l, i) => div().id(`card-${c.key}-l${i}`).h(20).truncate().text_size(13).font_weight(500).text_color(t.foreground).child(l)))
       .when(!c.team, (el) => el.child(this.icon("corner", 14).absolute().top(0).right(0).text_color(t.accent)))
-      .when(sel, (el) => el.child(div().absolute().top(-5).left(-5).right(-5).bottom(-5).rounded(12).border(2).border_color(t.accent)));
+      .when(sel, (el) => el.child(div().absolute().top(-4).left(-4).right(-4).bottom(-4).rounded(11).border(1.5).border_color(t.accent)));
     if (compact) return card;
     const label = mix(t.ansi4, t.raised, 0.14);
     return card
