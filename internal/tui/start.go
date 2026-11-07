@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/pavp/tkt/internal/textmatch"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/workspace"
 )
@@ -39,6 +40,20 @@ type picker struct {
 	// start holds the answers given so far when the picker asks which agent Start opens.
 	start *StartOptions
 	sel   int
+	// query is the text typed into a repository or board filter, narrowing its rows.
+	query string
+}
+
+// shown lists, as indexes into rows, the rows the typed text leaves; every row outside the filters.
+func (p *picker) shown() []int {
+	idx := make([]int, len(p.rows))
+	for i := range idx {
+		idx[i] = i
+	}
+	if p.filter == "" {
+		return idx
+	}
+	return textmatch.Filter(idx, p.query, func(i int) string { return p.rows[i].label })
 }
 
 type pickerRow struct {
@@ -202,6 +217,9 @@ func (m Model) finishPicker() (tea.Model, tea.Cmd) {
 
 func (m Model) pickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	p := m.picker
+	if p.filter != "" {
+		return m.filterKey(k)
+	}
 	switch k.String() {
 	case "esc", "q", "backspace":
 		m.picker = nil
@@ -213,17 +231,47 @@ func (m Model) pickerKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if p.multi {
 			p.rows[p.sel].checked = !p.rows[p.sel].checked
 		}
-	case "a":
-		if p.filter != "" {
-			all := !slices.ContainsFunc(p.rows, func(r pickerRow) bool { return !r.checked })
-			for i := range p.rows {
-				p.rows[i].checked = !all
-			}
-		}
 	case "enter":
 		return m.finishPicker()
 	case "ctrl+c":
 		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// filterKey drives the repository and board filters: letters narrow the rows, space ticks, ctrl+a ticks all
+// or none of the rows shown, enter applies, esc clears the text and then cancels.
+func (m Model) filterKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	p := m.picker
+	shown := p.shown()
+	switch {
+	case k.Type == tea.KeyCtrlC:
+		return m, tea.Quit
+	case k.Type == tea.KeyEnter:
+		return m.finishPicker()
+	case k.Type == tea.KeyEsc && p.query != "":
+		p.query, p.sel = "", 0
+	case k.Type == tea.KeyEsc:
+		m.picker = nil
+	case k.Type == tea.KeyUp:
+		p.sel = max(0, p.sel-1)
+	case k.Type == tea.KeyDown || k.Type == tea.KeyTab:
+		p.sel = min(max(0, len(shown)-1), p.sel+1)
+	case k.Type == tea.KeySpace || k.String() == " ":
+		if p.sel < len(shown) {
+			p.rows[shown[p.sel]].checked = !p.rows[shown[p.sel]].checked
+		}
+	case k.Type == tea.KeyCtrlA:
+		all := !slices.ContainsFunc(shown, func(i int) bool { return !p.rows[i].checked })
+		for _, i := range shown {
+			p.rows[i].checked = !all
+		}
+	case k.Type == tea.KeyBackspace:
+		if r := []rune(p.query); len(r) > 0 {
+			p.query, p.sel = string(r[:len(r)-1]), 0
+		}
+	case k.Type == tea.KeyRunes:
+		p.query, p.sel = p.query+string(k.Runes), 0
 	}
 	return m, nil
 }
@@ -239,7 +287,7 @@ func (m Model) pickerLayout() (box string, firstRow, buttonsRow int, buttons []c
 	keys := "enter " + strings.ToLower(p.action()) + " · esc cancel"
 	switch {
 	case p.filter != "":
-		keys = "space toggle · a all · " + keys
+		keys = "type to filter · space toggle · ctrl+a all · " + keys
 	case p.multi:
 		keys = "space toggle · " + keys
 	}
@@ -247,8 +295,21 @@ func (m Model) pickerLayout() (box string, firstRow, buttonsRow int, buttons []c
 	// Border and padding take 6 cells; a narrow pane (the tray panel) gets a narrower box, cutting labels.
 	inner = min(inner, max(20, m.width-6))
 	lines := []string{bold.Render(truncate(p.title, inner)), "", truncate(p.question, inner), ""}
+	shown := p.shown()
+	if p.filter != "" {
+		search := dim.Render("/ type to filter")
+		if p.query != "" {
+			search = "/ " + truncate(p.query, inner-3) + "█"
+		}
+		lines = append(lines, search)
+		if len(shown) == 0 {
+			noun := map[string]string{filterRepos: "repository", filterBoards: "board"}[p.filter]
+			lines = append(lines, dim.Render(truncate("no "+noun+" matches "+p.query, inner)))
+		}
+	}
 	firstRow = 1 + len(lines)
-	for i, r := range p.rows {
+	for i, ri := range shown {
+		r := p.rows[ri]
 		hint := r.hint
 		label := truncate(p.rowLabel(r), max(4, inner-2-3-lipgloss.Width(hint)))
 		gap := max(3, inner-2-lipgloss.Width(label)-lipgloss.Width(hint))
@@ -296,10 +357,11 @@ func (m Model) pickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.picker = nil
 			return m, nil
 		}
-		if i := y - firstRow; i >= 0 && i < len(p.rows) {
+		if shown := p.shown(); y-firstRow >= 0 && y-firstRow < len(shown) {
+			i := y - firstRow
 			p.sel = i
 			if p.multi {
-				p.rows[i].checked = !p.rows[i].checked
+				p.rows[shown[i]].checked = !p.rows[shown[i]].checked
 				return m, nil
 			}
 			return m.finishPicker()

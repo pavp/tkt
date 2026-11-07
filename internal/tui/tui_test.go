@@ -2461,7 +2461,7 @@ func TestRepoFilterHidesRepositoriesInThePRsFilter(t *testing.T) {
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = press(m, "2", "R")
 	v := stripANSI(m.View())
-	for _, want := range []string{"Repositories", "[x] example-org/api", "[x] example-org/web", "a all", "Apply"} {
+	for _, want := range []string{"Repositories", "[x] example-org/api", "[x] example-org/web", "ctrl+a all", "Apply"} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("filter modal lacks %q:\n%s", want, v)
 		}
@@ -2474,13 +2474,37 @@ func TestRepoFilterHidesRepositoriesInThePRsFilter(t *testing.T) {
 	if len(r.states) == 0 || !slices.Equal(r.states[len(r.states)-1].HiddenRepos, []string{"example-org/api"}) {
 		t.Errorf("saved states = %+v", r.states)
 	}
-	m = press(m, "R", "a", "a", "enter")
+	ctrlA := tea.KeyMsg{Type: tea.KeyCtrlA}
+	m = press(send(send(press(m, "R"), ctrlA), ctrlA), "enter")
 	if v := stripANSI(m.View()); !strings.Contains(v, "pick at least one repository") {
 		t.Errorf("unchecking every repository should be refused:\n%s", v)
 	}
-	m = press(m, "esc", "R", "a", "enter")
+	m = press(send(press(m, "esc", "R"), ctrlA), "enter")
 	if v := stripANSI(m.View()); !strings.Contains(v, "#816") || strings.Contains(v, "Showing") {
-		t.Errorf("a all should show every repository again:\n%s", v)
+		t.Errorf("ctrl+a should show every repository again:\n%s", v)
+	}
+}
+
+func TestRepoFilterNarrowsToTheTypedName(t *testing.T) {
+	r := &recorder{}
+	m := tea.Model(New(prsSnapshot(), false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = typeKeys(press(m, "2", "R"), "WEB")
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "/ WEB") || !strings.Contains(v, "[x] example-org/web") || strings.Contains(v, "example-org/api") {
+		t.Fatalf("typing should narrow the filter to matching names, showing the text:\n%s", v)
+	}
+	m = press(m, "esc")
+	if v := stripANSI(m.View()); !strings.Contains(v, "Repositories") || !strings.Contains(v, "example-org/api") {
+		t.Fatalf("esc should clear the text first, keeping the filter open:\n%s", v)
+	}
+	m = press(typeKeys(m, "web"), " ", "enter")
+	if len(r.states) == 0 || !slices.Equal(r.states[len(r.states)-1].HiddenRepos, []string{"example-org/web"}) {
+		t.Errorf("space should tick the row shown and enter apply it: %+v", r.states)
+	}
+	m = press(typeKeys(press(m, "R"), "zz"))
+	if v := stripANSI(m.View()); !strings.Contains(v, "no repository matches zz") {
+		t.Errorf("a text matching nothing should say so:\n%s", v)
 	}
 }
 
@@ -2682,13 +2706,14 @@ func TestBoardFilterHidesTicketsOfHiddenBoards(t *testing.T) {
 		if len(r.states) == 0 || !slices.Equal(r.states[len(r.states)-1].HiddenBoards, []string{"Accounts"}) {
 			t.Errorf("%s: saved states = %+v", view, r.states)
 		}
-		m = press(m, "B", "a", "a", "enter")
+		ctrlA := tea.KeyMsg{Type: tea.KeyCtrlA}
+		m = press(send(send(press(m, "B"), ctrlA), ctrlA), "enter")
 		if v := stripANSI(m.View()); !strings.Contains(v, "pick at least one board") {
 			t.Errorf("%s: unchecking every board should be refused:\n%s", view, v)
 		}
-		m = press(m, "esc", "B", "a", "enter")
+		m = press(send(press(m, "esc", "B"), ctrlA), "enter")
 		if v := stripANSI(m.View()); !strings.Contains(v, "DEMO-3") || strings.Contains(v, "Showing") {
-			t.Errorf("%s: a all should show every board again:\n%s", view, v)
+			t.Errorf("%s: ctrl+a should show every board again:\n%s", view, v)
 		}
 	}
 }
