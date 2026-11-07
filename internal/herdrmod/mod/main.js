@@ -1793,7 +1793,7 @@ export default class Tkt extends View {
     return this.segment(t, "view", [{ label: "Columns", on: this.view === "columns", click: (cx) => this.setView("columns", cx) }, { label: "List", on: this.view === "list", click: (cx) => this.setView("list", cx) }]);
   }
 
-  card(t, c, labelField, dim = false) {
+  card(t, c, labelField) {
     const mark = markOf(c.mark, c.status);
     const flag = cardFlag(c.attention, mark, c.points ? 11 : 14);
     const compact = Boolean(this.compact);
@@ -1813,7 +1813,6 @@ export default class Tkt extends View {
       .relative().rounded(8).border(1).border_color(sel ? t.accent : t.card).bg(t.card).shadow_sm().hover((s) => s.border_color(sel ? t.accent : mix(t.foreground, t.card, 0.18)))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { this.selected = c.key; this.clicked(c.key, () => this.menuFor(this.selectedRow(this.answers.sprint?.body) ?? {}), cx); })
-      .when(dim, (el) => el.opacity(0.75))
       .child(top)
       .children(lines.map((l, i) => div().id(`card-${c.key}-l${i}`).h(20).truncate().text_size(13).font_weight(500).text_color(t.foreground).child(l)))
       .when(!c.team, (el) => el.child(this.icon("corner", 14).absolute().top(0).right(0).text_color(t.accent)))
@@ -1957,7 +1956,7 @@ export default class Tkt extends View {
           .child(col.cards.length === 0 ? h_flex().py(28).justify_center().text_size(12).text_color(t.muted).child(EMPTY_COLUMN)
             : v_flex().relative().flex_1().min_h_0().px(2).pb(4)
               .child(this.scrollPane(`col-${col.category}-cards`, pane,
-                v_flex().gap(gap).p(6).children(col.cards.map((c) => this.card(t, c, board.label_field, col.category === "done")))).flex_1())
+                v_flex().gap(gap).p(6).children(col.cards.map((c) => this.card(t, c, board.label_field)))).flex_1())
               .when(below > 0, (el) => el.child(h_flex().absolute().bottom(10).left(0).right(0).justify_center()
                 .child(div().px(10).py(1).rounded(10).border(1).border_color(t.border).bg(t.pill).shadow_md().text_size(11).text_color(t.muted).child(`↓ ${below} more`))))));
       }));
