@@ -18,7 +18,7 @@ import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter, isConf
 import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors, detailsKey, positionOf } from "./lib/details.js";
-import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows, palettePatch } from "./lib/settings.js";
+import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, palettePatch, statusBoard, nextColumn, markChoices } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
 import { modKeyFor, withModKey } from "./lib/modkey.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
@@ -961,7 +961,7 @@ export default class Tkt extends View {
     const side = v_flex().id("settings-side").w(220).flex_none().h_full().px(10).py(12).gap(2).bg(t.well).border_r(1).border_color(t.border).children(SECTIONS.map((sec) => {
       const on = st.section === sec.id;
       return press(h_flex().id(`sec-${sec.id}`).h(32).px(12).items_center().rounded(7).bg(on ? t.pill : t.well).text_size(13).font_weight(on ? 600 : 500)
-        .text_color(on ? t.foreground : t.muted).hover((s) => s.text_color(t.foreground)), (cx) => { st.section = sec.id; st.sel = 0; cx.notify(); }).child(sec.title);
+        .text_color(on ? t.foreground : t.muted).hover((s) => s.text_color(t.foreground)), (cx) => { st.section = sec.id; st.sel = 0; st.chipFocus = false; st.drag = null; cx.notify(); }).child(sec.title);
     }));
     let content = v_flex();
     if (st.section === "spaces") {
@@ -989,17 +989,52 @@ export default class Tkt extends View {
           }))
           .when(!st.boards[sp.key], (el) => el.child(h_flex().child(button(`lb-${sp.key}`, "Choose from Jira's boards…", (cx) => this.attempt(async () => { st.boards[sp.key] = (await this.lookup("boards", sp.key)).boards; }, cx), "add"))))));
     } else if (st.section === "statuses") {
-      content = v_flex().child(intro("Statuses", "Which column of the board each Jira status falls in, and the mark its tickets show."))
-        .children(d.spaces.map((sp) => {
-          const loaded = st.statuses[sp.key];
-          const block = v_flex().id(`ss-${sp.key}`).gap(6).pb(22).child(spaceTitle(sp));
-          if (!loaded) return block.child(h_flex().child(button(`ls-${sp.key}`, "Read the statuses from Jira…", (cx) => this.attempt(async () => { st.statuses[sp.key] = await this.lookup("statuses", sp.key); }, cx), "add")));
-          return block.children(statusRows(loaded, d.columns).map((r) => h_flex().id(`s-${sp.key}-${r.name}`).gap(10).py(2).items_center()
-            .child(div().w(180).truncate().text_size(13).text_color(t.foreground).child(r.name))
-            .child(button(`sc-${sp.key}-${r.name}`, `${r.column}${r.columnAuto ? "" : " •"}`, (cx) => { this.menu = { title: `${r.name}: column`, sel: 0, items: d.columns.map((c) => ({ label: c.title, action: "settingsPatch", change: statusPatch(sp.key, r.name, { column: c.id }) })) }; cx.notify(); }, "value"))
-            .child(button(`sm-${sp.key}-${r.name}`, `${r.mark}${r.markAuto ? "" : " •"}`, (cx) => { this.menu = { title: `${r.name}: mark`, sel: 0, items: d.marks.map((m) => ({ label: m, action: "settingsPatch", change: statusPatch(sp.key, r.name, { mark: m }) })) }; cx.notify(); }, "value"))
-            .when(r.changed, (el) => el.child(button(`sr-${sp.key}-${r.name}`, "↺ automatic", (cx) => this.attempt(() => this.patchSettings(statusPatch(sp.key, r.name, null)), cx))))));
-        }));
+      const space = d.spaces.find((x) => x.key === st.statusSpace) ?? d.spaces[0];
+      const loaded = space ? st.statuses[space.key] : null;
+      st.chipAt = {};
+      const head = h_flex().gap(16).items_end().pb(16)
+        .child(v_flex().flex_1().gap(4).child(div().text_size(18).font_semibold().text_color(t.foreground).child("Statuses"))
+          .child(div().text_size(13).text_color(t.muted).child("Which column of the board each Jira status falls in, and the mark its tickets show.")))
+        .when(d.spaces.length > 1, (el) => el.child(this.segment(t, "status-space", d.spaces.map((x) => ({ label: x.key, on: x.key === space?.key, click: (cx) => { st.statusSpace = x.key; st.sel = 0; cx.notify(); } })))));
+      if (!space) content = head;
+      else if (!loaded) content = v_flex().child(head).child(h_flex().child(button(`ls-${space.key}`, "Read the statuses from Jira…", (cx) => this.attempt(async () => { st.statuses[space.key] = await this.lookup("statuses", space.key); }, cx), "add")));
+      else {
+        const columns = statusBoard(loaded, d.columns).map((col) => {
+          const tone = t[statusTone(col.id)] ?? t.muted;
+          return v_flex().id(`scol-${col.id}`).flex_1().min_w(150).rounded(10).border(1).border_color(t.border).bg(t.well).overflow_hidden()
+            .when(Boolean(st.drag), (el) => el.hover((h) => h.border_color(t.accent)))
+            .on_mouse_up("left", (_e, cx) => {
+              const dr = st.drag;
+              st.drag = null;
+              if (dr && dr.column !== col.id) this.attempt(() => this.moveStatus(dr.space, dr.name, col.id), cx); else cx.notify();
+            })
+            .child(div().h(2).flex_none().bg(tone))
+            .child(h_flex().px(12).pt(10).pb(8).gap(8).items_center()
+              .child(div().w(8).h(8).rounded(4).bg(tone))
+              .child(div().text_size(12).font_semibold().text_color(t.foreground).child(col.title))
+              .child(div().px(7).rounded(9).bg(t.pill).text_size(11).font_semibold().text_color(t.muted).child(String(col.statuses.length))))
+            .child(v_flex().gap(6).px(8).pb(10).children(col.statuses.map((stt) => {
+              const open = (cx) => { st.markPicker = { space: space.key, name: stt.name, mark: stt.mark, markAuto: stt.markAuto, sel: Math.max(0, d.marks.indexOf(stt.mark)) }; cx.notify(); };
+              const idx = controls.length;
+              const on = focusable(open);
+              st.chipAt[idx] = { space: space.key, name: stt.name, column: col.id };
+              if (st.focusStatus === stt.name) { st.sel = idx; st.focusStatus = null; }
+              const m = markOf(stt.mark, stt.name);
+              return h_flex().id(`chip-${stt.name}`).h(34).px(10).gap(8).items_center().rounded(7).border(1).border_color(on ? t.accent : t.border).bg(t.raised)
+                .when(st.drag?.name === stt.name, (el) => el.opacity(0.4)).hover((h) => h.border_color(t.accent))
+                .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); st.drag = { space: space.key, name: stt.name, column: col.id }; st.sel = idx; st.chipFocus = true; cx.notify(); })
+                .on_click((_e, cx) => open(cx))
+                .child(div().w(14).flex_none().text_size(12).text_color(m ? t[m.tone] ?? t.muted : t.dim).child(m ? m.glyph : "·"))
+                .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(t.foreground).child(stt.name))
+                .child(stt.manual ? div().w(6).h(6).flex_none().rounded(3).bg(t.accent) : div().flex_none().text_size(10).text_color(t.dim).child("auto"));
+            })));
+        });
+        content = v_flex().child(head).child(h_flex().gap(10).items_start().children(columns))
+          .child(h_flex().pt(14).gap(16).items_center().text_size(12).text_color(t.muted)
+            .child(div().flex_1().child(st.drag ? `Release on another column to move ${st.drag.name} there; it is saved for ${space.key}.` : "Drag a status to another column, or select it and press ← →. Enter changes its mark or brings it back to automatic."))
+            .child(h_flex().gap(6).items_center().child(div().w(6).h(6).rounded(3).bg(t.accent)).child("set by you"))
+            .child(div().child("auto: from Jira's category")));
+      }
     } else if (st.section === "clones") {
       content = v_flex().gap(8).child(intro("Local clones", "Folders tkt looks for clones in; the first one is where new clones go."))
         .when(d.repo_roots.length > 0, (el) => el.child(table(d.repo_roots.map((root, i) => tableRow(`root-${root}`, i, [
@@ -1086,6 +1121,61 @@ export default class Tkt extends View {
       .child(h_flex().gap(14).children(Object.entries(CATPPUCCIN.latte).map(([k, c]) =>
         v_flex().id(`latte-${k}`).gap(4).items_center().child(div().w(28).h(28).rounded(7).border(1).border_color(t.border).bg(c)).child(this.mono(div().text_size(10).text_color(t.muted)).child(c)))));
     return h_flex().items_start().child(left).child(right);
+  }
+
+  /** Puts a space's status in another column, then reads the statuses again and keeps it selected. */
+  async moveStatus(space, name, column) {
+    await this.patchSettings(statusPatch(space, name, { column }));
+    this.settings.statuses[space] = await this.lookup("statuses", space);
+    this.settings.focusStatus = name;
+  }
+
+  saveMark(change, cx) {
+    const st = this.settings;
+    const p = st.markPicker;
+    st.markPicker = null;
+    this.attempt(async () => {
+      await this.patchSettings(statusPatch(p.space, p.name, change));
+      st.statuses[p.space] = await this.lookup("statuses", p.space);
+      st.focusStatus = p.name;
+    }, cx);
+  }
+
+  markPickerKey(kk, k, cx) {
+    const p = this.settings.markPicker;
+    const marks = markChoices(this.settings.data.marks);
+    const step = { left: -1, h: -1, right: 1, l: 1, up: -4, k: -4, down: 4, j: 4 }[kk];
+    if (k === "escape") this.settings.markPicker = null;
+    else if (step) p.sel = Math.max(0, Math.min(marks.length - 1, p.sel + step));
+    else if ((kk === "enter" || kk === " ") && marks[p.sel]) this.saveMark({ mark: marks[p.sel].name }, cx);
+  }
+
+  /** The marks a status can take, each with its icon, the card's flag as it would look, and back to automatic. */
+  markPickerBox(t) {
+    const st = this.settings;
+    const p = st.markPicker;
+    const marks = markChoices(st.data.marks);
+    const chosen = marks[p.sel];
+    const mk = markOf(chosen?.name, p.name);
+    return this.dialog(t, "marks", 340, v_flex().gap(12).p(14)
+      .child(v_flex().gap(3).child(div().text_size(14).font_semibold().text_color(t.foreground).child(`Mark for ${p.name}`))
+        .child(div().text_size(12).text_color(t.muted).child(`${p.space} tickets in this status show it on their card`)))
+      .child(h_flex().flex_wrap().gap(6).children(marks.map((m, i) => {
+        const on = i === p.sel;
+        const tone = markOf(m.name, p.name);
+        return v_flex().id(`mark-${m.name}`).w(70).h(52).gap(3).items_center().justify_center().rounded(8).border(1).border_color(on ? t.accent : t.border)
+          .bg(on ? mix(t.accent, t.popover, 0.12) : t.raised).hover((h) => h.border_color(t.accent))
+          .on_click((_e, cx) => this.saveMark({ mark: m.name }, cx))
+          .child(div().text_size(18).text_color(tone ? t[tone.tone] ?? t.muted : t.dim).child(m.glyph))
+          .child(div().text_size(10).text_color(t.muted).child(m.name));
+      })))
+      .child(h_flex().gap(8).px(10).py(8).items_center().rounded(8).bg(t.surface).border(1).border_color(t.border)
+        .child(div().text_size(11).text_color(t.muted).child("On a card")).child(div().flex_1())
+        .child(h_flex().gap(4).px(7).rounded(5).bg(t.pill).text_size(10).font_semibold().text_color(t.muted)
+          .when(Boolean(mk), (el) => el.child(div().text_color(t[mk.tone] ?? t.muted).child(mk.glyph))).child(p.name)))
+      .when(!p.markAuto, (el) => el.child(h_flex().id("mark-auto").h(26).px(8).items_center().rounded(6).text_size(12).text_color(t.foreground).hover((h) => h.bg(t.hover))
+        .on_click((_e, cx) => this.saveMark(null, cx)).child("↺ Back to automatic (column and mark)")))
+      .child(div().pt(9).border_t(1).border_color(t.border).child(this.keyLine(t, [["← →", "choose"], ["enter", "save"], ["esc", "cancel"]]))));
   }
 
   async openStart(key) {
@@ -1284,14 +1374,21 @@ export default class Tkt extends View {
       else if (a === "copy") this.act({ action: "copyContext", key: this.details.key, label: "copy" }, cx);
       else if (kk === "enter" && this.details.ticket) this.menu = { ...ticketMenu(this.details.ticket, {}), sel: 0 };
       else if (to !== null) this.panes.details.offset = to;
+    } else if (this.settings && !this.prompt && this.settings.markPicker) {
+      this.markPickerKey(keyOf(e), k, cx);
+    } else if (this.settings && !this.prompt && this.settings.section === "statuses" && this.settings.chipFocus && this.settings.chipAt?.[this.settings.sel ?? 0] && { left: 1, h: 1, right: 1, l: 1 }[keyOf(e)]) {
+      const st = this.settings;
+      const chip = st.chipAt[st.sel ?? 0];
+      const to = nextColumn(st.data.columns, chip.column, keyOf(e) === "left" || keyOf(e) === "h" ? -1 : 1);
+      if (to) this.attempt(() => this.moveStatus(chip.space, chip.name, to), cx);
     } else if (this.settings && !this.prompt) {
       const st = this.settings;
       const kk = keyOf(e);
       const section = sectionAfter(SECTIONS.map((x) => x.id), st.section, kk);
       const to = listKey(st.sel ?? 0, (st.controls ?? []).length, kk);
       if (k === "escape") this.settings = null;
-      else if (section) { st.section = section; st.sel = 0; this.panes.settings.offset = 0; }
-      else if (to !== null) st.sel = to;
+      else if (section) { st.section = section; st.sel = 0; st.chipFocus = false; st.drag = null; this.panes.settings.offset = 0; }
+      else if (to !== null) { st.sel = to; st.chipFocus = Boolean(st.chipAt?.[to]); }
       else if ((kk === "enter" || kk === " ") && st.controls?.[st.sel ?? 0]) st.controls[st.sel ?? 0](cx);
       else {
         const off = scrolled(this.panes.settings, kk);
@@ -1480,21 +1577,25 @@ export default class Tkt extends View {
    *  and the keys that matter on the tab. */
   footer(t) {
     const body = this.answers[this.tab]?.body;
-    const board = !this.choices && !this.details && !this.settings && (this.tab === "sprint" || this.tab === "prs");
-    const row = board && this.tab === "sprint" ? this.selectedRow(body) : null;
+    const board = !this.choices && !this.details && !this.settings;
+    const row = board && this.tab === "sprint" ? this.selectedRow(body) : board && this.tab === "backlog" ? this.boardRow(this.selected) : null;
     const badge = row ? previewBadge(row) : null;
     const p = row ? previewOf(row) : board && this.tab === "prs" ? prPreview(prRows(body).find((r) => r.kind === "row" && r.key + r.group === this.selected)) : null;
     const where = this.machine === undefined ? "looking for tkt…" : `tkt on ${this.machine ?? "this computer"}`;
     const sync = this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.cachedAt ? cachedLabel(this.cachedAt) : this.answers[this.tab]?.body?.sync_label ?? "";
     const warn = sync.startsWith("!");
     const title = (text) => div().flex_1().min_w_0().truncate().text_size(13).font_weight(500).text_color(t.foreground).child(text);
-    const keys = this.details ? [["esc", "back"], ["c", "copy as markdown"]] : this.settings ? [["↑↓", "move"], ["enter", "choose"], ["esc", "back to the board"]] : topKeys(this.tab);
+    const keys = this.settings
+      ? (this.settings.section === "statuses" && this.settings.statuses?.[(this.settings.data.spaces.find((x) => x.key === this.settings.statusSpace) ?? this.settings.data.spaces[0])?.key]
+        ? [["↑↓", "select"], ["← →", "move to a column"], ["enter", "mark"], ["esc", "back to the board"]]
+        : [["↑↓", "move"], ["enter", "choose"], ["esc", "back to the board"]])
+      : this.details ? [["esc", "back"], ["c", "copy as markdown"]] : topKeys(this.tab);
     const line1 = h_flex().gap(10).items_center()
-      .when(Boolean(this.details), (el) => el.child(title(`Details of ${this.details.key}`)))
+      .when(Boolean(this.details) && !this.settings, (el) => el.child(title(`Details of ${this.details.key}`)))
       .when(Boolean(badge), (el) => el.child(div().flex_none().px(8).py(1).rounded(5).bg(t.pill).text_size(11).font_semibold().text_color(t.muted).child(badge.status))
         .child(this.mono(div().flex_none().text_size(12).text_color(t.muted)).child(badge.key)).child(title(badge.summary)))
       .when(!badge && Boolean(p), (el) => el.child(title(p.title)))
-      .when(!badge && !p && !this.details, (el) => el.child(div().flex_1().text_size(12).text_color(t.muted).child(board ? "nothing selected" : "")))
+      .when(!badge && !p && (!this.details || this.settings), (el) => el.child(div().flex_1().text_size(12).text_color(t.muted).child(board ? "nothing selected" : "")))
       .when(Boolean(sync), (el) => el.child(h_flex().flex_none().gap(6).items_center().text_size(11).text_color(warn ? ensure(t.ansi3, t.chrome, 4.5) : t.muted)
         .child(div().w(6).h(6).rounded(3).bg(warn ? t.ansi3 : t.ansi2)).child(sync.replace(/^✓ /, ""))))
       .child(h_flex().id("sync").w(22).h(22).flex_none().items_center().justify_center().rounded(5).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
@@ -1848,7 +1949,7 @@ export default class Tkt extends View {
       .on_action("tkt::NextTab", (_e, cx) => this.key({ key: "tab", keystroke: "tab", modifiers: {} }, cx))
       .on_action("tkt::PrevTab", (_e, cx) => this.key({ key: "tab", keystroke: "shift-tab", modifiers: { shift: true } }, cx))
       .on_size_change((size) => { this.windowHeight = size.height; })
-      .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
+      .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.settings?.drag) { this.settings.drag = null; cx.notify(); } if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
       .child(this.header(t))
       .when(!this.choices && !this.details && !this.settings, (el) => el.child(this.contextLine(t)))
       .when(Boolean(warningsLine(this.answers.sprint?.body?.warnings)), (el) => el.child(this.warningsStrip(t, warningsLine(this.answers.sprint.body.warnings))))
@@ -1858,6 +1959,7 @@ export default class Tkt extends View {
       .when(Boolean(this.menu), (el) => el.child(this.menuBox(t)))
       .when(Boolean(this.picker), (el) => el.child(this.pickerBox(t)))
       .when(Boolean(this.prompt), (el) => el.child(this.promptBox(t)))
-      .when(Boolean(this.keysOpen), (el) => el.child(this.keysBox(t)));
+      .when(Boolean(this.keysOpen), (el) => el.child(this.keysBox(t)))
+      .when(Boolean(this.settings?.markPicker), (el) => el.child(this.markPickerBox(t)));
   }
 }
