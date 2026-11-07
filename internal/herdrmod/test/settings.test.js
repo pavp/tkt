@@ -30,3 +30,35 @@ test("a clones folder is added or removed", () => {
   assert.deepEqual(rootsPatch(["~/src"], { add: "~/code" }), { repo_roots: ["~/src", "~/code"] });
   assert.deepEqual(rootsPatch(["~/src", "~/code"], { remove: "~/src" }), { repo_roots: ["~/code"] });
 });
+
+test("the Statuses board puts each status in its column, saying whether you set it or it is automatic", async () => {
+  const { statusBoard } = await import("../mod/lib/settings.js");
+  const view = fixture("settings-statuses.json");
+  const columns = fixture("settings.json").columns;
+  const board = statusBoard(view, columns);
+  assert.deepEqual(board.map((c) => c.id), columns.map((c) => c.id));
+  const all = board.flatMap((c) => c.statuses.map((s) => ({ ...s, column: c.id })));
+  assert.equal(all.length, view.statuses.length);
+  for (const s of view.statuses) {
+    const got = all.find((x) => x.name === s.name);
+    assert.equal(got.column, s.column);
+    assert.equal(got.manual, !s.column_auto || !s.mark_auto);
+    assert.equal(got.mark, s.mark);
+  }
+});
+
+test("a status moves to the column beside its own, and stops at the board's ends", async () => {
+  const { nextColumn } = await import("../mod/lib/settings.js");
+  const cols = [{ id: "todo" }, { id: "in_progress" }, { id: "review" }, { id: "done" }];
+  assert.equal(nextColumn(cols, "in_progress", 1), "review");
+  assert.equal(nextColumn(cols, "in_progress", -1), "todo");
+  assert.equal(nextColumn(cols, "todo", -1), null);
+  assert.equal(nextColumn(cols, "done", 1), null);
+});
+
+test("the mark picker offers every mark with its icon, none first", async () => {
+  const { markChoices } = await import("../mod/lib/settings.js");
+  const marks = markChoices(["none", "diamond", "blocked", "clock", "flag", "star", "triangle"]);
+  assert.deepEqual(marks.map((m) => m.glyph), ["—", "◇", "⊘", "◷", "⚑", "★", "▲"]);
+  assert.equal(marks[0].name, "none");
+});

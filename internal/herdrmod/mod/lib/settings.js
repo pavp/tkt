@@ -49,3 +49,28 @@ export function statusRows(view, columns) {
     name: s.name, column: title[s.column] ?? s.column, columnAuto: s.column_auto, mark: s.mark, markAuto: s.mark_auto, changed: !s.column_auto || !s.mark_auto,
   }));
 }
+
+/** The Statuses board: the board's columns in order, each with its statuses, each saying its mark and whether you set
+ *  its column or mark (else both are automatic). */
+export function statusBoard(view, columns) {
+  return (columns ?? []).map((c) => ({
+    id: c.id,
+    title: c.title,
+    statuses: (view?.statuses ?? []).filter((s) => s.column === c.id)
+      .map((s) => ({ name: s.name, mark: s.mark, manual: !s.column_auto || !s.mark_auto, markAuto: s.mark_auto })),
+  }));
+}
+
+/** The column beside id in dir (1 right, -1 left), or null at the board's end. */
+export function nextColumn(columns, id, dir) {
+  const i = (columns ?? []).findIndex((c) => c.id === id);
+  const next = columns?.[i + dir];
+  return i < 0 || !next ? null : next.id;
+}
+
+const MARK_GLYPHS = { none: "—", diamond: "◇", blocked: "⊘", clock: "◷", flag: "⚑", star: "★", triangle: "▲" };
+
+/** The marks the picker offers, each with its icon. */
+export function markChoices(marks) {
+  return (marks ?? []).map((name) => ({ name, glyph: MARK_GLYPHS[name] ?? "·" }));
+}
