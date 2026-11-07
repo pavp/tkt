@@ -90,6 +90,7 @@ export function boardAction(k, tab) {
   if (k === "B" && tab !== "prs") return "boards";
   if (k === "R" && tab === "prs") return "repos";
   if (k === "b" && tab === "prs") return "bots";
+  if (k === "z" && tab === "sprint") return "density";
   return null;
 }
 
