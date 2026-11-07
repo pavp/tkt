@@ -1076,7 +1076,6 @@ export default class Tkt extends View {
           .on_mouse_up("left", (_e, cx) => {
             const dr = st.drag, to = st.dropTarget;
             st.drag = null; st.press = null; st.dropTarget = null;
-            if (dr) st.dragged = true;
             if (dr && to && to !== dr.column) this.attempt(() => this.moveStatus(dr.space, dr.name, to), cx); else cx.notify();
           }))
           .child(h_flex().pt(14).gap(16).items_center().text_size(12).text_color(t.muted)
@@ -2017,6 +2016,8 @@ export default class Tkt extends View {
     if (!st.press) return;
     if (!st.drag && !dragStarted(st.press, e.position)) return;
     st.drag = st.press;
+    // Set as the drag starts: the chip's click fires before the lanes' mouse-up, so a release over it must already know.
+    st.dragged = true;
     st.dropTarget = over;
     st.ghost = { x: e.local_position.x - st.drag.grabX, y: e.local_position.y - st.drag.grabY };
     cx.notify();
