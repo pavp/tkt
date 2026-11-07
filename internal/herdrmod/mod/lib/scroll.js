@@ -38,6 +38,16 @@ export function cardsBelow(heights, gap, { offset, view }) {
   return n;
 }
 
+/** How many rows of the lanes, each counts[i] rows `row` tall and `gap` apart from `top` down, sit below the pane. */
+export function rowsBelow(counts, { top, row, gap }, { offset, view }) {
+  return counts.reduce((n, c) => n + cardsBelow(Array(c).fill(row), gap, { offset: offset - top, view }), 0);
+}
+
+/** Where the i-th of such rows starts. */
+export function rowTop({ top, row, gap }, i) {
+  return top + i * (row + gap);
+}
+
 /** The offset that shows a card at top..top+height in a pane, moving as little as it can; unmeasured panes stay. */
 export function revealed({ offset, view }, top, height) {
   if (view <= 0) return offset;

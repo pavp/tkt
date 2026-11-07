@@ -25,7 +25,7 @@ import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib
 import { stripChips, atTop } from "./lib/strip.js";
 import { packCache, unpackCache, cachedLabel, keptAnswer, pollAfter } from "./lib/cache.js";
 import { machineKey, stashed, restored } from "./lib/machines.js";
-import { scrolled, menuHeight, MENU_ROW, cardHeight, cardsBelow, revealed, keepVisible } from "./lib/scroll.js";
+import { scrolled, menuHeight, MENU_ROW, cardHeight, cardsBelow, revealed, keepVisible, rowsBelow, rowTop } from "./lib/scroll.js";
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget, listKey, sectionAfter } from "./lib/nav.js";
 
 const TABS = [
@@ -1096,6 +1096,7 @@ export default class Tkt extends View {
         .text_color(on ? t.foreground : t.muted).hover((s) => s.text_color(t.foreground)), (cx) => { st.section = sec.id; st.sel = 0; st.chipFocus = false; st.drag = null; st.press = null; st.grab = null; if (sec.id === "statuses") this.attempt(() => this.readStatuses(), cx); cx.notify(); }).child(sec.title);
     }));
     let content = v_flex();
+    let below = 0;
     if (st.section === "spaces") {
       content = v_flex().child(intro("Spaces & repositories", "The repositories each Jira space works in. tkt finds their clones and pull requests through them."))
         .children(d.spaces.map((sp) => v_flex().id(`sp-${sp.key}`).gap(8).pb(22).child(spaceTitle(sp))
@@ -1127,7 +1128,7 @@ export default class Tkt extends View {
       const colTitle = (id) => d.columns.find((c) => c.id === id)?.title ?? id;
       const hint = st.grab ? (st.grab.to !== st.grab.from ? `Space drops ${st.grab.name} in ${colTitle(st.grab.to)}, saved for ${space?.key}; esc cancels.` : `← → choose a column for ${st.grab.name}; esc cancels.`)
         : st.drag ? (st.dropTarget && st.dropTarget !== st.drag.column ? `Release to move ${st.drag.name} to ${colTitle(st.dropTarget)}, saved for ${space?.key}.` : `Drag ${st.drag.name} onto another column; release elsewhere to cancel.`) : null;
-      const head = h_flex().gap(16).items_end().pb(16)
+      const head = h_flex().id("status-head").gap(16).items_end().pb(16).on_size_change((size) => { st.headH = size.height; })
         .child(v_flex().flex_1().min_w_0().gap(4).child(div().text_size(18).font_semibold().text_color(t.foreground).child("Statuses"))
           .child(div().text_size(13).truncate().text_color(hint ? t.foreground : t.muted).child(hint ?? "Which column of the board each Jira status falls in, and the mark its tickets show.")))
         .when(Boolean(loaded), (el) => el.child(h_flex().flex_none().gap(14).items_center().text_size(12).text_color(t.muted)
@@ -1145,19 +1146,20 @@ export default class Tkt extends View {
           const target = Boolean(moving) && (st.drag ? st.dropTarget : st.grab.to) === col.id && from !== col.id;
           return v_flex().id(`scol-${col.id}`).flex_1().min_w(150).rounded(10).pt(2).bg(tone).child(v_flex().flex_1().rounded(9).border(target ? 2 : 1)
             .border_color(target ? t.accent : t.border).bg(target ? mix(t.accent, t.well, 0.06) : t.well).overflow_hidden()
-            .child(h_flex().px(12).pt(10).pb(8).gap(8).items_center()
+            .child(h_flex().id(`scolh-${col.id}`).px(12).pt(10).pb(8).gap(8).items_center().on_size_change((size) => { st.colHeadH = size.height; })
               .child(div().w(8).h(8).rounded(4).bg(tone))
               .child(div().text_size(12).font_semibold().text_color(t.foreground).child(col.title))
               .child(div().px(7).rounded(9).bg(t.pill).text_size(11).font_semibold().text_color(t.muted).child(String(col.statuses.length))))
-            .child(v_flex().gap(6).px(8).pb(10).children(col.statuses.map((stt) => {
+            .child(v_flex().gap(6).px(8).pb(10).children(col.statuses.map((stt, row) => {
               const open = (cx) => { st.markPicker = { space: space.key, name: stt.name, mark: stt.mark, markAuto: stt.markAuto, sel: Math.max(0, d.marks.indexOf(stt.mark)) }; cx.notify(); };
               const idx = controls.length;
               const on = focusable(open);
-              st.chipAt[idx] = { space: space.key, name: stt.name, column: col.id };
+              st.chipAt[idx] = { space: space.key, name: stt.name, column: col.id, row };
               if (st.focusStatus === stt.name) { st.sel = idx; st.focusStatus = null; }
               const m = markOf(stt.mark, stt.name);
               const held = st.grab?.name === stt.name;
-              return h_flex().id(`chip-${stt.name}`).h(34).px(10).gap(8).items_center().rounded(7).border(1).border_color(on || held ? t.accent : t.border).bg(held ? mix(t.accent, t.raised, 0.16) : t.raised)
+              const picking = st.markPicker?.space === space.key && st.markPicker?.name === stt.name;
+              const chip = h_flex().id(`chip-${stt.name}`).h(34).px(10).gap(8).items_center().rounded(7).border(1).border_color(on || held ? t.accent : t.border).bg(held ? mix(t.accent, t.raised, 0.16) : t.raised)
                 .when(held && st.grab.to !== st.grab.from, (el) => el.opacity(0.35))
                 .when(st.drag?.name === stt.name, (el) => el.opacity(0.35)).hover((h) => h.border_color(t.accent)).cursor_grab()
                 .on_mouse_down("left", (e, cx) => {
@@ -1169,11 +1171,15 @@ export default class Tkt extends View {
                 .child(div().w(14).flex_none().text_size(12).text_color(m ? t[m.tone] ?? t.muted : t.dim).child(m ? m.glyph : "·"))
                 .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(t.foreground).child(stt.name))
                 .child(stt.manual ? div().w(6).h(6).flex_none().rounded(3).bg(t.accent) : div().flex_none().text_size(10).text_color(t.dim).child("auto"));
+              return Popup.new(`mark-popup-${stt.name}`, chip).w_full().anchor("top_left").when(picking, (el) => el.content(this.markPickerBox(t)));
             }))
               .when(target, (el) => el.child(h_flex().id(`drop-${col.id}`).h(34).px(10).items_center().justify_center().rounded(7).border(1).border_color(t.accent)
                 .bg(mix(t.accent, t.well, 0.14)).text_size(12).text_color(ensure(mix(t.accent, t.foreground, 0.3), t.well, 4.5)).child(`Drop ${moving.name} here`)))));
         });
         const lanes = statusBoard(loaded, d.columns);
+        // The page's py(24), the column's pt(2) and its border sit above each column's title.
+        st.rows = { top: 24 + (st.headH ?? 0) + 3 + (st.colHeadH ?? 0), row: 34, gap: 6 };
+        below = rowsBelow(lanes.map((l) => l.statuses.length), st.rows, this.panes.settings);
         content = v_flex().child(head).child(h_flex().id("status-lanes").gap(10).items_start().children(columns)
           .on_mouse_move((e) => { const i = laneAt(e.local_position.x, { width: e.bounds.width, count: lanes.length, gap: 10 }); st.overLane = i >= 0 ? lanes[i].id : null; })
           .on_mouse_up("left", (_e, cx) => {
@@ -1217,7 +1223,10 @@ export default class Tkt extends View {
       .child(div().text_size(11).text_color(t.muted).child("Changes are saved to your config.toml"));
     return v_flex().id("settings").flex_1().min_h_0().child(nav)
       .child(h_flex().flex_1().min_h_0().items_start().child(side)
-        .child(this.scrollPane("settings-content", this.panes.settings, v_flex().px(32).py(24).child(content)).flex_1().h_full()));
+        .child(v_flex().relative().flex_1().h_full().min_h_0().min_w_0()
+          .child(this.scrollPane("settings-content", this.panes.settings, v_flex().px(32).py(24).child(content)).flex_1())
+          .when(below > 0, (el) => el.child(h_flex().absolute().bottom(12).left(0).right(0).justify_center()
+            .child(div().px(10).py(1).rounded(10).border(1).border_color(t.border).bg(t.pill).shadow_md().text_size(11).text_color(t.muted).child(`↓ ${below} more`))))));
   }
 
   /** Settings › Colors: the palette, and how each color the palette gives reads once tkt raises it. */
@@ -1311,7 +1320,10 @@ export default class Tkt extends View {
     const to = statusMove(statusBoard(st.statuses[chip.space], st.data.columns), { column: chip.column, name: chip.name }, kk);
     if (!to) return false;
     const idx = Object.keys(st.chipAt).find((i) => st.chipAt[i].name === to.name);
-    if (idx !== undefined) st.sel = Number(idx);
+    if (idx !== undefined) {
+      st.sel = Number(idx);
+      if (st.rows) this.panes.settings.offset = keepVisible(this.panes.settings, rowTop(st.rows, st.chipAt[idx].row), st.rows.row);
+    }
     cx.notify();
     return true;
   }
@@ -1332,7 +1344,8 @@ export default class Tkt extends View {
     const marks = markChoices(st.data.marks);
     const chosen = marks[p.sel];
     const mk = markOf(chosen?.name, p.name);
-    return this.dialog(t, "marks", 340, v_flex().gap(12).p(14)
+    return v_flex().id("marks").my(4).w(340).rounded(12).bg(t.popover).border(1).border_color(t.border).shadow_xl()
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(v_flex().gap(12).p(14)
       .child(v_flex().gap(3).child(div().text_size(14).font_semibold().text_color(t.foreground).child(`Mark for ${p.name}`))
         .child(div().text_size(12).text_color(t.muted).child(`${p.space} tickets in this status show it on their card`)))
       .child(h_flex().flex_wrap().gap(6).children(marks.map((m, i) => {
@@ -2170,7 +2183,7 @@ export default class Tkt extends View {
       .on_size_change((size) => { this.windowHeight = size.height; })
       .on_mouse_move((e, cx) => this.trackStatusDrag(e, cx))
       .on_mouse_up("left", (_e, cx) => { if (this.settings?.press || this.settings?.drag) { this.settings.press = null; this.settings.drag = null; this.settings.dropTarget = null; cx.notify(); } })
-      .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.settings?.drag || this.settings?.press) { this.settings.drag = null; this.settings.press = null; this.settings.dropTarget = null; cx.notify(); } if (this.machineMenu) { this.machineMenu = null; cx.notify(); } if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
+      .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.settings?.drag || this.settings?.press) { this.settings.drag = null; this.settings.press = null; this.settings.dropTarget = null; cx.notify(); } if (this.machineMenu) { this.machineMenu = null; cx.notify(); } if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } if (this.settings?.markPicker) { this.settings.markPicker = null; cx.notify(); } })
       .child(this.header(t))
       .when(!this.choices && !this.details && !this.settings, (el) => el.child(this.contextLine(t)))
       .when(Boolean(warningsLine(this.answers.sprint?.body?.warnings)), (el) => el.child(this.warningsStrip(t, warningsLine(this.answers.sprint.body.warnings))))
@@ -2181,7 +2194,6 @@ export default class Tkt extends View {
       .when(Boolean(this.picker), (el) => el.child(this.pickerBox(t)))
       .when(Boolean(this.prompt), (el) => el.child(this.promptBox(t)))
       .when(Boolean(this.keysOpen), (el) => el.child(this.keysBox(t)))
-      .when(Boolean(this.settings?.markPicker), (el) => el.child(this.markPickerBox(t)))
       .when(Boolean(this.settings?.drag && this.settings?.ghost), (el) => el.child(this.statusGhost(t)));
   }
 }

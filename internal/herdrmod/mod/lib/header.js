@@ -23,8 +23,9 @@ export function contextText(tab, body, { loading = false } = {}) {
   }
   if (!body) return "";
   if (tab === "prs") {
-    const rows = (body.sections ?? []).flatMap((s) => s.rows ?? []);
-    const mine = rows.filter((r) => !r.review && !r.other);
+    const sections = body.sections ?? [];
+    const rows = sections.flatMap((s) => s.rows ?? []);
+    const mine = sections.filter((s) => (s.group ?? "").startsWith("mine:")).flatMap((s) => s.rows ?? []);
     const needs = mine.filter((r) => r.needs_you).length;
     const reviews = rows.filter((r) => r.review).length;
     const parts = [`${mine.length} open`];

@@ -57,3 +57,18 @@ test("a pane scrolls just enough to show the item the keyboard reached, with a s
   assert.equal(keepVisible(pane, 880, 30), 600, "never past the end");
   assert.equal(keepVisible({ ...pane, offset: 50 }, 4, 30), 0, "never before the start");
 });
+
+test("Settings › Statuses counts the statuses of every column below what the page shows", async () => {
+  const { rowsBelow } = await import("../mod/lib/scroll.js");
+  const rows = { top: 100, row: 34, gap: 6 };
+  assert.equal(rowsBelow([3, 1], rows, { offset: 0, view: 0 }), 0, "an unmeasured page hides nothing");
+  assert.equal(rowsBelow([3, 1], rows, { offset: 0, view: 600 }), 0, "every status fits");
+  assert.equal(rowsBelow([10, 4, 1], rows, { offset: 0, view: 300 }), 5 + 0 + 0, "rows start at 100, so 5 of 10 fit in 300");
+  assert.equal(rowsBelow([10, 4, 1], rows, { offset: 200, view: 300 }), 0, "scrolled to the end, nothing is left below");
+});
+
+test("Settings › Statuses scrolls the page to the status the keyboard moves to", async () => {
+  const { rowTop } = await import("../mod/lib/scroll.js");
+  assert.equal(rowTop({ top: 100, row: 34, gap: 6 }, 0), 100);
+  assert.equal(rowTop({ top: 100, row: 34, gap: 6 }, 3), 220);
+});

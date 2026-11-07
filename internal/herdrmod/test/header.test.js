@@ -32,6 +32,11 @@ test("the context line sums the tab up in the TUI's words", () => {
   assert.equal(contextText("sprint", board), "DEMO · Sprint 12 · 3d left   OPS · Ops 3 · overdue");
   assert.equal(contextText("prs", prs), "2 open · 1 needs you · 1 review request");
   assert.equal(contextText("prs", { sections: [{ group: "mine:web", count: 1, rows: [{ key: "#1" }] }] }), "1 open · 0 review requests");
+  const own = { sections: [
+    { group: "mine:web", count: 2, rows: [{ key: "#4", other: true, needs_you: true }, { key: "#5", other: true }] },
+    { group: "team:web", count: 2, rows: [{ key: "#6", other: true, needs_you: true }, { key: "#7", review: true }] },
+  ] };
+  assert.equal(contextText("prs", own), "2 open · 1 needs you · 1 review request", "the user's own pull requests for a ticket not theirs count as open; others' with Team on do not");
   assert.equal(contextText("backlog", backlog), "2 boards · 2 sprints · 9 in backlog");
   assert.equal(contextText("backlog", undefined, { loading: true }), "loading backlog…");
 });
