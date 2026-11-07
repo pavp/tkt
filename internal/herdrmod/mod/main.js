@@ -29,8 +29,12 @@ import { scrolled, menuHeight, MENU_ROW, cardHeight, cardsBelow, revealed, keepV
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget, listKey, sectionAfter } from "./lib/nav.js";
 import { peopleQuery, peopleStatus, peopleItems, SEARCH_WAIT } from "./lib/people.js";
 import { filterDraft, filterRows, filterKey } from "./lib/filterpanel.js";
+import { completing, suggestions, accepted, ownersOf } from "./lib/complete.js";
+import { matching } from "./lib/match.js";
 
 const isPeople = (p) => p?.kind === "assignUser" || p?.kind === "fieldUser";
+const completes = (p) => p?.kind === "addRepo" || p?.kind === "addRoot";
+const listed = (p) => isPeople(p) || p?.kind === "choose" || completes(p);
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -76,6 +80,7 @@ export default class Tkt extends View {
     this.details = null;
     this.settings = null;
     this.prompt = null;
+    this.known = { repos: {}, folders: {}, pending: new Set(), errors: {} };
     this.form = null;
     this.input = InputState.new({ placeholder: "" });
     this.input.on("change", (_e, cx) => this.promptTyped(cx));
@@ -775,6 +780,12 @@ export default class Tkt extends View {
   /** Searches Jira for the people a search prompt names, once typing pauses; a later key drops an earlier answer. */
   promptTyped(cx) {
     const p = this.prompt;
+    if (p && !isPeople(p)) {
+      p.sel = 0;
+      if (completes(p)) this.fetchCompletion(completing(p.kind, this.input.value()), cx);
+      cx.notify();
+      return;
+    }
     if (!isPeople(p)) return;
     p.text = this.input.value();
     p.error = null;
@@ -811,11 +822,57 @@ export default class Tkt extends View {
   submitPrompt(cx) {
     const p = this.prompt;
     if (!p) return;
-    if (!isPeople(p)) return this.answerPrompt(cx);
-    const item = peopleItems(p, p.users ?? [])[p.sel];
-    if (!item) return;
-    this.closePrompt();
-    this.act(item, cx);
+    if (!isPeople(p) && p.kind !== "choose") return this.answerPrompt(cx);
+    this.promptRows(p)[p.sel]?.pick(cx);
+  }
+
+  /** The rows a prompt lists under its text: people found, the choices that match, or the completions of the text. */
+  promptRows(p) {
+    const text = this.input.value();
+    const pick = (item) => (cx) => { this.closePrompt(); this.act(item, cx); };
+    if (isPeople(p)) return peopleItems(p, p.users ?? []).map((item) => ({ label: item.label, pick: pick(item) }));
+    if (p.kind === "choose") return matching(p.items, text, (i) => i.label).map((item) => ({ label: item.label, pick: pick(item) }));
+    if (!completes(p)) return [];
+    const c = completing(p.kind, text);
+    return (suggestions(c, { ...this.known, owners: ownersOf(this.settings?.data?.spaces) }) ?? []).map((name) => ({ label: name, pick: (cx) => {
+      this.input.set_value(accepted(c, name));
+      this.input.focus();
+      this.promptTyped(cx);
+    } }));
+  }
+
+  /** The line under a completion prompt while its list is missing, failed or empty. */
+  completionStatus(p, rows) {
+    const text = this.input.value();
+    const c = completing(p.kind, text);
+    if (!c) return p.kind === "addRepo" && /\s/.test(text.trim()) ? "The clone's folder starts with ~ or /" : null;
+    const key = c.source === "repos" ? `repos:${c.owner}` : `folders:${c.dir}`;
+    if (this.known.errors[key]) return `Could not list: ${this.known.errors[key]}`;
+    if (this.known.pending.has(key)) return c.source === "repos" ? `Listing ${c.owner}'s repositories…` : `Listing ${c.dir}…`;
+    return rows.length === 0 && c.text ? `Nothing matches “${c.text}”` : null;
+  }
+
+  /** Asks tkt once for the repositories or folders a completion needs, keeping them for the next prompts. */
+  fetchCompletion(c, cx) {
+    if (!c || c.source === "owners") return;
+    const key = c.source === "repos" ? `repos:${c.owner}` : `folders:${c.dir}`;
+    const k = this.known;
+    if ((c.source === "repos" ? k.repos[c.owner] : k.folders[c.dir]) || k.pending.has(key)) return;
+    k.pending.add(key);
+    k.errors[key] = null;
+    cx.spawn(async (cx) => {
+      try {
+        const path = c.source === "repos" ? `/v1/settings/repos?owner=${encodeURIComponent(c.owner)}` : `/v1/settings/folders?path=${encodeURIComponent(c.dir)}`;
+        const a = await this.call("GET", path);
+        if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+        if (c.source === "repos") k.repos[c.owner] = a.body.repos ?? [];
+        else k.folders[c.dir] = a.body.folders ?? [];
+      } catch (e) {
+        k.errors[key] = e.message;
+      }
+      k.pending.delete(key);
+      cx.notify();
+    });
   }
 
   closePrompt() {
@@ -851,31 +908,32 @@ export default class Tkt extends View {
   promptBox(t) {
     const p = this.prompt;
     const field = div().rounded(8).border(1).border_color(t.accent).bg(t.surface).p(2).child(Input.new(this.input));
-    if (isPeople(p)) {
-      const items = peopleItems(p, p.users ?? []);
-      const status = peopleStatus(p);
-      return this.dialog(t, "prompt", 440, v_flex().gap(10).px(16).pt(16).pb(12)
-        .child(div().text_size(14).font_semibold().text_color(t.foreground).child(p.title))
-        .child(field)
-        .when(items.length > 0, (el) => el.child(v_flex().gap(1).children(items.map((item, i) => {
-          const on = i === p.sel;
-          return h_flex().id(`person-${i}`).h(MENU_ROW).gap(8).pl(6).pr(10).items_center().rounded(7).border(1).border_color(on ? mix(t.accent, t.popover, 0.45) : t.popover)
-            .bg(on ? mix(t.accent, t.popover, 0.12) : t.popover).hover((h) => h.bg(on ? mix(t.accent, t.popover, 0.12) : t.hover))
-            .on_click((_e, cx) => { p.sel = i; this.submitPrompt(cx); })
-            .child(div().w(10).text_size(11).text_color(t.accent).child(on ? "▸" : ""))
-            .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(t.foreground).child(item.label));
-        }))))
-        .when(Boolean(status), (el) => el.child(div().px(6).text_size(12).text_color(p.error ? ensure(t.ansi1, t.popover, 4.5) : t.muted).child(status)))
-        .child(div().pt(9).border_t(1).border_color(t.border).child(this.keyLine(t, [["↑↓", "choose"], ["enter", "pick"], ["esc", "cancel"]]))));
-    }
-    return this.dialog(t, "prompt", 440, v_flex().gap(12).px(16).pt(16).pb(12)
+    const rows = this.promptRows(p);
+    const from = Math.max(0, Math.min(p.sel - 3, rows.length - 8));
+    const status = isPeople(p) ? peopleStatus(p)
+      : p.kind === "choose" ? (rows.length === 0 ? `Nothing matches “${this.input.value().trim()}”` : null)
+        : completes(p) ? this.completionStatus(p, rows) : null;
+    const buttons = h_flex().gap(8).justify_end()
+      .child(h_flex().id("prompt-cancel").h(30).px(14).items_center().rounded(7).border(1).border_color(t.border).text_size(13).text_color(t.foreground)
+        .on_click((_e, cx) => { this.closePrompt(); cx.notify(); }).child("Cancel"))
+      .child(h_flex().id("prompt-ok").h(30).px(16).items_center().rounded(7).bg(t.accent).text_size(13).font_semibold().text_color(ensure(t.chrome, t.accent, 4.5))
+        .on_click((_e, cx) => this.answerPrompt(cx)).child("Done"));
+    const keys = completes(p) ? [["↑↓", "choose"], ["tab", "complete"], ["enter", "save"], ["esc", "cancel"]] : [["↑↓", "choose"], ["enter", "pick"], ["esc", "cancel"]];
+    return this.dialog(t, "prompt", 440, v_flex().gap(10).px(16).pt(16).pb(12)
       .child(div().text_size(14).font_semibold().text_color(t.foreground).child(p.title))
       .child(field)
-      .child(h_flex().gap(8).justify_end()
-        .child(h_flex().id("prompt-cancel").h(30).px(14).items_center().rounded(7).border(1).border_color(t.border).text_size(13).text_color(t.foreground)
-          .on_click((_e, cx) => { this.closePrompt(); cx.notify(); }).child("Cancel"))
-        .child(h_flex().id("prompt-ok").h(30).px(16).items_center().rounded(7).bg(t.accent).text_size(13).font_semibold().text_color(ensure(t.chrome, t.accent, 4.5))
-          .on_click((_e, cx) => this.answerPrompt(cx)).child("Done"))));
+      .when(rows.length > 0, (el) => el.child(v_flex().gap(1).children(rows.slice(from, from + 8).map((row, j) => {
+        const i = from + j;
+        const on = i === p.sel;
+        return h_flex().id(`prompt-row-${i}`).h(MENU_ROW).gap(8).pl(6).pr(10).items_center().rounded(7).border(1).border_color(on ? mix(t.accent, t.popover, 0.45) : t.popover)
+          .bg(on ? mix(t.accent, t.popover, 0.12) : t.popover).hover((h) => h.bg(on ? mix(t.accent, t.popover, 0.12) : t.hover))
+          .on_click((_e, cx) => { p.sel = i; row.pick(cx); cx.notify(); })
+          .child(div().w(10).text_size(11).text_color(t.accent).child(on ? "▸" : ""))
+          .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(t.foreground).child(row.label));
+      })).when(rows.length > 8, (el) => el.child(div().px(6).text_size(11).text_color(t.dim).child(`${rows.length} found · ↑↓ for more`)))))
+      .when(Boolean(status), (el) => el.child(div().px(6).text_size(12).text_color(p.error || /^Could not/.test(status) ? ensure(t.ansi1, t.popover, 4.5) : t.muted).child(status)))
+      .when(!listed(p) || completes(p), (el) => el.child(buttons))
+      .when(listed(p), (el) => el.child(div().pt(9).border_t(1).border_color(t.border).child(this.keyLine(t, keys)))));
   }
 
   /** The keys of the shown tab's tickets, in its order, for the details' arrows. */
@@ -1113,7 +1171,7 @@ export default class Tkt extends View {
   async openSettings() {
     const a = await this.call("GET", "/v1/settings");
     if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
-    this.settings = { section: this.settings?.section ?? "spaces", data: a.body, statuses: {}, statusFailed: {}, boards: {}, fields: null };
+    this.settings = { section: this.settings?.section ?? "spaces", data: a.body, statuses: {}, statusFailed: {}, fields: null };
     if (this.settings.section === "statuses") await this.readStatuses();
   }
 
@@ -1207,7 +1265,7 @@ export default class Tkt extends View {
     } else if (st.section === "boards") {
       content = v_flex().child(intro("Team boards", "The scrum boards whose sprints the Team view and the Backlog show."))
         .children(d.spaces.map((sp) => v_flex().id(`bs-${sp.key}`).gap(8).pb(22).child(spaceTitle(sp))
-          .children((st.boards[sp.key] ?? sp.team_boards).map((b) => {
+          .children(sp.team_boards.map((b) => {
             const on = sp.team_boards.some((x) => x.id === b.id);
             const toggle = (cx) => {
               if (!on) return this.attempt(() => this.patchSettings(boardsPatch(sp, b.id)), cx);
@@ -1218,7 +1276,11 @@ export default class Tkt extends View {
             return press(h_flex().id(`b-${sp.key}-${b.id}`).h(34).gap(10).px(10).items_center().rounded(7).border(1).border_color(lit ? t.accent : t.surface)
               .bg(lit ? mix(t.accent, t.surface, 0.1) : t.surface), toggle).child(this.checkbox(t, on)).child(div().text_size(13).text_color(t.foreground).child(b.name));
           }))
-          .when(!st.boards[sp.key], (el) => el.child(h_flex().child(button(`lb-${sp.key}`, "Choose from Jira's boards…", (cx) => this.attempt(async () => { st.boards[sp.key] = (await this.lookup("boards", sp.key)).boards; }, cx), "add"))))));
+          .child(h_flex().child(button(`lb-${sp.key}`, "+ Add a team board…", (cx) => this.attempt(async () => {
+            const boards = (await this.lookup("boards", sp.key)).boards ?? [];
+            const items = boards.filter((b) => !sp.team_boards.some((x) => x.id === b.id)).map((b) => ({ label: b.name, action: "settingsPatch", change: boardsPatch(sp, b.id) }));
+            this.ask({ kind: "choose", title: `Add a team board to ${sp.key}`, items });
+          }, cx), "add")))));
     } else if (st.section === "statuses") {
       const space = d.spaces.find((x) => x.key === st.statusSpace) ?? d.spaces[0];
       const loaded = space ? st.statuses[space.key] : null;
@@ -1296,7 +1358,8 @@ export default class Tkt extends View {
     } else if (st.section === "board") {
       const pick = (field, title) => (cx) => this.attempt(async () => {
         const names = (await this.lookup("fields")).fields ?? [];
-        this.menu = { title, sel: 0, items: [{ label: "— none", action: "settingsPatch", change: { [field]: "" } }, ...names.map((n) => ({ label: n, action: "settingsPatch", change: { [field]: n } }))] };
+        this.ask({ kind: "choose", title: `${title}: type part of its name`,
+          items: [{ label: "— none", action: "settingsPatch", change: { [field]: "" } }, ...names.map((n) => ({ label: n, action: "settingsPatch", change: { [field]: n } }))] });
       }, cx);
       const setting = (title, text, control) => h_flex().gap(14).items_center().py(12).border_b(1).border_color(t.border)
         .child(v_flex().flex_1().gap(3).child(div().text_size(13).font_semibold().text_color(t.foreground).child(title)).child(div().text_size(12).text_color(t.muted).child(text))).child(control);
@@ -1658,7 +1721,8 @@ export default class Tkt extends View {
       const p = this.prompt;
       if (k === "escape") this.closePrompt();
       else if (k === "enter") return this.submitPrompt(cx);
-      else if (isPeople(p) && (k === "down" || k === "up")) p.sel = Math.max(0, Math.min((p.users?.length ?? 1) - 1, p.sel + (k === "down" ? 1 : -1)));
+      else if (k === "tab" && completes(p)) this.promptRows(p)[p.sel]?.pick(cx);
+      else if (listed(p) && (k === "down" || k === "up")) p.sel = Math.max(0, Math.min(this.promptRows(p).length - 1, p.sel + (k === "down" ? 1 : -1)));
       cx.notify();
       return;
     }
