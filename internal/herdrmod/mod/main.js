@@ -17,7 +17,7 @@ import { backlogRows, badges, backlogAgents } from "./lib/backlog.js";
 import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter, isConfirm, splitTail, itemGroup, footerKeys, prsSubmenu } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
-import { detailView, neighbors, detailsKey, positionOf } from "./lib/details.js";
+import { detailView, neighbors, detailsKey, positionOf, structureText } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, palettePatch, statusBoard, markChoices, dragStarted, laneAt, statusMove, grabKey } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
 import { modKeyFor, withModKey } from "./lib/modkey.js";
@@ -847,29 +847,37 @@ export default class Tkt extends View {
       .child(v_flex().flex_1().gap(14).px(28).py(24).child(bar(420, 18)).child(bar(300, 12)).child(div().h(14)).child(bar(560, 11)).child(bar(520, 11)).child(bar(420, 11))
         .child(div().pt(8).text_size(12).text_color(t.muted).child(`Loading ${d.key}…`)))
       .child(div().w(320).h_full().bg(t.well).border_l(1).border_color(t.border)));
-    const h2 = (text, count) => h_flex().pt(20).pb(8).gap(8).items_center().child(div().text_size(13).font_semibold().text_color(t.foreground).child(text))
+    const h2 = (text, count) => h_flex().pt(24).pb(10).gap(8).items_center().child(div().text_size(11).font_semibold().text_color(t.muted).child(text.toUpperCase()))
       .when(count !== undefined, (el) => el.child(div().px(7).rounded(9).bg(t.pill).text_size(11).font_semibold().text_color(t.muted).child(String(count))));
     const icon = typeIcon(this.kindOf(d.key));
-    const leftContent = v_flex().px(28).pt(22).pb(20).max_w(820)
+    const body = ensure(mix(t.foreground, t.muted, 0.25), t.surface, 4.5);
+    // The root's mouse-down takes the keyboard back, which would drop a selection the text just started.
+    const prose = (id, text) => div().id(`${id}-text`).max_w(680).text_size(13).text_color(body).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .child(TextView.markdown(id, structureText(text)).selectable(true));
+    const leftContent = v_flex().px(28).pt(22).pb(20).max_w(760)
       .child(h_flex().gap(8).items_center().pb(8)
         .when(Boolean(icon), (el) => el.child(div().text_size(11).text_color(t[icon.tone] ?? t.muted).child(icon.glyph)))
         .child(this.mono(div().text_size(12).text_color(t.muted)).child(d.key))
         .when(Boolean(v.attention), (el) => el.child(div().px(8).py(1).rounded(5).bg(mix(t.ansi1, t.surface, 0.16)).text_size(11).font_semibold().text_color(ensure(t.ansi1, mix(t.ansi1, t.surface, 0.16), 4.5)).child(`! ${v.attention}`))))
-      .child(div().text_size(20).font_semibold().text_color(t.foreground).child(v.title))
+      .child(div().max_w(680).text_size(20).font_semibold().text_color(t.foreground).child(v.title))
       .child(h2("Description"))
-      .child(v.description ? TextView.markdown("desc", v.description) : div().text_color(t.muted).child("—"))
-      .when(Boolean(v.acceptance), (el) => el.child(h2("Acceptance criteria")).child(TextView.markdown("acc", v.acceptance)))
+      .child(v.description ? prose("desc", v.description) : div().text_size(13).text_color(t.muted).child("No description"))
+      .when(Boolean(v.acceptance), (el) => el.child(h2("Acceptance criteria")).child(prose("acc", v.acceptance)))
       .when(v.subtasks.length > 0, (el) => el.child(h2("Subtasks", v.subtasks.length)).child(v_flex().rounded(8).border(1).border_color(t.border).overflow_hidden()
         .children(v.subtasks.map((st, i) => h_flex().id(`st-${st.key}`).h(34).px(12).gap(10).items_center().bg(t.raised).when(i > 0, (row) => row.border_t(1).border_color(t.border))
           .child(this.mono(div().w(84).flex_none().text_size(11).text_color(t.muted)).child(st.key))
           .child(div().w(130).flex_none().truncate().text_size(12).text_color(t.foreground).child(st.status))
           .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(t.foreground).child(st.summary))))))
-      .when(v.comments.length > 0, (el) => el.child(h2("Comments", v.comments.length)).children(v.comments.map((c, i) => {
+      .child(h2("Comments", v.comments.length))
+      .child(v.comments.length === 0 ? div().text_size(13).text_color(t.muted).child("No comments") : v_flex().max_w(680).children(v.comments.map((c, i) => {
         const initials = (c.who ?? "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-        return h_flex().id(`c-${i}`).gap(10).pb(12).items_start()
-          .child(h_flex().w(24).h(24).flex_none().rounded(12).bg(t.pill).items_center().justify_center().text_size(9).font_semibold().text_color(t.muted).child(initials))
-          .child(v_flex().flex_1().min_w_0().gap(3).child(h_flex().gap(4).text_size(12).child(div().font_weight(500).text_color(t.foreground).child(c.who)).child(div().text_color(t.muted).child(`· ${c.when}`)))
-            .child(TextView.markdown(`cbody-${i}`, c.body || "")));
+        return v_flex().id(`c-${i}`).gap(6).py(12).when(i > 0, (el) => el.border_t(1).border_color(t.border))
+          .child(h_flex().gap(10).items_center()
+            .child(h_flex().w(24).h(24).flex_none().rounded(12).bg(t.pill).items_center().justify_center().text_size(9).font_semibold().text_color(t.muted).child(initials))
+            .child(div().flex_1().min_w_0().truncate().text_size(12).font_weight(500).text_color(t.foreground).child(c.who))
+            .child(div().flex_none().text_size(11).text_color(t.muted).child(c.when)))
+          .child(div().id(`cbody-${i}-text`).pl(34).text_size(13).text_color(body).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+            .child(TextView.markdown(`cbody-${i}`, structureText(c.body || "")).selectable(true)));
       })));
     const left = this.scrollPane("details-left", this.panes.details, leftContent).flex_1().min_w_0().h_full();
     const menu = ticketMenu(d.ticket, { agent: v.agent, attention: v.attention ? [v.attention] : [] });
