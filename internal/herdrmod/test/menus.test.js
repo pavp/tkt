@@ -87,3 +87,25 @@ test("a backlog ticket offers its board's current sprint, asking first, unless i
   assert.equal(sprintMoveItem({ key: "DEMO-20", board: "Web" }, backlog), null);
   assert.equal(sprintMoveItem({ key: "DEMO-40", board: "Core" }, backlog), null);
 });
+
+test("a menu of one yes and Cancel is a confirmation, drawn as a dialog", async () => {
+  const { isConfirm } = await import("../mod/lib/menus.js");
+  assert.equal(isConfirm({ title: "Move DEMO-1 to Done?", items: [{ label: "Yes, move it", action: "transition" }, { label: "Cancel", action: "cancel" }] }), true);
+  assert.equal(isConfirm({ title: "Move DEMO-1 to", items: [{ label: "Done", action: "submenu" }, { label: "Cancel", action: "cancel" }] }), false, "a choice is not a yes");
+  assert.equal(isConfirm({ title: "Actions", items: [{ label: "Show details", action: "details" }] }), false);
+});
+
+test("a menu item's trailing ▸ or ↗ goes to the right, and items group by what they do", async () => {
+  const { splitTail, itemGroup } = await import("../mod/lib/menus.js");
+  assert.deepEqual(splitTail("Move to… ▸"), { label: "Move to…", tail: "▸" });
+  assert.deepEqual(splitTail("Open in Jira ↗"), { label: "Open in Jira", tail: "↗" });
+  assert.deepEqual(splitTail("Copy the key DEMO-1"), { label: "Copy the key DEMO-1", tail: "" });
+  assert.equal(itemGroup({ action: "open" }), itemGroup({ action: "submenu", menu: {} }));
+  assert.notEqual(itemGroup({ action: "move" }), itemGroup({ action: "copy" }));
+  assert.equal(itemGroup({ action: "copyContext" }), itemGroup({ action: "copy" }));
+});
+
+test("the menu's key line reads as keys and what they do", async () => {
+  const { footerKeys } = await import("../mod/lib/menus.js");
+  assert.deepEqual(footerKeys("enter run · c copy link · esc close"), [["enter", "run"], ["c", "copy link"], ["esc", "close"]]);
+});

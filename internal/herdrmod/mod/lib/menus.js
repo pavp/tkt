@@ -150,3 +150,30 @@ export function menuFooter(item) {
 export function reviewersOf(pr) {
   return [...(pr?.approved_by ?? []).map((n) => ({ text: `✓ ${n}`, tone: "ansi2" })), ...(pr?.changes_requested_by ?? []).map((n) => ({ text: `✗ ${n}`, tone: "peach" }))];
 }
+
+/** Whether a menu asks one yes-or-Cancel question, which the mod draws as a dialog with two buttons. */
+export function isConfirm(menu) {
+  const items = menu?.items ?? [];
+  return items.length === 2 && items[1].action === "cancel" && /^Yes\b/.test(items[0].label ?? "");
+}
+
+/** A menu item's label without its trailing ▸ (a submenu) or ↗ (opens outside), which the menu puts on the right. */
+export function splitTail(label) {
+  const m = /^(.*?)\s+([▸↗])$/.exec(label ?? "");
+  return m ? { label: m[1], tail: m[2] } : { label: label ?? "", tail: "" };
+}
+
+/** Which group of a menu an item belongs to, for the dividers between them: opening, changing, copying. */
+export function itemGroup(item) {
+  if (item.action === "open" || item.action === "submenu" || item.action === "details") return 1;
+  if (item.action === "copy" || item.action === "copyContext") return 3;
+  return 2;
+}
+
+/** The key line under a menu as [key, what it does] pairs. */
+export function footerKeys(text) {
+  return (text ?? "").split(" · ").map((part) => {
+    const i = part.indexOf(" ");
+    return i < 0 ? [part, ""] : [part.slice(0, i), part.slice(i + 1)];
+  });
+}
