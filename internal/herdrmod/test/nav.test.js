@@ -96,3 +96,8 @@ test("? opens the list of every key, on any tab", async () => {
   const { boardAction } = await import("../mod/lib/nav.js");
   for (const tab of ["sprint", "prs", "backlog"]) assert.equal(boardAction("?", tab), "keys");
 });
+
+test("m opens the machine menu from any tab", async () => {
+  const { boardAction } = await import("../mod/lib/nav.js");
+  for (const tab of ["sprint", "prs", "backlog"]) assert.equal(boardAction("m", tab), "machines", tab);
+});

@@ -24,7 +24,7 @@ export function legendFor(tab, view, { strip = false, bots = 0, merged = false }
   if (tab === "sprint") legend.push(["v", "view"]);
   if (columns) legend.push(["z", "density"]);
   if (tab !== "backlog") legend.push(["t", tab === "prs" ? "requested" : "team"]);
-  legend.push(tab === "prs" ? ["R", "repos"] : ["B", "boards"], ["g", "refresh"], [",", "settings"], ["q", "close"]);
+  legend.push(tab === "prs" ? ["R", "repos"] : ["B", "boards"], ["g", "refresh"], ["m", "machine"], [",", "settings"], ["q", "close"]);
   return legend;
 }
 

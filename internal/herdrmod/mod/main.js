@@ -2,7 +2,7 @@
 // core runs tkt, so it works whether tkt runs here or on a machine reached over SSH.
 
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView, VirtualListScrollHandle } from "gpui-base";
+import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView, VirtualListScrollHandle, Popup } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile, settings, fonts } from "herdr";
 import { tktTheme, monoFont, sourceColors, contrast, ensure, mix, CATPPUCCIN } from "./lib/theme.js";
 import * as os from "os";
@@ -169,7 +169,7 @@ export default class Tkt extends View {
 
   machineBox(t) {
     const m = this.machineMenu;
-    return v_flex().id("machines").absolute().bottom(56).right(16).w(260).p(6).gap(1).rounded(10).bg(t.popover).border(1).border_color(t.border).shadow_lg()
+    return v_flex().id("machines").my(4).w(260).p(6).gap(1).rounded(10).bg(t.popover).border(1).border_color(t.border).shadow_lg()
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .child(div().px(8).pt(4).pb(6).text_size(11).font_semibold().text_color(t.muted).child("Show tkt on"))
       .children(m.items.map((on, i) => {
@@ -1499,7 +1499,7 @@ export default class Tkt extends View {
     if (this.keysOpen) { this.keysOpen = false; cx.notify(); return; }
     if (this.machineMenu) {
       const m = this.machineMenu;
-      if (k === "escape") this.machineMenu = null;
+      if (k === "escape" || k === "m") this.machineMenu = null;
       else if (k === "down" || k === "up") m.sel = Math.max(0, Math.min(m.items.length - 1, m.sel + (k === "down" ? 1 : -1)));
       else if (k === "enter") { this.machineMenu = null; this.use(m.items[m.sel], cx); }
       cx.notify();
@@ -1594,6 +1594,7 @@ export default class Tkt extends View {
     if (action === "close") return close();
     if (action === "refresh") return this.sync(cx);
     if (action === "settings") return this.attempt(() => this.openSettings(), cx);
+    if (action === "machines") return this.openMachines(cx);
     if (action === "boards" || action === "repos") { this.panel = this.panel === action ? null : action; return; }
     if (action === "bots") { this.bots = !this.bots; return this.load(cx); }
     if (action === "keys") { this.keysOpen = !this.keysOpen; return; }
@@ -1754,8 +1755,9 @@ export default class Tkt extends View {
       .child(h_flex().id("sync").w(22).h(22).flex_none().items_center().justify_center().rounded(5).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.sync(cx)).child(this.icon("refresh", 13)))
       .child(div().w(1).h(14).flex_none().bg(t.border))
-      .child(h_flex().id("machine").flex_none().gap(5).px(6).h(22).items_center().rounded(5).text_size(11).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.openMachines(cx)).child(where).child("▾"));
+      .child(Popup.new("machine-popup", h_flex().id("machine").flex_none().gap(5).px(6).h(22).items_center().rounded(5).text_size(11).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.openMachines(cx)).child(where).child("▾"))
+        .anchor("top_right").when(Boolean(this.machineMenu), (el) => el.content(this.machineBox(t))));
     const error = this.error ? problemOf(this.error, this.machine) : "";
     const notice = this.notice;
     const label = mix(t.ansi4, t.chrome, 0.14);
@@ -2141,7 +2143,6 @@ export default class Tkt extends View {
       .when(Boolean(this.picker), (el) => el.child(this.pickerBox(t)))
       .when(Boolean(this.prompt), (el) => el.child(this.promptBox(t)))
       .when(Boolean(this.keysOpen), (el) => el.child(this.keysBox(t)))
-      .when(Boolean(this.machineMenu), (el) => el.child(this.machineBox(t)))
       .when(Boolean(this.settings?.markPicker), (el) => el.child(this.markPickerBox(t)))
       .when(Boolean(this.settings?.drag && this.settings?.ghost), (el) => el.child(this.statusGhost(t)));
   }
