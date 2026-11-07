@@ -1804,7 +1804,7 @@ export default class Tkt extends View {
     const flagBg = alarm ? mix(t.ansi1, t.raised, 0.16) : t.pill;
     const ci = { "✓": t.ansi2, "✕": t.ansi1 };
     const top = h_flex().h(18).gap(6).items_center()
-      .child(this.mono(div().text_size(11).text_color(sel ? t.accent : t.muted)).when(sel, (el) => el.font_semibold()).child([sel ? "▸" : "", c.subtask ? "↳" : "", c.key].filter(Boolean).join(" ")))
+      .child(this.mono(div().text_size(11).text_color(t.muted)).child([c.subtask ? "↳" : "", c.key].filter(Boolean).join(" ")))
       .when(Boolean(c.points), (el) => el.child(this.mono(div().px(5).rounded(4).bg(t.pill).text_size(10).text_color(t.muted)).child(c.points)))
       .child(div().flex_1())
       .when(Boolean(flag), (el) => el.child(div().px(6).rounded(5).bg(flagBg).text_size(10).font_semibold().text_color(alarm ? ensure(t.ansi1, flagBg, 4.5) : t.muted).child(flag)))
