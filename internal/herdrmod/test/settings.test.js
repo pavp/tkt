@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { fixture } from "./fixtures.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows } from "../mod/lib/settings.js";
 
-test("Settings has the TUI's sections, and the machine the window uses", () => {
-  assert.deepEqual(SECTIONS.map((s) => s.title), ["Spaces & repositories", "Team boards", "Statuses", "Local clones", "Board", "Machine"]);
+test("Settings has the TUI's sections, the mod's Colors, and the machine the window uses", () => {
+  assert.deepEqual(SECTIONS.map((s) => s.title), ["Spaces & repositories", "Team boards", "Statuses", "Local clones", "Board", "Colors", "Machine"]);
 });
 
 test("a repository is added to or removed from its space as the whole list", () => {

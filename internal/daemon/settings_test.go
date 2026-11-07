@@ -101,6 +101,35 @@ func TestContractSettings(t *testing.T) {
 	}
 }
 
+func TestPatchSettingsChoosesTheModPalette(t *testing.T) {
+	tests := []struct {
+		name, body, saved, shown string
+	}{
+		{"tkt's own colors", `{"palette":"tkt"}`, "tkt", "tkt"},
+		{"back to Herdr's", `{"palette":" herdr "}`, "", "herdr"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeSettings{cfg: settingsConfig()}
+			f.cfg.Palette = "tkt"
+			s := settingsServer(t, f)
+			rec := patchSettings(s, tt.body, "application/json", "")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("patch = %d %s", rec.Code, rec.Body)
+			}
+			want := settingsConfig()
+			want.Palette = tt.saved
+			if !reflect.DeepEqual(f.cfg, want) || f.saves != 1 {
+				t.Errorf("saved %d times:\n%+v\nwant\n%+v", f.saves, f.cfg, want)
+			}
+			var got SettingsView
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.Palette != tt.shown {
+				t.Errorf("answer = %s (%v), want palette %q", rec.Body, err, tt.shown)
+			}
+		})
+	}
+}
+
 func TestSettingsLookupsRefuseAnUnknownSpace(t *testing.T) {
 	for _, path := range []string{"/v1/settings/statuses", "/v1/settings/statuses?space=NOPE", "/v1/settings/boards?space=demo"} {
 		f := &fakeSettings{cfg: settingsConfig()}
@@ -179,6 +208,7 @@ func TestPatchSettingsRefusesWithoutWriting(t *testing.T) {
 		{"an unknown mark", `{"spaces":{"DEMO":{"statuses":{"To Do":{"mark":"heart"}}}}}`, "application/json", "", http.StatusBadRequest, `unknown mark "heart"`},
 		{"an empty status change", `{"spaces":{"DEMO":{"statuses":{"To Do":{}}}}}`, "application/json", "", http.StatusBadRequest, `"To Do" needs a column, a mark, or null`},
 		{"ignoring a configured repository", `{"spaces":{"DEMO":{"ignore":["example-org/web"]}}}`, "application/json", "", http.StatusBadRequest, "example-org/web is not a repository inferred for DEMO"},
+		{"an unknown palette", `{"palette":"pink"}`, "application/json", "", http.StatusBadRequest, `unknown palette "pink" (use herdr or tkt)`},
 		{"a wrong type", `{"label_field":3}`, "application/json", "", http.StatusBadRequest, "the body is not a settings change"},
 		{"a second value", `{"label_field":"A"}{"label_field":"B"}`, "application/json", "", http.StatusBadRequest, "the body is not a settings change"},
 		{"not JSON", `{"label_field":"A"}`, "text/plain", "", http.StatusUnsupportedMediaType, "send the request as application/json"},
@@ -242,5 +272,19 @@ func TestSettingsRoutes(t *testing.T) {
 	s = settingsServer(t, &fakeSettings{cfg: settingsConfig()})
 	if code, _ := get(t, s.Handler(), http.MethodGet, "/v1/settings", ""); code != http.StatusUnauthorized {
 		t.Errorf("settings without the token = %d", code)
+	}
+}
+
+func TestSettingsShowHerdrsPaletteForAnUnknownOne(t *testing.T) {
+	f := &fakeSettings{cfg: settingsConfig()}
+	f.cfg.Palette = "pink"
+	s := settingsServer(t, f)
+	req := httptest.NewRequest(http.MethodGet, "/v1/settings", nil)
+	req.Header.Set("Authorization", "Bearer "+s.token)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	var got SettingsView
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.Palette != "herdr" {
+		t.Errorf("GET /v1/settings = %d %s, want palette herdr", rec.Code, rec.Body)
 	}
 }

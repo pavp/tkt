@@ -24,7 +24,9 @@ var ErrNotConfigured = errors.New("tkt is not configured yet: run `tkt init`")
 type Config struct {
 	RepoRoots []string `toml:"repo_roots,omitempty"`
 	// Reviews selects which review requests the board shows: direct (default), team, or off.
-	Reviews string  `toml:"reviews,omitempty"`
+	Reviews string `toml:"reviews,omitempty"`
+	// Palette picks the Herdr desktop mod's colors: the Herdr theme's (empty, "herdr") or tkt's own ("tkt").
+	Palette string  `toml:"palette,omitempty"`
 	Jira    Jira    `toml:"jira"`
 	GitHub  GitHub  `toml:"github,omitempty"`
 	Context Context `toml:"context,omitempty"`

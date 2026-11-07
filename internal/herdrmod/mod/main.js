@@ -4,7 +4,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView, VirtualListScrollHandle } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile, settings, fonts } from "herdr";
-import { tktTheme, monoFont } from "./lib/theme.js";
+import { tktTheme, monoFont, sourceColors, contrast, CATPPUCCIN } from "./lib/theme.js";
 import * as os from "os";
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
@@ -18,7 +18,7 @@ import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter } from 
 import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors, detailsKey } from "./lib/details.js";
-import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows } from "./lib/settings.js";
+import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows, palettePatch } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
 import { modKeyFor, withModKey } from "./lib/modkey.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
@@ -182,6 +182,13 @@ export default class Tkt extends View {
           } catch (e) {
             this.notice = `the tkt mod (${MOD_VERSION}) differs from tkt on ${on ?? "this computer"} (${v}) and could not update: ${e.message}`;
           }
+          cx.notify();
+        }
+      } catch {}
+      try {
+        const st = await this.call("GET", "/v1/settings");
+        if (st.status === 200 && st.body?.palette !== this.palette) {
+          this.palette = st.body.palette;
           cx.notify();
         }
       } catch {}
@@ -819,6 +826,7 @@ export default class Tkt extends View {
     const a = await this.call("PATCH", "/v1/settings", change);
     if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
     this.settings.data = a.body;
+    this.palette = a.body.palette;
     this.settings.statuses = {};
     this.notice = "✓ saved to config.toml · the board refreshes with it";
   }
@@ -910,6 +918,8 @@ export default class Tkt extends View {
       content = v_flex()
         .child(heading("The field a ticket's label comes from")).child(link("label-field", d.label_field || "— none", pick("label_field", "Label field")))
         .child(heading("The story points field")).child(link("points-field", d.points_field || "detected", pick("points_field", "Story points field")));
+    } else if (st.section === "colors") {
+      content = this.colorsSection(t, d, focusable);
     } else {
       content = v_flex().child(heading("The machine whose tkt this window shows"))
         .child(div().text_color(t.foreground).child(this.machine === undefined ? "none yet" : this.machine ?? "This computer"))
@@ -921,6 +931,56 @@ export default class Tkt extends View {
     return v_flex().id("settings").flex_1().min_h_0().child(nav)
       .child(h_flex().flex_1().min_h_0().items_start().child(side)
         .child(this.scrollPane("settings-content", this.panes.settings, v_flex().p(14).child(content)).flex_1().h_full()));
+  }
+
+  /** Settings › Colors: the palette, and how each color the palette gives reads once tkt raises it. */
+  colorsSection(t, d, focusable) {
+    const palette = d.palette ?? "herdr";
+    const source = sourceColors(theme(), palette);
+    const option = (id, title, sub) => {
+      const on = palette === id;
+      const choose = (cx) => this.attempt(() => this.patchSettings(palettePatch(id)), cx);
+      const lit = focusable(choose);
+      return h_flex().id(`palette-${id}`).gap(12).p(12).rounded(9).border(1).border_color(on || lit ? t.accent : t.border).bg(on ? t.selected : t.raised)
+        .hover((s) => s.border_color(t.accent)).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => choose(cx))
+        .child(h_flex().w(16).h(16).flex_none().rounded(8).border(2).border_color(on ? t.accent : t.dim).items_center().justify_center()
+          .child(div().w(8).h(8).rounded(4).bg(on ? t.accent : t.raised)))
+        .child(v_flex().flex_1().min_w_0().gap(3).child(div().font_semibold().text_color(t.foreground).child(title)).child(div().text_size(12).text_color(t.muted).child(sub)));
+    };
+    const ratio = (c, min, note) => {
+      const r = contrast(c, t.raised);
+      const ok = r >= min;
+      const pill = div().flex_none().px(6).rounded(4).text_size(11).text_color(ok ? t.ansi2 : t.ansi1).bg(t.surface).child(`${r.toFixed(1)}:1${ok ? "" : " ✕"}`);
+      return note ? v_flex().flex_none().items_end().child(pill).child(div().text_size(10).text_color(t.muted).child(note)) : pill;
+    };
+    const roles = [["Secondary text", "muted", 4.5, "Ana López · 3 pts"], ["Faint text", "dim", 4.5, "accounts-web · Product"], ["In Progress", "ansi4", 3, "● In Progress"],
+      ["In Review", "ansi5", 3, "● In Review"], ["Done", "ansi2", 3, "#49 approved"], ["Blocked", "ansi1", 4.5, "Blocked"]];
+    const cell = (color, min, sample, note) => h_flex().flex_1().min_w_0().gap(6).items_center()
+      .child(div().flex_none().px(8).py(3).rounded(5).bg(t.raised).text_size(12).font_weight(500).text_color(color).child(sample))
+      .child(div().flex_1()).child(ratio(color, min, note));
+    const heading = (text) => div().pb(8).font_semibold().text_size(15).text_color(t.foreground).child(text);
+    const left = v_flex().w(300).flex_none().gap(8).pr(24).border_r(1).border_color(t.border)
+      .child(heading("Palette"))
+      .child(option("herdr", "Herdr theme", "Column and PR colors come from the terminal colors of your Herdr theme, so tkt changes with it."))
+      .child(option("tkt", "tkt · Catppuccin", "Catppuccin Mocha in dark (Latte in light), as the TUI uses, with its grays raised to read at 4.5:1. Backgrounds and agent colors still follow Herdr."))
+      .child(div().pt(16).child(heading("Legibility")))
+      .child(div().text_size(12).text_color(t.foreground).child("Whatever the palette, tkt never draws text below 4.5:1 contrast, nor status marks below 3:1. A color the theme makes too faint is darkened or lightened until it passes; its hue stays."))
+      .child(div().pt(6).text_size(12).text_color(t.muted).child("Backgrounds always come from the Herdr theme, so tkt matches the window it lives in."));
+    const right = v_flex().flex_1().min_w_0().gap(10).pl(20)
+      .child(h_flex().gap(10).items_end().child(div().font_semibold().text_size(15).text_color(t.foreground).child("On the current theme")).child(div().text_size(12).text_color(t.muted).child("on a card")))
+      .child(v_flex().rounded(10).border(1).border_color(t.border)
+        .child(h_flex().px(12).py(8).gap(10).bg(t.chrome).text_size(11).font_semibold().text_color(t.muted)
+          .child(div().w(96).child("Used for")).child(div().flex_1().child("The palette's color")).child(div().flex_1().child("What tkt draws")))
+        .children(roles.map(([label, key, min, sample]) => {
+          const from = source[key] ?? t[key];
+          return h_flex().id(`role-${key}`).px(12).py(8).gap(10).items_center().border_t(1).border_color(t.border)
+            .child(div().w(96).text_size(12).text_color(t.foreground).child(label))
+            .child(cell(from, min, sample)).child(cell(t[key], min, sample, from === t[key] ? "" : "adjusted"));
+        })))
+      .child(h_flex().pt(10).gap(10).items_end().child(div().font_semibold().text_color(t.foreground).child("Light palette")).child(div().text_size(12).text_color(t.muted).child("Catppuccin Latte · defined, designed later")))
+      .child(h_flex().gap(14).children(Object.entries(CATPPUCCIN.latte).map(([k, c]) =>
+        v_flex().id(`latte-${k}`).gap(4).items_center().child(div().w(28).h(28).rounded(7).border(1).border_color(t.border).bg(c)).child(this.mono(div().text_size(10).text_color(t.muted)).child(c)))));
+    return h_flex().items_start().child(left).child(right);
   }
 
   async openStart(key) {

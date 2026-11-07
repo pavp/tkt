@@ -6,8 +6,14 @@ export const SECTIONS = [
   { id: "statuses", title: "Statuses" },
   { id: "clones", title: "Local clones" },
   { id: "board", title: "Board" },
+  { id: "colors", title: "Colors" },
   { id: "machine", title: "Machine" },
 ];
+
+/** The mod's colors: the Herdr theme's ("herdr") or tkt's own ("tkt"). */
+export function palettePatch(palette) {
+  return { palette };
+}
 
 /** A space's repositories with one added ({repo, path}) or one removed (its name). */
 export function reposPatch(space, change) {

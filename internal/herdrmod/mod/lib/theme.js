@@ -50,14 +50,19 @@ function readable(fg, bgs, min) {
   return bgs.filter(isHex).reduce((c, bg) => ensure(c, bg, min), fg);
 }
 
+/** The colors the palette gives before tkt raises them: Herdr's theme, with Catppuccin's (Latte on a light theme) for
+ *  palette "tkt". */
+export function sourceColors(theme, palette = "herdr") {
+  const light = isHex(theme.surface) && luminance(theme.surface) > 0.4;
+  return palette === "tkt" ? { ...theme, ...CATPPUCCIN[light ? "latte" : "mocha"] } : { ...theme };
+}
+
 /** Herdr's theme with tkt's colors over it. palette "tkt" takes Catppuccin (Latte on a light theme); any other
  *  value keeps Herdr's ANSI colors. Backgrounds, the accent and the agent colors stay Herdr's. */
 export function tktTheme(theme, palette = "herdr") {
   const name = palette === "tkt" ? "tkt" : "herdr";
   const bgs = [theme.surface, theme.raised, theme.chrome, theme.popover];
-  const light = isHex(theme.surface) && luminance(theme.surface) > 0.4;
-  const out = { ...theme, peach: PEACH, palette: name };
-  if (name === "tkt") Object.assign(out, CATPPUCCIN[light ? "latte" : "mocha"]);
+  const out = { ...sourceColors(theme, name), peach: PEACH, palette: name };
   for (const k of ["foreground", "muted", "dim"]) if (theme[k]) out[k] = readable(theme[k], bgs, TEXT);
   for (const k of ["ansi1", "ansi2", "ansi3", "ansi4", "ansi5", "ansi6", "ansi8"]) if (out[k]) out[k] = readable(out[k], bgs, MARK);
   return out;
