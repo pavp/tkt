@@ -27,6 +27,9 @@ import { packCache, unpackCache, cachedLabel, keptAnswer, pollAfter } from "./li
 import { machineKey, stashed, restored } from "./lib/machines.js";
 import { scrolled, menuHeight, MENU_ROW, cardHeight, cardsBelow, revealed, keepVisible, rowsBelow, rowTop } from "./lib/scroll.js";
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget, listKey, sectionAfter } from "./lib/nav.js";
+import { peopleQuery, peopleStatus, peopleItems, SEARCH_WAIT } from "./lib/people.js";
+
+const isPeople = (p) => p?.kind === "assignUser" || p?.kind === "fieldUser";
 
 const TABS = [
   { id: "sprint", title: "Sprint", route: "/v1/board?herdr=desktop" },
@@ -74,6 +77,8 @@ export default class Tkt extends View {
     this.prompt = null;
     this.form = null;
     this.input = InputState.new({ placeholder: "" });
+    this.input.on("change", (_e, cx) => this.promptTyped(cx));
+    this.input.on("submit", (_e, cx) => this.submitPrompt(cx));
     this.notice = "";
     this.lastClick = { key: null, at: 0 };
     this.focus = cx.focus_handle();
@@ -730,14 +735,66 @@ export default class Tkt extends View {
 
   /** Opens the text prompt: a comment, or a name to search people by. */
   ask(prompt) {
-    this.prompt = prompt;
+    this.prompt = { ...prompt, sel: 0, seq: 0 };
     this.input.set_value(prompt.value ?? "");
+    this.input.focus();
+  }
+
+  /** Searches Jira for the people a search prompt names, once typing pauses; a later key drops an earlier answer. */
+  promptTyped(cx) {
+    const p = this.prompt;
+    if (!isPeople(p)) return;
+    p.text = this.input.value();
+    p.error = null;
+    const seq = ++p.seq;
+    const q = peopleQuery(p.text);
+    if (!q) {
+      p.users = undefined;
+      p.searching = false;
+      cx.notify();
+      return;
+    }
+    p.searching = true;
+    cx.notify();
+    const current = () => this.prompt === p && p.seq === seq;
+    cx.spawn(async (cx) => {
+      await cx.sleep(SEARCH_WAIT);
+      if (!current()) return;
+      try {
+        const a = await this.call("GET", `/v1/tickets/${p.key}/users?query=${encodeURIComponent(q)}`);
+        if (!current()) return;
+        if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+        p.users = a.body.users ?? [];
+        p.sel = 0;
+      } catch (e) {
+        if (!current()) return;
+        p.error = e.message;
+      }
+      p.searching = false;
+      cx.notify();
+    });
+  }
+
+  /** Enter in the prompt: a search picks the highlighted person, any other prompt is answered. */
+  submitPrompt(cx) {
+    const p = this.prompt;
+    if (!p) return;
+    if (!isPeople(p)) return this.answerPrompt(cx);
+    const item = peopleItems(p, p.users ?? [])[p.sel];
+    if (!item) return;
+    this.closePrompt();
+    this.act(item, cx);
+  }
+
+  closePrompt() {
+    this.prompt = null;
+    this.focus.focus();
   }
 
   answerPrompt(cx) {
     const p = this.prompt;
     const text = this.input.value().trim();
-    this.prompt = null;
+    this.closePrompt();
     cx.spawn(async (cx) => {
       try {
         if (p.kind === "addRepo") {
@@ -750,14 +807,6 @@ export default class Tkt extends View {
         } else if (p.kind === "comment") {
           this.form.comment = text;
           this.menu = { ...formMenu(this.form.key, this.form.move, this.form), sel: 0 };
-        } else {
-          const a = await this.call("GET", `/v1/tickets/${p.key}/users?query=${encodeURIComponent(text)}`);
-          if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
-          const users = a.body.users ?? [];
-          if (users.length === 0) throw new Error(text.length < 2 ? "type at least two letters" : `nobody in Jira matches ${text}`);
-          this.menu = p.kind === "assignUser"
-            ? { title: `Assign ${p.key} to`, sel: 0, items: users.map((u) => ({ label: u.name, action: "confirmAssign", key: p.key, who: { to: "user", account_id: u.id, name: u.name } })) }
-            : { title: p.field.name, sel: 0, items: users.map((u) => ({ label: u.name, action: "fieldValue", field: p.field, value: { id: u.id, name: u.name } })) };
         }
       } catch (e) {
         this.notice = `could not: ${e.message}`;
@@ -769,15 +818,32 @@ export default class Tkt extends View {
 
   promptBox(t) {
     const p = this.prompt;
-    const done = p.kind === "comment" || p.kind.startsWith("add");
+    const field = div().rounded(8).border(1).border_color(t.accent).bg(t.surface).p(2).child(Input.new(this.input));
+    if (isPeople(p)) {
+      const items = peopleItems(p, p.users ?? []);
+      const status = peopleStatus(p);
+      return this.dialog(t, "prompt", 440, v_flex().gap(10).px(16).pt(16).pb(12)
+        .child(div().text_size(14).font_semibold().text_color(t.foreground).child(p.title))
+        .child(field)
+        .when(items.length > 0, (el) => el.child(v_flex().gap(1).children(items.map((item, i) => {
+          const on = i === p.sel;
+          return h_flex().id(`person-${i}`).h(MENU_ROW).gap(8).pl(6).pr(10).items_center().rounded(7).border(1).border_color(on ? mix(t.accent, t.popover, 0.45) : t.popover)
+            .bg(on ? mix(t.accent, t.popover, 0.12) : t.popover).hover((h) => h.bg(on ? mix(t.accent, t.popover, 0.12) : t.hover))
+            .on_click((_e, cx) => { p.sel = i; this.submitPrompt(cx); })
+            .child(div().w(10).text_size(11).text_color(t.accent).child(on ? "▸" : ""))
+            .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(t.foreground).child(item.label));
+        }))))
+        .when(Boolean(status), (el) => el.child(div().px(6).text_size(12).text_color(p.error ? ensure(t.ansi1, t.popover, 4.5) : t.muted).child(status)))
+        .child(div().pt(9).border_t(1).border_color(t.border).child(this.keyLine(t, [["↑↓", "choose"], ["enter", "pick"], ["esc", "cancel"]]))));
+    }
     return this.dialog(t, "prompt", 440, v_flex().gap(12).px(16).pt(16).pb(12)
       .child(div().text_size(14).font_semibold().text_color(t.foreground).child(p.title))
-      .child(div().rounded(8).border(1).border_color(t.accent).bg(t.surface).p(2).child(Input.new(this.input)))
+      .child(field)
       .child(h_flex().gap(8).justify_end()
         .child(h_flex().id("prompt-cancel").h(30).px(14).items_center().rounded(7).border(1).border_color(t.border).text_size(13).text_color(t.foreground)
-          .on_click((_e, cx) => { this.prompt = null; cx.notify(); }).child("Cancel"))
+          .on_click((_e, cx) => { this.closePrompt(); cx.notify(); }).child("Cancel"))
         .child(h_flex().id("prompt-ok").h(30).px(16).items_center().rounded(7).bg(t.accent).text_size(13).font_semibold().text_color(ensure(t.chrome, t.accent, 4.5))
-          .on_click((_e, cx) => this.answerPrompt(cx)).child(done ? "Done" : "Search"))));
+          .on_click((_e, cx) => this.answerPrompt(cx)).child("Done"))));
   }
 
   /** The keys of the shown tab's tickets, in its order, for the details' arrows. */
@@ -1553,6 +1619,14 @@ export default class Tkt extends View {
       if (k === "escape" || k === "m") this.machineMenu = null;
       else if (k === "down" || k === "up") m.sel = Math.max(0, Math.min(m.items.length - 1, m.sel + (k === "down" ? 1 : -1)));
       else if (k === "enter") { this.machineMenu = null; this.use(m.items[m.sel], cx); }
+      cx.notify();
+      return;
+    }
+    if (this.prompt) {
+      const p = this.prompt;
+      if (k === "escape") this.closePrompt();
+      else if (k === "enter") return this.submitPrompt(cx);
+      else if (isPeople(p) && (k === "down" || k === "up")) p.sel = Math.max(0, Math.min((p.users?.length ?? 1) - 1, p.sel + (k === "down" ? 1 : -1)));
       cx.notify();
       return;
     }

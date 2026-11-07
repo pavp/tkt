@@ -3739,11 +3739,12 @@ func TestAssignToSomeoneSearchedByName(t *testing.T) {
 	if v := stripANSI(m.View()); !strings.Contains(v, "Assign DEMO-1 to") || !strings.Contains(v, "type to search") {
 		t.Fatalf("no search box:\n%s", v)
 	}
-	m, msg := run(press(m, "b"), "e")
+	m, due := run(press(m, "b"), "e")
+	m, search := m.Update(due)
 	if r.last() != "users be" {
 		t.Fatalf("calls %v", r.calls)
 	}
-	m, _ = m.Update(msg)
+	m, _ = m.Update(search())
 	m = press(m, "enter")
 	if v := stripANSI(m.View()); !strings.Contains(v, "Assign DEMO-1 to Bea Ruiz?") {
 		t.Fatalf("picking someone should ask first:\n%s", v)
@@ -3969,10 +3970,12 @@ func typeKeys(m tea.Model, text string) tea.Model {
 	for _, r := range text {
 		var cmd tea.Cmd
 		m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		if cmd != nil {
-			if msg := cmd(); msg != nil {
-				m, _ = m.Update(msg)
+		for cmd != nil {
+			msg := cmd()
+			if msg == nil {
+				break
 			}
+			m, cmd = m.Update(msg)
 		}
 	}
 	return m
@@ -4016,6 +4019,49 @@ func TestMoveFormPicksAUserAndWritesAComment(t *testing.T) {
 	want := []Value{{Field: "cf_reason", Kind: KindOption, ID: "9002"}, {Field: "cf_owner", Kind: KindUser, ID: "acc-8"}}
 	if r.last() != "transition DEMO-1 51" || !reflect.DeepEqual(r.values, want) || r.comment != "Waiting for keys" {
 		t.Errorf("moved with %+v and comment %q (%v)", r.values, r.comment, r.calls)
+	}
+}
+
+func TestUserSearchWaitsForTypingToPauseAndKeepsOneSpace(t *testing.T) {
+	r := &recorder{users: map[string][]User{"an m": {{ID: "acc-7", Name: "Ana María"}}}}
+	m := press(selectMenuItem(t, press(loaded(r), "l", "enter"), "Assign to…"), "enter")
+	m = press(selectMenuItem(t, m, "Search someone…"), "enter")
+	if v := stripANSI(m.View()); !strings.Contains(v, "type at least two letters") {
+		t.Fatalf("an empty search should ask for two letters:\n%s", v)
+	}
+	var cmds []tea.Cmd
+	for _, k := range []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune("a")}, {Type: tea.KeyRunes, Runes: []rune("n")},
+		{Type: tea.KeySpace, Runes: []rune(" ")}, {Type: tea.KeyRunes, Runes: []rune("m")}} {
+		var cmd tea.Cmd
+		m, cmd = m.Update(k)
+		cmds = append(cmds, cmd)
+	}
+	if slices.ContainsFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, "users") }) {
+		t.Fatalf("typing should not ask Jira before it pauses: %v", r.calls)
+	}
+	if v := stripANSI(m.View()); !strings.Contains(v, "> an m█") || !strings.Contains(v, "searching…") {
+		t.Fatalf("one space per key, and the box should say it is searching:\n%s", v)
+	}
+	for _, cmd := range cmds[:len(cmds)-1] {
+		if cmd != nil {
+			m, _ = m.Update(cmd())
+		}
+	}
+	if slices.ContainsFunc(r.calls, func(c string) bool { return strings.HasPrefix(c, "users") }) {
+		t.Fatalf("a pause after an earlier key should not search once more was typed: %v", r.calls)
+	}
+	m, cmd := m.Update(cmds[len(cmds)-1]())
+	if r.last() != "users an m" {
+		t.Fatalf("the pause after the last key should search what was typed: %v", r.calls)
+	}
+	m, _ = m.Update(cmd())
+	if v := stripANSI(m.View()); !strings.Contains(v, "Ana María") {
+		t.Errorf("the people found should be listed:\n%s", v)
+	}
+	r.users = nil
+	m = typeKeys(m, "x")
+	if v := stripANSI(m.View()); !strings.Contains(v, "nobody in Jira matches") {
+		t.Errorf("a search with no one found should say so:\n%s", v)
 	}
 }
 

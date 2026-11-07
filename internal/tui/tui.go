@@ -908,6 +908,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.transitioned(msg)
 	case UsersListedMsg:
 		return m.usersListed(msg)
+	case userSearchDueMsg:
+		return m.userSearchDue(msg)
 	case formMsg:
 		m.menu = m.formMenu(msg.form)
 		m.status = msg.status

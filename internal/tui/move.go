@@ -181,6 +181,17 @@ type formPrompt struct {
 	sel   int
 	// assign, when set, searches someone to give that ticket to instead of filling a form.
 	assign ticket.Key
+	// waiting is set from a key until Jira answers what was typed.
+	waiting bool
+}
+
+// searchWait is how long a user search waits after the last key before asking Jira.
+const searchWait = 250 * time.Millisecond
+
+// userSearchDueMsg arrives once typing paused; it searches only if the text is still what was typed.
+type userSearchDueMsg struct {
+	key   ticket.Key
+	query string
 }
 
 // key is the ticket the prompt belongs to.
@@ -329,25 +340,32 @@ func (m Model) promptKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case tea.KeyRunes, tea.KeySpace:
 		p.text += string(k.Runes)
-		if k.Type == tea.KeySpace {
-			p.text += " "
-		}
 		return m, m.searchUsers()
 	}
 	return m, nil
 }
 
-// searchUsers asks for the users matching a user field's text once it has two letters.
+// searchUsers asks for the users matching a user field's text once it has two letters and typing pauses.
 func (m Model) searchUsers() tea.Cmd {
 	p := m.prompt
 	if !p.searching() {
 		return nil
 	}
 	if len([]rune(strings.TrimSpace(p.text))) < 2 {
-		p.users, p.sel = nil, 0
+		p.users, p.sel, p.waiting = nil, 0, false
 		return nil
 	}
-	return m.actions.Users(p.key(), p.text)
+	p.waiting = true
+	due := userSearchDueMsg{key: p.key(), query: p.text}
+	return tea.Tick(searchWait, func(time.Time) tea.Msg { return due })
+}
+
+func (m Model) userSearchDue(msg userSearchDueMsg) (tea.Model, tea.Cmd) {
+	p := m.prompt
+	if p == nil || !p.searching() || p.key() != msg.key || p.text != msg.query {
+		return m, nil
+	}
+	return m, m.actions.Users(msg.key, msg.query)
 }
 
 func (m Model) usersListed(msg UsersListedMsg) (tea.Model, tea.Cmd) {
@@ -355,6 +373,7 @@ func (m Model) usersListed(msg UsersListedMsg) (tea.Model, tea.Cmd) {
 	if p == nil || !p.searching() || p.key() != msg.Key || p.text != msg.Query {
 		return m, nil
 	}
+	p.waiting = false
 	if msg.Err != nil {
 		m.status = "could not search users: " + msg.Err.Error()
 		return m, nil
@@ -385,7 +404,14 @@ func (m Model) promptView() string {
 	if p.searching() {
 		lines = append(lines, "")
 		if len(p.users) == 0 {
-			lines = append(lines, dim.Render("no matches yet"))
+			switch {
+			case len([]rune(strings.TrimSpace(p.text))) < 2:
+				lines = append(lines, dim.Render("type at least two letters"))
+			case p.waiting:
+				lines = append(lines, dim.Render("searching…"))
+			default:
+				lines = append(lines, dim.Render("nobody in Jira matches"))
+			}
 		}
 		const rows = 8
 		start := max(0, p.sel-rows+1)
