@@ -90,3 +90,34 @@ export function laneAt(x, { width, count, gap }) {
   const i = Math.floor(x / (lane + gap));
   return x - i * (lane + gap) < lane && i < count ? i : -1;
 }
+
+const DIRS = { up: [0, -1], k: [0, -1], down: [0, 1], j: [0, 1], left: [-1, 0], h: [-1, 0], right: [1, 0], l: [1, 0] };
+
+/** Where an arrow takes the selection on the Statuses board: up and down within the column, left and right to the
+ *  nearest column with statuses, keeping the row or taking its last. Null for any other key. */
+export function statusMove(board, at, key) {
+  const dir = DIRS[key];
+  if (!dir) return null;
+  const ci = board.findIndex((c) => c.id === at.column);
+  const col = board[ci];
+  const ri = col ? col.statuses.findIndex((s) => s.name === at.name) : -1;
+  if (ri < 0) return null;
+  if (dir[1] !== 0) {
+    const next = col.statuses[ri + dir[1]];
+    return next ? { column: col.id, name: next.name } : at;
+  }
+  for (let i = ci + dir[0]; i >= 0 && i < board.length; i += dir[0]) {
+    const st = board[i].statuses;
+    if (st.length > 0) return { column: board[i].id, name: st[Math.min(ri, st.length - 1)].name };
+  }
+  return at;
+}
+
+/** A key while a status is picked up: left and right choose its column, space or enter drop it, escape cancels. */
+export function grabKey(board, grab, key) {
+  if (key === " " || key === "enter") return { drop: true };
+  if (key === "escape") return { cancel: true };
+  const dir = DIRS[key]?.[0];
+  if (!dir) return { grab };
+  return { grab: { ...grab, to: nextColumn(board, grab.to, dir) ?? grab.to } };
+}

@@ -18,7 +18,7 @@ import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter, isConf
 import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors, detailsKey, positionOf } from "./lib/details.js";
-import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, palettePatch, statusBoard, nextColumn, markChoices, dragStarted, laneAt } from "./lib/settings.js";
+import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, palettePatch, statusBoard, markChoices, dragStarted, laneAt, statusMove, grabKey } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
 import { modKeyFor, withModKey } from "./lib/modkey.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
@@ -941,7 +941,25 @@ export default class Tkt extends View {
   async openSettings() {
     const a = await this.call("GET", "/v1/settings");
     if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
-    this.settings = { section: this.settings?.section ?? "spaces", data: a.body, statuses: {}, boards: {}, fields: null };
+    this.settings = { section: this.settings?.section ?? "spaces", data: a.body, statuses: {}, statusFailed: {}, boards: {}, fields: null };
+    if (this.settings.section === "statuses") await this.readStatuses();
+  }
+
+  /** Reads the shown space's statuses from Jira once, so the Statuses board appears without asking. */
+  async readStatuses() {
+    const st = this.settings;
+    const space = st?.data.spaces.find((x) => x.key === st.statusSpace) ?? st?.data.spaces[0];
+    if (!space || st.statuses[space.key] || st.statusReading === space.key) return;
+    st.statusReading = space.key;
+    st.statusFailed[space.key] = false;
+    try {
+      st.statuses[space.key] = await this.lookup("statuses", space.key);
+    } catch (e) {
+      st.statusFailed[space.key] = true;
+      throw e;
+    } finally {
+      st.statusReading = null;
+    }
   }
 
   async patchSettings(change) {
@@ -1001,7 +1019,7 @@ export default class Tkt extends View {
     const side = v_flex().id("settings-side").w(220).flex_none().h_full().px(10).py(12).gap(2).bg(t.well).border_r(1).border_color(t.border).children(SECTIONS.map((sec) => {
       const on = st.section === sec.id;
       return press(h_flex().id(`sec-${sec.id}`).h(32).px(12).items_center().rounded(7).bg(on ? t.pill : t.well).text_size(13).font_weight(on ? 600 : 500)
-        .text_color(on ? t.foreground : t.muted).hover((s) => s.text_color(t.foreground)), (cx) => { st.section = sec.id; st.sel = 0; st.chipFocus = false; st.drag = null; st.press = null; cx.notify(); }).child(sec.title);
+        .text_color(on ? t.foreground : t.muted).hover((s) => s.text_color(t.foreground)), (cx) => { st.section = sec.id; st.sel = 0; st.chipFocus = false; st.drag = null; st.press = null; st.grab = null; if (sec.id === "statuses") this.attempt(() => this.readStatuses(), cx); cx.notify(); }).child(sec.title);
     }));
     let content = v_flex();
     if (st.section === "spaces") {
@@ -1035,13 +1053,16 @@ export default class Tkt extends View {
       const head = h_flex().gap(16).items_end().pb(16)
         .child(v_flex().flex_1().gap(4).child(div().text_size(18).font_semibold().text_color(t.foreground).child("Statuses"))
           .child(div().text_size(13).text_color(t.muted).child("Which column of the board each Jira status falls in, and the mark its tickets show.")))
-        .when(d.spaces.length > 1, (el) => el.child(this.segment(t, "status-space", d.spaces.map((x) => ({ label: x.key, on: x.key === space?.key, click: (cx) => { st.statusSpace = x.key; st.sel = 0; cx.notify(); } })))));
+        .when(d.spaces.length > 1, (el) => el.child(this.segment(t, "status-space", d.spaces.map((x) => ({ label: x.key, on: x.key === space?.key, click: (cx) => { st.statusSpace = x.key; st.sel = 0; st.grab = null; this.attempt(() => this.readStatuses(), cx); cx.notify(); } })))));
       if (!space) content = head;
-      else if (!loaded) content = v_flex().child(head).child(h_flex().child(button(`ls-${space.key}`, "Read the statuses from Jira…", (cx) => this.attempt(async () => { st.statuses[space.key] = await this.lookup("statuses", space.key); }, cx), "add")));
+      else if (!loaded && !st.statusFailed?.[space.key]) content = v_flex().child(head).child(div().text_size(13).text_color(t.muted).child("Reading the statuses from Jira…"));
+      else if (!loaded) content = v_flex().child(head).child(h_flex().child(button(`ls-${space.key}`, "Read the statuses from Jira again", (cx) => this.attempt(() => this.readStatuses(), cx), "add")));
       else {
         const columns = statusBoard(loaded, d.columns).map((col) => {
           const tone = t[statusTone(col.id)] ?? t.muted;
-          const target = Boolean(st.drag) && st.dropTarget === col.id && st.drag.column !== col.id;
+          const moving = st.drag ?? st.grab;
+          const from = st.drag ? st.drag.column : st.grab?.from;
+          const target = Boolean(moving) && (st.drag ? st.dropTarget : st.grab.to) === col.id && from !== col.id;
           return v_flex().id(`scol-${col.id}`).flex_1().min_w(150).rounded(10).pt(2).bg(tone).child(v_flex().flex_1().rounded(9).border(target ? 2 : 1)
             .border_color(target ? t.accent : t.border).bg(target ? mix(t.accent, t.well, 0.06) : t.well).overflow_hidden()
             .child(h_flex().px(12).pt(10).pb(8).gap(8).items_center()
@@ -1055,7 +1076,9 @@ export default class Tkt extends View {
               st.chipAt[idx] = { space: space.key, name: stt.name, column: col.id };
               if (st.focusStatus === stt.name) { st.sel = idx; st.focusStatus = null; }
               const m = markOf(stt.mark, stt.name);
-              return h_flex().id(`chip-${stt.name}`).h(34).px(10).gap(8).items_center().rounded(7).border(1).border_color(on ? t.accent : t.border).bg(t.raised)
+              const held = st.grab?.name === stt.name;
+              return h_flex().id(`chip-${stt.name}`).h(34).px(10).gap(8).items_center().rounded(7).border(1).border_color(on || held ? t.accent : t.border).bg(held ? mix(t.accent, t.raised, 0.16) : t.raised)
+                .when(held && st.grab.to !== st.grab.from, (el) => el.opacity(0.35))
                 .when(st.drag?.name === stt.name, (el) => el.opacity(0.35)).hover((h) => h.border_color(t.accent)).cursor_grab()
                 .on_mouse_down("left", (e, cx) => {
                   cx.stop_propagation();
@@ -1068,7 +1091,7 @@ export default class Tkt extends View {
                 .child(stt.manual ? div().w(6).h(6).flex_none().rounded(3).bg(t.accent) : div().flex_none().text_size(10).text_color(t.dim).child("auto"));
             }))
               .when(target, (el) => el.child(h_flex().id(`drop-${col.id}`).h(34).px(10).items_center().justify_center().rounded(7).border(1).border_color(t.accent)
-                .bg(mix(t.accent, t.well, 0.14)).text_size(12).text_color(ensure(mix(t.accent, t.foreground, 0.3), t.well, 4.5)).child(`Drop ${st.drag.name} here`)))));
+                .bg(mix(t.accent, t.well, 0.14)).text_size(12).text_color(ensure(mix(t.accent, t.foreground, 0.3), t.well, 4.5)).child(`Drop ${moving.name} here`)))));
         });
         const lanes = statusBoard(loaded, d.columns);
         content = v_flex().child(head).child(h_flex().id("status-lanes").gap(10).items_start().children(columns)
@@ -1079,7 +1102,7 @@ export default class Tkt extends View {
             if (dr && to && to !== dr.column) this.attempt(() => this.moveStatus(dr.space, dr.name, to), cx); else cx.notify();
           }))
           .child(h_flex().pt(14).gap(16).items_center().text_size(12).text_color(t.muted)
-            .child(div().flex_1().child(st.drag ? (st.dropTarget && st.dropTarget !== st.drag.column ? `Release to move ${st.drag.name} to ${d.columns.find((c) => c.id === st.dropTarget)?.title ?? st.dropTarget}; it is saved for ${space.key}.` : `Drag ${st.drag.name} onto another column; release elsewhere to cancel.`) : "Drag a status to another column, or select it and press ← →. Enter changes its mark or brings it back to automatic."))
+            .child(div().flex_1().child(st.grab ? `← → choose a column for ${st.grab.name}, space to drop it there, esc to cancel.` : st.drag ? (st.dropTarget && st.dropTarget !== st.drag.column ? `Release to move ${st.drag.name} to ${d.columns.find((c) => c.id === st.dropTarget)?.title ?? st.dropTarget}; it is saved for ${space.key}.` : `Drag ${st.drag.name} onto another column; release elsewhere to cancel.`) : "Drag a status to another column, or select it and press space to pick it up. Enter changes its mark or brings it back to automatic."))
             .child(h_flex().gap(6).items_center().child(div().w(6).h(6).rounded(3).bg(t.accent)).child("set by you"))
             .child(div().child("auto: from Jira's category")));
       }
@@ -1187,6 +1210,34 @@ export default class Tkt extends View {
       st.statuses[p.space] = await this.lookup("statuses", p.space);
       st.focusStatus = p.name;
     }, cx);
+  }
+
+  /** Arrows over the Statuses board, and space to pick a status up and drop it; false for keys it leaves to Settings. */
+  statusesKey(kk, cx) {
+    const st = this.settings;
+    if (st.section !== "statuses") return false;
+    if (st.grab) {
+      const g = st.grab;
+      const r = grabKey(statusBoard(st.statuses[g.space], st.data.columns), g, kk);
+      st.grab = r.grab ?? null;
+      if (r.drop && g.to !== g.from) this.attempt(() => this.moveStatus(g.space, g.name, g.to), cx);
+      cx.notify();
+      return true;
+    }
+    const chip = st.chipAt?.[st.sel ?? 0];
+    if (!chip) return false;
+    st.chipFocus = true;
+    if (kk === " ") {
+      st.grab = { space: chip.space, name: chip.name, from: chip.column, to: chip.column };
+      cx.notify();
+      return true;
+    }
+    const to = statusMove(statusBoard(st.statuses[chip.space], st.data.columns), { column: chip.column, name: chip.name }, kk);
+    if (!to) return false;
+    const idx = Object.keys(st.chipAt).find((i) => st.chipAt[i].name === to.name);
+    if (idx !== undefined) st.sel = Number(idx);
+    cx.notify();
+    return true;
   }
 
   markPickerKey(kk, k, cx) {
@@ -1442,18 +1493,15 @@ export default class Tkt extends View {
       else if (to !== null) this.panes.details.offset = to;
     } else if (this.settings && !this.prompt && this.settings.markPicker) {
       this.markPickerKey(keyOf(e), k, cx);
-    } else if (this.settings && !this.prompt && this.settings.section === "statuses" && this.settings.chipFocus && this.settings.chipAt?.[this.settings.sel ?? 0] && { left: 1, h: 1, right: 1, l: 1 }[keyOf(e)]) {
-      const st = this.settings;
-      const chip = st.chipAt[st.sel ?? 0];
-      const to = nextColumn(st.data.columns, chip.column, keyOf(e) === "left" || keyOf(e) === "h" ? -1 : 1);
-      if (to) this.attempt(() => this.moveStatus(chip.space, chip.name, to), cx);
+    } else if (this.settings && !this.prompt && this.statusesKey(k === "escape" ? "escape" : keyOf(e), cx)) {
+      // handled by the Statuses board
     } else if (this.settings && !this.prompt) {
       const st = this.settings;
       const kk = keyOf(e);
       const section = sectionAfter(SECTIONS.map((x) => x.id), st.section, kk);
       const to = listKey(st.sel ?? 0, (st.controls ?? []).length, kk);
       if (k === "escape") this.settings = null;
-      else if (section) { st.section = section; st.sel = 0; st.chipFocus = false; st.drag = null; st.press = null; this.panes.settings.offset = 0; }
+      else if (section) { st.section = section; st.sel = 0; st.chipFocus = false; st.drag = null; st.press = null; st.grab = null; this.panes.settings.offset = 0; if (section === "statuses") this.attempt(() => this.readStatuses(), cx); }
       else if (to !== null) { st.sel = to; st.chipFocus = Boolean(st.chipAt?.[to]); }
       else if ((kk === "enter" || kk === " ") && st.controls?.[st.sel ?? 0]) st.controls[st.sel ?? 0](cx);
       else {
@@ -1654,7 +1702,7 @@ export default class Tkt extends View {
     const detailKeys = this.details?.actFocus ? [["↑↓", "choose"], ["enter", "run"], ["←", "back to the text"]] : [["esc", "back"], ["→", "actions"], ["c", "copy as markdown"]];
     const keys = this.settings
       ? (this.settings.section === "statuses" && this.settings.statuses?.[(this.settings.data.spaces.find((x) => x.key === this.settings.statusSpace) ?? this.settings.data.spaces[0])?.key]
-        ? [["↑↓", "select"], ["← →", "move to a column"], ["enter", "mark"], ["esc", "back to the board"]]
+        ? (this.settings.grab ? [["← →", "choose a column"], ["space", "drop"], ["esc", "cancel"]] : [["arrows", "select"], ["space", "pick up"], ["enter", "mark"], ["esc", "back to the board"]])
         : [["↑↓", "move"], ["enter", "choose"], ["esc", "back to the board"]])
       : this.details ? detailKeys : topKeys(this.tab);
     const line1 = h_flex().gap(10).items_center()

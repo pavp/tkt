@@ -83,3 +83,35 @@ test("the column under the pointer is read from where it is across the row of eq
   assert.equal(laneAt(-5, row), -1);
   assert.equal(laneAt(431, row), -1);
 });
+
+const keyboardBoard = [
+  { id: "todo", statuses: [{ name: "Backlog" }, { name: "Blocked" }, { name: "Nuevo" }] },
+  { id: "in_progress", statuses: [{ name: "En curso" }] },
+  { id: "review", statuses: [] },
+  { id: "done", statuses: [{ name: "Ceased" }, { name: "Finalizada" }] },
+];
+
+test("arrows move the selection over the Statuses board as over the ticket board, saving nothing", async () => {
+  const { statusMove } = await import("../mod/lib/settings.js");
+  assert.deepEqual(statusMove(keyboardBoard, { column: "todo", name: "Backlog" }, "down"), { column: "todo", name: "Blocked" });
+  assert.deepEqual(statusMove(keyboardBoard, { column: "todo", name: "Blocked" }, "up"), { column: "todo", name: "Backlog" });
+  assert.deepEqual(statusMove(keyboardBoard, { column: "todo", name: "Nuevo" }, "down"), { column: "todo", name: "Nuevo" }, "the bottom of a column stays put");
+  assert.deepEqual(statusMove(keyboardBoard, { column: "todo", name: "Nuevo" }, "right"), { column: "in_progress", name: "En curso" }, "the row is kept where the next column has it, else its last");
+  assert.deepEqual(statusMove(keyboardBoard, { column: "in_progress", name: "En curso" }, "right"), { column: "done", name: "Ceased" }, "an empty column is skipped");
+  assert.deepEqual(statusMove(keyboardBoard, { column: "done", name: "Finalizada" }, "left"), { column: "in_progress", name: "En curso" });
+  assert.deepEqual(statusMove(keyboardBoard, { column: "done", name: "Ceased" }, "right"), { column: "done", name: "Ceased" }, "the board's end stays put");
+  assert.deepEqual(statusMove(keyboardBoard, { column: "todo", name: "Backlog" }, "j"), { column: "todo", name: "Blocked" });
+  assert.equal(statusMove(keyboardBoard, { column: "todo", name: "Backlog" }, "enter"), null);
+});
+
+test("space picks a status up, left and right choose its column without saving, space drops it and escape cancels", async () => {
+  const { grabKey } = await import("../mod/lib/settings.js");
+  const grab = { name: "Nuevo", from: "todo", to: "todo" };
+  assert.deepEqual(grabKey(keyboardBoard, grab, "right"), { grab: { ...grab, to: "in_progress" } });
+  assert.deepEqual(grabKey(keyboardBoard, { ...grab, to: "in_progress" }, "right"), { grab: { ...grab, to: "review" } }, "an empty column takes a status");
+  assert.deepEqual(grabKey(keyboardBoard, grab, "left"), { grab }, "the board's end stays put");
+  assert.deepEqual(grabKey(keyboardBoard, grab, " "), { drop: true });
+  assert.deepEqual(grabKey(keyboardBoard, grab, "enter"), { drop: true });
+  assert.deepEqual(grabKey(keyboardBoard, grab, "escape"), { cancel: true });
+  assert.deepEqual(grabKey(keyboardBoard, grab, "down"), { grab }, "other keys keep the status picked up");
+});
