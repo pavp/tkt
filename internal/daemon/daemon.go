@@ -91,6 +91,10 @@ type Options struct {
 	JiraStatuses StatusesFunc
 	JiraBoards   BoardsFunc
 	JiraFields   FieldsFunc
+	// Folders and GitHubRepos list folders and an owner's repositories for Settings' completion, on the machine tkt
+	// runs on, which may not be the one showing Settings.
+	Folders     FoldersFunc
+	GitHubRepos ReposFunc
 	// StateFile and ConfigFile are board-state.json and config.toml, which the TUI writes too: when their content
 	// changes the daemon sends state.updated or settings.updated, checking every WatchEvery (none when zero).
 	StateFile  string
@@ -393,6 +397,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/settings/statuses", s.authed(s.settingsStatuses))
 	mux.HandleFunc("GET /v1/settings/boards", s.authed(s.settingsBoards))
 	mux.HandleFunc("GET /v1/settings/fields", s.authed(s.settingsFields))
+	mux.HandleFunc("GET /v1/settings/folders", s.authed(s.settingsFolders))
+	mux.HandleFunc("GET /v1/settings/repos", s.authed(s.settingsRepos))
 	mux.HandleFunc("POST /v1/sync", s.authed(s.requestSync))
 	mux.HandleFunc("GET /v1/ws", s.ws)
 	return mux

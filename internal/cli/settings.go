@@ -2,10 +2,12 @@ package cli
 
 import (
 	"context"
+	"path/filepath"
 	"time"
 
 	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/config"
+	"github.com/pavp/tkt/internal/daemon"
 )
 
 // savedConfig reads config.toml as written, "~" unexpanded, so Settings saves the user's paths portable.
@@ -80,4 +82,24 @@ func (a *App) daemonFields(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	return a.jiraFieldNames(ctx, c)
+}
+
+// settingsFolders and settingsRepos serve Settings' completion of folders and repositories, as the TUI lists them.
+func (a *App) settingsFolders(path string) (daemon.FolderList, error) {
+	abs := filepath.Clean(a.Env.ExpandHome(path))
+	names, broken, err := listDirs(abs)
+	if err != nil {
+		return daemon.FolderList{}, err
+	}
+	return daemon.FolderList{Dir: withSlash(a.tildePath(abs)), Folders: names, Broken: broken}, nil
+}
+
+func (a *App) settingsRepos(ctx context.Context, owner string) ([]string, error) {
+	c, err := a.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return a.NewGitHub(c).Repos(ctx, owner)
 }

@@ -2,10 +2,14 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -124,5 +128,28 @@ func TestDaemonSettingsWriteWhatTheTUIsSettingsWrite(t *testing.T) {
 	}
 	if code, body := call(http.MethodGet, "/v1/settings", ""); strings.Contains(body, "tok") || strings.Contains(body, "dev@example.com") || code != http.StatusOK {
 		t.Errorf("settings show the account: %d %s", code, body)
+	}
+}
+
+func TestSettingsFoldersListsWhatTheTUIsCompletionLists(t *testing.T) {
+	h := settingsHarness(t)
+	for _, d := range []string{"src/web", "src/api", "src/.cache"} {
+		if err := os.MkdirAll(filepath.Join(h.home, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(h.home, "src", "notes.txt"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(h.home, "gone"), filepath.Join(h.home, "src", "old")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.app.settingsFolders("~/src")
+	want := daemon.FolderList{Dir: "~/src/", Folders: []string{".cache", "api", "web"}, Broken: []string{"old"}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("settingsFolders = %+v, %v; want %+v", got, err, want)
+	}
+	if _, err := h.app.settingsFolders("~/missing"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a missing folder = %v, want not exist", err)
 	}
 }
