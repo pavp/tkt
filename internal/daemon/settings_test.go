@@ -176,6 +176,8 @@ func TestSettingsListsFoldersAndRepositoriesForCompletion(t *testing.T) {
 		{"an absolute folder", "/v1/settings/folders?path=/opt/", http.StatusOK, ""},
 		{"no folder", "/v1/settings/folders", http.StatusBadRequest, "bad_request"},
 		{"a relative folder, which would depend on the daemon's own folder", "/v1/settings/folders?path=src/", http.StatusBadRequest, "bad_request"},
+		{"another user's home, which tkt does not expand", "/v1/settings/folders?path=~src/", http.StatusBadRequest, "bad_request"},
+		{"the home itself", "/v1/settings/folders?path=~", http.StatusOK, ""},
 		{"a folder that is not there", "/v1/settings/folders?path=~/missing/", http.StatusNotFound, "not_found"},
 		{"an owner", "/v1/settings/repos?owner=example-org", http.StatusOK, ""},
 		{"no owner", "/v1/settings/repos", http.StatusBadRequest, "bad_request"},

@@ -254,8 +254,9 @@ func (s *Server) settingsFolders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Query().Get("path")
-	if !strings.HasPrefix(path, "~") && !strings.HasPrefix(path, "/") {
-		writeError(w, http.StatusBadRequest, "bad_request", "give path, a folder starting with ~ or /")
+	// Only "~" and "~/" expand to the home; anything else, "~src" included, would be read from the daemon's own folder.
+	if path != "~" && !strings.HasPrefix(path, "~/") && !strings.HasPrefix(path, "/") {
+		writeError(w, http.StatusBadRequest, "bad_request", "give path, a folder starting with ~/ or /")
 		return
 	}
 	list, err := s.opts.Folders(path)
