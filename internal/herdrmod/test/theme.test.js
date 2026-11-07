@@ -63,3 +63,16 @@ test("the mono font is the terminal's from Herdr's settings, else a known coding
   assert.equal(monoFont({}, ["Inter", "JetBrains Mono", "Menlo"]), "JetBrains Mono");
   assert.equal(monoFont({}, ["Inter"]), "");
 });
+
+test("Settings › Colors compares each color as the palette gives it with what tkt draws", async () => {
+  const { sourceColors, tktTheme } = await import("../mod/lib/theme.js");
+  assert.equal(sourceColors(herdrDark, "tkt").ansi4, "#89b4fa");
+  assert.equal(sourceColors(herdrDark, "herdr").muted, "#6c7086");
+  assert.notEqual(tktTheme(herdrDark, "herdr").muted, "#6c7086", "the drawn muted is raised");
+});
+
+test("Settings lists Colors before Machine, and a palette change is a settings patch of only it", async () => {
+  const { SECTIONS, palettePatch } = await import("../mod/lib/settings.js");
+  assert.deepEqual(SECTIONS.map((s) => s.id).slice(-2), ["colors", "machine"]);
+  assert.deepEqual(palettePatch("tkt"), { palette: "tkt" });
+});

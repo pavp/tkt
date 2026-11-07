@@ -32,6 +32,7 @@ type SettingsView struct {
 	RepoRoots   []string        `json:"repo_roots"`
 	LabelField  string          `json:"label_field"`
 	PointsField string          `json:"points_field"`
+	Palette     string          `json:"palette"`
 	Columns     []ColumnChoice  `json:"columns"`
 	Marks       []string        `json:"marks"`
 }
@@ -73,6 +74,7 @@ type settingsPatch struct {
 	RepoRoots   *[]string             `json:"repo_roots"`
 	LabelField  *string               `json:"label_field"`
 	PointsField *string               `json:"points_field"`
+	Palette     *string               `json:"palette"`
 	Spaces      map[string]spacePatch `json:"spaces"`
 }
 
@@ -88,6 +90,14 @@ type statusPatch struct {
 	Mark   *string `json:"mark"`
 }
 
+// shownPalette is the palette the mod uses: tkt's when chosen, Herdr's otherwise, a hand-written unknown value included.
+func shownPalette(p string) string {
+	if p == "tkt" {
+		return p
+	}
+	return "herdr"
+}
+
 func markName(m ticket.Mark) string {
 	if m == ticket.MarkNone {
 		return "none"
@@ -99,7 +109,7 @@ func (s *Server) settingsView(c config.Config) SettingsView {
 	s.mu.Lock()
 	inferred := s.snap.Repos
 	s.mu.Unlock()
-	v := SettingsView{Spaces: []SpaceSettings{}, RepoRoots: orNoneOf(c.RepoRoots), LabelField: c.Jira.LabelField, PointsField: c.Jira.PointsField}
+	v := SettingsView{Spaces: []SpaceSettings{}, RepoRoots: orNoneOf(c.RepoRoots), LabelField: c.Jira.LabelField, PointsField: c.Jira.PointsField, Palette: shownPalette(c.Palette)}
 	for _, sp := range c.Spaces {
 		out := SpaceSettings{Key: sp.Key, Name: sp.Name, Repos: []RepoSetting{}, Inferred: orNoneOf(board.InferredRepos(sp, inferred[sp.Key])), TeamBoards: []BoardChoice{}}
 		for _, r := range sp.Repos {
@@ -318,6 +328,16 @@ func (s *Server) applySettings(ctx context.Context, c *config.Config, p settings
 	}
 	if p.PointsField != nil {
 		c.Jira.PointsField = strings.TrimSpace(*p.PointsField)
+	}
+	if p.Palette != nil {
+		switch v := strings.TrimSpace(*p.Palette); v {
+		case "tkt":
+			c.Palette = v
+		case "herdr", "":
+			c.Palette = ""
+		default:
+			return refuse("unknown palette %q (use herdr or tkt)", v)
+		}
 	}
 	s.mu.Lock()
 	inferred := s.snap.Repos
