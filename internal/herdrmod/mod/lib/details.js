@@ -8,6 +8,7 @@ export function detailView(d, from) {
     key: t.key,
     breadcrumb: `${from} › ${t.key}`,
     title: t.summary ?? "",
+    category: t.category ?? "",
     url: t.url ?? "",
     fields: fields.filter(([, v]) => v),
     attention: d.attention?.[0] ?? "",
@@ -22,6 +23,12 @@ export function detailView(d, from) {
     comments: (d.comments ?? []).map((c) => ({ who: c.author, when: (c.created ?? "").slice(0, 10), body: c.body })),
     work: (d.work ?? []).map((w) => ({ where: `${w.repo} · ${w.branch}`, path: w.path ?? "" })),
   };
+}
+
+/** "2 of 8": where key sits in the list the details were opened from; empty when it is not in it. */
+export function positionOf(keys, key) {
+  const i = keys.indexOf(key);
+  return i < 0 ? "" : `${i + 1} of ${keys.length}`;
 }
 
 /** The tickets before and after key in the list the details were opened from. */

@@ -17,7 +17,7 @@ import { backlogRows, badges, backlogAgents } from "./lib/backlog.js";
 import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
-import { detailView, neighbors, detailsKey } from "./lib/details.js";
+import { detailView, neighbors, detailsKey, positionOf } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows, palettePatch } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
 import { modKeyFor, withModKey } from "./lib/modkey.js";
@@ -761,7 +761,9 @@ export default class Tkt extends View {
       this.details = null;
       throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
     }
-    this.details = { key, keys, view: detailView(a.body, TABS.find((t) => t.id === this.tab).title), ticket: a.body.ticket };
+    const known = this.boardRow(key)?.ticket ?? {};
+    const ticket = { ...known, ...Object.fromEntries(Object.entries(a.body.ticket ?? {}).filter(([, v]) => v !== "" && v !== null && v !== undefined && v !== 0)) };
+    this.details = { key, keys, view: detailView({ ...a.body, ticket }, TABS.find((t) => t.id === this.tab).title), ticket: a.body.ticket };
   }
 
   goDetails(key, cx) {
@@ -788,42 +790,97 @@ export default class Tkt extends View {
       .child(v_flex().id(`${id}-content`).mt(-pane.offset).on_size_change((size) => { pane.content = size.height; }).child(content));
   }
 
+  /** The type kind of a ticket the board shows, for its icon; empty when the board does not show it. */
+  kindOf(key) {
+    return this.boardRow(key)?.card?.type_kind ?? "";
+  }
+
+  /** The board's row of a ticket, whose card and ticket fill what the details leave out. */
+  boardRow(key) {
+    const rows = [...(this.answers.sprint?.body?.columns ?? []).flatMap((c) => c.rows ?? []), ...(this.answers.backlog?.body?.groups ?? []).flatMap((g) => g.rows ?? [])];
+    return rows.find((r) => r.key === key) ?? null;
+  }
+
   detailsScreen(t) {
     const d = this.details;
     const v = d.view;
     const { prev, next } = neighbors(d.keys, d.key);
-    const button = (id, text, on, onClick) => div().id(id).px(8).py(2).rounded(5).text_color(on ? t.foreground : t.dim).hover((s) => s.bg(t.hover))
-      .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => { if (on) onClick(cx); }).child(text);
-    const nav = h_flex().px(12).py(6).gap(8).items_center().border_b(1).border_color(t.border)
-      .child(button("back", "‹ Back", true, (cx) => { this.details = null; cx.notify(); }))
-      .child(div().text_color(t.muted).child(v ? v.breadcrumb : `› ${d.key}`))
+    const step = (id, icon, on, onClick) => h_flex().id(id).w(26).h(24).items_center().justify_center().rounded(5).bg(on ? t.pill : t.surface).text_size(11)
+      .text_color(on ? t.foreground : t.dim).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => { if (on) onClick(cx); }).child(icon);
+    const nav = h_flex().h(44).px(14).gap(10).items_center().border_b(1).border_color(t.border)
+      .child(h_flex().id("back").h(28).pl(6).pr(10).gap(6).items_center().rounded(7).border(1).border_color(t.border).text_size(12).font_weight(500).text_color(t.foreground)
+        .hover((s) => s.bg(t.hover)).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => { this.details = null; cx.notify(); }).child("‹").child("Back"))
+      .child(h_flex().gap(6).items_center().text_size(12).text_color(t.muted).child((v?.breadcrumb ?? "").split(" › ")[0] || "").child(div().text_color(t.dim).child("›"))
+        .child(this.mono(div().text_size(11).text_color(t.foreground)).child(d.key)))
       .child(div().flex_1())
-      .child(button("prev", "◀", Boolean(prev), (cx) => this.goDetails(prev, cx)))
-      .child(button("next", "▶", Boolean(next), (cx) => this.goDetails(next, cx)));
-    if (!v) return v_flex().flex_1().child(nav).child(div().p(16).text_color(t.muted).child("Loading…"));
-    const heading = (text) => div().pt(10).pb(4).font_semibold().text_color(t.foreground).child(text);
-    const leftContent = v_flex().p(14).gap(4)
-      .child(div().text_size(16).font_semibold().text_color(t.foreground).child(v.title))
-      .child(h_flex().gap(14).text_size(12).children(v.fields.map(([k, val], i) => h_flex().id(`f-${i}`).gap(4).child(div().text_color(t.dim).child(k)).child(div().text_color(t.foreground).child(val)))))
-      .when(Boolean(v.attention), (el) => el.child(div().text_color(t.blocked).child(`! ${v.attention}`)))
-      .child(heading("Description"))
-      .child(v.description ? TextView.markdown("desc", v.description) : div().text_color(t.dim).child("—"))
-      .when(Boolean(v.acceptance), (el) => el.child(heading("Acceptance criteria")).child(TextView.markdown("acc", v.acceptance)))
-      .when(v.subtasks.length > 0, (el) => el.child(heading(`Subtasks · ${v.subtasks.length}`)).children(v.subtasks.map((st) =>
-        h_flex().id(`st-${st.key}`).gap(10).child(div().w(96).text_color(t.dim).child(st.key)).child(div().w(110).text_color(t.muted).child(st.status)).child(div().flex_1().truncate().text_color(t.foreground).child(st.summary)))))
-      .when(v.comments.length > 0, (el) => el.child(heading(`Comments · ${v.comments.length}`)).children(v.comments.map((c, i) =>
-        v_flex().id(`c-${i}`).pb(6).child(div().text_size(12).text_color(t.dim).child(`${c.who} · ${c.when}`)).child(TextView.markdown(`cbody-${i}`, c.body || "")))));
+      .child(div().text_size(11).text_color(t.muted).child(positionOf(d.keys, d.key)))
+      .child(h_flex().p(2).gap(2).rounded(7).border(1).border_color(t.border).child(step("prev", "◀", Boolean(prev), (cx) => this.goDetails(prev, cx))).child(step("next", "▶", Boolean(next), (cx) => this.goDetails(next, cx))));
+    const bar = (w, h) => div().w(w).h(h).rounded(4).bg(t.pill);
+    if (!v) return v_flex().flex_1().child(nav).child(h_flex().flex_1().items_start()
+      .child(v_flex().flex_1().gap(14).px(28).py(24).child(bar(420, 18)).child(bar(300, 12)).child(div().h(14)).child(bar(560, 11)).child(bar(520, 11)).child(bar(420, 11))
+        .child(div().pt(8).text_size(12).text_color(t.muted).child(`Loading ${d.key}…`)))
+      .child(div().w(320).h_full().bg(t.well).border_l(1).border_color(t.border)));
+    const h2 = (text, count) => h_flex().pt(20).pb(8).gap(8).items_center().child(div().text_size(13).font_semibold().text_color(t.foreground).child(text))
+      .when(count !== undefined, (el) => el.child(div().px(7).rounded(9).bg(t.pill).text_size(11).font_semibold().text_color(t.muted).child(String(count))));
+    const icon = typeIcon(this.kindOf(d.key));
+    const leftContent = v_flex().px(28).pt(22).pb(20).max_w(820)
+      .child(h_flex().gap(8).items_center().pb(8)
+        .when(Boolean(icon), (el) => el.child(div().text_size(11).text_color(t[icon.tone] ?? t.muted).child(icon.glyph)))
+        .child(this.mono(div().text_size(12).text_color(t.muted)).child(d.key))
+        .when(Boolean(v.attention), (el) => el.child(div().px(8).py(1).rounded(5).bg(mix(t.ansi1, t.surface, 0.16)).text_size(11).font_semibold().text_color(ensure(t.ansi1, mix(t.ansi1, t.surface, 0.16), 4.5)).child(`! ${v.attention}`))))
+      .child(div().text_size(20).font_semibold().text_color(t.foreground).child(v.title))
+      .child(h2("Description"))
+      .child(v.description ? TextView.markdown("desc", v.description) : div().text_color(t.muted).child("—"))
+      .when(Boolean(v.acceptance), (el) => el.child(h2("Acceptance criteria")).child(TextView.markdown("acc", v.acceptance)))
+      .when(v.subtasks.length > 0, (el) => el.child(h2("Subtasks", v.subtasks.length)).child(v_flex().rounded(8).border(1).border_color(t.border).overflow_hidden()
+        .children(v.subtasks.map((st, i) => h_flex().id(`st-${st.key}`).h(34).px(12).gap(10).items_center().bg(t.raised).when(i > 0, (row) => row.border_t(1).border_color(t.border))
+          .child(this.mono(div().w(84).flex_none().text_size(11).text_color(t.muted)).child(st.key))
+          .child(div().w(130).flex_none().truncate().text_size(12).text_color(t.foreground).child(st.status))
+          .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(t.foreground).child(st.summary))))))
+      .when(v.comments.length > 0, (el) => el.child(h2("Comments", v.comments.length)).children(v.comments.map((c, i) => {
+        const initials = (c.who ?? "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+        return h_flex().id(`c-${i}`).gap(10).pb(12).items_start()
+          .child(h_flex().w(24).h(24).flex_none().rounded(12).bg(t.pill).items_center().justify_center().text_size(9).font_semibold().text_color(t.muted).child(initials))
+          .child(v_flex().flex_1().min_w_0().gap(3).child(h_flex().gap(4).text_size(12).child(div().font_weight(500).text_color(t.foreground).child(c.who)).child(div().text_color(t.muted).child(`· ${c.when}`)))
+            .child(TextView.markdown(`cbody-${i}`, c.body || "")));
+      })));
     const left = this.scrollPane("details-left", this.panes.details, leftContent).flex_1().min_w_0().h_full();
     const menu = ticketMenu(d.ticket, { agent: v.agent, attention: v.attention ? [v.attention] : [] });
-    const right = v_flex().id("details-right").w(300).min_h_0().overflow_y_scrollbar().p(12).gap(4).border_l(1).border_color(t.border)
-      .child(heading("Agent")).child(div().text_color(v.agent ? t[v.agent] ?? t.foreground : t.dim).child(v.agent ? `● ${v.agent}` : "no agent"))
-      .child(heading("Pull requests")).children(v.prs.length === 0 ? [div().text_color(t.dim).child("—")] : v.prs.map((p, i) =>
-        h_flex().id(`dpr-${i}`).gap(6).child(div().text_color(t[p.tone] ?? t.dim).child(p.mark)).child(div().flex_1().truncate().text_color(t.foreground).child(p.ref))))
-      .child(heading("Actions")).children(menu.items.filter((it) => it.action !== "details").map((it, i) =>
-        div().id(`dact-${i}`).px(8).py(3).rounded(5).text_color(t.foreground).hover((s) => s.bg(t.hover))
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(it, cx)).child(it.label)))
-      .child(heading("Work")).children(v.work.length === 0 ? [div().text_color(t.dim).child("no worktree linked")] : v.work.map((w, i) =>
-        v_flex().id(`w-${i}`).child(div().text_color(t.foreground).child(w.where)).child(div().text_size(11).text_color(t.dim).truncate().child(w.path))));
+    const items = menu.items.filter((it) => it.action !== "details");
+    const primary = items.find((it) => it.action === "start");
+    const group = (it) => it.action === "copy" || it.action === "copyContext" ? 3 : it.action === "open" || it.action === "submenu" ? 1 : 2;
+    const rest = items.filter((it) => it !== primary).sort((a, b) => group(a) - group(b));
+    const h3 = (text) => div().pb(6).text_size(12).font_semibold().text_color(t.muted).child(text);
+    const labelName = this.answers.sprint?.body?.label_field || "Label";
+    const chip = mix(t.ansi4, t.well, 0.14);
+    const fieldValue = (k, val) => {
+      if (k === "Status") {
+        const blocked = (this.boardRow(d.key)?.ticket?.mark ?? d.ticket?.mark) === "blocked";
+        return h_flex().gap(7).items_center().child(div().w(7).h(7).rounded(4).bg(t[statusTone(v.category)] ?? t.muted))
+          .child(div().text_size(12).text_color(blocked ? ensure(t.ansi1, t.well, 4.5) : t.foreground).when(blocked, (el) => el.font_semibold()).child(val));
+      }
+      if (k === "Type") return h_flex().gap(7).items_center().when(Boolean(icon), (el) => el.child(div().text_size(11).text_color(t[icon.tone] ?? t.muted).child(icon.glyph))).child(div().text_size(12).text_color(t.foreground).child(val));
+      if (k === "Label" || k === "Board") return h_flex().child(div().px(8).rounded(4).bg(chip).text_size(11).text_color(ensure(mix(t.ansi4, t.foreground, 0.45), chip, 4.5)).child(val));
+      return div().text_size(12).text_color(t.foreground).when(k === "Points", (el) => this.mono(el)).child(val);
+    };
+    const field = (k, val, i) => h_flex().id(`f-${i}`).min_h(26).gap(10).items_center().child(div().w(76).flex_none().text_size(12).text_color(t.muted).child(k === "Label" ? labelName : k)).child(fieldValue(k, val));
+    const right = v_flex().id("details-right").w(320).flex_none().h_full().min_h_0().overflow_y_scrollbar().px(18).py(22).gap(22).bg(t.well).border_l(1).border_color(t.border)
+      .child(v_flex().child(h3("Details")).children(v.fields.map(([k, val], i) => field(k, val, i)))
+        .child(h_flex().id("f-agent").min_h(26).gap(10).items_center().child(div().w(76).flex_none().text_size(12).text_color(t.muted).child("Agent"))
+          .child(v.agent ? h_flex().gap(7).items_center().child(this.agentDot(t, v.agent)).child(div().text_size(12).text_color(t.foreground).child(agentLabel(v.agent))) : div().text_size(12).text_color(t.muted).child("no agent"))))
+      .child(v_flex().gap(6).child(h3("Pull requests")).children(v.prs.length === 0 ? [div().text_size(12).text_color(t.muted).child("—")] : v.prs.map((p, i) =>
+        v_flex().id(`dpr-${i}`).gap(3).px(11).py(9).rounded(8).bg(t.raised).border(1).border_color(t.border)
+          .child(h_flex().gap(7).items_center().child(div().font_semibold().text_size(11).text_color(p.mark === "✓" ? t.ansi2 : p.mark === "✕" ? ensure(t.ansi1, t.raised, 4.5) : t.muted).child(p.mark))
+            .child(this.mono(div().text_size(11).text_color(t.muted)).child(p.ref)))
+          .child(div().truncate().text_size(12).text_color(t.foreground).child(p.title ?? "")))))
+      .child(v_flex().gap(4).child(h3("Actions"))
+        .when(Boolean(primary), (el) => el.child(h_flex().id("dact-primary").h(32).justify_center().items_center().rounded(7).bg(t.accent).text_size(13).font_semibold()
+          .text_color(ensure(t.chrome, t.accent, 4.5)).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(primary, cx)).child(primary.label)))
+        .children(rest.flatMap((it, i) => [...(i > 0 && group(it) !== group(rest[i - 1]) ? [div().id(`dact-sep-${i}`).h(1).my(4).bg(t.border)] : []),
+          h_flex().id(`dact-${i}`).h(28).px(8).items_center().rounded(6).text_size(12).text_color(t.foreground).hover((s) => s.bg(t.hover))
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(it, cx)).child(it.label)])))
+      .child(v_flex().gap(4).child(h3("Work")).children(v.work.length === 0 ? [div().text_size(12).text_color(t.muted).child("no worktree linked")] : v.work.map((w, i) =>
+        v_flex().id(`w-${i}`).gap(3).child(div().text_size(12).text_color(t.foreground).child(w.where)).child(this.mono(div().text_size(11).text_color(t.muted).truncate()).child(w.path)))));
     return v_flex().id("details").flex_1().min_h_0().child(nav).child(h_flex().flex_1().min_h_0().items_start().child(left).child(right));
   }
 
@@ -1362,11 +1419,13 @@ export default class Tkt extends View {
     const sync = this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.cachedAt ? cachedLabel(this.cachedAt) : this.answers[this.tab]?.body?.sync_label ?? "";
     const warn = sync.startsWith("!");
     const title = (text) => div().flex_1().min_w_0().truncate().text_size(13).font_weight(500).text_color(t.foreground).child(text);
+    const keys = this.details ? [["esc", "back"], ["c", "copy as markdown"]] : topKeys(this.tab);
     const line1 = h_flex().gap(10).items_center()
+      .when(Boolean(this.details), (el) => el.child(title(`Details of ${this.details.key}`)))
       .when(Boolean(badge), (el) => el.child(div().flex_none().px(8).py(1).rounded(5).bg(t.pill).text_size(11).font_semibold().text_color(t.muted).child(badge.status))
         .child(this.mono(div().flex_none().text_size(12).text_color(t.muted)).child(badge.key)).child(title(badge.summary)))
       .when(!badge && Boolean(p), (el) => el.child(title(p.title)))
-      .when(!badge && !p, (el) => el.child(div().flex_1().text_size(12).text_color(t.muted).child(board ? "nothing selected" : "")))
+      .when(!badge && !p && !this.details, (el) => el.child(div().flex_1().text_size(12).text_color(t.muted).child(board ? "nothing selected" : "")))
       .when(Boolean(sync), (el) => el.child(h_flex().flex_none().gap(6).items_center().text_size(11).text_color(warn ? ensure(t.ansi3, t.chrome, 4.5) : t.muted)
         .child(div().w(6).h(6).rounded(3).bg(warn ? t.ansi3 : t.ansi2)).child(sync.replace(/^✓ /, ""))))
       .child(h_flex().id("sync").w(22).h(22).flex_none().items_center().justify_center().rounded(5).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
@@ -1383,7 +1442,7 @@ export default class Tkt extends View {
           : h_flex().flex_1().min_w_0().gap(8).items_center()
             .when(Boolean(p?.label), (el) => el.child(div().flex_none().px(8).rounded(4).bg(label).text_size(11).text_color(ensure(mix(t.ansi4, t.foreground, 0.45), label, 4.5)).child(p.label)))
             .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(t.muted).child(p?.line ?? "")))
-      .children(topKeys(this.tab).map(([k, what], i) => h_flex().id(`key-${i}`).flex_none().gap(5).items_center().text_size(11).text_color(t.muted).child(this.keyCap(t, k)).child(what)));
+      .children(keys.map(([k, what], i) => h_flex().id(`key-${i}`).flex_none().gap(5).items_center().text_size(11).text_color(t.muted).child(this.keyCap(t, k)).child(what)));
     return v_flex().px(16).pt(9).pb(10).gap(6).bg(t.chrome).border_t(1).border_color(t.border).child(line1).child(line2);
   }
 

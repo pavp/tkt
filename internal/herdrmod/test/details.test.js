@@ -31,3 +31,10 @@ test("the arrows go to the previous and next ticket of the list it was opened fr
   assert.deepEqual(neighbors(["A-1", "A-2"], "A-1"), { prev: null, next: "A-2" });
   assert.deepEqual(neighbors([], "A-1"), { prev: null, next: null });
 });
+
+test("the details say where the ticket sits in the list it was opened from, and its status's column", async () => {
+  const { positionOf, detailView: view } = await import("../mod/lib/details.js");
+  assert.equal(positionOf(["A-1", "A-2", "A-3"], "A-2"), "2 of 3");
+  assert.equal(positionOf(["A-1"], "B-9"), "");
+  assert.equal(view({ ticket: { ...detail.ticket, category: "in_progress" } }, "Sprint").category, "in_progress");
+});
