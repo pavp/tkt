@@ -212,3 +212,22 @@ func TestDaemonSyncLogsHowLongASlowSyncTook(t *testing.T) {
 		}
 	}
 }
+
+func TestASlowSyncLineSaysWhereTheTimeWent(t *testing.T) {
+	h := daemonHarness(t)
+	start := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	calls := 0
+	h.app.Now = func() time.Time {
+		calls++
+		if calls == 1 {
+			return start
+		}
+		return start.Add(6 * time.Second)
+	}
+	if _, err := h.app.daemonSync(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.errOut.String(), "sync: took 6.0s (mine ") {
+		t.Errorf("the slow line names each part's time:\n%s", h.errOut.String())
+	}
+}

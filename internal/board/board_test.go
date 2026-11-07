@@ -1305,3 +1305,36 @@ func TestTheFirstPaintShowsTheLastTeamTicketsInsteadOfWaitingForTheTeamSearch(t 
 		t.Errorf("the full board takes the team search's answer: %+v", snap.Tickets)
 	}
 }
+
+func TestAFetchSaysHowLongEachPartTook(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	js := &stubJira{
+		issues:  []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate"}},
+		team:    []jira.Issue{{ID: "7", Key: "DEMO-7", Summary: "Theirs", Status: "To Do", StatusCategory: "new"}},
+		linked:  map[string][]jira.DevPullRequest{"1": {{Repo: "example-org/web", Number: 3, Branch: "feature/DEMO-1-x", Status: "OPEN"}}},
+		sprints: map[int][]int{5205: {11807}},
+	}
+	snap, err := FetchWith(context.Background(), teamCfg(), js, &stubGitHub{}, now, Snapshot{}, Options{Team: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, tm := range snap.Timings {
+		names = append(names, tm.Name)
+		if tm.Took < 0 {
+			t.Errorf("%s took %v", tm.Name, tm.Took)
+		}
+	}
+	for _, want := range []string{"mine", "panels", "team", "github"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("the fetch times %q: %v", want, names)
+		}
+	}
+	if b, _ := json.Marshal(snap); strings.Contains(string(b), "timings") || strings.Contains(string(b), "Timings") {
+		t.Errorf("the timings stay out of the saved board: %s", b)
+	}
+	snap, _ = FetchWith(context.Background(), cfg(), js, &stubGitHub{}, now, Snapshot{}, Options{})
+	if slices.ContainsFunc(snap.Timings, func(tm Timing) bool { return tm.Name == "team" }) {
+		t.Errorf("no team search, no team timing: %v", snap.Timings)
+	}
+}
