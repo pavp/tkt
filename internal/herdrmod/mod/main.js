@@ -4,7 +4,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView, VirtualListScrollHandle } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile, settings, fonts } from "herdr";
-import { tktTheme, monoFont, sourceColors, contrast, CATPPUCCIN } from "./lib/theme.js";
+import { tktTheme, monoFont, sourceColors, contrast, ensure, mix, CATPPUCCIN } from "./lib/theme.js";
 import * as os from "os";
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
@@ -25,7 +25,7 @@ import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib
 import { stripChips, atTop } from "./lib/strip.js";
 import { packCache, unpackCache, cachedLabel } from "./lib/cache.js";
 import { machineKey, stashed, restored } from "./lib/machines.js";
-import { scrolled, menuHeight, MENU_ROW, cardHeight, revealed } from "./lib/scroll.js";
+import { scrolled, menuHeight, MENU_ROW, cardHeight, cardsBelow, revealed } from "./lib/scroll.js";
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget, listKey, sectionAfter } from "./lib/nav.js";
 
 const TABS = [
@@ -1194,6 +1194,11 @@ export default class Tkt extends View {
     if (action === "settings") return this.attempt(() => this.openSettings(), cx);
     if (action === "boards" || action === "repos") { this.panel = this.panel === action ? null : action; return; }
     if (action === "bots") { this.bots = !this.bots; return this.load(cx); }
+    if (action === "density") {
+      this.compact = !this.compact;
+      this.notice = this.compact ? "compact cards · z for details" : "detailed cards · z for compact";
+      return;
+    }
     if (action === "team") {
       if (this.tab === "prs") return this.patchState({ team_prs: !this.answers.prs?.body?.team_prs }, cx);
       return this.toggleTeam(cx);
@@ -1273,7 +1278,7 @@ export default class Tkt extends View {
       const ci = at.cols.findIndex((c) => c.includes(this.selected));
       const col = columnCards(body)[ci];
       if (col) {
-        const heights = col.cards.map((c) => cardHeight({ lines: wrapWords(c.summary, 34, 2).length, label: Boolean(body.label_field) }) + 6);
+        const heights = col.cards.map((c) => cardHeight({ lines: wrapWords(c.summary, 34, this.compact ? 1 : 2).length, label: Boolean(body.label_field), compact: this.compact }) + (this.compact ? 6 : 8));
         const i = at.cols[ci].indexOf(this.selected);
         const pane = this.colPane(col.category);
         pane.offset = revealed(pane, heights.slice(0, i).reduce((a, b) => a + b, 0), heights[i]);
@@ -1426,33 +1431,50 @@ export default class Tkt extends View {
       .child(b.label);
   }
 
-  card(t, c, labelField) {
+  card(t, c, labelField, dim = false) {
     const mark = markOf(c.mark, c.status);
     const flag = cardFlag(c.attention, mark, c.points ? 11 : 14);
-    const lines = wrapWords(c.summary, 34, 2);
+    const compact = Boolean(this.compact);
+    const lines = wrapWords(c.summary, 34, compact ? 1 : 2);
     const sel = this.selected === c.key && !this.inStrip;
     const icon = typeIcon(c.typeKind);
-    return v_flex().id(`card-${c.key}`).h(cardHeight({ lines: lines.length, label: Boolean(labelField) })).p(8).gap(3).rounded(8).border(1)
+    const alarm = Boolean(c.attention) || c.mark === "blocked";
+    const flagBg = alarm ? mix(t.ansi1, t.raised, 0.16) : t.pill;
+    const ci = { "✓": t.ansi2, "✕": t.ansi1 };
+    const top = h_flex().h(18).gap(6).items_center()
+      .child(this.mono(div().text_size(11).text_color(sel ? t.accent : t.muted)).when(sel, (el) => el.font_semibold()).child([sel ? "▸" : "", c.subtask ? "↳" : "", c.key].filter(Boolean).join(" ")))
+      .when(Boolean(c.points), (el) => el.child(this.mono(div().px(5).rounded(4).bg(t.pill).text_size(10).text_color(t.muted)).child(c.points)))
+      .child(div().flex_1())
+      .when(Boolean(flag), (el) => el.child(div().px(6).rounded(5).bg(flagBg).text_size(10).font_semibold().text_color(alarm ? ensure(t.ansi1, flagBg, 4.5) : t.muted).child(flag)))
+      .when(Boolean(c.agent), (el) => el.child(this.agentDot(t, c.agent)));
+    const card = v_flex().id(`card-${c.key}`).h(cardHeight({ lines: lines.length, label: Boolean(labelField), compact })).px(11).py(compact ? 8 : 10).gap(compact ? 5 : 7)
+      .rounded(8).border(1).border_color(sel ? t.accent : t.border).bg(t.raised).hover((s) => s.border_color(t.accent))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { this.selected = c.key; this.clicked(c.key, () => this.menuFor(this.selectedRow(this.answers.sprint?.body) ?? {}), cx); })
-      .border_color(sel ? t.accent : c.attention ? t.blocked : t.border).bg(t.raised).hover((s) => s.border_color(t.accent))
-      .child(h_flex().gap(6).items_center()
-        .child(h_flex().gap(4).child(div().text_color(t.accent).child(sel ? "▸" : ""))
-          .when(c.subtask, (el) => el.child(div().text_color(t.ansi6 ?? t.dim).child("↳")))
-          .child(this.mono(div().text_color(sel ? t.foreground : t.dim)).when(sel, (el) => el.font_semibold()).child(c.key)))
-        .when(Boolean(c.points), (el) => el.child(div().text_color(t.dim).child(c.points)))
-        .child(div().flex_1())
-        .when(Boolean(flag), (el) => el.child(div().text_color(c.attention ? t.blocked : t[mark?.tone] ?? t.muted).child(flag)))
-        .when(Boolean(c.agent), (el) => el.child(div().text_color(t[c.agent] ?? t.unknown).child(agentGlyph(c.agent)))))
-      .children(lines.map((l, i) => div().id(`card-${c.key}-l${i}`).font_semibold().text_color(c.team ? t.muted : t.foreground).child(l)))
-      .child(h_flex().gap(6).text_size(12).children(c.prs.length === 0 && !c.finished ? [div().text_color(t.dim).child("—")] :
-        c.prs.map((p, i) => h_flex().id(`card-${c.key}-pr${i}`).gap(3).child(div().text_color(t.muted).child(p.ref)).child(div().text_color(t[p.tone] ?? t.dim).child(p.mark))))
-        .when(Boolean(c.finished), (el) => el.child(div().text_color(t.dim).child(c.finished))))
-      .when(Boolean(labelField), (el) => el.child(h_flex().h(18).text_size(12)
-        .when(Boolean(c.label), (row) => row.child(div().px(5).rounded(4).bg(t.chrome).text_color(t.foreground).child(c.label)))))
-      .child(h_flex().gap(5).text_size(12)
-        .when(Boolean(icon), (el) => el.child(div().text_color(t[icon.tone] ?? t.dim).child(icon.glyph)))
-        .child(div().flex_1().text_color(t.dim).truncate().child([c.info, c.who].filter(Boolean).join(" · "))));
+      .when(dim, (el) => el.opacity(0.75))
+      .child(top)
+      .children(lines.map((l, i) => div().id(`card-${c.key}-l${i}`).h(20).truncate().text_size(13).font_weight(500).text_color(c.team ? t.muted : t.foreground).child(l)));
+    if (compact) return card;
+    const label = mix(t.ansi4, t.raised, 0.14);
+    return card
+      .child(h_flex().h(20).gap(6).items_center().text_size(11).children(c.prs.length === 0 && !c.finished ? [div().text_color(t.muted).child("—")] :
+        c.prs.map((p, i) => h_flex().id(`card-${c.key}-pr${i}`).gap(5).px(7).rounded(5).bg(t.pill)
+          .child(this.mono(div().text_color(t.muted)).child(p.ref)).child(div().font_semibold().text_color(ci[p.mark] ?? t.muted).child(p.mark))))
+        .when(Boolean(c.finished), (el) => el.child(div().text_color(t.muted).child(c.finished))))
+      .when(Boolean(labelField), (el) => el.child(h_flex().h(18).items_center()
+        .when(Boolean(c.label), (row) => row.child(div().px(8).rounded(4).bg(label).text_size(11).text_color(ensure(mix(t.ansi4, t.foreground, 0.45), label, 4.5)).child(c.label)))))
+      .child(h_flex().h(16).gap(6).items_center().text_size(11)
+        .when(Boolean(icon), (el) => el.child(div().text_size(11).text_color(t[icon.tone] ?? t.muted).child(icon.glyph)))
+        .child(div().flex_1().min_w_0().truncate().text_color(t.muted).child(c.info))
+        .when(Boolean(c.who), (el) => el.child(div().flex_none().text_color(t.foreground).child(c.who))));
+  }
+
+  /** An agent's state as Herdr colors it: a dot, hollow when idle, ringed while it works or needs you. */
+  agentDot(t, status) {
+    const c = t[status] ?? t.unknown;
+    const dot = status === "idle" ? div().w(8).h(8).rounded(4).border(2).border_color(c) : div().w(8).h(8).rounded(4).bg(c);
+    if (status !== "working" && status !== "blocked") return dot;
+    return h_flex().w(14).h(14).rounded(7).bg(mix(c, t.raised, 0.25)).items_center().justify_center().child(dot);
   }
 
   /** The dim header over a list's rows, naming the columns it shows, as the TUI's. */
@@ -1522,17 +1544,56 @@ export default class Tkt extends View {
   }
 
   columns(t, board) {
-    return h_flex().id("columns").flex_1().min_h_0().gap(10).p(10).items_start().children(
-      columnCards(board).map((col) =>
-        v_flex().id(`col-${col.category}`).flex_1().min_w(220).h_full().min_h_0().gap(6).p(6).rounded(8).border(1)
-          .border_color(!this.inStrip && col.cards.some((c) => c.key === this.selected) ? t.accent : t.border)
-          .child(h_flex().px(4).pb(4).border_b(1).border_color(t.border)
-            .child(div().font_semibold().text_color(t.foreground).child(col.title))
+    const gap = this.compact ? 6 : 8;
+    return h_flex().id("columns").flex_1().min_h_0().gap(10).p(14).items_start().children(
+      columnCards(board).map((col) => {
+        const tone = t[statusTone(col.category)] ?? t.muted;
+        const selIn = !this.inStrip && col.cards.some((c) => c.key === this.selected);
+        const pane = this.colPane(col.category);
+        const heights = col.cards.map((c) => cardHeight({ lines: wrapWords(c.summary, 34, this.compact ? 1 : 2).length, label: Boolean(board.label_field), compact: this.compact }));
+        const below = cardsBelow(heights, gap, pane);
+        return v_flex().id(`col-${col.category}`).flex_1().min_w(220).h_full().min_h_0().rounded(10).border(1).overflow_hidden()
+          .border_color(selIn ? mix(t.accent, t.well, 0.55) : t.border).bg(t.well)
+          .child(div().h(2).flex_none().bg(tone))
+          .child(h_flex().px(12).pt(10).pb(8).gap(8).items_center()
+            .child(div().w(8).h(8).rounded(4).bg(tone))
+            .child(div().text_size(12).font_semibold().text_color(t.foreground).child(col.title))
+            .child(div().px(7).rounded(9).bg(t.pill).text_size(11).font_semibold().text_color(t.muted).child(String(col.count)))
             .child(div().flex_1())
-            .child(div().text_color(t.dim).child([String(col.count), col.points].filter(Boolean).join(" · "))))
-          .child(col.cards.length === 0 ? div().px(4).text_color(t.dim).child(EMPTY_COLUMN)
-            : this.scrollPane(`col-${col.category}-cards`, this.colPane(col.category),
-              v_flex().gap(6).children(col.cards.map((c) => this.card(t, c, board.label_field)))).flex_1())));
+            .when(Boolean(col.points), (el) => el.child(this.mono(div().text_size(11).text_color(t.muted)).child(col.points))))
+          .child(col.cards.length === 0 ? h_flex().py(28).justify_center().text_size(12).text_color(t.muted).child(EMPTY_COLUMN)
+            : v_flex().relative().flex_1().min_h_0().px(8).pb(10)
+              .child(this.scrollPane(`col-${col.category}-cards`, pane,
+                v_flex().gap(gap).children(col.cards.map((c) => this.card(t, c, board.label_field, col.category === "done")))).flex_1())
+              .when(below > 0, (el) => el.child(h_flex().absolute().bottom(10).left(0).right(0).justify_center()
+                .child(div().px(10).py(1).rounded(10).border(1).border_color(t.border).bg(t.pill).shadow_md().text_size(11).text_color(t.muted).child(`↓ ${below} more`)))));
+      }));
+  }
+
+  /** The Sprint's columns while it loads: their titles, and cards shaped as the real ones. */
+  skeletonColumns(t) {
+    const cols = [["todo", "To Do"], ["in_progress", "In Progress"], ["review", "In Review"], ["done", "Done"]];
+    const bar = (w, h) => div().w(w).h(h).rounded(4).bg(t.pill);
+    const ghost = (i) => v_flex().id(`ghost-${i}`).gap(9).px(11).py(12).rounded(8).border(1).border_color(t.border).bg(t.raised)
+      .child(bar(70, 9)).child(bar(170, 11)).child(bar(120, 11));
+    return h_flex().id("columns").flex_1().min_h_0().gap(10).p(14).items_start().children(cols.map(([cat, title], i) =>
+      v_flex().id(`col-${cat}`).flex_1().min_w(220).h_full().rounded(10).border(1).border_color(t.border).bg(t.well).overflow_hidden()
+        .child(div().h(2).flex_none().bg(t[statusTone(cat)] ?? t.muted))
+        .child(h_flex().px(12).pt(10).pb(8).gap(8).items_center()
+          .child(div().w(8).h(8).rounded(4).bg(t[statusTone(cat)] ?? t.muted))
+          .child(div().text_size(12).font_semibold().text_color(t.foreground).child(title))
+          .child(div().px(7).rounded(9).bg(t.pill).text_size(11).text_color(t.muted).child("…")))
+        .child(v_flex().gap(8).px(8).child(ghost(i * 2)).child(ghost(i * 2 + 1)))));
+  }
+
+  /** What the last sync could not read, on an amber strip as the board's other notices. */
+  warningsStrip(t, text) {
+    const y = t.ansi3;
+    const bg = mix(y, t.surface, 0.06);
+    return h_flex().mx(14).mt(10).px(12).py(7).gap(10).items_center().rounded(8).border(1).border_color(mix(y, t.surface, 0.28)).bg(bg)
+      .child(h_flex().w(16).h(16).flex_none().rounded(8).bg(y).items_center().justify_center().text_size(11).font_semibold().text_color(ensure(t.surface, y, 4.5)).child("!"))
+      .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(ensure(t.foreground, bg, 7)).child(text.replace(/^! /, "")))
+      .child(div().flex_none().text_size(11).text_color(t.muted).child("showing what tkt could read"));
   }
 
   colPane(category) {
@@ -1545,6 +1606,7 @@ export default class Tkt extends View {
     if (this.settings) return this.settingsScreen(t);
     if (this.details) return this.detailsScreen(t);
     const answer = this.answers[this.tab];
+    if (!answer && !this.error && this.tab === "sprint" && this.view === "columns") return this.skeletonColumns(t);
     if (!answer) return div().p(16).text_color(this.error ? t.blocked : t.muted).child(this.error ? problemOf(this.error, this.machine) : "Loading…");
     if (answer.status === 503) return div().p(16).text_color(t.muted).child("tkt is syncing the board for the first time…");
     if (answer.status !== 200) return div().p(16).text_color(t.blocked).child(problemOf(answer.body?.message ?? `tkt answered ${answer.status}`, this.machine));
@@ -1581,7 +1643,7 @@ export default class Tkt extends View {
       .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
       .child(this.header(t))
       .when(!this.choices && !this.details && !this.settings, (el) => el.child(this.contextLine(t)))
-      .when(Boolean(warningsLine(this.answers.sprint?.body?.warnings)), (el) => el.child(div().px(12).py(3).truncate().text_size(12).text_color(t.working).child(warningsLine(this.answers.sprint.body.warnings))))
+      .when(Boolean(warningsLine(this.answers.sprint?.body?.warnings)), (el) => el.child(this.warningsStrip(t, warningsLine(this.answers.sprint.body.warnings))))
       .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
       .when((this.tab === "sprint" || this.tab === "prs") && !this.choices && !this.details && !this.settings, (el) => el.child(this.preview(t, this.answers[this.tab]?.body)))
       .child(this.legend(t))

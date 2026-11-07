@@ -21,8 +21,21 @@ export function menuHeight(items, windowHeight) {
 
 /** A card's height in px: its padding and border, the key, summary, pull request and details lines, and its label
  *  line when the board has a label field. */
-export function cardHeight({ lines, label }) {
-  return 16 + 2 + 20 + lines * 20 + 18 + 18 + (label ? 21 : 0) + 3 * 3 + 4;
+export function cardHeight({ lines, label, compact = false }) {
+  if (compact) return 2 + 16 + 18 + 5 + 20;
+  return 2 + 20 + 18 + 7 + lines * 20 + 7 + 20 + (label ? 7 + 18 : 0) + 7 + 16;
+}
+
+/** How many cards of heights, gap apart, end below what a pane shows, for its "↓ N more"; none while unmeasured. */
+export function cardsBelow(heights, gap, { offset, view }) {
+  if (view <= 0) return 0;
+  let top = 0;
+  let n = 0;
+  for (const h of heights) {
+    if (top + h > offset + view) n++;
+    top += h + gap;
+  }
+  return n;
 }
 
 /** The offset that shows a card at top..top+height in a pane, moving as little as it can; unmeasured panes stay. */

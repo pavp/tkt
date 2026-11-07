@@ -27,7 +27,17 @@ test("a long menu keeps inside the window, scrolling its items, as the TUI's men
 test("a card's height follows its summary lines and its label line, so the column can scroll to it", () => {
   const short = cardHeight({ lines: 1, label: false });
   assert.equal(cardHeight({ lines: 2, label: false }) - short, 20);
-  assert.equal(cardHeight({ lines: 1, label: true }) - short, 21);
+  assert.equal(cardHeight({ lines: 1, label: true }) - short, 25);
+  assert.ok(cardHeight({ lines: 2, label: true, compact: true }) < short, "a compact card shows only its first row and one title line");
+  assert.equal(cardHeight({ lines: 2, label: true, compact: true }), cardHeight({ lines: 1, label: false, compact: true }));
+});
+
+test("a column counts the cards below what it shows, for its ↓ N more", async () => {
+  const { cardsBelow } = await import("../mod/lib/scroll.js");
+  assert.equal(cardsBelow([100, 100, 100], 8, { offset: 0, view: 0 }), 0, "an unmeasured column hides nothing");
+  assert.equal(cardsBelow([100, 100, 100], 8, { offset: 0, view: 220 }), 1);
+  assert.equal(cardsBelow([100, 100, 100], 8, { offset: 0, view: 150 }), 2, "a card cut by the bottom counts as below");
+  assert.equal(cardsBelow([100, 100, 100], 8, { offset: 116, view: 220 }), 0);
 });
 
 test("moving the selection scrolls a column just enough to show the card, as the TUI's columns follow it", async () => {

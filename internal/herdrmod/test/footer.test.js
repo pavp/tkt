@@ -24,3 +24,8 @@ test("a tkt that is not set up says how to set it up", () => {
   assert.equal(problemOf("tkt is not configured yet: run `tkt init`", null), "tkt isn't set up on this computer: run `tkt init` in a terminal");
   assert.equal(problemOf("the tkt daemon did not answer: timeout", null), "the tkt daemon did not answer: timeout");
 });
+
+test("the legend names z density on the Sprint's columns only, as the TUI's", () => {
+  assert.ok(legendFor("sprint", "columns").some(([k, what]) => k === "z" && what === "density"));
+  assert.ok(!legendFor("sprint", "list").some(([k]) => k === "z"));
+});

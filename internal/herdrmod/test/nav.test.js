@@ -84,3 +84,10 @@ test("Settings' sections follow tab and right, shift-tab and left back, as the T
   assert.equal(sectionAfter(ids, "boards", "left"), "spaces");
   assert.equal(sectionAfter(ids, "boards", "x"), null);
 });
+
+test("z switches the Sprint's cards between detailed and compact, as the TUI's density", async () => {
+  const { boardAction } = await import("../mod/lib/nav.js");
+  assert.equal(boardAction("z", "sprint"), "density");
+  assert.equal(boardAction("z", "prs"), null);
+  assert.equal(boardAction("z", "backlog"), null);
+});

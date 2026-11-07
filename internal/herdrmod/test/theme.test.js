@@ -76,3 +76,12 @@ test("Settings lists Colors before Machine, and a palette change is a settings p
   assert.deepEqual(SECTIONS.map((s) => s.id).slice(-2), ["colors", "machine"]);
   assert.deepEqual(palettePatch("tkt"), { palette: "tkt" });
 });
+
+test("the theme adds a sunken well behind columns and a pill tone over cards, from Herdr's surfaces", async () => {
+  const { tktTheme, contrast } = await import("../mod/lib/theme.js");
+  const t = tktTheme(herdrDark);
+  assert.notEqual(t.well, t.surface);
+  assert.ok(contrast(t.well, "#000000") < contrast(t.surface, "#000000"), "the well is darker than the surface on a dark theme");
+  assert.notEqual(t.pill, t.raised);
+  assert.ok(contrast(t.muted, t.pill) >= 4.5, "text on a pill reads");
+});
