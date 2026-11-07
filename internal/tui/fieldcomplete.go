@@ -38,15 +38,10 @@ func (f *settingsForm) completeJiraFieldFrom(msg JiraFieldsListedMsg) {
 		f.hint = "cannot list your Jira fields: " + msg.Err.Error()
 		return
 	}
-	var matches []string
-	for _, n := range msg.Names {
-		if hasPrefixFold(n, v) {
-			matches = append(matches, n)
-		}
-	}
+	matches := tabMatches(msg.Names, v, "")
 	switch len(matches) {
 	case 0:
-		f.hint = "no Jira field starts with " + v
+		f.hint = "no Jira field matches " + v
 	case 1:
 		f.values[0], f.hint = matches[0], ""
 	default:
@@ -93,15 +88,10 @@ func (f *settingsForm) completeTeamBoardNames() {
 	for i, b := range f.boards {
 		names[i] = b.Name
 	}
-	var matches []string
-	for _, n := range names {
-		if hasPrefixFold(n, v) {
-			matches = append(matches, n)
-		}
-	}
+	matches := tabMatches(names, v, "")
 	switch len(matches) {
 	case 0:
-		f.hint = "no board starts with " + v
+		f.hint = "no board matches " + v
 	case 1:
 		f.values[0], f.hint = matches[0], ""
 	default:

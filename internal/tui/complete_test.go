@@ -44,8 +44,9 @@ func TestTabCompletesTheTypedFolder(t *testing.T) {
 		{"common prefix longer than the typed text", "~/do", 1, "~/do", "downloads/"},
 		{"hidden folders only when asked for", "~/.", 1, "~/.cache/", ""},
 		{"a bare ~ becomes the home folder", "~", 1, "~/", ""},
-		{"no match says so", "~/zz", 1, "~/zz", "no folder starts with zz"},
-		{"an empty listing says so", "~/dev/per/x", 1, "~/dev/per/x", "no folder starts with x"},
+		{"a name that only contains the text", "~/ownl", 1, "~/downloads/", ""},
+		{"no match says so", "~/zz", 1, "~/zz", "no folder matches zz"},
+		{"an empty listing says so", "~/dev/per/x", 1, "~/dev/per/x", "no folder matches x"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

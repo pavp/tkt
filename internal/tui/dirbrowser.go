@@ -72,18 +72,20 @@ func (b *dirBrowser) listed(msg DirsListedMsg) bool {
 
 func (b *dirBrowser) refresh() {
 	b.rows = nil
-	keep := func(n string) bool {
-		return (b.hidden || !strings.HasPrefix(n, ".")) && strings.Contains(strings.ToLower(n), strings.ToLower(b.filter))
-	}
-	for _, n := range b.all {
-		if keep(n) {
-			b.rows = append(b.rows, browserRow{name: n})
+	shown := func(names []string) []string {
+		var keep []string
+		for _, n := range names {
+			if b.hidden || !strings.HasPrefix(n, ".") {
+				keep = append(keep, n)
+			}
 		}
+		return matchingNames(keep, b.filter)
 	}
-	for _, n := range b.broken {
-		if keep(n) {
-			b.rows = append(b.rows, browserRow{name: n, broken: true})
-		}
+	for _, n := range shown(b.all) {
+		b.rows = append(b.rows, browserRow{name: n})
+	}
+	for _, n := range shown(b.broken) {
+		b.rows = append(b.rows, browserRow{name: n, broken: true})
 	}
 	b.cursor, b.offset = 0, 0
 }

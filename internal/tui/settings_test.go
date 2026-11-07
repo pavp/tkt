@@ -344,7 +344,7 @@ func TestSettingsTicketLabelHintsAnUnknownField(t *testing.T) {
 	r.jiraFields = []string{"Product"}
 	m = press(send(send(send(send(m, keyTab), keyTab), keyTab), keyTab), "enter")
 	m = send(typeText(m, "Team"), keyTab)
-	if v := stripANSI(m.View()); !strings.Contains(v, "no Jira field starts with Team") {
+	if v := stripANSI(m.View()); !strings.Contains(v, "no Jira field matches Team") {
 		t.Errorf("hint:\n%s", v)
 	}
 	if v := stripANSI(send(send(m, keyTab), keyTab).View()); strings.Contains(v, "Board") && !strings.Contains(v, "Ticket label") {

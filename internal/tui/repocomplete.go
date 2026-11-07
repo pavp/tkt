@@ -29,16 +29,14 @@ func (m Model) completeRepo() (tea.Model, tea.Cmd) {
 		return m, m.actions.ListRepos(owner)
 	}
 	var owners []string
-	for _, o := range m.settings.knownOwners() {
-		if hasPrefixFold(o, v) {
-			owners = append(owners, o+"/")
-		}
+	for _, o := range tabMatches(m.settings.knownOwners(), v, "") {
+		owners = append(owners, o+"/")
 	}
 	switch len(owners) {
 	case 0:
 		f.hint = "type owner/ to list its repositories"
 		if v != "" {
-			f.hint = "no known owner starts with " + v + " · " + f.hint
+			f.hint = "no known owner matches " + v + " · " + f.hint
 		}
 	case 1:
 		f.values[fieldRepo], f.hint = owners[0], ""
@@ -85,21 +83,16 @@ func (f *settingsForm) completeRepoFrom(msg ReposListedMsg) bool {
 		f.hint = "cannot list " + owner + "'s repositories: " + msg.Err.Error()
 		return false
 	}
-	var matches []string
-	for _, n := range msg.Names {
-		if hasPrefixFold(n, v) {
-			matches = append(matches, n)
-		}
-	}
+	matches := tabMatches(msg.Names, v, owner+"/")
 	switch len(matches) {
 	case 0:
-		f.hint = "no repository of " + owner + " starts with " + name
+		f.hint = "no repository of " + owner + " matches " + name
 		return false
 	case 1:
 		f.values[fieldRepo], f.hint = matches[0], ""
 		return true
 	}
-	if p := commonPrefixFold(matches); len([]rune(p)) > len([]rune(v)) {
+	if p := commonPrefixFold(matches); extends(p, v) {
 		f.values[fieldRepo] = p
 	}
 	f.open(msg.Names, matches, owner+"/")
