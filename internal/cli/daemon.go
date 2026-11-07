@@ -88,7 +88,8 @@ func (a *App) runDaemon(ctx context.Context) error {
 		Transitions: a.daemonTransitions, Transition: a.daemonTransition, Users: a.daemonUsers, Assign: a.daemonAssign,
 		TaskAgents: a.daemonTaskAgents, Task: a.daemonTask,
 		StateFile: a.boardStateFile(), ConfigFile: a.ConfigPath(), WatchEvery: watchEvery, Log: a.printf, SaveAgentKinds: a.saveAgentKinds, MoveToSprint: a.daemonMoveToSprint,
-		Settings: a.savedConfig, SaveSettings: a.saveConfig, JiraStatuses: a.daemonStatuses, JiraBoards: a.daemonBoards, JiraFields: a.daemonFields})
+		Settings: a.savedConfig, SaveSettings: a.saveConfig, JiraStatuses: a.daemonStatuses, JiraBoards: a.daemonBoards, JiraFields: a.daemonFields,
+		Folders: a.settingsFolders, GitHubRepos: a.settingsRepos})
 	if err != nil {
 		return err
 	}

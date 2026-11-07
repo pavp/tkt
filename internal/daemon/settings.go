@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -25,6 +27,22 @@ type BoardsFunc func(ctx context.Context, space string) ([]config.TeamBoard, err
 
 // FieldsFunc lists the names of the Jira site's fields.
 type FieldsFunc func(ctx context.Context) ([]string, error)
+
+// FolderList is the folders inside a folder: Dir is that folder as config.toml writes it ("~/src/"), Broken the
+// symlinks there whose target is gone.
+type FolderList struct {
+	Dir     string   `json:"dir"`
+	Folders []string `json:"folders"`
+	Broken  []string `json:"broken"`
+}
+
+// FoldersFunc lists the folders inside path, "~" or absolute.
+type FoldersFunc func(path string) (FolderList, error)
+
+// ReposFunc lists a GitHub owner's repositories as "owner/name".
+type ReposFunc func(ctx context.Context, owner string) ([]string, error)
+
+var githubOwner = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
 
 // SettingsView is what the TUI's Settings shows from config.toml, with the choices that need no Jira.
 type SettingsView struct {
@@ -225,6 +243,52 @@ func (s *Server) settingsFields(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"fields": orNoneOf(names)})
+}
+
+func (s *Server) settingsFolders(w http.ResponseWriter, r *http.Request) {
+	if !s.hasSettings(w) {
+		return
+	}
+	if s.opts.Folders == nil {
+		writeError(w, http.StatusNotFound, "not_found", "this daemon lists no folders for Settings")
+		return
+	}
+	path := r.URL.Query().Get("path")
+	if !strings.HasPrefix(path, "~") && !strings.HasPrefix(path, "/") {
+		writeError(w, http.StatusBadRequest, "bad_request", "give path, a folder starting with ~ or /")
+		return
+	}
+	list, err := s.opts.Folders(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		writeError(w, http.StatusNotFound, "not_found", "no folder "+path)
+		return
+	case err != nil:
+		writeError(w, http.StatusBadRequest, "bad_request", "cannot read "+path+": "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": path, "dir": list.Dir, "folders": orNoneOf(list.Folders), "broken": orNoneOf(list.Broken)})
+}
+
+func (s *Server) settingsRepos(w http.ResponseWriter, r *http.Request) {
+	if !s.hasSettings(w) {
+		return
+	}
+	if s.opts.GitHubRepos == nil {
+		writeError(w, http.StatusNotFound, "not_found", "this daemon lists no repositories for Settings")
+		return
+	}
+	owner := r.URL.Query().Get("owner")
+	if !githubOwner.MatchString(owner) {
+		writeError(w, http.StatusBadRequest, "bad_request", "give owner, a GitHub organization or user")
+		return
+	}
+	names, err := s.opts.GitHubRepos(r.Context(), owner)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "github_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"owner": owner, "repos": orNoneOf(names)})
 }
 
 // badSettings is a change the TUI's Settings would refuse; it answers 400 and nothing is written.

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -17,10 +19,13 @@ import (
 
 // fakeSettings keeps config.toml in memory and Jira's answers for Settings, counting saves and Jira calls.
 type fakeSettings struct {
-	cfg       config.Config
-	saves     int
-	jiraCalls int
-	jiraErr   error
+	cfg         config.Config
+	saves       int
+	jiraCalls   int
+	jiraErr     error
+	listed      []string
+	githubCalls int
+	githubErr   error
 }
 
 func (f *fakeSettings) load() (config.Config, error) { return f.cfg.Clone(), nil }
@@ -42,6 +47,19 @@ func (f *fakeSettings) statuses(_ context.Context, space string) ([]board.Status
 func (f *fakeSettings) boards(_ context.Context, space string) ([]config.TeamBoard, error) {
 	f.jiraCalls++
 	return []config.TeamBoard{{ID: 7, Name: "Web"}, {ID: 9, Name: "Core"}, {ID: 11, Name: "Mobile"}}, f.jiraErr
+}
+
+func (f *fakeSettings) folders(path string) (FolderList, error) {
+	f.listed = append(f.listed, path)
+	if path == "~/missing/" {
+		return FolderList{}, fmt.Errorf("open /home/dev/missing: %w", fs.ErrNotExist)
+	}
+	return FolderList{Dir: "~/src/", Folders: []string{"api", "web"}, Broken: []string{"old"}}, nil
+}
+
+func (f *fakeSettings) repos(_ context.Context, owner string) ([]string, error) {
+	f.githubCalls++
+	return []string{owner + "/api", owner + "/web"}, f.githubErr
 }
 
 func (f *fakeSettings) fields(context.Context) ([]string, error) {
@@ -67,7 +85,8 @@ func settingsServer(t *testing.T, f *fakeSettings) *Server {
 	t.Helper()
 	seed := board.Snapshot{FetchedAt: fetched, Repos: map[string][]string{"DEMO": {"example-org/web", "example-org/api", "example-org/old"}}}
 	s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour, Seed: &seed,
-		Settings: f.load, SaveSettings: f.save, JiraStatuses: f.statuses, JiraBoards: f.boards, JiraFields: f.fields})
+		Settings: f.load, SaveSettings: f.save, JiraStatuses: f.statuses, JiraBoards: f.boards, JiraFields: f.fields,
+		Folders: f.folders, GitHubRepos: f.repos})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +111,8 @@ func TestContractSettings(t *testing.T) {
 		{"a space's statuses", "/v1/settings/statuses?space=DEMO", "settings-statuses"},
 		{"a space's scrum boards", "/v1/settings/boards?space=DEMO", "settings-boards"},
 		{"the site's fields", "/v1/settings/fields", "settings-fields"},
+		{"a folder's folders", "/v1/settings/folders?path=~/src/", "settings-folders"},
+		{"an owner's repositories", "/v1/settings/repos?owner=example-org", "settings-repos"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -142,6 +163,41 @@ func TestSettingsLookupsRefuseAnUnknownSpace(t *testing.T) {
 	s := settingsServer(t, f)
 	if code, body := get(t, s.Handler(), http.MethodGet, "/v1/settings/fields", s.token); code != http.StatusBadGateway || body["code"] != "jira_failed" {
 		t.Errorf("fields with Jira down = %d %v", code, body)
+	}
+}
+
+func TestSettingsListsFoldersAndRepositoriesForCompletion(t *testing.T) {
+	tests := []struct {
+		name, path string
+		code       int
+		kind       string
+	}{
+		{"a folder under the home", "/v1/settings/folders?path=~/src/", http.StatusOK, ""},
+		{"an absolute folder", "/v1/settings/folders?path=/opt/", http.StatusOK, ""},
+		{"no folder", "/v1/settings/folders", http.StatusBadRequest, "bad_request"},
+		{"a relative folder, which would depend on the daemon's own folder", "/v1/settings/folders?path=src/", http.StatusBadRequest, "bad_request"},
+		{"a folder that is not there", "/v1/settings/folders?path=~/missing/", http.StatusNotFound, "not_found"},
+		{"an owner", "/v1/settings/repos?owner=example-org", http.StatusOK, ""},
+		{"no owner", "/v1/settings/repos", http.StatusBadRequest, "bad_request"},
+		{"not an owner's name", "/v1/settings/repos?owner=example-org/web", http.StatusBadRequest, "bad_request"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeSettings{cfg: settingsConfig()}
+			s := settingsServer(t, f)
+			code, body := get(t, s.Handler(), http.MethodGet, tt.path, s.token)
+			if code != tt.code || (tt.kind != "" && body["code"] != tt.kind) {
+				t.Errorf("GET %s = %d %v", tt.path, code, body)
+			}
+			if tt.code == http.StatusBadRequest && (len(f.listed) > 0 || f.githubCalls > 0) {
+				t.Errorf("a refused request still listed %v, %d GitHub calls", f.listed, f.githubCalls)
+			}
+		})
+	}
+	f := &fakeSettings{cfg: settingsConfig(), githubErr: errors.New("github: 502 Bad Gateway")}
+	s := settingsServer(t, f)
+	if code, body := get(t, s.Handler(), http.MethodGet, "/v1/settings/repos?owner=example-org", s.token); code != http.StatusBadGateway || body["code"] != "github_failed" {
+		t.Errorf("repositories with GitHub down = %d %v", code, body)
 	}
 }
 
@@ -251,7 +307,8 @@ func TestPatchSettingsTellsTheOtherClients(t *testing.T) {
 
 func TestSettingsRoutes(t *testing.T) {
 	s := newServer(t, &fakeSync{}, nil)
-	for _, path := range []string{"/v1/settings", "/v1/settings/statuses?space=DEMO", "/v1/settings/boards?space=DEMO", "/v1/settings/fields"} {
+	for _, path := range []string{"/v1/settings", "/v1/settings/statuses?space=DEMO", "/v1/settings/boards?space=DEMO", "/v1/settings/fields",
+		"/v1/settings/folders?path=~/", "/v1/settings/repos?owner=example-org"} {
 		if code, body := get(t, s.Handler(), http.MethodGet, path, s.token); code != http.StatusNotFound || body["code"] != "not_found" {
 			t.Errorf("GET %s without settings = %d %v", path, code, body)
 		}
@@ -264,9 +321,10 @@ func TestSettingsRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/v1/settings/statuses?space=DEMO", "/v1/settings/boards?space=DEMO", "/v1/settings/fields"} {
+	for _, path := range []string{"/v1/settings/statuses?space=DEMO", "/v1/settings/boards?space=DEMO", "/v1/settings/fields",
+		"/v1/settings/folders?path=~/", "/v1/settings/repos?owner=example-org"} {
 		if code, body := get(t, s.Handler(), http.MethodGet, path, s.token); code != http.StatusNotFound || body["code"] != "not_found" {
-			t.Errorf("GET %s without Jira lookups = %d %v", path, code, body)
+			t.Errorf("GET %s without lookups = %d %v", path, code, body)
 		}
 	}
 	s = settingsServer(t, &fakeSettings{cfg: settingsConfig()})
