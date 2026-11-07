@@ -1,0 +1,31 @@
+# mod-search — search and filter flows in the Herdr mod
+
+Objective: improve the four search/filter flows in the Herdr mod, with TUI parity. Branches `feat/mod-search-<n>-<slug>`, stacked on `main`. Delivery: Stacked PRs, grouped with `gh stack link` once the last PR is open. Tests: `node --test 'internal/herdrmod/test/*.test.js'`, `go test ./...`, `herdr-app check internal/herdrmod/mod`.
+
+## Specs
+
+- **S1** People search (Assign, user fields in Move forms). User: "1. Buscar personas (Assign y los campos de usuario al mover un ticket)". The mod searches as the person types (today: only on the Search button), waits between keystrokes instead of calling Jira on every key, tells "too short", "searching…" and "no matches" apart, and is driven by the keyboard (up/down, enter picks, esc goes back). TUI: fix "Bug confirmado: en el TUI, cada espacio entra doble (internal/tui/move.go:330-334)" and wait between keystrokes too.
+- **S2** Shared matcher. User: "Compara por prefijo sin distinguir mayúsculas" / "filtra por cualquier parte del nombre, con otro algoritmo distinto al del punto 2" / "Con Tab no completas \"sprint\", pero si lo guardas, sí funciona." One rule in JS (mod) and Go (TUI): case- and accent-insensitive, prefix matches first, then substring matches. TUI completion, the directory browser and `config.MatchBoard`'s candidates agree with it.
+- **S3** Repos/Boards filters. User: "4. Filtros de Repos y Boards: son listas para marcar, sin escribir para filtrar. Además, el TUI aplica los cambios al pulsar Enter y el mod en cada marca." Decision (2026-11-07, user chose "On Enter, like the TUI"): in the mod, typing filters the list, space toggles, enter applies, esc discards. TUI's picker gains the same type-to-filter.
+- **S4** Settings autocomplete in the mod. User: "El mod no tiene autocompletado: repos y carpetas se escriben enteros a mano." Add repository, add folder, team boards and Jira fields offer completion as in the TUI; folders and GitHub repos come from the daemon (new additive endpoints `GET /v1/settings/folders?path=`, `GET /v1/settings/repos?owner=`), since the mod may run on another machine. Folder suggestions filter with the S2 matcher (point 3, "Explorador de carpetas").
+- Out of scope: "no me interesa la busqueda de tickets".
+
+## Tasks
+
+| ID | S# | Slice / branch | Route | Status |
+|---|---|---|---|---|
+| T1 | S1 | 1 people search · `feat/mod-search-1-people` | inline, no Writer reason | done: people.test.js and TestUserSearchWaitsForTypingToPauseAndKeepsOneSpace failed first; 156/156 node, go test ./... 1455, vet, gofmt; checked live (see L3) |
+| T2 | S2 S3 | 2 mod matcher + filter panels · `feat/mod-search-2-filters` | inline, no Writer reason | pending |
+| T3 | S2 S3 | 3 Go matcher + TUI parity · `feat/mod-search-3-tui-match` | inline, no Writer reason | pending |
+| T4 | S4 | 4 daemon folders/repos endpoints + docs · `feat/mod-search-4-daemon` (Risk item 2: new filesystem read over the API → independent verifier) | inline, no Writer reason | pending |
+| T5 | S4 | 5 mod Settings autocomplete · `feat/mod-search-5-complete` | inline, no Writer reason | pending |
+
+Slice plan (budget 400, default): forecast 765–1425 total; slices 135–255, 145–265, 150–300, 160–310, 185–325. Each slice bases on the previous one. Native grouping: once the last slice's PR is open, group with `gh stack link <bottom-pr> … <top-pr>`; merging any PR then takes every unmerged PR below it. Every branch lives in one repository; read back each PR's base and diff after grouping and report that; `gh stack unstack <stack>` dissolves the stack before any base can be corrected.
+
+> Before each commit, run `git diff --numstat <previous slice branch or main>` and sum additions + deletions, skipping binary rows and generated paths; if the current slice is over 400 real changed lines, stop: hand the accumulated diff to `slice-diff` (budget 400), then re-forecast every slice not yet started with `slice-plan` (budget 400).
+
+## Log
+
+- **L1** (2026-11-07) User: "no me interesa la busqueda de tickets, mejora estos 4 puntos en el mod:" followed by the four points of the search review (people search; Settings autocomplete; directory browser filter; Repos and Boards filters).
+- **L2** (2026-11-07) User chose "On Enter, like the TUI" for the filters' apply mode, confirmed the 5-slice plan and "stacked".
+- **L3** (2026-11-07) T1: the mod's search box searches 250 ms after the last key (`lib/people.js`), drops answers to older text, says "Type at least two letters" / "Searching Jira…" / "Nobody in Jira matches", lists people in the dialog; ↑↓ choose, enter picks, esc cancels. GPUI's input `submit` event did not fire live, so enter is handled in `key()` too (submitPrompt is idempotent: it closes the prompt first). TUI: the space no longer doubles, the search waits 250 ms (`userSearchDueMsg`), and the box says the same three states. Live: typed two letters → five people without a Search button, ↓ moved, enter opened "Assign ACTO-174634 to Ana Serra Alcega?", closed without assigning. 286 lines.
