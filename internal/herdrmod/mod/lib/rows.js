@@ -18,21 +18,24 @@ export function statusTone(category) {
   return COLUMN_TONES[category] ?? "foreground";
 }
 
-/** A PRs tab row's STATUS color: review requests mauve, needing you peach, draft dim, approved or ready green,
- *  waiting review mauve, CI running in the accent. */
+/** A PRs tab row's STATUS color, with few colors: review requests amber, what needs you red, approved or ready
+ *  green, drafts dim, the rest plain. */
 export function prStatusTone(row) {
   const pr = row.pr ?? {};
-  if (row.review) return "ansi5";
-  if (row.needs_you) return "peach";
+  if (row.review) return "ansi3";
+  if (row.needs_you) return "ansi1";
   if (pr.draft) return "dim";
   if (pr.merge === "ready" || pr.review === "approved") return "ansi2";
-  if (pr.review === "review_required") return "ansi5";
-  if (pr.checks === "pending") return "accent";
   return "foreground";
 }
 
 export function agentWord(status) {
   return AGENT_WORDS[status] ?? "";
+}
+
+/** The agent's state in words, for beside the dot that takes Herdr's color. */
+export function agentLabel(status) {
+  return (AGENT_WORDS[status] ?? "").replace(/^[●○] /, "");
 }
 
 const ref = (pr) => (pr.state === "merged" || pr.state === "closed" ? `#${pr.number} ${pr.state}` : `#${pr.number} ${CHECK_MARKS[pr.checks] ?? "—"}`);
