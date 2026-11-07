@@ -45,8 +45,7 @@ test("a card's pull requests end with its finished ones, as the TUI words them",
   assert.equal(c.finished, "#1 merged");
 });
 
-test("the palette adds the TUI's peach to Herdr's theme, for blocked marks and what needs you", async () => {
-  const { withPeach, PEACH } = await import("../mod/lib/columns.js");
+test("the TUI's peach stays the color for blocked marks and what needs you", async () => {
+  const { PEACH } = await import("../mod/lib/columns.js");
   assert.equal(PEACH, "#fab387");
-  assert.deepEqual(withPeach({ ansi3: "#f9e2af" }), { ansi3: "#f9e2af", peach: "#fab387" });
 });

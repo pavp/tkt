@@ -104,7 +104,3 @@ export const EMPTY_COLUMN = "— nothing here";
 
 /** The TUI's peach (Catppuccin), which no ANSI color matches: blocked marks and what needs you use it. */
 export const PEACH = "#fab387";
-
-export function withPeach(theme) {
-  return { ...theme, peach: PEACH };
-}
