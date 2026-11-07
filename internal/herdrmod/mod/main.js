@@ -28,6 +28,7 @@ import { machineKey, stashed, restored } from "./lib/machines.js";
 import { scrolled, menuHeight, MENU_ROW, cardHeight, cardsBelow, revealed, keepVisible, rowsBelow, rowTop } from "./lib/scroll.js";
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget, listKey, sectionAfter } from "./lib/nav.js";
 import { peopleQuery, peopleStatus, peopleItems, SEARCH_WAIT } from "./lib/people.js";
+import { filterDraft, filterRows, filterKey } from "./lib/filterpanel.js";
 
 const isPeople = (p) => p?.kind === "assignUser" || p?.kind === "fieldUser";
 
@@ -411,19 +412,50 @@ export default class Tkt extends View {
         .text_size(12).font_weight(500).text_color(this.bots ? t.foreground : t.muted).hover((s) => s.text_color(t.foreground))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => { this.bots = !this.bots; this.load(cx); cx.notify(); })
         .child(this.bots ? "Bots shown" : `Bots ${view.hidden_bots} hidden`)))
-      .when((view.repos ?? []).length > 0, (el) => el.child(this.filterButton(t, "repos", reposChip(view.repos), this.panel === "repos", (cx) => { this.panel = this.panel === "repos" ? null : "repos"; cx.notify(); })));
+      .when((view.repos ?? []).length > 0, (el) => el.child(this.filterButton(t, "repos", reposChip(view.repos), this.panel === "repos", (cx) => { this.togglePanel("repos"); cx.notify(); })));
   }
 
-  /** A filter's checkbox panel under the header: each name with its count, a click hides or shows it. */
-  filterPanel(t, items, hidden, field) {
-    return v_flex().id(`${field}-panel`).absolute().top(44).right(48).w(280).p(6).gap(2).rounded(8).bg(t.popover).border(1).border_color(t.border)
+  /** Opens a filter with a draft of what it hides, or closes it, dropping the draft. */
+  togglePanel(name) {
+    this.panel = this.panel === name ? null : name;
+    this.panelDraft = this.panel ? filterDraft(this.openPanel()?.hidden) : null;
+  }
+
+  /** Saves the draft of the open filter, when it differs, and closes it. */
+  applyPanel(cx) {
+    const p = this.openPanel();
+    const d = this.panelDraft;
+    this.togglePanel(this.panel);
+    const same = (p?.hidden ?? []).length === d.hidden.length && d.hidden.every((n) => (p?.hidden ?? []).includes(n));
+    if (p && !same) this.patchState({ [p.field]: d.hidden }, cx);
+  }
+
+  /** A filter's panel under the header: typed text narrows it, ticks change a draft, Apply saves it. */
+  filterPanel(t) {
+    const p = this.openPanel();
+    const d = this.panelDraft ?? filterDraft(p.hidden);
+    const rows = filterRows(p.items, d);
+    const noun = this.panel === "repos" ? "repositories" : "boards";
+    const button = (id, label, primary, click) => h_flex().id(id).h(26).px(12).items_center().rounded(6).text_size(12)
+      .when(primary, (el) => el.bg(t.accent).font_semibold().text_color(ensure(t.chrome, t.accent, 4.5)))
+      .when(!primary, (el) => el.border(1).border_color(t.border).text_color(t.foreground).hover((s) => s.bg(t.hover)))
+      .on_click((_e, cx) => { click(cx); cx.notify(); }).child(label);
+    return v_flex().id(`${p.field}-panel`).absolute().top(44).right(48).w(300).p(6).gap(2).rounded(8).bg(t.popover).border(1).border_color(t.border)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .children(items.map((r, i) =>
-        h_flex().id(`${field}-${r.name}`).gap(8).px(8).py(4).rounded(5).bg(i === Math.min(this.panelSel ?? 0, items.length - 1) ? t.selected : t.popover).hover((s) => s.bg(t.hover))
-          .on_click((_e, cx) => this.patchState({ [field]: toggled(hidden, r.name) }, cx))
+      .child(h_flex().h(28).mb(4).px(8).gap(6).items_center().rounded(6).border(1).border_color(d.query ? t.accent : t.border).bg(t.surface).text_size(12)
+        .child(div().text_color(t.dim).child("⌕"))
+        .child(d.query ? div().flex_1().min_w_0().truncate().text_color(t.foreground).child(`${d.query}▏`) : div().flex_1().text_color(t.dim).child(`Type to filter ${noun}`)))
+      .when(rows.length === 0, (el) => el.child(div().px(8).py(6).text_size(12).text_color(t.muted).child(`No ${noun} match “${d.query}”`)))
+      .children(rows.map((r, i) =>
+        h_flex().id(`${p.field}-${r.name}`).gap(8).px(8).py(4).rounded(5).bg(i === d.sel ? t.selected : t.popover).hover((s) => s.bg(t.hover))
+          .on_click((_e, cx) => { this.panelDraft = filterKey({ ...d, sel: i }, p.items, " ").draft; cx.notify(); })
           .child(this.checkbox(t, !r.hidden))
           .child(div().flex_1().truncate().text_color(r.hidden ? t.muted : t.foreground).child(r.name))
-          .child(div().text_color(t.dim).child(String(r.prs ?? r.tickets ?? "")))));
+          .child(div().text_color(t.dim).child(String(r.prs ?? r.tickets ?? "")))))
+      .child(h_flex().mt(4).pt(6).px(2).gap(6).items_center().border_t(1).border_color(t.border)
+        .child(div().flex_1().min_w_0().truncate().text_size(11).text_color(t.muted).child("space tick · ctrl-a all or none"))
+        .child(button("panel-cancel", "Cancel", false, () => this.togglePanel(this.panel)))
+        .child(button("panel-apply", "Apply", true, (cx) => this.applyPanel(cx))));
   }
 
   openPanel() {
@@ -459,7 +491,7 @@ export default class Tkt extends View {
     const boards = this.answers[this.tab]?.body?.boards ?? [];
     if (boards.length === 0) return div();
     const shown = boards.filter((b) => !b.hidden).length;
-    return this.filterButton(t, "boards", shown === boards.length ? "Boards" : `Boards ${shown}/${boards.length}`, this.panel === "boards", (cx) => { this.panel = this.panel === "boards" ? null : "boards"; cx.notify(); });
+    return this.filterButton(t, "boards", shown === boards.length ? "Boards" : `Boards ${shown}/${boards.length}`, this.panel === "boards", (cx) => { this.togglePanel("boards"); cx.notify(); });
   }
 
   backlogControls(t) {
@@ -1611,7 +1643,7 @@ export default class Tkt extends View {
 
 
   key(e, cx) {
-    if (!this.prompt && keyOf(e) === "q") e = { ...e, key: "escape", keystroke: "escape", key_char: undefined };
+    if (!this.prompt && !this.panel && keyOf(e) === "q") e = { ...e, key: "escape", keystroke: "escape", key_char: undefined };
     const k = e.key;
     if (this.keysOpen) { this.keysOpen = false; cx.notify(); return; }
     if (this.machineMenu) {
@@ -1679,16 +1711,13 @@ export default class Tkt extends View {
     cx.notify();
   }
 
-  /** The Boards and Repos filters from the keyboard: up and down move, space or enter ticks, a ticks all or none. */
+  /** The Boards and Repos filters from the keyboard: typing narrows, up and down move, space ticks, ctrl-a all or none, enter applies, esc cancels. */
   panelKey(k, cx) {
     const p = this.openPanel();
-    const sel = Math.min(this.panelSel ?? 0, Math.max(0, p.items.length - 1));
-    if (k === "escape") { this.panel = null; return; }
-    const to = listKey(sel, p.items.length, k);
-    if (to !== null) { this.panelSel = to; return; }
-    const item = p.items[sel];
-    if ((k === " " || k === "enter") && item) return this.patchState({ [p.field]: toggled(p.hidden, item.name) }, cx);
-    if (k === "a") return this.patchState({ [p.field]: (p.hidden ?? []).length > 0 ? [] : p.items.map((r) => r.name) }, cx);
+    const { draft, done } = filterKey(this.panelDraft ?? filterDraft(p.hidden), p.items, k);
+    this.panelDraft = draft;
+    if (done === "apply") this.applyPanel(cx);
+    else if (done === "cancel") this.togglePanel(this.panel);
   }
 
   pickerKeyDown(k, cx) {
@@ -1720,7 +1749,7 @@ export default class Tkt extends View {
     if (action === "refresh") return this.sync(cx);
     if (action === "settings") return this.attempt(() => this.openSettings(), cx);
     if (action === "machines") return this.openMachines(cx);
-    if (action === "boards" || action === "repos") { this.panel = this.panel === action ? null : action; return; }
+    if (action === "boards" || action === "repos") return this.togglePanel(action);
     if (action === "bots") { this.bots = !this.bots; return this.load(cx); }
     if (action === "keys") { this.keysOpen = !this.keysOpen; return; }
     if (action === "density") {
@@ -1955,7 +1984,7 @@ export default class Tkt extends View {
       .child(h_flex().flex_1().min_w_0().gap(8).items_center().children(parts))
       .when(Boolean(notice), (el) => el.child(h_flex().id("scope-notice").gap(5).items_center().text_size(11).text_color(t.muted).hover((s) => s.text_color(t.foreground))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => { this.panel = this.tab === "prs" ? "repos" : "boards"; cx.notify(); })
+        .on_click((_e, cx) => { this.togglePanel(this.tab === "prs" ? "repos" : "boards"); cx.notify(); })
         .child(notice.text.replace(/ · $/, " ·")).child(this.keyCap(t, notice.key)).child(notice.after.trim())));
   }
 
@@ -2263,7 +2292,7 @@ export default class Tkt extends View {
       .when(Boolean(warningsLine(this.answers.sprint?.body?.warnings)), (el) => el.child(this.warningsStrip(t, warningsLine(this.answers.sprint.body.warnings))))
       .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
       .child(this.footer(t))
-      .when(Boolean(this.openPanel()), (el) => { const p = this.openPanel(); return el.child(this.filterPanel(t, p.items, p.hidden, p.field)); })
+      .when(Boolean(this.openPanel()), (el) => el.child(this.filterPanel(t)))
       .when(Boolean(this.menu), (el) => el.child(this.menuBox(t)))
       .when(Boolean(this.picker), (el) => el.child(this.pickerBox(t)))
       .when(Boolean(this.prompt), (el) => el.child(this.promptBox(t)))
