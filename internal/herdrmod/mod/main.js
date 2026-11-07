@@ -1810,12 +1810,14 @@ export default class Tkt extends View {
       .when(Boolean(flag), (el) => el.child(div().px(6).rounded(5).bg(flagBg).text_size(10).font_semibold().text_color(alarm ? ensure(t.ansi1, flagBg, 4.5) : t.muted).child(flag)))
       .when(Boolean(c.agent), (el) => el.child(this.agentDot(t, c.agent)));
     const card = v_flex().id(`card-${c.key}`).h(cardHeight({ lines: lines.length, label: Boolean(labelField), compact })).px(11).py(compact ? 8 : 10).gap(compact ? 5 : 7)
-      .rounded(8).border(1).border_color(sel ? t.accent : c.team ? t.border : t.cardBorder).bg(c.team ? t.well : t.card).hover((s) => s.border_color(t.accent))
+      .relative().rounded(8).border(1).border_color(sel ? t.accent : t.card).bg(t.card).shadow_sm().hover((s) => s.border_color(sel ? t.accent : mix(t.foreground, t.card, 0.18)))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { this.selected = c.key; this.clicked(c.key, () => this.menuFor(this.selectedRow(this.answers.sprint?.body) ?? {}), cx); })
       .when(dim, (el) => el.opacity(0.75))
       .child(top)
-      .children(lines.map((l, i) => div().id(`card-${c.key}-l${i}`).h(20).truncate().text_size(13).font_weight(500).text_color(c.team ? t.muted : t.foreground).child(l)));
+      .children(lines.map((l, i) => div().id(`card-${c.key}-l${i}`).h(20).truncate().text_size(13).font_weight(500).text_color(t.foreground).child(l)))
+      .when(!c.team, (el) => el.child(this.icon("corner", 14).absolute().top(0).right(0).text_color(t.accent)))
+      .when(sel, (el) => el.child(div().absolute().top(-5).left(-5).right(-5).bottom(-5).rounded(12).border(2).border_color(t.accent)));
     if (compact) return card;
     const label = mix(t.ansi4, t.raised, 0.14);
     return card
@@ -1936,6 +1938,7 @@ export default class Tkt extends View {
 
   columns(t, board) {
     const gap = this.compact ? 6 : 8;
+    const anySel = !this.inStrip && columnCards(board).some((col) => col.cards.some((c) => c.key === this.selected));
     return h_flex().id("columns").flex_1().min_h_0().gap(10).p(14).items_start().children(
       columnCards(board).map((col) => {
         const tone = t[statusTone(col.category)] ?? t.muted;
@@ -1944,17 +1947,17 @@ export default class Tkt extends View {
         const heights = col.cards.map((c) => cardHeight({ lines: wrapWords(c.summary, 34, this.compact ? 1 : 2).length, label: Boolean(board.label_field), compact: this.compact }));
         const below = cardsBelow(heights, gap, pane);
         return v_flex().id(`col-${col.category}`).flex_1().min_w(220).h_full().min_h_0().rounded(10).pt(2).bg(tone).child(v_flex().flex_1().min_h_0().rounded(9).border(1).overflow_hidden()
-          .border_color(selIn ? mix(t.accent, t.well, 0.55) : t.border).bg(t.well)
-          .child(h_flex().px(12).pt(10).pb(8).gap(8).items_center()
+          .border_color(t.border).bg(t.well)
+          .child(h_flex().px(12).pt(10).pb(8).gap(8).items_center().border_b(1).border_color(selIn ? mix(t.accent, t.well, 0.6) : t.well)
             .child(div().w(8).h(8).rounded(4).bg(tone))
-            .child(div().text_size(12).font_semibold().text_color(t.foreground).child(col.title))
+            .child(div().text_size(12).font_semibold().text_color(selIn || !anySel ? t.foreground : t.muted).child(col.title))
             .child(div().px(7).rounded(9).bg(t.pill).text_size(11).font_semibold().text_color(t.muted).child(String(col.count)))
             .child(div().flex_1())
             .when(Boolean(col.points), (el) => el.child(this.mono(div().text_size(11).text_color(t.muted)).child(col.points))))
           .child(col.cards.length === 0 ? h_flex().py(28).justify_center().text_size(12).text_color(t.muted).child(EMPTY_COLUMN)
-            : v_flex().relative().flex_1().min_h_0().px(8).pb(10)
+            : v_flex().relative().flex_1().min_h_0().px(2).pb(4)
               .child(this.scrollPane(`col-${col.category}-cards`, pane,
-                v_flex().gap(gap).children(col.cards.map((c) => this.card(t, c, board.label_field, col.category === "done")))).flex_1())
+                v_flex().gap(gap).p(6).children(col.cards.map((c) => this.card(t, c, board.label_field, col.category === "done")))).flex_1())
               .when(below > 0, (el) => el.child(h_flex().absolute().bottom(10).left(0).right(0).justify_center()
                 .child(div().px(10).py(1).rounded(10).border(1).border_color(t.border).bg(t.pill).shadow_md().text_size(11).text_color(t.muted).child(`↓ ${below} more`))))));
       }));
