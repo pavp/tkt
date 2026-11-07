@@ -99,6 +99,7 @@ func (s *Server) board(w http.ResponseWriter, r *http.Request) {
 	for _, sp := range snap.Sprints {
 		view.Sprints = append(view.Sprints, sp.Space+" · "+board.SprintLabel(sp, snap.FetchedAt))
 	}
+	snap = board.ForTeam(snap, state.Team)
 	for name, n := range board.BoardCounts(snap.Tickets, state.Team) {
 		view.Boards = append(view.Boards, BoardFilter{Name: name, Tickets: n, Hidden: hidden[name]})
 	}

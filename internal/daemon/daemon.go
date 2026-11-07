@@ -475,7 +475,7 @@ func (s *Server) syncSoon() {
 
 // public leaves out the development-panel cache, which only the sync needs.
 func public(snap board.Snapshot) board.Snapshot {
-	snap.Panels = nil
+	snap.Panels, snap.KeptTeam = nil, nil
 	return snap
 }
 

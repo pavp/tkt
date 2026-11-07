@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,5 +70,12 @@ func TestBoardRowsCarryTheirCard(t *testing.T) {
 	}
 	if card["who"] != "Ada L." || card["points"] != "2pt" || card["type_kind"] != "bug" {
 		t.Errorf("card = %v, want the TUI card's words", card)
+	}
+}
+
+func TestAPublishedSnapshotLeavesOutTheTeamTicketsKeptWhileTheTeamIsOff(t *testing.T) {
+	snap := board.Snapshot{Tickets: []ticket.Ticket{{Key: "DEMO-1"}}, KeptTeam: []ticket.Ticket{{Key: "DEMO-7", Team: true}}}
+	if b, _ := json.Marshal(public(snap)); strings.Contains(string(b), "DEMO-7") || strings.Contains(string(b), "kept_team") {
+		t.Errorf("the kept team tickets are the daemon's own, never sent: %s", b)
 	}
 }

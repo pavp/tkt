@@ -38,6 +38,9 @@ type Snapshot struct {
 	Panels map[string]DevPanel `json:"panels,omitempty"`
 	// Partial marks a board painted before GitHub answered: Jira's tickets with earlier pull request data.
 	Partial bool `json:"partial,omitempty"`
+	// KeptTeam is the team tickets last found while the team is off, apart from Tickets so the board without
+	// the team stays exactly the user's; ForTeam joins them in when the team is turned on.
+	KeptTeam []ticket.Ticket `json:"kept_team,omitempty"`
 	// Timings says how long each part of the fetch took, for the daemon's log; never saved.
 	Timings []Timing `json:"-"`
 	// LabelField names the Jira field whose value each ticket's Label holds, when one is configured and found.
@@ -250,7 +253,7 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 	} else {
 		prsDone <- prsResult{}
 	}
-	var team []ticket.Ticket
+	var team, kept []ticket.Ticket
 	joined := false
 	takeTeam := func(r teamResult) {
 		joined = true
@@ -280,14 +283,14 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 			joined = true
 			// Turning the team on then shows these at once, while the sync that reads them again runs.
 			if len(boards) > 0 {
-				team = keptTeam(prev.Tickets)
+				kept = keptTeam(prev)
 			}
 			return
 		}
 		takeTeam(<-teamDone)
 	}
 	if opts.Partial != nil {
-		partialTeam := keptTeam(prev.Tickets)
+		partialTeam := keptTeam(prev)
 		if teamDone == nil || len(partialTeam) == 0 {
 			joinTeam()
 			partialTeam = team
@@ -300,6 +303,11 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 			default:
 			}
 		}
+		yours := map[ticket.Key]bool{}
+		for _, t := range tickets {
+			yours[t.Key] = true
+		}
+		partialTeam = slices.DeleteFunc(slices.Clone(partialTeam), func(t ticket.Ticket) bool { return yours[t.Key] })
 		opts.Partial(partialBoard(snap, tickets, partialTeam, linked, prev))
 	}
 	r := <-prsDone
@@ -373,6 +381,9 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 	}
 	team = slices.DeleteFunc(team, func(t ticket.Ticket) bool { return mine[t.Key] })
 	snap.Tickets = ticket.GroupSubtasks(append(tickets, ticket.AttachPRs(team, prs)...))
+	if kept = slices.DeleteFunc(kept, func(t ticket.Ticket) bool { return mine[t.Key] }); len(kept) > 0 {
+		snap.KeptTeam = ticket.AttachPRs(kept, prs)
+	}
 
 	if reviewsDone != nil {
 		r := <-reviewsDone
@@ -932,9 +943,9 @@ func (s Snapshot) Find(key ticket.Key) (ticket.Ticket, bool) {
 	return ticket.Ticket{}, false
 }
 
-// keptTeam is the team tickets of an earlier snapshot, subtasks included, without the pull requests and
-// subtasks attached to them, which this fetch attaches again.
-func keptTeam(prev []ticket.Ticket) []ticket.Ticket {
+// keptTeam is the team tickets of an earlier snapshot, those on its board and those it kept, subtasks
+// included, flat and without the pull requests attached to them, which this fetch attaches again.
+func keptTeam(prev Snapshot) []ticket.Ticket {
 	var out []ticket.Ticket
 	var walk func([]ticket.Ticket)
 	walk = func(ts []ticket.Ticket) {
@@ -947,6 +958,10 @@ func keptTeam(prev []ticket.Ticket) []ticket.Ticket {
 			walk(t.Subtasks)
 		}
 	}
-	walk(prev)
+	walk(prev.Tickets)
+	for _, t := range prev.KeptTeam {
+		t.PRs, t.Subtasks = nil, nil
+		out = append(out, t)
+	}
 	return out
 }

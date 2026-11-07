@@ -1243,31 +1243,31 @@ func TestTeamTicketsFoundBeforeStayWhileTheTeamIsOff(t *testing.T) {
 	if slices.ContainsFunc(js.jqls, func(q string) bool { return strings.Contains(q, "assignee != currentUser()") }) {
 		t.Errorf("with the team off there is no team search: %v", js.jqls)
 	}
+	if len(snap.Tickets) != 1 || snap.Tickets[0].Key != "DEMO-1" || snap.Tickets[0].Team {
+		t.Errorf("with the team off the board holds only your tickets, as before: %+v", snap.Tickets)
+	}
 	byKey := map[ticket.Key]ticket.Ticket{}
-	for _, tk := range snap.Tickets {
+	for _, tk := range ForTeam(snap, true).Tickets {
 		byKey[tk.Key] = tk
 	}
 	theirs, mine := byKey["DEMO-7"], byKey["DEMO-1"]
 	if !theirs.Team || theirs.Board != "Authorization Center" || len(theirs.PRs) != 1 || theirs.PRs[0].Number != 70 {
-		t.Errorf("the last team tickets are kept, with fresh pull requests, so turning the team on shows them at once: %+v", snap.Tickets)
+		t.Errorf("the last team tickets are kept, with fresh pull requests, so turning the team on shows them at once: %+v", snap.KeptTeam)
 	}
-	if mine.Team || len(snap.Tickets) != 2 {
-		t.Errorf("a ticket now yours is yours, once: %+v", snap.Tickets)
-	}
-	if shown := ShownTickets(snap.Tickets, nil, false); len(shown) != 1 || shown[0].Key != "DEMO-1" {
-		t.Errorf("with the team off the board still shows only your tickets: %+v", shown)
+	if mine.Team || len(byKey) != 2 {
+		t.Errorf("a ticket now yours is yours, once: %+v", ForTeam(snap, true).Tickets)
 	}
 	boardless, err := FetchWith(context.Background(), cfg(), js, gh, now, prev, Options{})
-	if err != nil || slices.ContainsFunc(boardless.Tickets, func(tk ticket.Ticket) bool { return tk.Team }) {
+	if err != nil || len(boardless.KeptTeam) > 0 || slices.ContainsFunc(boardless.Tickets, func(tk ticket.Ticket) bool { return tk.Team }) {
 		t.Errorf("without team boards configured no team ticket is kept: %v %+v", err, boardless.Tickets)
 	}
 }
 
 func TestTheRepositoryCountsLeaveTeamPullRequestsOutWhileTheTeamIsOff(t *testing.T) {
-	snap := Snapshot{Tickets: []ticket.Ticket{
-		{Key: "DEMO-1", PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 1, State: ticket.PROpen}}},
-		{Key: "DEMO-7", Team: true, PRs: []ticket.PullRequest{{Repo: "example-org/api", Number: 2, State: ticket.PROpen}}},
-	}}
+	snap := Snapshot{
+		Tickets:  []ticket.Ticket{{Key: "DEMO-1", PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 1, State: ticket.PROpen}}}},
+		KeptTeam: []ticket.Ticket{{Key: "DEMO-7", Team: true, PRs: []ticket.PullRequest{{Repo: "example-org/api", Number: 2, State: ticket.PROpen}}}},
+	}
 	if got := Repos(ForTeam(snap, false), nil); got["example-org/web"] != 1 || len(got) != 1 {
 		t.Errorf("team off: %v", got)
 	}
@@ -1336,5 +1336,77 @@ func TestAFetchSaysHowLongEachPartTook(t *testing.T) {
 	snap, _ = FetchWith(context.Background(), cfg(), js, &stubGitHub{}, now, Snapshot{}, Options{})
 	if slices.ContainsFunc(snap.Timings, func(tm Timing) bool { return tm.Name == "team" }) {
 		t.Errorf("no team search, no team timing: %v", snap.Timings)
+	}
+}
+
+func TestWithTheTeamOffYourSubtaskUnderATeammatesStoryStillShows(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	js := &stubJira{
+		issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "My subtask", Parent: "DEMO-7", Status: "In Progress", StatusCategory: "indeterminate",
+			Sprints: []jira.Sprint{{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active"}}}},
+		linked: map[string][]jira.DevPullRequest{},
+	}
+	gh := &stubGitHub{prs: []ticket.PullRequest{{Repo: "example-org/web", Number: 5, Branch: "feature/DEMO-1-x", State: ticket.PROpen, Checks: ticket.ChecksFail}}}
+	prev := Snapshot{Tickets: []ticket.Ticket{{Key: "DEMO-7", Summary: "Their story", Team: true}}}
+	snap, err := FetchWith(context.Background(), teamCfg(), js, gh, now, prev, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shown := ShownTickets(ForTeam(snap, false).Tickets, nil, false); len(shown) != 1 || shown[0].Key != "DEMO-1" {
+		t.Errorf("team off: your subtask shows on its own, as before: %+v", shown)
+	}
+	if len(snap.NeedsYou()) != 1 || len(MyPRs(snap, PRFilter{})) != 1 {
+		t.Errorf("team off: its failing pull request still needs you: needs %d, prs %d", len(snap.NeedsYou()), len(MyPRs(snap, PRFilter{})))
+	}
+	on := ForTeam(snap, true)
+	if !slices.ContainsFunc(on.Tickets, func(tk ticket.Ticket) bool { return tk.Key == "DEMO-7" && tk.Team }) {
+		t.Errorf("team on: the teammate's story shows at once: %+v", on.Tickets)
+	}
+}
+
+func TestWithTheTeamOffATeammatesSubtaskUnderYourTicketStaysHidden(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	js := &stubJira{
+		issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate"}},
+		linked: map[string][]jira.DevPullRequest{},
+	}
+	prev := Snapshot{Tickets: []ticket.Ticket{{Key: "DEMO-1", Summary: "Mine", Subtasks: []ticket.Ticket{{Key: "DEMO-9", Parent: "DEMO-1", Team: true}}}}}
+	snap, err := FetchWith(context.Background(), teamCfg(), js, &stubGitHub{}, now, prev, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	off := ForTeam(snap, false)
+	if _, found := off.Find("DEMO-9"); found || len(off.Tickets) != 1 || len(off.Tickets[0].Subtasks) != 0 {
+		t.Errorf("team off: a teammate's subtask stays out: %+v", off.Tickets)
+	}
+	if _, found := ForTeam(snap, true).Find("DEMO-9"); !found {
+		t.Errorf("team on: it shows at once under your ticket")
+	}
+}
+
+func TestTheFirstPaintNeverShowsATicketTwice(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	release := make(chan struct{})
+	js := &stubJira{
+		issues:   []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Now mine", Status: "In Progress", StatusCategory: "indeterminate"}},
+		team:     []jira.Issue{{ID: "7", Key: "DEMO-7", Summary: "Theirs", Status: "To Do", StatusCategory: "new"}},
+		linked:   map[string][]jira.DevPullRequest{},
+		sprints:  map[int][]int{5205: {11807}},
+		teamGate: release,
+	}
+	prev := Snapshot{Tickets: []ticket.Ticket{{Key: "DEMO-1", Team: true}, {Key: "DEMO-7", Team: true}}}
+	var partial Snapshot
+	if _, err := FetchWith(context.Background(), teamCfg(), js, &stubGitHub{}, now, prev, Options{Team: true, Partial: func(s Snapshot) {
+		partial = s
+		close(release)
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[ticket.Key]int{}
+	for _, tk := range partial.Tickets {
+		seen[tk.Key]++
+	}
+	if seen["DEMO-1"] != 1 || seen["DEMO-7"] != 1 {
+		t.Errorf("each ticket once on the first paint: %v", seen)
 	}
 }
