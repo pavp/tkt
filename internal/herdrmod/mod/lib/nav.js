@@ -79,7 +79,7 @@ export function keyOf(e) {
 
 const ACTIONS = {
   enter: "menu", " ": "menu", i: "details", o: "openJira", O: "copyJira", p: "openPR", P: "copyPR",
-  g: "refresh", ",": "settings", q: "close", escape: "close",
+  g: "refresh", ",": "settings", q: "close", escape: "close", "?": "keys",
 };
 
 /** The action a key runs on the board's tab, as the TUI binds it; null when it runs none there. */
