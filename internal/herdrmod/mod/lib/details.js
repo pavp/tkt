@@ -46,19 +46,19 @@ export function detailsKey(k) {
   return null;
 }
 
-const SECTION = /^([A-Z][\p{L}\d]*(?: [\p{L}\d]+){0,3}):\s*$/u;
-const LEAD = /^([A-Z][\p{L}\d]*(?: [\p{L}\d]+)?):\s+(\S.*)$/u;
+/** A ticket's pull requests in one phrase for the details' header: how their checks stand, else how many merged. */
+export function prSummary(prs) {
+  if (!prs || prs.length === 0) return "";
+  const count = `${prs.length} ${prs.length === 1 ? "PR" : "PRs"}`;
+  const marks = prs.map((p) => p.mark);
+  if (marks.includes("✕")) return `${count} · ✕ checks failing`;
+  if (marks.includes("…")) return `${count} · … checks running`;
+  if (marks.includes("✓")) return `${count} · ✓ checks passing`;
+  const merged = marks.filter((m) => m === "merged").length;
+  return merged > 0 ? `${count} · ${merged} merged` : count;
+}
 
-/** Jira text with its own sections ("Acceptance criteria:" alone on a line) as headings and a leading one- or
- *  two-word label ("Narrative: …") in bold, leaving code blocks as they are. */
-export function structureText(text) {
-  let code = false;
-  return (text ?? "").split("\n").map((line) => {
-    if (line.trimStart().startsWith("```")) code = !code;
-    if (code || line.trimStart().startsWith("```")) return line;
-    const section = line.match(SECTION);
-    if (section) return `#### ${section[1]}`;
-    const lead = line.match(LEAD);
-    return lead ? `**${lead[1]}:** ${lead[2]}` : line;
-  }).join("\n");
+/** Whether a comment's author is a bot or an automation rather than a person. */
+export function isBot(who) {
+  return /\bbot\b|\[bot\]|automation|\bfor jira\b/i.test(who ?? "");
 }

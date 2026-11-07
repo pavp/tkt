@@ -47,12 +47,18 @@ test("→ moves into the details' actions, as Tab does", async () => {
   assert.equal(detailsKey("left"), "back");
 });
 
-test("a description's own sections read as headings, and a leading label as bold", async () => {
-  const { structureText } = await import("../mod/lib/details.js");
-  const jira = "Narrative: As a developer, I want the module moved.\n\nAcceptance criteria:\n\n* It follows the skeleton.\n* Tests pass.\n\nSuggested tasks:\n\n* Restructure files.";
-  assert.equal(structureText(jira), "**Narrative:** As a developer, I want the module moved.\n\n#### Acceptance criteria\n\n* It follows the skeleton.\n* Tests pass.\n\n#### Suggested tasks\n\n* Restructure files.");
-  assert.equal(structureText("Note: see https://example.atlassian.net/browse/DEMO-1 for more."), "**Note:** see https://example.atlassian.net/browse/DEMO-1 for more.");
-  assert.equal(structureText("A plain sentence: with a colon in the middle of a long line that is not a label at all."), "A plain sentence: with a colon in the middle of a long line that is not a label at all.", "only a short label of a few words counts");
-  assert.equal(structureText("```\nkey: value\n```"), "```\nkey: value\n```", "code is left as it is");
-  assert.equal(structureText(""), "");
+
+test("the header sums a ticket's pull requests up by their checks, else by how many merged", async () => {
+  const { prSummary } = await import("../mod/lib/details.js");
+  assert.equal(prSummary([]), "");
+  assert.equal(prSummary([{ mark: "✓" }, { mark: "✓" }]), "2 PRs · ✓ checks passing");
+  assert.equal(prSummary([{ mark: "✓" }, { mark: "✕" }]), "2 PRs · ✕ checks failing", "a failure wins");
+  assert.equal(prSummary([{ mark: "…" }]), "1 PR · … checks running");
+  assert.equal(prSummary([{ mark: "merged" }, { mark: "merged" }, { mark: "closed" }]), "3 PRs · 2 merged");
+});
+
+test("comments from bots and automations are told apart by their author", async () => {
+  const { isBot } = await import("../mod/lib/details.js");
+  for (const who of ["Automation for Jira", "ScriptRunner for Jira", "dependabot[bot]", "Release Bot"]) assert.equal(isBot(who), true, who);
+  for (const who of ["Ada Lovelace", "Robert Botha", ""]) assert.equal(isBot(who), false, who);
 });

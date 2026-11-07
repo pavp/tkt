@@ -17,7 +17,7 @@ import { backlogRows, badges, backlogAgents } from "./lib/backlog.js";
 import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter, isConfirm, splitTail, itemGroup, footerKeys, prsSubmenu } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
-import { detailView, neighbors, detailsKey, positionOf, structureText } from "./lib/details.js";
+import { detailView, neighbors, detailsKey, positionOf, prSummary, isBot } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, palettePatch, statusBoard, markChoices, dragStarted, laneAt, statusMove, grabKey } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
 import { modKeyFor, withModKey } from "./lib/modkey.js";
@@ -588,7 +588,7 @@ export default class Tkt extends View {
             break;
           case "copy":
             await this.local('printf %s "$1" | (pbcopy 2>/dev/null || wl-copy 2>/dev/null || xclip -selection clipboard)', item.value);
-            this.notice = `copied ${item.value}`;
+            this.notice = `copied ${item.what ?? item.value}`;
             break;
           case "copyContext": {
             const a = await this.call("GET", `/v1/tickets/${item.key}/context`);
@@ -847,37 +847,63 @@ export default class Tkt extends View {
       .child(v_flex().flex_1().gap(14).px(28).py(24).child(bar(420, 18)).child(bar(300, 12)).child(div().h(14)).child(bar(560, 11)).child(bar(520, 11)).child(bar(420, 11))
         .child(div().pt(8).text_size(12).text_color(t.muted).child(`Loading ${d.key}…`)))
       .child(div().w(320).h_full().bg(t.well).border_l(1).border_color(t.border)));
-    const h2 = (text, count) => h_flex().pt(24).pb(10).gap(8).items_center().child(div().text_size(11).font_semibold().text_color(t.muted).child(text.toUpperCase()))
+    const h2 = (text, count) => h_flex().pt(10).pb(2).gap(8).items_center().child(div().text_size(12).font_semibold().text_color(t.foreground).child(text))
       .when(count !== undefined, (el) => el.child(div().px(7).rounded(9).bg(t.pill).text_size(11).font_semibold().text_color(t.muted).child(String(count))));
     const icon = typeIcon(this.kindOf(d.key));
-    const body = ensure(mix(t.foreground, t.muted, 0.25), t.surface, 4.5);
-    // The root's mouse-down takes the keyboard back, which would drop a selection the text just started.
-    const prose = (id, text) => div().id(`${id}-text`).max_w(680).text_size(13).text_color(body).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .child(TextView.markdown(id, structureText(text)).selectable(true));
-    const leftContent = v_flex().px(28).pt(22).pb(20).max_w(760)
-      .child(h_flex().gap(8).items_center().pb(8)
-        .when(Boolean(icon), (el) => el.child(div().text_size(11).text_color(t[icon.tone] ?? t.muted).child(icon.glyph)))
-        .child(this.mono(div().text_size(12).text_color(t.muted)).child(d.key))
-        .when(Boolean(v.attention), (el) => el.child(div().px(8).py(1).rounded(5).bg(mix(t.ansi1, t.surface, 0.16)).text_size(11).font_semibold().text_color(ensure(t.ansi1, mix(t.ansi1, t.surface, 0.16), 4.5)).child(`! ${v.attention}`))))
-      .child(div().max_w(680).text_size(20).font_semibold().text_color(t.foreground).child(v.title))
-      .child(h2("Description"))
-      .child(v.description ? prose("desc", v.description) : div().text_size(13).text_color(t.muted).child("No description"))
-      .when(Boolean(v.acceptance), (el) => el.child(h2("Acceptance criteria")).child(prose("acc", v.acceptance)))
-      .when(v.subtasks.length > 0, (el) => el.child(h2("Subtasks", v.subtasks.length)).child(v_flex().rounded(8).border(1).border_color(t.border).overflow_hidden()
+    const body = ensure(mix(t.foreground, t.muted, 0.25), t.raised, 4.5);
+    const fieldOf = (k) => v.fields.find(([x]) => x === k)?.[1] ?? "";
+    const initialsOf = (who) => (who ?? "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+    const avatar = (who, size) => h_flex().w(size).h(size).flex_none().rounded(size / 2).bg(mix(t.foreground, t.raised, 0.12)).items_center().justify_center()
+      .text_size(size > 20 ? 10 : 8).font_semibold().text_color(t.foreground).child(initialsOf(who));
+    const copyButton = (id, value, what) => h_flex().id(id).ml_auto().h(24).px(8).gap(5).items_center().rounded(6).border(1).border_color(t.raised).text_size(11).text_color(t.muted)
+      .hover((h) => h.border_color(t.border).bg(t.surface).text_color(t.foreground)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => this.act({ action: "copy", value, what }, cx)).child(this.icon("copy", 12)).child("Copy");
+    const card = (id, title, text) => v_flex().id(id).max_w(680).rounded(10).border(1).border_color(t.border).bg(t.raised).overflow_hidden()
+      .child(h_flex().h(38).pl(14).pr(8).items_center().border_b(1).border_color(t.border).child(div().text_size(12).font_semibold().text_color(t.foreground).child(title))
+        .child(copyButton(`${id}-copy`, text, `the ${title.toLowerCase()}`)))
+      .child(div().px(14).pt(10).pb(12).text_size(13).text_color(body).child(TextView.markdown(`${id}-text`, text)));
+    const tag = (id, children) => h_flex().id(id).h(24).px(9).gap(6).items_center().rounded(6).bg(t.pill).text_size(12).text_color(t.foreground).children(children);
+    const tone = t[statusTone(v.category)] ?? t.muted;
+    const statusBg = mix(tone, t.surface, 0.14);
+    const who = fieldOf("Assignee");
+    const board = fieldOf("Board") || fieldOf("Label");
+    const boardBg = mix(t.ansi4, t.surface, 0.16);
+    const prs = prSummary(v.prs);
+    const leftContent = v_flex().px(28).pt(22).pb(24).gap(14).max_w(760)
+      .child(v_flex().gap(10)
+        .child(h_flex().gap(8).items_center()
+          .when(Boolean(icon), (el) => el.child(div().text_size(11).text_color(t[icon.tone] ?? t.muted).child(icon.glyph)))
+          .child(this.mono(div().text_size(12).text_color(t.muted)).child(d.key))
+          .when(Boolean(fieldOf("Status")), (el) => el.child(h_flex().h(20).px(9).gap(6).items_center().rounded(10).bg(statusBg)
+            .child(div().w(6).h(6).rounded(3).bg(tone)).child(div().text_size(11).font_semibold().text_color(ensure(tone, statusBg, 4.5)).child(fieldOf("Status"))))))
+        .child(div().max_w(680).text_size(21).font_semibold().text_color(t.foreground).child(v.title))
+        .child(h_flex().flex_wrap().gap(6)
+          .when(Boolean(fieldOf("Type")), (el) => el.child(tag("chip-type", [...(icon ? [div().text_size(11).text_color(t[icon.tone] ?? t.muted).child(icon.glyph)] : []), fieldOf("Type")])))
+          .when(Boolean(fieldOf("Points")), (el) => el.child(tag("chip-points", [this.mono(div()).child(`${fieldOf("Points")} pt`)])))
+          .child(tag("chip-who", who && who !== "unassigned" ? [avatar(who, 18), who] : [div().text_color(t.muted).child("unassigned")]))
+          .when(Boolean(board), (el) => el.child(h_flex().id("chip-board").h(24).px(9).items_center().rounded(6).bg(boardBg).text_size(12).text_color(ensure(mix(t.ansi4, t.foreground, 0.45), boardBg, 4.5)).child(board)))
+          .when(Boolean(prs), (el) => el.child(tag("chip-prs", [div().text_color(t.muted).child(prs.split(" · ")[0]), ...(prs.includes(" · ") ? [prs.split(" · ")[1]] : [])])))))
+      .when(Boolean(v.attention), (el) => el.child(h_flex().max_w(680).px(12).py(9).gap(10).items_center().rounded(8).border(1).border_color(mix(t.ansi1, t.surface, 0.35)).bg(mix(t.ansi1, t.surface, 0.09))
+        .child(div().text_size(12).font_semibold().text_color(ensure(t.ansi1, mix(t.ansi1, t.surface, 0.09), 4.5)).child(`! ${v.attention}`))))
+      .child(v.description ? card("desc", "Description", v.description) : v_flex().max_w(680).px(14).py(12).rounded(10).border(1).border_color(t.border).text_size(13).text_color(t.muted).child("No description"))
+      .when(Boolean(v.acceptance), (el) => el.child(card("acc", "Acceptance criteria", v.acceptance)))
+      .when(v.subtasks.length > 0, (el) => el.child(h2("Subtasks", v.subtasks.length)).child(v_flex().max_w(680).rounded(10).border(1).border_color(t.border).overflow_hidden()
         .children(v.subtasks.map((st, i) => h_flex().id(`st-${st.key}`).h(34).px(12).gap(10).items_center().bg(t.raised).when(i > 0, (row) => row.border_t(1).border_color(t.border))
           .child(this.mono(div().w(84).flex_none().text_size(11).text_color(t.muted)).child(st.key))
           .child(div().w(130).flex_none().truncate().text_size(12).text_color(t.foreground).child(st.status))
           .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(t.foreground).child(st.summary))))))
       .child(h2("Comments", v.comments.length))
-      .child(v.comments.length === 0 ? div().text_size(13).text_color(t.muted).child("No comments") : v_flex().max_w(680).children(v.comments.map((c, i) => {
-        const initials = (c.who ?? "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-        return v_flex().id(`c-${i}`).gap(6).py(12).when(i > 0, (el) => el.border_t(1).border_color(t.border))
-          .child(h_flex().gap(10).items_center()
-            .child(h_flex().w(24).h(24).flex_none().rounded(12).bg(t.pill).items_center().justify_center().text_size(9).font_semibold().text_color(t.muted).child(initials))
-            .child(div().flex_1().min_w_0().truncate().text_size(12).font_weight(500).text_color(t.foreground).child(c.who))
-            .child(div().flex_none().text_size(11).text_color(t.muted).child(c.when)))
-          .child(div().id(`cbody-${i}-text`).pl(34).text_size(13).text_color(body).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-            .child(TextView.markdown(`cbody-${i}`, structureText(c.body || "")).selectable(true)));
+      .child(v.comments.length === 0 ? div().text_size(13).text_color(t.muted).child("No comments yet") : v_flex().max_w(680).gap(12).children(v.comments.map((c, i) => {
+        const bot = isBot(c.who);
+        return h_flex().id(`c-${i}`).gap(12).items_start()
+          .child(avatar(c.who, 28))
+          .child(v_flex().flex_1().min_w_0().rounded(10).border(1).border_color(t.border).bg(bot ? t.surface : t.raised).overflow_hidden()
+            .child(h_flex().h(34).pl(12).pr(8).gap(8).items_center().border_b(1).border_color(t.border)
+              .child(div().min_w_0().truncate().text_size(12).font_weight(bot ? 500 : 600).text_color(bot ? t.muted : t.foreground).child(c.who))
+              .when(bot, (el) => el.child(div().px(5).rounded(4).border(1).border_color(t.border).text_size(10).text_color(t.muted).child("bot")))
+              .child(div().flex_none().text_size(11).text_color(t.muted).child(c.when))
+              .child(copyButton(`c-${i}-copy`, c.body || "", `${c.who}'s comment`)))
+            .child(div().px(12).pt(9).pb(11).text_size(13).text_color(bot ? t.muted : body).child(TextView.markdown(`cbody-${i}`, c.body || ""))));
       })));
     const left = this.scrollPane("details-left", this.panes.details, leftContent).flex_1().min_w_0().h_full();
     const menu = ticketMenu(d.ticket, { agent: v.agent, attention: v.attention ? [v.attention] : [] });
