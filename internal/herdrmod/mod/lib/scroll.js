@@ -45,3 +45,14 @@ export function revealed({ offset, view }, top, height) {
   if (top + height > offset + view) return top + height - view;
   return offset;
 }
+
+const MARGIN = 8;
+
+/** The offset that shows an item from top to top + height in a pane, moving the pane as little as it can. */
+export function keepVisible({ offset, view, content }, top, height) {
+  const max = Math.max(0, content - view);
+  let to = offset;
+  if (top - MARGIN < offset) to = top - MARGIN;
+  else if (top + height + MARGIN > offset + view) to = top + height + MARGIN - view;
+  return Math.max(0, Math.min(max, to));
+}

@@ -47,3 +47,13 @@ test("moving the selection scrolls a column just enough to show the card, as the
   assert.equal(revealed({ offset: 200, view: 300 }, 100, 80), 100);
   assert.equal(revealed({ offset: 0, view: 0 }, 280, 80), 0);
 });
+
+test("a pane scrolls just enough to show the item the keyboard reached, with a small margin", async () => {
+  const { keepVisible } = await import("../mod/lib/scroll.js");
+  const pane = { offset: 0, view: 300, content: 900 };
+  assert.equal(keepVisible(pane, 100, 30), 0, "an item already in view keeps the offset");
+  assert.equal(keepVisible(pane, 400, 30), 138, "an item below scrolls up to sit at the bottom");
+  assert.equal(keepVisible({ ...pane, offset: 500 }, 200, 30), 192, "an item above scrolls down to sit at the top");
+  assert.equal(keepVisible(pane, 880, 30), 600, "never past the end");
+  assert.equal(keepVisible({ ...pane, offset: 50 }, 4, 30), 0, "never before the start");
+});
