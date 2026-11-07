@@ -36,9 +36,10 @@ func TestTabCompletesRepositoriesFromGitHub(t *testing.T) {
 		{"common prefix of several", "example-org/w", 1, "example-org/web", "web-admin"},
 		{"next tab cycles", "example-org/w", 2, "example-org/web", ""},
 		{"and on", "example-org/w", 3, "example-org/web-admin", ""},
-		{"no match says so", "example-org/zz", 1, "example-org/zz", "no repository of example-org starts with zz"},
+		{"a name that only contains the text", "example-org/admin", 1, "example-org/web-admin", ""},
+		{"no match says so", "example-org/zz", 1, "example-org/zz", "no repository of example-org matches zz"},
 		{"an unknown owner says why", "nobody/x", 1, "nobody/x", "cannot list nobody's repositories: no GitHub organization or user named nobody"},
-		{"an unknown owner prefix", "zz", 1, "zz", "no known owner starts with zz · type owner/ to list its repositories"},
+		{"an unknown owner prefix", "zz", 1, "zz", "no known owner matches zz · type owner/ to list its repositories"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

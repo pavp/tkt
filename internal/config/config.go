@@ -16,6 +16,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/pavp/tkt/internal/paths"
+	"github.com/pavp/tkt/internal/textmatch"
 	"github.com/pavp/tkt/internal/ticket"
 )
 
@@ -73,20 +74,15 @@ type TeamBoard struct {
 	Name string `toml:"name"`
 }
 
-// MatchBoard finds the board called name, ignoring case, else the boards whose name contains it; n says
-// how many matched, so a name that fits several is refused rather than guessed.
+// MatchBoard finds the board called name, ignoring case and accents, else the boards whose name contains it;
+// n says how many matched, so a name that fits several is refused rather than guessed.
 func MatchBoard(boards []TeamBoard, name string) (TeamBoard, int) {
 	for _, b := range boards {
-		if strings.EqualFold(b.Name, name) {
+		if textmatch.Fold(b.Name) == textmatch.Fold(name) {
 			return b, 1
 		}
 	}
-	var found []TeamBoard
-	for _, b := range boards {
-		if strings.Contains(strings.ToLower(b.Name), strings.ToLower(name)) {
-			found = append(found, b)
-		}
-	}
+	found := textmatch.Filter(boards, name, func(b TeamBoard) string { return b.Name })
 	if len(found) == 1 {
 		return found[0], 1
 	}

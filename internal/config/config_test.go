@@ -226,3 +226,24 @@ func TestTeamBoardsRoundTrip(t *testing.T) {
 		t.Error("Clone shares the team boards")
 	}
 }
+
+func TestMatchBoardIgnoresCaseAndAccents(t *testing.T) {
+	boards := []TeamBoard{{ID: 1, Name: "Diseño"}, {ID: 2, Name: "Team sprint"}, {ID: 3, Name: "Sprint planning"}}
+	tests := []struct {
+		name   string
+		wantID int
+		wantN  int
+	}{
+		{"DISENO", 1, 1},
+		{"team SPRINT", 2, 1},
+		{"planning", 3, 1},
+		{"sprint", 0, 2},
+		{"kanban", 0, 0},
+	}
+	for _, tt := range tests {
+		b, n := MatchBoard(boards, tt.name)
+		if b.ID != tt.wantID || n != tt.wantN {
+			t.Errorf("MatchBoard(%q) = board %d, %d matches; want %d, %d", tt.name, b.ID, n, tt.wantID, tt.wantN)
+		}
+	}
+}

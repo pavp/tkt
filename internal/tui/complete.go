@@ -8,6 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/pavp/tkt/internal/textmatch"
 )
 
 // DirsListedMsg carries the folders inside Path, as listed by ListDirs. Dir is that folder as tkt writes
@@ -78,15 +80,16 @@ func (f *settingsForm) completeFrom(msg DirsListedMsg) {
 		return
 	}
 	parent, base := v[:i+1], v[i+1:]
-	var matches []string
+	var shown []string
 	for _, n := range msg.Names {
-		if hasPrefixFold(n, base) && (strings.HasPrefix(base, ".") || !strings.HasPrefix(n, ".")) {
-			matches = append(matches, n)
+		if strings.HasPrefix(base, ".") || !strings.HasPrefix(n, ".") {
+			shown = append(shown, n)
 		}
 	}
+	matches := tabMatches(shown, base, "")
 	switch len(matches) {
 	case 0:
-		f.hint = "no folder starts with " + base
+		f.hint = "no folder matches " + base
 		if base == "" {
 			f.hint = "no folders in " + parent
 		}
@@ -94,7 +97,7 @@ func (f *settingsForm) completeFrom(msg DirsListedMsg) {
 		f.values[pf] = parent + matches[0] + "/"
 		f.hint = ""
 	default:
-		if p := commonPrefixFold(matches); len([]rune(p)) > len([]rune(base)) {
+		if p := commonPrefixFold(matches); extends(p, base) {
 			f.values[pf] = parent + p
 		}
 		var source, cands []string
@@ -129,11 +132,7 @@ func (f *settingsForm) refilter() {
 	}
 	v := f.values[f.focus]
 	f.cands, f.cand = nil, -1
-	for _, c := range f.source {
-		if hasPrefixFold(c, v) {
-			f.cands = append(f.cands, c)
-		}
-	}
+	f.cands = matchingUnder(f.source, v, f.dropBase)
 	if len(f.cands) == 0 {
 		f.resetCompletion()
 	}
@@ -205,8 +204,49 @@ func (m Model) dropdownRowAt(y int) int {
 	}
 	return -1
 }
-func hasPrefixFold(s, prefix string) bool {
-	return strings.HasPrefix(strings.ToLower(s), strings.ToLower(prefix))
+
+// matchingNames keeps the names that match the typed text, those starting with it first.
+func matchingNames(names []string, text string) []string {
+	return textmatch.Filter(names, text, func(n string) string { return n })
+}
+
+// tabMatches is what Tab completes from: the names starting with the text, or those containing it when none do.
+func tabMatches(names []string, text, base string) []string {
+	all := matchingUnder(names, text, base)
+	under := strings.TrimSpace(text)
+	if len(under) >= len(base) && strings.EqualFold(under[:len(base)], base) {
+		under = under[len(base):]
+	}
+	var starts []string
+	for _, n := range all {
+		if len(n) >= len(base) && strings.EqualFold(n[:len(base)], base) && textmatch.Rank(n[len(base):], under) == 0 {
+			starts = append(starts, n)
+		}
+	}
+	if len(starts) > 0 {
+		return starts
+	}
+	return all
+}
+
+// matchingUnder matches only what follows base ("owner/", a parent folder) in the names and the typed text,
+// so typing part of a repository's name finds it without its owner's.
+func matchingUnder(names []string, text, base string) []string {
+	if len(text) < len(base) || !strings.EqualFold(text[:len(base)], base) {
+		return matchingNames(names, text)
+	}
+	return textmatch.Filter(names, text[len(base):], func(n string) string {
+		if len(n) >= len(base) && strings.EqualFold(n[:len(base)], base) {
+			return n[len(base):]
+		}
+		return n
+	})
+}
+
+// extends reports whether the matches' common prefix p is longer than the typed text v and still begins with it,
+// as names that only contain v may share a prefix that does not.
+func extends(p, v string) bool {
+	return len([]rune(p)) > len([]rune(v)) && strings.HasPrefix(textmatch.Fold(p), textmatch.Fold(v))
 }
 
 // commonPrefixFold returns the longest prefix all names share ignoring case, spelled as the first name.
