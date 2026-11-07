@@ -17,13 +17,13 @@ test("a ticket's status takes its column's color, a pull request's where it stan
   assert.equal(statusTone("in_progress"), "ansi4");
   assert.equal(statusTone("review"), "ansi5");
   assert.equal(statusTone("done"), "ansi2");
-  assert.equal(prStatusTone({ review: true }), "ansi5");
-  assert.equal(prStatusTone({ needs_you: true, pr: {} }), "peach");
+  assert.equal(prStatusTone({ review: true }), "ansi3", "a review request is amber, as the strip's chips");
+  assert.equal(prStatusTone({ needs_you: true, pr: {} }), "ansi1", "red only for what needs you");
   assert.equal(prStatusTone({ pr: { draft: true } }), "dim");
   assert.equal(prStatusTone({ pr: { review: "approved" } }), "ansi2");
   assert.equal(prStatusTone({ pr: { merge: "ready" } }), "ansi2");
-  assert.equal(prStatusTone({ pr: { review: "review_required" } }), "ansi5");
-  assert.equal(prStatusTone({ pr: { checks: "pending" } }), "accent");
+  assert.equal(prStatusTone({ pr: { review: "review_required" } }), "foreground");
+  assert.equal(prStatusTone({ pr: { checks: "pending" } }), "foreground");
   assert.equal(prStatusTone({ pr: {} }), "foreground");
 });
 
@@ -50,4 +50,12 @@ test("SP and AGENT show only when some row has them, ASSIGNEE whenever tickets s
   assert.equal(pointsText(3), "3");
   assert.equal(pointsText(0.5), "0.5");
   assert.equal(pointsText(0), "");
+});
+
+test("the list's AGENT column words the state beside Herdr's dot", async () => {
+  const { agentLabel } = await import("../mod/lib/rows.js");
+  assert.equal(agentLabel("working"), "working");
+  assert.equal(agentLabel("blocked"), "needs you");
+  assert.equal(agentLabel("idle"), "idle");
+  assert.equal(agentLabel(""), "");
 });
