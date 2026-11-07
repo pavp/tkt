@@ -14,7 +14,7 @@ import { gutterOf, statusTone, prStatusTone, agentLabel, prRefs, listColumns, po
 import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone, topKeys, noticeShown } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
 import { backlogRows, badges, backlogAgents } from "./lib/backlog.js";
-import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter } from "./lib/menus.js";
+import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter, isConfirm, splitTail, itemGroup, footerKeys } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors, detailsKey, positionOf } from "./lib/details.js";
@@ -732,16 +732,15 @@ export default class Tkt extends View {
 
   promptBox(t) {
     const p = this.prompt;
-    return v_flex().id("prompt").absolute().top(70).left(0).right(0).items_center()
-      .child(v_flex().id("prompt-box").w(420).p(12).gap(8).rounded(10).bg(t.popover).border(1).border_color(t.accent)
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .child(div().font_semibold().text_color(t.foreground).child(p.title))
-        .child(Input.new(this.input))
-        .child(h_flex().gap(8).justify_end()
-          .child(div().id("prompt-cancel").px(10).py(3).rounded(5).text_color(t.muted).hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => { this.prompt = null; cx.notify(); }).child("Cancel"))
-          .child(div().id("prompt-ok").px(10).py(3).rounded(5).bg(t.solid).text_color(t.solid_foreground)
-            .on_click((_e, cx) => this.answerPrompt(cx)).child(p.kind === "comment" || p.kind.startsWith("add") ? "Done" : "Search"))));
+    const done = p.kind === "comment" || p.kind.startsWith("add");
+    return this.dialog(t, "prompt", 440, v_flex().gap(12).px(16).pt(16).pb(12)
+      .child(div().text_size(14).font_semibold().text_color(t.foreground).child(p.title))
+      .child(div().rounded(8).border(1).border_color(t.accent).bg(t.surface).p(2).child(Input.new(this.input)))
+      .child(h_flex().gap(8).justify_end()
+        .child(h_flex().id("prompt-cancel").h(30).px(14).items_center().rounded(7).border(1).border_color(t.border).text_size(13).text_color(t.foreground)
+          .on_click((_e, cx) => { this.prompt = null; cx.notify(); }).child("Cancel"))
+        .child(h_flex().id("prompt-ok").h(30).px(16).items_center().rounded(7).bg(t.accent).text_size(13).font_semibold().text_color(ensure(t.chrome, t.accent, 4.5))
+          .on_click((_e, cx) => this.answerPrompt(cx)).child(done ? "Done" : "Search"))));
   }
 
   /** The keys of the shown tab's tickets, in its order, for the details' arrows. */
@@ -1137,59 +1136,106 @@ export default class Tkt extends View {
 
   pickerBox(t) {
     const p = this.picker;
-    return v_flex().id("picker").absolute().top(70).left(0).right(0).items_center()
-      .child(v_flex().id("picker-box").w(420).p(12).gap(3).rounded(10).bg(t.popover).border(1).border_color(t.accent)
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .child(div().font_semibold().text_color(t.foreground).child(p.title))
-        .when(Boolean(p.question), (el) => el.child(div().pb(6).text_color(t.muted).child(p.question)))
-        .children(p.rows.map((r, i) =>
-          h_flex().id(`pick-${i}`).gap(8).px(8).py(4).rounded(5).bg(i === p.sel ? t.selected : t.popover).hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => {
-              if (p.multi) {
-                if (p.checked.has(r.value)) p.checked.delete(r.value); else p.checked.add(r.value);
-                cx.notify();
-              } else this.choose([r.value], r, cx);
-            })
-            .when(Boolean(p.multi), (el) => el.child(this.checkbox(t, p.checked.has(r.value))))
-            .child(div().flex_1().truncate().text_color(t.foreground).child(r.label))
-            .when(Boolean(r.hint), (el) => el.child(div().text_color(t.dim).child(r.hint)))))
-        .child(h_flex().pt(8).gap(8).justify_end()
-          .child(div().id("pick-cancel").px(10).py(3).rounded(5).text_color(t.muted).hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => { this.picker = null; cx.notify(); }).child("Cancel"))
-          .when(Boolean(p.multi), (el) => el.child(div().id("pick-next").px(10).py(3).rounded(5).bg(t.solid).text_color(t.solid_foreground)
-            .on_click((_e, cx) => { if (p.checked.size > 0) this.choose([...p.checked], null, cx); })
-            .child("Next")))));
+    return this.dialog(t, "picker", 440, v_flex()
+      .child(v_flex().gap(4).px(16).pt(14).pb(12).child(div().text_size(14).font_semibold().text_color(t.foreground).child(p.title))
+        .when(Boolean(p.question), (el) => el.child(div().text_size(12).text_color(t.muted).child(p.question))))
+      .child(div().h(1).bg(t.border))
+      .child(v_flex().p(6).gap(1).children(p.rows.map((r, i) => {
+        const on = i === p.sel;
+        return h_flex().id(`pick-${i}`).h(32).gap(8).pl(6).pr(10).items_center().rounded(7).border(1).border_color(on ? mix(t.accent, t.popover, 0.45) : t.popover)
+          .bg(on ? mix(t.accent, t.popover, 0.12) : t.popover).hover((s) => s.bg(t.hover))
+          .on_click((_e, cx) => {
+            if (p.multi) {
+              if (p.checked.has(r.value)) p.checked.delete(r.value); else p.checked.add(r.value);
+              cx.notify();
+            } else this.choose([r.value], r, cx);
+          })
+          .child(div().w(10).text_size(11).text_color(t.accent).child(on ? "▸" : ""))
+          .when(Boolean(p.multi), (el) => el.child(this.checkbox(t, p.checked.has(r.value))))
+          .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(t.foreground).child(r.label))
+          .when(Boolean(r.hint), (el) => el.child(div().text_size(12).text_color(/^● /.test(r.hint) ? t.working ?? t.muted : t.muted).child(r.hint)));
+      })))
+      .when(Boolean(p.multi), (el) => el.child(h_flex().gap(8).justify_end().px(14).pb(12)
+        .child(h_flex().id("pick-cancel").h(30).px(14).items_center().rounded(7).border(1).border_color(t.border).text_size(13).text_color(t.foreground)
+          .on_click((_e, cx) => { this.picker = null; cx.notify(); }).child("Cancel"))
+        .child(h_flex().id("pick-next").h(30).px(16).items_center().rounded(7).bg(t.accent).text_size(13).font_semibold().text_color(ensure(t.chrome, t.accent, 4.5))
+          .on_click((_e, cx) => { if (p.checked.size > 0) this.choose([...p.checked], null, cx); }).child("Next"))))
+      .child(div().px(16).py(9).border_t(1).border_color(t.border)
+        .child(this.keyLine(t, p.multi ? [["space", "tick"], ["enter", "next"], ["esc", "cancel"]] : [["enter", "choose"], ["esc", "cancel"]]))));
+  }
+
+  /** A centered box over the dimmed window, as every menu, picker, prompt and confirmation. */
+  dialog(t, id, width, content) {
+    return div().id(id).absolute().inset_0()
+      .child(div().absolute().inset_0().bg(t.background).opacity(0.62))
+      .child(v_flex().absolute().inset_0().items_center().justify_center()
+        .child(v_flex().id(`${id}-box`).w(width).rounded(12).bg(t.popover).border(1).border_color(t.border).shadow_xl()
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(content)));
+  }
+
+  keyLine(t, pairs) {
+    return h_flex().gap(12).items_center().children(pairs.map(([k, what], i) => h_flex().id(`mk-${i}`).gap(5).items_center().text_size(11).text_color(t.muted).child(this.keyCap(t, k)).child(what)));
   }
 
   menuBox(t) {
     const m = this.menu;
-    return div().id("menu").absolute().inset_0()
-      .child(div().absolute().inset_0().bg(t.background).opacity(0.55))
-      .child(v_flex().absolute().inset_0().items_center().justify_center()
-        .child(v_flex().id("menu-box").w(420).p(10).gap(2).rounded(10).bg(t.popover).border(1).border_color(t.border)
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          .child(h_flex().gap(6)
-            .when(Boolean(m.back), (el) => el.child(div().id("menu-back").text_color(t.dim).hover((s) => s.text_color(t.foreground))
-              .on_click((_e, cx) => { this.menu = backOf(this.menu); cx.notify(); }).child("‹")))
-            .child(div().font_semibold().text_color(t.foreground).child(m.title)))
-          .when(Boolean(m.subtitle), (el) => el.child(div().text_size(12).text_color(t.dim).child(m.subtitle)))
-          .when((m.reviewers ?? []).length > 0, (el) => el.child(h_flex().flex_wrap().gap(10).text_size(12)
-            .children(m.reviewers.map((r, i) => div().id(`rev-${i}`).text_color(t[r.tone] ?? t.foreground).child(r.text)))))
-          .child(div().h(6))
-          .child(v_flex().relative().h(menuHeight(m.items.length, this.windowHeight))
-            .child(v_virtual_list("menu-items", m.items.length, MENU_ROW, (i) => `${m.title}-${i}`, (range) =>
-              m.items.slice(range.start, range.end).map((item, j) => {
-                const i = range.start + j;
-                return h_flex().h(MENU_ROW).gap(6).px(8).items_center().rounded(5).bg(i === m.sel ? t.selected : t.popover).text_color(t.foreground)
-                  .child(div().w(10).text_color(t.accent).child(i === m.sel ? "▸" : ""))
-                  .child(div().flex_1().truncate().child(item.label))
-                  .when(Boolean(item.keyHint), (el) => el.child(div().text_color(t.accent).child(item.keyHint)));
-              })).size_full().track_scroll(this.scrolls.menu).on_item_click((key, cx) => {
-                const i = Number(key.slice(key.lastIndexOf("-") + 1));
-                if (m.items[i]) this.act(m.items[i], cx);
-              }))
-            .child(Scrollbar.vertical("menu-items").absolute().inset_0()))
-          .child(div().pt(6).text_size(11).text_color(t.dim).child(menuFooter(m.items[m.sel])))));
+    if (isConfirm(m)) return this.confirmBox(t, m);
+    const header = v_flex().gap(4).px(16).pt(14).pb(12)
+      .child(h_flex().gap(8).items_center()
+        .when(Boolean(m.back), (el) => el.child(h_flex().id("menu-back").w(22).h(22).items_center().justify_center().rounded(5).bg(t.pill).text_size(12).text_color(t.foreground)
+          .on_click((_e, cx) => { this.menu = backOf(this.menu); cx.notify(); }).child("‹")))
+        .child(div().text_size(14).font_semibold().text_color(t.foreground).child(m.title)))
+      .when(Boolean(m.subtitle), (el) => el.child(div().text_size(12).text_color(t.muted).child(m.subtitle)))
+      .when((m.reviewers ?? []).length > 0, (el) => el.child(h_flex().flex_wrap().gap(10).text_size(12)
+        .children(m.reviewers.map((r, i) => div().id(`rev-${i}`).text_color(t[r.tone] ?? t.foreground).child(r.text)))));
+    const row = (item, i) => {
+      const { label, tail } = splitTail(item.label);
+      const on = i === m.sel;
+      const primary = item.action === "fix" || item.action === "transition";
+      const split = i > 0 && itemGroup(item) !== itemGroup(m.items[i - 1]);
+      return h_flex().id(`mi-${i}`).h(MENU_ROW).gap(8).pl(6).pr(10).items_center().rounded(7).border(1).border_color(on ? mix(t.accent, t.popover, 0.45) : t.popover)
+        .bg(on ? mix(t.accent, t.popover, 0.12) : t.popover)
+        .relative().when(split, (el) => el.child(div().absolute().top(0).left(8).right(8).h(1).bg(t.border)))
+        .child(div().w(10).text_size(11).text_color(t.accent).child(on ? "▸" : ""))
+        .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(primary ? ensure(mix(t.accent, t.foreground, 0.3), t.popover, 4.5) : t.foreground).when(primary, (el) => el.font_semibold()).child(label))
+        .when(Boolean(item.keyHint), (el) => el.child(this.keyCap(t, item.keyHint)))
+        .when(Boolean(tail), (el) => el.child(div().text_size(12).text_color(t.muted).child(tail)));
+    };
+    const list = v_flex().relative().h(menuHeight(m.items.length, this.windowHeight))
+      .child(v_virtual_list("menu-items", m.items.length, MENU_ROW, (i) => `${m.title}-${i}`, (range) =>
+        m.items.slice(range.start, range.end).map((item, j) => row(item, range.start + j))).size_full().track_scroll(this.scrolls.menu).on_item_click((key, cx) => {
+        const i = Number(key.slice(key.lastIndexOf("-") + 1));
+        if (m.items[i]) this.act(m.items[i], cx);
+      }))
+      .child(Scrollbar.vertical("menu-items").absolute().inset_0());
+    return this.dialog(t, "menu", 440, v_flex().child(header).child(div().h(1).bg(t.border)).child(div().p(6).child(list))
+      .child(div().px(16).py(9).border_t(1).border_color(t.border).child(this.keyLine(t, footerKeys(menuFooter(m.items[m.sel]))))));
+  }
+
+  /** A yes-or-Cancel menu as a dialog: the question, what it changes, and the two buttons; enter runs the one selected. */
+  confirmBox(t, m) {
+    const [yes, no] = m.items;
+    const danger = /remove/i.test(yes.label);
+    const yesColor = danger ? t.ansi1 : t.accent;
+    const row = (yes.key && this.boardRow(yes.key)) || (!yes.key ? this.selectedRow(this.answers.sprint?.body) : null);
+    const move = yes.action === "transition" && yes.move;
+    const aboutTicket = ["transition", "assign", "moveToSprint"].includes(yes.action);
+    const body = m.subtitle || (aboutTicket ? row?.ticket?.summary : yes.action === "settingsPatch" ? "Only tkt's configuration changes: nothing in Jira, GitHub or your clones." : "");
+    const button = (item, i, solid) => {
+      const on = m.sel === i;
+      return h_flex().id(`confirm-${i}`).h(32).px(14).items_center().rounded(7).text_size(13).font_weight(solid ? 600 : 500)
+        .border(on ? 2 : 1).border_color(on ? (solid ? mix(yesColor, t.foreground, 0.35) : t.accent) : solid ? yesColor : t.border)
+        .bg(solid ? yesColor : t.popover).text_color(solid ? ensure(t.chrome, yesColor, 4.5) : t.foreground)
+        .on_click((_e, cx) => this.act(item, cx)).child(item.label);
+    };
+    return this.dialog(t, "menu", 440, v_flex().gap(16).px(18).pt(18).pb(14)
+      .child(v_flex().gap(6).child(div().text_size(15).font_semibold().text_color(t.foreground).child(m.title))
+        .when(Boolean(body), (el) => el.child(div().text_size(13).text_color(t.foreground).child(body))))
+      .when(Boolean(move), (el) => el.child(h_flex().gap(10).px(12).py(10).items_center().rounded(8).bg(t.surface).border(1).border_color(t.border).text_size(12)
+        .when(Boolean(row?.ticket?.status), (r) => r.child(div().text_color(t.muted).child(row.ticket.status)).child(div().text_color(t.muted).child("→")))
+        .child(div().font_weight(500).text_color(t.foreground).child(move.to)).child(div().flex_1()).child(div().text_size(11).text_color(t.muted).child("writes to Jira"))))
+      .child(h_flex().gap(8).justify_end().child(button(no, 1, false)).child(button(yes, 0, true)))
+      .child(this.keyLine(t, [["enter", m.sel === 0 ? splitTail(yes.label).label.replace(/^Yes, /, "") : "cancel"], ["↑↓", "choose"], ["esc", "cancel"]])));
   }
 
 
