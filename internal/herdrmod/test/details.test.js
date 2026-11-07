@@ -38,3 +38,11 @@ test("the details say where the ticket sits in the list it was opened from, and 
   assert.equal(positionOf(["A-1"], "B-9"), "");
   assert.equal(view({ ticket: { ...detail.ticket, category: "in_progress" } }, "Sprint").category, "in_progress");
 });
+
+test("→ moves into the details' actions, as Tab does", async () => {
+  const { detailsKey } = await import("../mod/lib/details.js");
+  assert.equal(detailsKey("right"), "actions");
+  assert.equal(detailsKey("l"), "actions");
+  assert.equal(detailsKey("tab"), "actions");
+  assert.equal(detailsKey("left"), "back");
+});

@@ -155,6 +155,33 @@ export default class Tkt extends View {
     });
   }
 
+  /** The machines tkt runs on, as a popup over the bottom bar's machine button. */
+  openMachines(cx) {
+    if (this.machineMenu) { this.machineMenu = null; cx.notify(); return; }
+    cx.spawn(async (cx) => {
+      await this.discover();
+      const items = this.found ?? [];
+      if (items.length === 0) this.error = "tkt is not installed on this computer or on any machine connected to Herdr";
+      else this.machineMenu = { items, sel: Math.max(0, items.findIndex((on) => machineKey(on) === machineKey(this.machine))) };
+      cx.notify();
+    });
+  }
+
+  machineBox(t) {
+    const m = this.machineMenu;
+    return v_flex().id("machines").absolute().bottom(56).right(16).w(260).p(6).gap(1).rounded(10).bg(t.popover).border(1).border_color(t.border).shadow_lg()
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .child(div().px(8).pt(4).pb(6).text_size(11).font_semibold().text_color(t.muted).child("Show tkt on"))
+      .children(m.items.map((on, i) => {
+        const current = machineKey(on) === machineKey(this.machine);
+        const sel = i === m.sel;
+        return h_flex().id(`machine-${i}`).h(30).px(8).gap(8).items_center().rounded(6).bg(sel ? mix(t.accent, t.popover, 0.12) : t.popover).hover((h) => h.bg(t.hover))
+          .on_click((_e, cx) => { this.machineMenu = null; this.use(on, cx); cx.notify(); })
+          .child(div().flex_1().text_size(13).text_color(t.foreground).child(on ?? "This computer"))
+          .when(current, (el) => el.child(div().text_size(12).text_color(t.accent).child("✓")));
+      }));
+  }
+
   use(on, cx) {
     const switched = this.machine !== undefined && machineKey(this.machine) !== machineKey(on);
     if (switched) {
@@ -474,11 +501,11 @@ export default class Tkt extends View {
     const ci = { pass: ["✓", t.ansi2], fail: ["✕", ensure(t.ansi1, t.surface, 4.5)], pending: ["…", t.muted] }[pr.checks] ?? ["—", t.dim];
     const tone = t[prStatusTone(r.raw)] ?? t.foreground;
     return this.rowBox(t, sel)
-      .child(div().w(22).flex_none().text_size(12).font_semibold().text_color(t[g.tone] ?? t.muted).child(g.text))
-      .child(this.mono(div().w(56).flex_none().text_size(11).text_color(sel ? t.accent : t.muted)).child(r.key))
-      .child(h_flex().w(214).flex_none().gap(4).child(div().truncate().text_size(12).text_color(ensure(tone, t.surface, 4.5)).child(r.status))
+      .child(div().w(20).flex_none().text_size(12).font_semibold().text_color(t[g.tone] ?? t.muted).child(g.text))
+      .child(this.mono(div().w(52).flex_none().text_size(11).text_color(sel ? t.accent : t.muted)).child(r.key))
+      .child(h_flex().w(190).flex_none().gap(4).child(div().truncate().text_size(12).text_color(ensure(tone, t.surface, 4.5)).child(r.status))
         .when(Boolean(r.approvals), (el) => el.child(div().text_size(12).text_color(t.muted).child(`· ${r.approvals}`))))
-      .child(div().w(92).flex_none().truncate().text_size(12).text_color(t.muted).child(pr.author ?? ""))
+      .child(div().w(84).flex_none().truncate().text_size(12).text_color(t.muted).child(pr.author ?? ""))
       .child(div().w(24).flex_none().font_semibold().text_color(ci[1] ?? t.dim).child(ci[0]))
       .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(pr.draft ? t.muted : t.foreground).child(r.title));
   }
@@ -849,6 +876,8 @@ export default class Tkt extends View {
     const primary = items.find((it) => it.action === "start");
     const group = (it) => it.action === "copy" || it.action === "copyContext" ? 3 : it.action === "open" || it.action === "submenu" ? 1 : 2;
     const rest = items.filter((it) => it !== primary).sort((a, b) => group(a) - group(b));
+    d.actions = [...(primary ? [primary] : []), ...rest];
+    const lit = (it) => Boolean(d.actFocus) && d.actions[d.actSel ?? 0] === it;
     const h3 = (text) => div().pb(6).text_size(12).font_semibold().text_color(t.muted).child(text);
     const labelName = this.answers.sprint?.body?.label_field || "Label";
     const chip = mix(t.ansi4, t.well, 0.14);
@@ -868,15 +897,17 @@ export default class Tkt extends View {
         .child(h_flex().id("f-agent").min_h(26).gap(10).items_center().child(div().w(76).flex_none().text_size(12).text_color(t.muted).child("Agent"))
           .child(v.agent ? h_flex().gap(7).items_center().child(this.agentDot(t, v.agent)).child(div().text_size(12).text_color(t.foreground).child(agentLabel(v.agent))) : div().text_size(12).text_color(t.muted).child("no agent"))))
       .child(v_flex().gap(6).child(h3("Pull requests")).children(v.prs.length === 0 ? [div().text_size(12).text_color(t.muted).child("—")] : v.prs.map((p, i) =>
-        v_flex().id(`dpr-${i}`).gap(3).px(11).py(9).rounded(8).bg(t.raised).border(1).border_color(t.border)
-          .child(h_flex().gap(7).items_center().child(div().font_semibold().text_size(11).text_color(p.mark === "✓" ? t.ansi2 : p.mark === "✕" ? ensure(t.ansi1, t.raised, 4.5) : t.muted).child(p.mark))
-            .child(this.mono(div().text_size(11).text_color(t.muted)).child(p.ref)))
+        v_flex().id(`dpr-${i}`).min_w_0().overflow_hidden().gap(3).px(11).py(9).rounded(8).bg(t.raised).border(1).border_color(t.border)
+          .child(h_flex().min_w_0().gap(7).items_center().child(div().font_semibold().text_size(11).text_color(p.mark === "✓" ? t.ansi2 : p.mark === "✕" ? ensure(t.ansi1, t.raised, 4.5) : t.muted).child(p.mark))
+            .child(this.mono(div().flex_1().min_w_0().truncate().text_size(11).text_color(t.muted)).child(p.ref)))
           .child(div().truncate().text_size(12).text_color(t.foreground).child(p.title ?? "")))))
       .child(v_flex().gap(4).child(h3("Actions"))
         .when(Boolean(primary), (el) => el.child(h_flex().id("dact-primary").h(32).justify_center().items_center().rounded(7).bg(t.accent).text_size(13).font_semibold()
+          .border(2).border_color(primary && lit(primary) ? mix(t.accent, t.foreground, 0.4) : t.accent)
           .text_color(ensure(t.chrome, t.accent, 4.5)).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(primary, cx)).child(primary.label)))
         .children(rest.flatMap((it, i) => [...(i > 0 && group(it) !== group(rest[i - 1]) ? [div().id(`dact-sep-${i}`).h(1).my(4).bg(t.border)] : []),
           h_flex().id(`dact-${i}`).h(28).px(8).items_center().rounded(6).text_size(12).text_color(t.foreground).hover((s) => s.bg(t.hover))
+            .border(1).border_color(lit(it) ? mix(t.accent, t.well, 0.45) : t.well).bg(lit(it) ? mix(t.accent, t.well, 0.12) : t.well).child(div().w(10).text_size(11).text_color(t.accent).child(lit(it) ? "▸" : ""))
             .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(it, cx)).child(it.label)])))
       .child(v_flex().gap(4).child(h3("Work")).children(v.work.length === 0 ? [div().text_size(12).text_color(t.muted).child("no worktree linked")] : v.work.map((w, i) =>
         v_flex().id(`w-${i}`).gap(3).child(div().text_size(12).text_color(t.foreground).child(w.where)).child(this.mono(div().text_size(11).text_color(t.muted).truncate()).child(w.path)))));
@@ -1001,14 +1032,13 @@ export default class Tkt extends View {
       else {
         const columns = statusBoard(loaded, d.columns).map((col) => {
           const tone = t[statusTone(col.id)] ?? t.muted;
-          return v_flex().id(`scol-${col.id}`).flex_1().min_w(150).rounded(10).border(1).border_color(t.border).bg(t.well).overflow_hidden()
+          return v_flex().id(`scol-${col.id}`).flex_1().min_w(150).rounded(10).pt(2).bg(tone).child(v_flex().flex_1().rounded(9).border(1).border_color(t.border).bg(t.well).overflow_hidden()
             .when(Boolean(st.drag), (el) => el.hover((h) => h.border_color(t.accent)))
             .on_mouse_up("left", (_e, cx) => {
               const dr = st.drag;
               st.drag = null;
               if (dr && dr.column !== col.id) this.attempt(() => this.moveStatus(dr.space, dr.name, col.id), cx); else cx.notify();
             })
-            .child(div().h(2).flex_none().bg(tone))
             .child(h_flex().px(12).pt(10).pb(8).gap(8).items_center()
               .child(div().w(8).h(8).rounded(4).bg(tone))
               .child(div().text_size(12).font_semibold().text_color(t.foreground).child(col.title))
@@ -1027,7 +1057,7 @@ export default class Tkt extends View {
                 .child(div().w(14).flex_none().text_size(12).text_color(m ? t[m.tone] ?? t.muted : t.dim).child(m ? m.glyph : "·"))
                 .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(t.foreground).child(stt.name))
                 .child(stt.manual ? div().w(6).h(6).flex_none().rounded(3).bg(t.accent) : div().flex_none().text_size(10).text_color(t.dim).child("auto"));
-            })));
+            }))));
         });
         content = v_flex().child(head).child(h_flex().gap(10).items_start().children(columns))
           .child(h_flex().pt(14).gap(16).items_center().text_size(12).text_color(t.muted)
@@ -1301,11 +1331,11 @@ export default class Tkt extends View {
       .when(Boolean(m.subtitle), (el) => el.child(div().text_size(12).text_color(t.muted).child(m.subtitle)))
       .when((m.reviewers ?? []).length > 0, (el) => el.child(h_flex().flex_wrap().gap(10).text_size(12)
         .children(m.reviewers.map((r, i) => div().id(`rev-${i}`).text_color(t[r.tone] ?? t.foreground).child(r.text)))));
-    const row = (item, i) => {
+    const row = (item, i, inPlain = false) => {
       const { label, tail } = splitTail(item.label);
       const on = i === m.sel;
       const primary = item.action === "fix" || item.action === "transition";
-      const split = i > 0 && itemGroup(item) !== itemGroup(m.items[i - 1]);
+      const split = !inPlain && i > 0 && itemGroup(item) !== itemGroup(m.items[i - 1]);
       return h_flex().id(`mi-${i}`).h(MENU_ROW).gap(8).pl(6).pr(10).items_center().rounded(7).border(1).border_color(on ? mix(t.accent, t.popover, 0.45) : t.popover)
         .bg(on ? mix(t.accent, t.popover, 0.12) : t.popover)
         .relative().when(split, (el) => el.child(div().absolute().top(0).left(8).right(8).h(1).bg(t.border)))
@@ -1314,7 +1344,11 @@ export default class Tkt extends View {
         .when(Boolean(item.keyHint), (el) => el.child(this.keyCap(t, item.keyHint)))
         .when(Boolean(tail), (el) => el.child(div().text_size(12).text_color(t.muted).child(tail)));
     };
-    const list = v_flex().relative().h(menuHeight(m.items.length, this.windowHeight))
+    const plain = m.items.length <= 14;
+    const list = plain ? v_flex().gap(1).children(m.items.flatMap((item, i) => [
+      ...(i > 0 && itemGroup(item) !== itemGroup(m.items[i - 1]) ? [div().id(`msep-${i}`).h(1).mx(8).my(5).bg(t.border)] : []),
+      row(item, i, true).on_click((_e, cx) => this.act(item, cx))]))
+      : v_flex().relative().h(menuHeight(m.items.length, this.windowHeight))
       .child(v_virtual_list("menu-items", m.items.length, MENU_ROW, (i) => `${m.title}-${i}`, (range) =>
         m.items.slice(range.start, range.end).map((item, j) => row(item, range.start + j))).size_full().track_scroll(this.scrolls.menu).on_item_click((key, cx) => {
         const i = Number(key.slice(key.lastIndexOf("-") + 1));
@@ -1356,6 +1390,14 @@ export default class Tkt extends View {
     if (!this.prompt && keyOf(e) === "q") e = { ...e, key: "escape", keystroke: "escape", key_char: undefined };
     const k = e.key;
     if (this.keysOpen) { this.keysOpen = false; cx.notify(); return; }
+    if (this.machineMenu) {
+      const m = this.machineMenu;
+      if (k === "escape") this.machineMenu = null;
+      else if (k === "down" || k === "up") m.sel = Math.max(0, Math.min(m.items.length - 1, m.sel + (k === "down" ? 1 : -1)));
+      else if (k === "enter") { this.machineMenu = null; this.use(m.items[m.sel], cx); }
+      cx.notify();
+      return;
+    }
     if (this.menu) {
       if (k === "escape") this.menu = backOf(this.menu);
       if (k === "down") this.menu.sel = Math.min(this.menu.items.length - 1, this.menu.sel + 1);
@@ -1370,7 +1412,13 @@ export default class Tkt extends View {
       const kk = keyOf(e);
       const a = detailsKey(kk);
       const to = scrolled(this.panes.details, kk);
-      if (a === "back") this.details = null;
+      const acts = this.details.actions ?? [];
+      if (this.details.actFocus) {
+        if (k === "escape" || kk === "left" || kk === "h") this.details.actFocus = false;
+        else if (listKey(this.details.actSel ?? 0, acts.length, kk) !== null) this.details.actSel = listKey(this.details.actSel ?? 0, acts.length, kk);
+        else if ((kk === "enter" || kk === " ") && acts[this.details.actSel ?? 0]) this.act(acts[this.details.actSel ?? 0], cx);
+      } else if (a === "actions" && acts.length > 0) { this.details.actFocus = true; this.details.actSel = 0; }
+      else if (a === "back") this.details = null;
       else if (a === "copy") this.act({ action: "copyContext", key: this.details.key, label: "copy" }, cx);
       else if (kk === "enter" && this.details.ticket) this.menu = { ...ticketMenu(this.details.ticket, {}), sel: 0 };
       else if (to !== null) this.panes.details.offset = to;
@@ -1585,11 +1633,12 @@ export default class Tkt extends View {
     const sync = this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.cachedAt ? cachedLabel(this.cachedAt) : this.answers[this.tab]?.body?.sync_label ?? "";
     const warn = sync.startsWith("!");
     const title = (text) => div().flex_1().min_w_0().truncate().text_size(13).font_weight(500).text_color(t.foreground).child(text);
+    const detailKeys = this.details?.actFocus ? [["↑↓", "choose"], ["enter", "run"], ["←", "back to the text"]] : [["esc", "back"], ["→", "actions"], ["c", "copy as markdown"]];
     const keys = this.settings
       ? (this.settings.section === "statuses" && this.settings.statuses?.[(this.settings.data.spaces.find((x) => x.key === this.settings.statusSpace) ?? this.settings.data.spaces[0])?.key]
         ? [["↑↓", "select"], ["← →", "move to a column"], ["enter", "mark"], ["esc", "back to the board"]]
         : [["↑↓", "move"], ["enter", "choose"], ["esc", "back to the board"]])
-      : this.details ? [["esc", "back"], ["c", "copy as markdown"]] : topKeys(this.tab);
+      : this.details ? detailKeys : topKeys(this.tab);
     const line1 = h_flex().gap(10).items_center()
       .when(Boolean(this.details) && !this.settings, (el) => el.child(title(`Details of ${this.details.key}`)))
       .when(Boolean(badge), (el) => el.child(div().flex_none().px(8).py(1).rounded(5).bg(t.pill).text_size(11).font_semibold().text_color(t.muted).child(badge.status))
@@ -1602,7 +1651,7 @@ export default class Tkt extends View {
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.sync(cx)).child(this.icon("refresh", 13)))
       .child(div().w(1).h(14).flex_none().bg(t.border))
       .child(h_flex().id("machine").flex_none().gap(5).px(6).h(22).items_center().rounded(5).text_size(11).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.pick(cx)).child(where).child("▾"));
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.openMachines(cx)).child(where).child("▾"));
     const error = this.error ? problemOf(this.error, this.machine) : "";
     const notice = this.notice;
     const label = mix(t.ansi4, t.chrome, 0.14);
@@ -1743,7 +1792,7 @@ export default class Tkt extends View {
       .when(Boolean(flag), (el) => el.child(div().px(6).rounded(5).bg(flagBg).text_size(10).font_semibold().text_color(alarm ? ensure(t.ansi1, flagBg, 4.5) : t.muted).child(flag)))
       .when(Boolean(c.agent), (el) => el.child(this.agentDot(t, c.agent)));
     const card = v_flex().id(`card-${c.key}`).h(cardHeight({ lines: lines.length, label: Boolean(labelField), compact })).px(11).py(compact ? 8 : 10).gap(compact ? 5 : 7)
-      .rounded(8).border(1).border_color(sel ? t.accent : t.border).bg(t.raised).hover((s) => s.border_color(t.accent))
+      .rounded(8).border(1).border_color(sel ? t.accent : t.border).bg(c.team ? t.well : t.raised).hover((s) => s.border_color(t.accent))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { this.selected = c.key; this.clicked(c.key, () => this.menuFor(this.selectedRow(this.answers.sprint?.body) ?? {}), cx); })
       .when(dim, (el) => el.opacity(0.75))
@@ -1775,19 +1824,19 @@ export default class Tkt extends View {
   /** The dim header over a list's rows, naming the columns it shows, as the TUI's. */
   listHeader(t, heads, cols, opts = {}) {
     const cell = (w, text) => div().w(w).flex_none().truncate().child(text);
-    return h_flex().h(ROW - 2).px(12).gap(12).items_center().text_size(10).font_semibold().text_color(t.muted).border_b(1).border_color(t.border)
-      .child(cell(22, "")).child(cell(opts.prs ? 56 : 112, heads[0])).child(cell(opts.prs ? 214 : 132, heads[1]))
-      .when(Boolean(cols.points), (el) => el.child(cell(30, "SP")))
-      .when(Boolean(opts.backlog), (el) => el.child(cell(132, "BOARD")))
-      .when(Boolean(cols.assignee), (el) => el.child(cell(opts.prs ? 92 : 86, opts.prs ? "AUTHOR" : "ASSIGNEE")))
-      .when(Boolean(cols.agent), (el) => el.child(cell(100, "AGENT")))
-      .when(Boolean(heads[2]), (el) => el.child(cell(opts.prs ? 24 : 112, heads[2])))
+    return h_flex().h(ROW - 2).px(12).gap(10).items_center().text_size(10).font_semibold().text_color(t.muted).border_b(1).border_color(t.border)
+      .child(cell(20, "")).child(cell(opts.prs ? 52 : 104, heads[0])).child(cell(opts.prs ? 190 : 118, heads[1]))
+      .when(Boolean(cols.points), (el) => el.child(cell(24, "SP")))
+      .when(Boolean(opts.backlog), (el) => el.child(cell(118, "BOARD")))
+      .when(Boolean(cols.assignee), (el) => el.child(cell(opts.prs ? 84 : 76, opts.prs ? "AUTHOR" : "ASSIGNEE")))
+      .when(Boolean(cols.agent), (el) => el.child(cell(88, "AGENT")))
+      .when(Boolean(heads[2]), (el) => el.child(cell(opts.prs ? 24 : 96, heads[2])))
       .child(div().flex_1().child("TITLE"));
   }
 
   /** A list row's box: the selected one tinted and outlined in the accent. */
   rowBox(t, sel) {
-    return h_flex().h(ROW).px(12).gap(12).items_center().rounded(6).border(1).border_color(sel ? t.accent : t.surface).bg(sel ? mix(t.accent, t.surface, 0.1) : t.surface);
+    return h_flex().h(ROW).px(12).gap(10).items_center().rounded(6).border(1).border_color(sel ? t.accent : t.surface).bg(sel ? mix(t.accent, t.surface, 0.1) : t.surface);
   }
 
   /** A section's title in a list: its name, its count, and what follows (the board, dates, points). */
@@ -1817,22 +1866,22 @@ export default class Tkt extends View {
     const blocked = c.mark === "blocked";
     const chip = mix(t.ansi4, t.surface, 0.14);
     return this.rowBox(t, sel).when(tk.category === "done", (el) => el.opacity(0.72))
-      .child(div().w(22).flex_none().text_size(12).font_semibold().text_color(t[g.tone] ?? t.muted).child(g.text))
-      .child(h_flex().w(112).flex_none().gap(5).items_center()
+      .child(div().w(20).flex_none().text_size(12).font_semibold().text_color(t[g.tone] ?? t.muted).child(g.text))
+      .child(h_flex().w(104).flex_none().gap(5).items_center()
         .when(Boolean(icon), (el) => el.child(div().text_size(10).text_color(t[icon?.tone] ?? t.muted).child(icon?.glyph ?? "")))
         .when(c.subtask, (el) => el.child(div().text_color(t.muted).child("↳")))
         .child(this.mono(div().text_size(11).text_color(sel ? t.accent : t.muted)).child(c.key)))
-      .child(h_flex().w(132).flex_none().gap(6).items_center()
+      .child(h_flex().w(118).flex_none().gap(6).items_center()
         .child(div().w(7).h(7).flex_none().rounded(4).bg(t[statusTone(tk.category)] ?? t.muted))
         .child(div().truncate().text_size(12).text_color(blocked ? ensure(t.ansi1, t.surface, 4.5) : t.foreground).when(blocked, (el) => el.font_semibold()).child(c.status)))
-      .when(Boolean(cols.points), (el) => el.child(this.mono(div().w(30).flex_none().text_size(11).text_color(t.muted)).child(pointsText(tk.points))))
-      .when(Boolean(opts.backlog), (el) => el.child(h_flex().w(132).flex_none()
+      .when(Boolean(cols.points), (el) => el.child(this.mono(div().w(24).flex_none().text_size(11).text_color(t.muted)).child(pointsText(tk.points))))
+      .when(Boolean(opts.backlog), (el) => el.child(h_flex().w(118).flex_none()
         .when(Boolean(tk.board), (row) => row.child(div().px(8).rounded(4).bg(chip).truncate().text_size(11).text_color(ensure(mix(t.ansi4, t.foreground, 0.45), chip, 4.5)).child(tk.board)))))
-      .when(Boolean(cols.assignee), (el) => el.child(div().w(86).flex_none().truncate().text_size(12).text_color(c.who === "unassigned" ? t.dim : t.muted).child(c.who)))
-      .when(Boolean(cols.agent), (el) => el.child(h_flex().w(100).flex_none().gap(6).items_center()
+      .when(Boolean(cols.assignee), (el) => el.child(div().w(76).flex_none().truncate().text_size(12).text_color(c.who === "unassigned" ? t.dim : t.muted).child(c.who)))
+      .when(Boolean(cols.agent), (el) => el.child(h_flex().w(88).flex_none().gap(6).items_center()
         .child(c.agent ? this.agentDot(t, c.agent) : div().text_color(t.dim).child("—"))
         .child(div().text_size(12).text_color(t.muted).child(agentLabel(c.agent)))))
-      .when(!opts.backlog, (el) => el.child(this.refsCell(t, tk.prs, 112)))
+      .when(!opts.backlog, (el) => el.child(this.refsCell(t, tk.prs, 96)))
       .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(c.team ? t.muted : t.foreground).child(c.summary));
   }
 
@@ -1876,9 +1925,8 @@ export default class Tkt extends View {
         const pane = this.colPane(col.category);
         const heights = col.cards.map((c) => cardHeight({ lines: wrapWords(c.summary, 34, this.compact ? 1 : 2).length, label: Boolean(board.label_field), compact: this.compact }));
         const below = cardsBelow(heights, gap, pane);
-        return v_flex().id(`col-${col.category}`).flex_1().min_w(220).h_full().min_h_0().rounded(10).border(1).overflow_hidden()
+        return v_flex().id(`col-${col.category}`).flex_1().min_w(220).h_full().min_h_0().rounded(10).pt(2).bg(tone).child(v_flex().flex_1().min_h_0().rounded(9).border(1).overflow_hidden()
           .border_color(selIn ? mix(t.accent, t.well, 0.55) : t.border).bg(t.well)
-          .child(div().h(2).flex_none().bg(tone))
           .child(h_flex().px(12).pt(10).pb(8).gap(8).items_center()
             .child(div().w(8).h(8).rounded(4).bg(tone))
             .child(div().text_size(12).font_semibold().text_color(t.foreground).child(col.title))
@@ -1890,7 +1938,7 @@ export default class Tkt extends View {
               .child(this.scrollPane(`col-${col.category}-cards`, pane,
                 v_flex().gap(gap).children(col.cards.map((c) => this.card(t, c, board.label_field, col.category === "done")))).flex_1())
               .when(below > 0, (el) => el.child(h_flex().absolute().bottom(10).left(0).right(0).justify_center()
-                .child(div().px(10).py(1).rounded(10).border(1).border_color(t.border).bg(t.pill).shadow_md().text_size(11).text_color(t.muted).child(`↓ ${below} more`)))));
+                .child(div().px(10).py(1).rounded(10).border(1).border_color(t.border).bg(t.pill).shadow_md().text_size(11).text_color(t.muted).child(`↓ ${below} more`))))));
       }));
   }
 
@@ -1901,13 +1949,12 @@ export default class Tkt extends View {
     const ghost = (i) => v_flex().id(`ghost-${i}`).gap(9).px(11).py(12).rounded(8).border(1).border_color(t.border).bg(t.raised)
       .child(bar(70, 9)).child(bar(170, 11)).child(bar(120, 11));
     return h_flex().id("columns").flex_1().min_h_0().gap(10).p(14).items_start().children(cols.map(([cat, title], i) =>
-      v_flex().id(`col-${cat}`).flex_1().min_w(220).h_full().rounded(10).border(1).border_color(t.border).bg(t.well).overflow_hidden()
-        .child(div().h(2).flex_none().bg(t[statusTone(cat)] ?? t.muted))
+      v_flex().id(`col-${cat}`).flex_1().min_w(220).h_full().rounded(10).pt(2).bg(t[statusTone(cat)] ?? t.muted).child(v_flex().flex_1().rounded(9).border(1).border_color(t.border).bg(t.well).overflow_hidden()
         .child(h_flex().px(12).pt(10).pb(8).gap(8).items_center()
           .child(div().w(8).h(8).rounded(4).bg(t[statusTone(cat)] ?? t.muted))
           .child(div().text_size(12).font_semibold().text_color(t.foreground).child(title))
           .child(div().px(7).rounded(9).bg(t.pill).text_size(11).text_color(t.muted).child("…")))
-        .child(v_flex().gap(8).px(8).child(ghost(i * 2)).child(ghost(i * 2 + 1)))));
+        .child(v_flex().gap(8).px(8).child(ghost(i * 2)).child(ghost(i * 2 + 1))))));
   }
 
   /** What the last sync could not read, on an amber strip as the board's other notices. */
@@ -1949,7 +1996,7 @@ export default class Tkt extends View {
       .on_action("tkt::NextTab", (_e, cx) => this.key({ key: "tab", keystroke: "tab", modifiers: {} }, cx))
       .on_action("tkt::PrevTab", (_e, cx) => this.key({ key: "tab", keystroke: "shift-tab", modifiers: { shift: true } }, cx))
       .on_size_change((size) => { this.windowHeight = size.height; })
-      .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.settings?.drag) { this.settings.drag = null; cx.notify(); } if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
+      .on_mouse_down("left", (_e, cx) => { this.focus.focus(); if (this.settings?.drag) { this.settings.drag = null; cx.notify(); } if (this.machineMenu) { this.machineMenu = null; cx.notify(); } if (this.panel || this.menu || this.picker) { this.panel = null; this.menu = null; this.picker = null; cx.notify(); } })
       .child(this.header(t))
       .when(!this.choices && !this.details && !this.settings, (el) => el.child(this.contextLine(t)))
       .when(Boolean(warningsLine(this.answers.sprint?.body?.warnings)), (el) => el.child(this.warningsStrip(t, warningsLine(this.answers.sprint.body.warnings))))
@@ -1960,6 +2007,7 @@ export default class Tkt extends View {
       .when(Boolean(this.picker), (el) => el.child(this.pickerBox(t)))
       .when(Boolean(this.prompt), (el) => el.child(this.promptBox(t)))
       .when(Boolean(this.keysOpen), (el) => el.child(this.keysBox(t)))
+      .when(Boolean(this.machineMenu), (el) => el.child(this.machineBox(t)))
       .when(Boolean(this.settings?.markPicker), (el) => el.child(this.markPickerBox(t)));
   }
 }

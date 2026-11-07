@@ -42,5 +42,6 @@ export function neighbors(keys, key) {
 export function detailsKey(k) {
   if (["escape", "i", "left", "h"].includes(k)) return "back";
   if (k === "c") return "copy";
+  if (["right", "l", "tab"].includes(k)) return "actions";
   return null;
 }
