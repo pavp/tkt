@@ -907,59 +907,55 @@ export default class Tkt extends View {
       })));
     const left = this.scrollPane("details-left", this.panes.details, leftContent).flex_1().min_w_0().h_full();
     const menu = ticketMenu(d.ticket, { agent: v.agent, attention: v.attention ? [v.attention] : [] });
-    const items = menu.items.filter((it) => it.action !== "details");
+    const prUrls = new Set(v.prs.map((p) => p.url));
+    const items = menu.items.filter((it) => it.action !== "details" && !(it.action === "open" && prUrls.has(it.url)) && !(it.action === "submenu" && it.label.startsWith("Pull requests")));
     const primary = items.find((it) => it.action === "start");
     const group = (it) => it.action === "copy" || it.action === "copyContext" ? 3 : it.action === "open" || it.action === "submenu" ? 1 : 2;
     const rest = items.filter((it) => it !== primary).sort((a, b) => group(a) - group(b));
     const prItems = v.prs.slice(0, 3).map((p) => ({ action: "open", url: p.url, label: p.ref }));
     const moreItem = v.prs.length > 3 ? { action: "submenu", label: "more", menu: prsSubmenu(d.key, v.prs.map((p) => ({ number: Number(p.ref.split("#").pop()), label: `#${p.ref.split("#").pop()} ${p.title ?? ""}`.trim(), url: p.url }))) } : null;
-    d.actions = [...prItems, ...(moreItem ? [moreItem] : []), ...(primary ? [primary] : []), ...rest];
+    d.actions = [...(primary ? [primary] : []), ...rest, ...prItems, ...(moreItem ? [moreItem] : [])];
     d.focusY = this.detailsFocusY(d, prItems.length, Boolean(moreItem), Boolean(primary), rest.map(group));
     const lit = (it) => Boolean(d.actFocus) && d.actions[d.actSel ?? 0] === it;
     const h3 = (text) => div().pb(6).text_size(12).font_semibold().text_color(t.muted).child(text);
     const labelName = this.answers.sprint?.body?.label_field || "Label";
-    const chip = mix(t.ansi4, t.well, 0.14);
-    const fieldValue = (k, val) => {
-      if (k === "Status") {
-        const blocked = (this.boardRow(d.key)?.ticket?.mark ?? d.ticket?.mark) === "blocked";
-        return h_flex().gap(7).items_center().child(div().w(7).h(7).rounded(4).bg(t[statusTone(v.category)] ?? t.muted))
-          .child(div().text_size(12).text_color(blocked ? ensure(t.ansi1, t.well, 4.5) : t.foreground).when(blocked, (el) => el.font_semibold()).child(val));
-      }
-      if (k === "Type") return h_flex().gap(7).items_center().when(Boolean(icon), (el) => el.child(div().text_size(11).text_color(t[icon.tone] ?? t.muted).child(icon.glyph))).child(div().text_size(12).text_color(t.foreground).child(val));
-      if (k === "Label" || k === "Board") return h_flex().child(div().px(8).rounded(4).bg(chip).text_size(11).text_color(ensure(mix(t.ansi4, t.foreground, 0.45), chip, 4.5)).child(val));
-      return div().text_size(12).text_color(t.foreground).when(k === "Points", (el) => this.mono(el)).child(val);
-    };
-    const field = (k, val, i) => h_flex().id(`f-${i}`).min_h(26).gap(10).items_center().child(div().w(76).flex_none().text_size(12).text_color(t.muted).child(k === "Label" ? labelName : k)).child(fieldValue(k, val));
-    const rightContent = v_flex().px(18).py(22).gap(22)
-      .child(v_flex().id("dsec-details").on_size_change((size) => { d.hDetails = size.height; }).child(h3("Details")).children(v.fields.map(([k, val], i) => field(k, val, i)))
-        .child(h_flex().id("f-agent").min_h(26).gap(10).items_center().child(div().w(76).flex_none().text_size(12).text_color(t.muted).child("Agent"))
-          .child(v.agent ? h_flex().gap(7).items_center().child(this.agentDot(t, v.agent)).child(div().text_size(12).text_color(t.foreground).child(agentLabel(v.agent))) : div().text_size(12).text_color(t.muted).child("no agent"))))
-      .child(v_flex().id("dsec-prs").gap(6).on_size_change((size) => { d.hPrs = size.height; }).child(h3(v.prs.length > 0 ? `Pull requests · ${v.prs.length}` : "Pull requests"))
-        .child(v.prs.length === 0 ? div().text_size(12).text_color(t.muted).child("—") : v_flex().id("dpr-box").on_size_change((size) => { d.hPrBox = size.height; }).rounded(8).border(1).border_color(t.border).bg(t.raised).overflow_hidden()
-          .children(v.prs.slice(0, 3).map((p, i) => h_flex().id(`dpr-${i}`).h(32).px(10).gap(8).items_center().min_w_0().hover((h) => h.bg(t.hover))
-            .when(lit(prItems[i]), (el) => el.bg(mix(t.accent, t.raised, 0.14)))
-            .when(i > 0, (el) => el.border_t(1).border_color(t.border))
-            .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act({ action: "open", url: p.url, label: p.ref }, cx))
-            .child(div().w(12).flex_none().font_semibold().text_size(11).text_color(p.mark === "✓" ? t.ansi2 : p.mark === "✕" ? ensure(t.ansi1, t.raised, 4.5) : t.muted).child(["✓", "✕", "…", "—"].includes(p.mark) ? p.mark : "·"))
-            .child(this.mono(div().flex_none().text_size(11).text_color(t.muted)).child(`#${p.ref.split("#").pop()}`))
-            .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(["✓", "✕", "…", "—"].includes(p.mark) ? t.foreground : t.muted).child(p.title ?? ""))
-            .when(!["✓", "✕", "…", "—"].includes(p.mark), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(p.mark)))))
-          .when(v.prs.length > 3, (el) => el.child(h_flex().id("dpr-more").h(30).px(10).items_center().border_t(1).border_color(t.border).text_size(12)
-            .text_color(ensure(mix(t.accent, t.foreground, 0.3), t.raised, 4.5)).hover((h) => h.bg(t.hover))
-            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-            .when(lit(moreItem), (el) => el.bg(mix(t.accent, t.raised, 0.14)))
-            .on_click((_e, cx) => this.act(moreItem, cx))
-            .child(`+${v.prs.length - 3} more ▸`)))))
-      .child(v_flex().gap(4).child(h3("Actions"))
-        .when(Boolean(primary), (el) => el.child(h_flex().id("dact-primary").h(32).justify_center().items_center().rounded(7).bg(t.accent).text_size(13).font_semibold()
-          .border(2).border_color(primary && lit(primary) ? mix(t.accent, t.foreground, 0.4) : t.accent)
-          .text_color(ensure(t.chrome, t.accent, 4.5)).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(primary, cx)).child(primary.label)))
-        .children(rest.flatMap((it, i) => [...(i > 0 && group(it) !== group(rest[i - 1]) ? [div().id(`dact-sep-${i}`).h(1).my(4).bg(t.border)] : []),
-          h_flex().id(`dact-${i}`).h(28).px(8).items_center().rounded(6).text_size(12).text_color(t.foreground).hover((s) => s.bg(t.hover))
-            .border(1).border_color(lit(it) ? mix(t.accent, t.well, 0.45) : t.well).bg(lit(it) ? mix(t.accent, t.well, 0.12) : t.well).child(div().w(10).text_size(11).text_color(t.accent).child(lit(it) ? "▸" : ""))
-            .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(it, cx)).child(it.label)])))
-      .child(v_flex().gap(4).child(h3("Work")).children(v.work.length === 0 ? [div().text_size(12).text_color(t.muted).child("no worktree linked")] : v.work.map((w, i) =>
-        v_flex().id(`w-${i}`).gap(3).child(div().text_size(12).text_color(t.foreground).child(w.where)).child(this.mono(div().text_size(11).text_color(t.muted).truncate()).child(w.path)))));
+    const valueOf = (k) => v.fields.find(([x]) => x === k)?.[1] ?? "";
+    const more = valueOf("Board") && valueOf("Label") ? [[labelName, valueOf("Label")]] : [];
+    const actions = v_flex().id("dsec-acts").gap(4).on_size_change((size) => { d.hActs = size.height; }).child(h3("Actions"))
+      .when(Boolean(primary), (el) => el.child(h_flex().id("dact-primary").h(32).justify_center().items_center().rounded(7).bg(t.accent).text_size(13).font_semibold()
+        .border(2).border_color(primary && lit(primary) ? mix(t.accent, t.foreground, 0.4) : t.accent)
+        .text_color(ensure(t.chrome, t.accent, 4.5)).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(primary, cx)).child(primary.label)))
+      .children(rest.flatMap((it, i) => [...(i > 0 && group(it) !== group(rest[i - 1]) ? [div().id(`dact-sep-${i}`).h(1).my(4).bg(t.border)] : []),
+        h_flex().id(`dact-${i}`).h(28).px(8).items_center().rounded(6).text_size(12).text_color(t.foreground).hover((s) => s.bg(t.hover))
+          .border(1).border_color(lit(it) ? mix(t.accent, t.well, 0.45) : t.well).bg(lit(it) ? mix(t.accent, t.well, 0.12) : t.well).child(div().w(10).text_size(11).text_color(t.accent).child(lit(it) ? "▸" : ""))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(it, cx)).child(it.label)]));
+    const pullRequests = v_flex().id("dsec-prs").gap(6).on_size_change((size) => { d.hPrs = size.height; }).child(h3(v.prs.length > 0 ? `Pull requests · ${v.prs.length}` : "Pull requests"))
+      .child(v.prs.length === 0 ? div().text_size(12).text_color(t.muted).child("none linked") : v_flex().id("dpr-box").on_size_change((size) => { d.hPrBox = size.height; }).rounded(8).border(1).border_color(t.border).bg(t.raised).overflow_hidden()
+        .children(v.prs.slice(0, 3).map((p, i) => h_flex().id(`dpr-${i}`).h(32).px(10).gap(8).items_center().min_w_0().hover((h) => h.bg(t.hover))
+          .when(lit(prItems[i]), (el) => el.bg(mix(t.accent, t.raised, 0.14)))
+          .when(i > 0, (el) => el.border_t(1).border_color(t.border))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act({ action: "open", url: p.url, label: p.ref }, cx))
+          .child(div().w(12).flex_none().font_semibold().text_size(11).text_color(p.mark === "✓" ? t.ansi2 : p.mark === "✕" ? ensure(t.ansi1, t.raised, 4.5) : t.muted).child(["✓", "✕", "…", "—"].includes(p.mark) ? p.mark : "·"))
+          .child(this.mono(div().flex_none().text_size(11).text_color(t.muted)).child(`#${p.ref.split("#").pop()}`))
+          .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(["✓", "✕", "…", "—"].includes(p.mark) ? t.foreground : t.muted).child(p.title ?? ""))
+          .when(!["✓", "✕", "…", "—"].includes(p.mark), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(p.mark)))))
+        .when(v.prs.length > 3, (el) => el.child(h_flex().id("dpr-more").h(30).px(10).items_center().border_t(1).border_color(t.border).text_size(12)
+          .text_color(ensure(mix(t.accent, t.foreground, 0.3), t.raised, 4.5)).hover((h) => h.bg(t.hover))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .when(lit(moreItem), (el) => el.bg(mix(t.accent, t.raised, 0.14)))
+          .on_click((_e, cx) => this.act(moreItem, cx))
+          .child(`+${v.prs.length - 3} more ▸`))));
+    const agentRow = h_flex().id("d-agent").h(32).px(10).gap(8).items_center().rounded(8).border(1).border_color(t.border).bg(t.raised)
+      .child(v.agent ? this.agentDot(t, v.agent) : div().w(8).h(8).rounded(4).border(1).border_color(t.dim))
+      .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(v.agent ? t.foreground : t.muted).child(v.agent ? agentLabel(v.agent) : "no agent"))
+      .when(Boolean(v.agent && primary), (el) => el.hover((h) => h.bg(t.hover)).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(primary, cx))
+        .child(div().flex_none().text_size(11).text_color(ensure(mix(t.accent, t.foreground, 0.3), t.raised, 4.5)).child("Go to it ›")));
+    const work = v_flex().gap(8).child(h3("Agent and work")).child(agentRow)
+      .children(v.work.length === 0 ? [div().text_size(12).text_color(t.muted).child("no worktree linked")] : v.work.map((w, i) =>
+        v_flex().id(`w-${i}`).gap(3).child(this.mono(div().text_size(11).text_color(t.foreground).truncate()).child(w.where)).child(this.mono(div().text_size(11).text_color(t.muted).truncate()).child(w.path))));
+    const rightContent = v_flex().px(18).py(22).gap(22).child(actions).child(pullRequests).child(work)
+      .when(more.length > 0, (el) => el.child(v_flex().gap(2).child(h3("More")).children(more.map(([k, val], i) => h_flex().id(`dm-${i}`).min_h(24).gap(10).items_center()
+        .child(div().w(76).flex_none().text_size(12).text_color(t.muted).child(k)).child(div().flex_1().min_w_0().truncate().text_size(12).text_color(t.foreground).child(val))))));
     const right = this.scrollPane("details-right", this.panes.detailsRight, rightContent).w(320).flex_none().h_full().bg(t.well).border_l(1).border_color(t.border);
     return v_flex().id("details").flex_1().min_h_0().child(nav).child(h_flex().flex_1().min_h_0().items_start().child(left).child(right));
   }
@@ -974,22 +970,20 @@ export default class Tkt extends View {
     else if (y) pane.offset = keepVisible(pane, y[0], y[1]);
   }
 
-  /** Where each item the keyboard reaches in the details' right column sits, as [top, height], from the measured
-   *  Details and Pull requests sections and the fixed heights of the rows drawn after them. */
+  /** Where each item the keyboard reaches in the details' right column sits, as [top, height]: the actions from their
+   *  fixed row heights, then the pull requests below the measured Actions section. */
   detailsFocusY(d, prs, more, primary, groups) {
     const out = [];
-    const prsTop = 22 + (d.hDetails ?? 0) + 22;
-    const rowsTop = prsTop + Math.max(0, (d.hPrs ?? 0) - (d.hPrBox ?? 0));
-    for (let i = 0; i < prs; i++) out.push([rowsTop + i * 33, 32]);
-    if (more) out.push([rowsTop + prs * 33, 30]);
-    const h3 = Math.max(0, (d.hPrs ?? 0) - (d.hPrBox ?? 0) - 6);
-    let y = prsTop + (d.hPrs ?? 0) + 22 + h3 + 4;
+    let y = 22 + 22 + 4;
     if (primary) { out.push([y, 32]); y += 36; }
     groups.forEach((g, i) => {
       if (i > 0 && g !== groups[i - 1]) y += 13;
       out.push([y, 28]);
       y += 32;
     });
+    const rowsTop = 22 + (d.hActs ?? 0) + 22 + Math.max(0, (d.hPrs ?? 0) - (d.hPrBox ?? 0));
+    for (let i = 0; i < prs; i++) out.push([rowsTop + i * 33, 32]);
+    if (more) out.push([rowsTop + prs * 33, 30]);
     return out;
   }
 
