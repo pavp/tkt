@@ -28,6 +28,22 @@ export function legendFor(tab, view, { strip = false, bots = 0, merged = false }
   return legend;
 }
 
+/** The five keys the bottom bar names on a tab, the last one ? for every key the legend lists. */
+export function topKeys(tab) {
+  const keys = {
+    sprint: [["enter", "actions"], ["i", "details"], ["f", "feedback"], ["v", "view"]],
+    prs: [["enter", "actions"], ["p", "open PR"], ["f", "feedback"], ["t", "requested"]],
+    backlog: [["enter", "actions"], ["i", "details"], ["o", "Jira ↗"], ["v", "merge"]],
+  }[tab] ?? [];
+  return [...keys, ["?", "all keys"]];
+}
+
+/** Whether a notice set at `at` still shows at `now`: for six seconds, or until replaced when it reports a failure. */
+export function noticeShown(notice, at, now) {
+  if (!notice) return false;
+  return /^(could not|!)/i.test(notice) || now - at <= 6000;
+}
+
 /** The selected ticket's preview title: its key, its status with its mark's icon on its column's color, its summary. */
 export function previewBadge(row) {
   if (!row?.ticket) return null;

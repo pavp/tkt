@@ -29,3 +29,24 @@ test("the legend names z density on the Sprint's columns only, as the TUI's", ()
   assert.ok(legendFor("sprint", "columns").some(([k, what]) => k === "z" && what === "density"));
   assert.ok(!legendFor("sprint", "list").some(([k]) => k === "z"));
 });
+
+test("the bottom bar names the five keys that matter on each tab, ? listing the rest", async () => {
+  const { topKeys } = await import("../mod/lib/footer.js");
+  assert.deepEqual(topKeys("sprint", "columns").map(([k]) => k), ["enter", "i", "f", "v", "?"]);
+  assert.deepEqual(topKeys("prs", "list").map(([k]) => k), ["enter", "p", "f", "t", "?"]);
+  assert.deepEqual(topKeys("backlog", "list").map(([k]) => k), ["enter", "i", "o", "v", "?"]);
+  assert.equal(topKeys("sprint", "list").at(-1)[1], "all keys");
+});
+
+test("a notice shows for six seconds, an error until it is gone", async () => {
+  const { noticeShown } = await import("../mod/lib/footer.js");
+  assert.equal(noticeShown("✓ saved", 1000, 6999), true);
+  assert.equal(noticeShown("✓ saved", 1000, 7001), false);
+  assert.equal(noticeShown("", 1000, 1001), false);
+});
+
+test("a notice that reports a failure stays until another replaces it", async () => {
+  const { noticeShown } = await import("../mod/lib/footer.js");
+  assert.equal(noticeShown("could not: Jira answered 502", 1000, 60000), true);
+  assert.equal(noticeShown("! cached · 10:30", 1000, 60000), true);
+});

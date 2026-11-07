@@ -1,7 +1,7 @@
 // tkt's board in Herdr desktop: the daemon's /v1 API, reached through `tkt api` on whichever machine of the
 // core runs tkt, so it works whether tkt runs here or on a machine reached over SSH.
 
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView, VirtualListScrollHandle } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile, settings, fonts } from "herdr";
 import { tktTheme, monoFont, sourceColors, contrast, ensure, mix, CATPPUCCIN } from "./lib/theme.js";
@@ -11,8 +11,8 @@ import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns,
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN } from "./lib/columns.js";
 import { gutterOf, statusTone, prStatusTone, agentWord, prRefs, listColumns, pointsText } from "./lib/rows.js";
-import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone } from "./lib/footer.js";
-import { prRows, toggled, reposChip, prPreview, prsToggle } from "./lib/prs.js";
+import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone, topKeys, noticeShown } from "./lib/footer.js";
+import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
 import { backlogRows, badges, backlogAgents } from "./lib/backlog.js";
 import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
@@ -301,8 +301,41 @@ export default class Tkt extends View {
     });
   }
 
+  get notice() {
+    return noticeShown(this._notice, this._noticeAt ?? 0, Date.now()) ? this._notice : "";
+  }
+
+  set notice(text) {
+    this._notice = text;
+    this._noticeAt = Date.now();
+  }
+
   theme() {
     return tktTheme(theme(), this.palette);
+  }
+
+  icon(name, size = 16) {
+    return svg(`mods/tkt/icons/${name}.svg`).w(size).h(size).flex_none();
+  }
+
+  iconButton(t, id, name, onClick) {
+    return h_flex().id(id).w(32).h(32).flex_none().items_center().justify_center().rounded(7).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => onClick(cx)).child(this.icon(name));
+  }
+
+  /** Options side by side in one rounded box, the chosen one raised, as the header's switches. */
+  segment(t, id, options) {
+    return h_flex().id(id).p(3).gap(2).rounded(8).border(1).border_color(t.border).bg(t.surface).children(options.map((o, i) =>
+      h_flex().id(`${id}-${i}`).h(26).px(10).items_center().rounded(5).text_size(12).font_weight(500).bg(o.on ? t.pill : t.surface)
+        .text_color(o.on ? t.foreground : t.muted).hover((s) => s.text_color(t.foreground))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => { if (!o.on) o.click(cx); }).child(o.label)));
+  }
+
+  /** A filter's button: the funnel, its name, and how many it shows when it hides some. */
+  filterButton(t, id, label, on, onClick) {
+    return h_flex().id(id).h(32).px(10).gap(6).items_center().rounded(8).border(1).border_color(on ? t.accent : t.border).text_size(12).font_weight(500)
+      .text_color(t.muted).hover((s) => s.text_color(t.foreground)).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => onClick(cx))
+      .child(this.icon("filter", 13)).child(label);
   }
 
   /** el in the terminal's font, for ticket keys, PR numbers and paths. */
@@ -330,12 +363,15 @@ export default class Tkt extends View {
     const view = this.answers.prs?.body;
     if (!view) return div();
     const showBots = this.bots || view.hidden_bots > 0;
-    return h_flex().gap(6)
-      .child(this.toggle("team-prs", prsToggle(view.team_prs).on, (cx) => this.patchState({ team_prs: !view.team_prs }, cx)).child(prsToggle(view.team_prs).label))
-      .when(showBots, (el) => el.child(this.toggle("bots", this.bots, (cx) => { this.bots = !this.bots; this.load(cx); cx.notify(); })
-        .child(this.bots ? "Bots" : `Bots ${view.hidden_bots}`)))
-      .when((view.repos ?? []).length > 0, (el) => el.child(this.toggle("repos", this.panel === "repos", (cx) => { this.panel = this.panel === "repos" ? null : "repos"; cx.notify(); })
-        .child(`${reposChip(view.repos)} ▾`)));
+    return h_flex().gap(8).items_center()
+      .child(this.segment(t, "team-prs", [
+        { label: "Requested", on: !view.team_prs, click: (cx) => this.patchState({ team_prs: false }, cx) },
+        { label: "Team", on: Boolean(view.team_prs), click: (cx) => this.patchState({ team_prs: true }, cx) }]))
+      .when(showBots, (el) => el.child(h_flex().id("bots").h(32).px(10).items_center().rounded(8).border(1).border_color(this.bots ? t.accent : t.border)
+        .text_size(12).font_weight(500).text_color(this.bots ? t.foreground : t.muted).hover((s) => s.text_color(t.foreground))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => { this.bots = !this.bots; this.load(cx); cx.notify(); })
+        .child(this.bots ? "Bots shown" : `Bots ${view.hidden_bots} hidden`)))
+      .when((view.repos ?? []).length > 0, (el) => el.child(this.filterButton(t, "repos", reposChip(view.repos), this.panel === "repos", (cx) => { this.panel = this.panel === "repos" ? null : "repos"; cx.notify(); })));
   }
 
   /** A filter's checkbox panel under the header: each name with its count, a click hides or shows it. */
@@ -361,7 +397,7 @@ export default class Tkt extends View {
   teamToggle(t) {
     const view = this.answers.sprint?.body;
     if (!view) return div();
-    return this.toggle("team", Boolean(view.team), (cx) => this.toggleTeam(cx)).child("Team");
+    return this.segment(t, "team", [{ label: "Mine", on: !view.team, click: (cx) => this.toggleTeam(cx) }, { label: "Team", on: Boolean(view.team), click: (cx) => this.toggleTeam(cx) }]);
   }
 
   /** Turns the team's tickets on or off on the Sprint, then syncs, since they come from Jira. */
@@ -381,22 +417,16 @@ export default class Tkt extends View {
     const boards = this.answers[this.tab]?.body?.boards ?? [];
     if (boards.length === 0) return div();
     const shown = boards.filter((b) => !b.hidden).length;
-    return this.toggle("boards", this.panel === "boards", (cx) => { this.panel = this.panel === "boards" ? null : "boards"; cx.notify(); })
-      .child(`${shown === boards.length ? "Boards" : `Boards ${shown}/${boards.length}`} ▾`);
+    return this.filterButton(t, "boards", shown === boards.length ? "Boards" : `Boards ${shown}/${boards.length}`, this.panel === "boards", (cx) => { this.panel = this.panel === "boards" ? null : "boards"; cx.notify(); });
   }
 
   backlogControls(t) {
     const view = this.answers.backlog?.body;
     if (!view) return div();
-    const option = (merged, title) => {
-      const on = Boolean(view.merged) === merged;
-      return div().id(`merge-${merged}`).px(10).py(2).rounded(5).bg(on ? t.selected : t.chrome).text_color(on ? t.foreground : t.muted)
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => this.patchState({ backlog_merged: merged }, cx))
-        .child(title);
-    };
-    return h_flex().gap(6)
-      .child(h_flex().p(2).gap(2).rounded(7).border(1).border_color(t.border).child(option(false, "Split")).child(option(true, "Merged")))
+    return h_flex().gap(8).items_center()
+      .child(this.segment(t, "merge", [
+        { label: "Split", on: !view.merged, click: (cx) => this.patchState({ backlog_merged: false }, cx) },
+        { label: "Merged", on: Boolean(view.merged), click: (cx) => this.patchState({ backlog_merged: true }, cx) }]))
       .child(this.boardsChip(t));
   }
 
@@ -1113,6 +1143,7 @@ export default class Tkt extends View {
   key(e, cx) {
     if (!this.prompt && keyOf(e) === "q") e = { ...e, key: "escape", keystroke: "escape", key_char: undefined };
     const k = e.key;
+    if (this.keysOpen) { this.keysOpen = false; cx.notify(); return; }
     if (this.menu) {
       if (k === "escape") this.menu = backOf(this.menu);
       if (k === "down") this.menu.sel = Math.min(this.menu.items.length - 1, this.menu.sel + 1);
@@ -1194,7 +1225,9 @@ export default class Tkt extends View {
     if (action === "settings") return this.attempt(() => this.openSettings(), cx);
     if (action === "boards" || action === "repos") { this.panel = this.panel === action ? null : action; return; }
     if (action === "bots") { this.bots = !this.bots; return this.load(cx); }
+    if (action === "keys") { this.keysOpen = !this.keysOpen; return; }
     if (action === "density") {
+      if (this.view !== "columns") return;
       this.compact = !this.compact;
       this.notice = this.compact ? "compact cards · z for details" : "detailed cards · z for compact";
       return;
@@ -1317,26 +1350,60 @@ export default class Tkt extends View {
     return undefined;
   }
 
-  preview(t, board) {
-    const p = this.tab === "prs" ? prPreview(prRows(board).find((r) => r.kind === "row" && r.key + r.group === this.selected)) : previewOf(this.selectedRow(board));
-    if (!p) return div().px(12).py(6).text_size(12).text_color(t.dim).child("nothing selected");
-    const badge = this.tab === "prs" ? null : previewBadge(this.selectedRow(board));
-    return v_flex().px(12).py(6).gap(2).border_t(1).border_color(t.border)
-      .child(badge ? h_flex().gap(6).items_center()
-        .child(div().font_semibold().text_color(t.foreground).child(badge.key))
-        .child(div().px(5).rounded(4).text_size(12).bg(t[badge.tone] ?? t.raised).text_color(t.background).child(badge.status))
-        .child(div().flex_1().truncate().text_color(t.foreground).child(`· ${badge.summary}`))
-        : div().truncate().font_semibold().text_color(t.foreground).child(p.title))
-      .child(h_flex().gap(6).text_size(12)
-        .when(Boolean(p.label), (el) => el.child(div().px(5).rounded(4).bg(t.chrome).text_color(t.foreground).child(p.label)))
-        .child(div().flex_1().truncate().text_color(t.dim).child(p.line)));
+  keyCap(t, k) {
+    return this.mono(div().px(5).rounded(4).border(1).border_color(t.border).text_size(10).text_color(t.foreground)).child(k);
   }
 
-  legend(t) {
+  /** The bottom bar: the selection and the sync on top; under it the selection's details, or a notice or an error,
+   *  and the keys that matter on the tab. */
+  footer(t) {
+    const body = this.answers[this.tab]?.body;
+    const board = !this.choices && !this.details && !this.settings && (this.tab === "sprint" || this.tab === "prs");
+    const row = board && this.tab === "sprint" ? this.selectedRow(body) : null;
+    const badge = row ? previewBadge(row) : null;
+    const p = row ? previewOf(row) : board && this.tab === "prs" ? prPreview(prRows(body).find((r) => r.kind === "row" && r.key + r.group === this.selected)) : null;
+    const where = this.machine === undefined ? "looking for tkt…" : `tkt on ${this.machine ?? "this computer"}`;
+    const sync = this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.cachedAt ? cachedLabel(this.cachedAt) : this.answers[this.tab]?.body?.sync_label ?? "";
+    const warn = sync.startsWith("!");
+    const title = (text) => div().flex_1().min_w_0().truncate().text_size(13).font_weight(500).text_color(t.foreground).child(text);
+    const line1 = h_flex().gap(10).items_center()
+      .when(Boolean(badge), (el) => el.child(div().flex_none().px(8).py(1).rounded(5).bg(t.pill).text_size(11).font_semibold().text_color(t.muted).child(badge.status))
+        .child(this.mono(div().flex_none().text_size(12).text_color(t.muted)).child(badge.key)).child(title(badge.summary)))
+      .when(!badge && Boolean(p), (el) => el.child(title(p.title)))
+      .when(!badge && !p, (el) => el.child(div().flex_1().text_size(12).text_color(t.muted).child(board ? "nothing selected" : "")))
+      .when(Boolean(sync), (el) => el.child(h_flex().flex_none().gap(6).items_center().text_size(11).text_color(warn ? ensure(t.ansi3, t.chrome, 4.5) : t.muted)
+        .child(div().w(6).h(6).rounded(3).bg(warn ? t.ansi3 : t.ansi2)).child(sync.replace(/^✓ /, ""))))
+      .child(h_flex().id("sync").w(22).h(22).flex_none().items_center().justify_center().rounded(5).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.sync(cx)).child(this.icon("refresh", 13)))
+      .child(div().w(1).h(14).flex_none().bg(t.border))
+      .child(h_flex().id("machine").flex_none().gap(5).px(6).h(22).items_center().rounded(5).text_size(11).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.pick(cx)).child(where).child("▾"));
+    const error = this.error ? problemOf(this.error, this.machine) : "";
+    const notice = this.notice;
+    const label = mix(t.ansi4, t.chrome, 0.14);
+    const line2 = h_flex().gap(8).items_center()
+      .child(error ? div().flex_1().min_w_0().truncate().text_size(12).text_color(ensure(t.ansi1, t.chrome, 4.5)).child(error)
+        : notice ? div().flex_1().min_w_0().truncate().text_size(12).text_color(t.foreground).child(notice)
+          : h_flex().flex_1().min_w_0().gap(8).items_center()
+            .when(Boolean(p?.label), (el) => el.child(div().flex_none().px(8).rounded(4).bg(label).text_size(11).text_color(ensure(mix(t.ansi4, t.foreground, 0.45), label, 4.5)).child(p.label)))
+            .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(t.muted).child(p?.line ?? "")))
+      .children(topKeys(this.tab).map(([k, what], i) => h_flex().id(`key-${i}`).flex_none().gap(5).items_center().text_size(11).text_color(t.muted).child(this.keyCap(t, k)).child(what)));
+    return v_flex().px(16).pt(9).pb(10).gap(6).bg(t.chrome).border_t(1).border_color(t.border).child(line1).child(line2);
+  }
+
+  /** Every key the tab answers, as the legend lists them; any key closes it. */
+  keysBox(t) {
     const body = this.answers[this.tab]?.body;
     const opts = { strip: (this.answers.sprint?.body?.reviews ?? []).length > 0, bots: body?.hidden_bots ?? 0, merged: Boolean(body?.merged) };
-    return h_flex().flex_wrap().px(12).py(4).gap(14).text_size(11).children(legendFor(this.tab, this.view, opts).map(([k, what], i) =>
-      h_flex().id(`legend-${i}`).gap(4).child(div().text_color(t.accent).child(k)).child(div().text_color(t.dim).child(what))));
+    return div().id("keys").absolute().inset_0()
+      .child(div().absolute().inset_0().bg(t.background).opacity(0.55))
+      .child(v_flex().absolute().inset_0().items_center().justify_center()
+        .child(v_flex().id("keys-box").w(520).p(16).gap(10).rounded(12).bg(t.popover).border(1).border_color(t.border).shadow_lg()
+          .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); this.keysOpen = false; cx.notify(); })
+          .child(div().text_size(14).font_semibold().text_color(t.foreground).child("Keys"))
+          .child(h_flex().flex_wrap().gap_x(18).gap_y(8).children(legendFor(this.tab, this.view, opts).map(([k, what], i) =>
+            h_flex().id(`all-key-${i}`).w(220).gap(8).items_center().text_size(12).text_color(t.muted).child(this.keyCap(t, k)).child(what))))
+          .child(div().text_size(11).text_color(t.muted).child("any key closes"))));
   }
 
   select(id, cx) {
@@ -1352,28 +1419,39 @@ export default class Tkt extends View {
   strip(t, board) {
     const { chips, more } = stripChips(board?.reviews, 6);
     if (chips.length === 0) return div();
-    return h_flex().id("strip").px(12).pt(8).gap(8).items_center().text_size(12)
-      .child(div().text_color(t.dim).child("Review requested"))
+    const amber = mix(t.ansi3, t.raised, 0.05);
+    return h_flex().id("strip").px(18).pt(12).gap(8).items_center()
+      .child(div().text_size(11).font_weight(500).text_color(t.muted).child("Review requested"))
       .children(chips.map((c, i) => {
         const on = this.inStrip && this.stripSel === i;
-        return h_flex().id(`chip-${i}`).gap(4).px(8).py(2).rounded(10).border(1).border_color(on ? t.accent : t.ansi5 ?? t.border)
-          .hover((s) => s.bg(t.hover)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        return h_flex().id(`chip-${i}`).h(26).gap(6).px(10).items_center().rounded(13).border(1).border_color(on ? t.accent : mix(t.ansi3, t.raised, 0.28)).bg(amber)
+          .hover((s) => s.border_color(t.accent)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click((_e, cx) => { this.menu = { ...prMenu(c.row, {}), sel: 0 }; cx.notify(); })
-          .child(div().text_color(on ? t.accent : t.peach).child(on ? "▸" : "!")).child(div().text_color(t.foreground).child(c.label));
+          .child(div().text_size(12).font_semibold().text_color(on ? t.accent : ensure(t.ansi3, amber, 4.5)).child(on ? "▸" : "!"))
+          .child(this.mono(div().text_size(11).text_color(ensure(t.foreground, amber, 7))).child(c.label));
       }))
-      .when(Boolean(more), (el) => el.child(div().text_color(t.dim).child(more)));
+      .when(Boolean(more), (el) => el.child(div().text_size(11).text_color(t.muted).child(more)));
   }
 
   /** The line under the tabs: the tab summed up, and on its right the filter's notice, which a click opens. */
   contextLine(t) {
     const body = this.answers[this.tab]?.body;
     const notice = scopeNotice(this.tab, body);
-    return h_flex().px(12).py(3).gap(12).text_size(12).border_b(1).border_color(t.border)
-      .child(div().flex_1().truncate().text_color(t.muted).child(contextText(this.tab, body, { loading: this.tab === "backlog" && !body }) || " "))
-      .when(Boolean(notice), (el) => el.child(h_flex().id("scope-notice").hover((s) => s.bg(t.hover))
+    const text = contextText(this.tab, body, { loading: this.tab === "backlog" && !body }) || " ";
+    const parts = this.tab === "sprint"
+      ? text.split(/ {3,}/).flatMap((sprint, i) => {
+        const words = sprint.split(" · ");
+        const head = words.length > 1 ? words.slice(0, -1).join(" · ") : sprint;
+        return [...(i > 0 ? [div().w(14)] : []), div().text_size(13).font_semibold().text_color(t.foreground).child(head), ...(words.length > 1 ? [div().text_size(12).text_color(t.muted).child(`· ${words.at(-1)}`)] : [])];
+      })
+      : text.split(" · ").flatMap((w, i) => [...(i > 0 ? [div().text_size(12).text_color(t.dim).child("·")] : []),
+        div().text_size(12).text_color(/needs? you/.test(w) ? ensure(t.ansi3, t.surface, 4.5) : i === 0 ? t.foreground : t.muted).child(w)]);
+    return h_flex().px(18).pt(12).gap(8).items_center()
+      .child(h_flex().flex_1().min_w_0().gap(8).items_center().children(parts))
+      .when(Boolean(notice), (el) => el.child(h_flex().id("scope-notice").gap(5).items_center().text_size(11).text_color(t.muted).hover((s) => s.text_color(t.foreground))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => { this.panel = this.tab === "prs" ? "repos" : "boards"; cx.notify(); })
-        .child(div().text_color(t.dim).child(notice.text)).child(div().text_color(t.accent).child(notice.key)).child(div().text_color(t.dim).child(notice.after))));
+        .child(notice.text.replace(/ · $/, " ·")).child(this.keyCap(t, notice.key)).child(notice.after.trim())));
   }
 
   header(t) {
@@ -1381,31 +1459,27 @@ export default class Tkt extends View {
       const id = props()?.overlay;
       if (id) closeOverlay(id);
     };
-    return h_flex().px(12).py(8).gap(6).items_center().bg(t.chrome).border_b(1).border_color(t.border)
-      .child(div().font_semibold().text_color(t.foreground).pr(10).child("tkt"))
-      .children(TABS.map((tab, i) => {
-        const on = tab.id === this.tab;
-        const count = tabCount(tab.id, this.answers[tab.id]?.body);
-        return h_flex().id(`tab-${tab.id}`).gap(6).px(8).py(2).rounded(6).border(1).border_color(on ? t.accent : t.border)
-          .bg(t.chrome).hover((s) => s.bg(t.hover))
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          .on_click((_e, cx) => this.select(tab.id, cx))
-          .child(div().text_color(t.dim).child(String(i + 1)))
-          .child(div().text_color(on ? t.foreground : t.muted).when(on, (el) => el.font_semibold()).child(tab.title))
-          .when(count !== "", (el) => el.child(div().px(5).rounded(4).text_size(11).bg(on ? t.solid : t.raised).text_color(on ? t.solid_foreground : t.foreground).child(count)));
-      }))
+    const tabs = h_flex().p(3).gap(2).rounded(8).border(1).border_color(t.border).bg(t.surface).children(TABS.map((tab, i) => {
+      const on = tab.id === this.tab;
+      const count = tabCount(tab.id, this.answers[tab.id]?.body);
+      return h_flex().id(`tab-${tab.id}`).h(28).px(10).gap(7).items_center().rounded(5).bg(on ? t.pill : t.surface).hover((s) => s.bg(t.hover))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => this.select(tab.id, cx))
+        .child(this.mono(div().text_size(10).text_color(t.muted)).child(String(i + 1)))
+        .child(div().text_size(13).text_color(on ? t.foreground : t.muted).font_weight(on ? 600 : 500).child(tab.title))
+        .when(count !== "", (el) => el.child(div().px(6).rounded(8).text_size(10).font_semibold().bg(on ? t.accent : t.pill).text_color(on ? ensure(t.chrome, t.accent, 4.5) : t.foreground).child(count)));
+    }));
+    return h_flex().h(52).px(14).gap(12).items_center().bg(t.chrome).border_b(1).border_color(t.border)
+      .child(h_flex().gap(8).items_center().mr(6)
+        .child(h_flex().w(20).h(20).rounded(5).bg(t.accent).items_center().justify_center().text_size(12).font_semibold().text_color(ensure(t.chrome, t.accent, 4.5)).child("t"))
+        .child(div().text_size(14).font_semibold().text_color(t.foreground).child("tkt")))
+      .child(tabs)
       .child(div().flex_1())
-      .when(this.tab === "sprint", (el) => el.child(this.viewSwitch(t)).child(this.boardsChip(t)).child(this.teamToggle(t)))
+      .when(this.tab === "sprint", (el) => el.child(this.viewSwitch(t)).child(this.teamToggle(t)).child(this.boardsChip(t)))
       .when(this.tab === "prs", (el) => el.child(this.prControls(t)))
       .when(this.tab === "backlog", (el) => el.child(this.backlogControls(t)))
-      .child(div().id("gear").px(8).py(3).rounded(6).text_color(this.settings ? t.foreground : t.muted).hover((s) => s.bg(t.hover))
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => { if (this.settings) { this.settings = null; cx.notify(); } else this.attempt(() => this.openSettings(), cx); })
-        .text_size(18).child("⚙"))
-      .child(div().id("close").px(8).py(3).rounded(6).text_color(t.muted).hover((s) => s.bg(t.hover))
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click(() => close())
-        .text_size(16).child("✕"));
+      .child(this.iconButton(t, "gear", "gear", (cx) => { if (this.settings) { this.settings = null; cx.notify(); } else this.attempt(() => this.openSettings(), cx); }))
+      .child(this.iconButton(t, "close", "close", () => close()));
   }
 
   chooser(t) {
@@ -1424,11 +1498,7 @@ export default class Tkt extends View {
   }
 
   viewSwitch(t) {
-    const b = viewButton(this.view);
-    return div().id("view").px(10).py(2).rounded(6).border(1).border_color(t.border).text_color(t.foreground).hover((s) => s.bg(t.hover))
-      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-      .on_click((_e, cx) => this.setView(b.next, cx))
-      .child(b.label);
+    return this.segment(t, "view", [{ label: "Columns", on: this.view === "columns", click: (cx) => this.setView("columns", cx) }, { label: "List", on: this.view === "list", click: (cx) => this.setView("list", cx) }]);
   }
 
   card(t, c, labelField, dim = false) {
@@ -1618,21 +1688,6 @@ export default class Tkt extends View {
     return div().p(16).text_color(t.muted).child(`${(answer.body.sections ?? answer.body.groups ?? []).length} groups`);
   }
 
-  status(t) {
-    const where = this.machine === undefined ? "looking for tkt…" : `tkt on ${this.machine ?? "this computer"} ▾`;
-    return h_flex().px(12).py(5).gap(12).bg(t.chrome).border_t(1).border_color(t.border).text_size(12)
-      .child(div().id("machine").px(4).rounded(4).text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => this.pick(cx))
-        .child(where))
-      .child(div().flex_1().truncate().text_color(this.error ? t.blocked : t.dim).child(this.error ? problemOf(this.error, this.machine) : this.notice))
-      .child(((label) => div().text_color(t[syncTone(label)] ?? t.dim).child(label))(this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.cachedAt ? cachedLabel(this.cachedAt) : this.answers[this.tab]?.body?.sync_label ?? ""))
-      .child(div().id("sync").px(6).rounded(4).text_color(t.muted).hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => this.sync(cx))
-        .child("↻"));
-  }
-
   render(_cx) {
     const t = this.theme();
     return v_flex().id("root").relative().size_full().bg(t.surface).text_size(13)
@@ -1645,12 +1700,11 @@ export default class Tkt extends View {
       .when(!this.choices && !this.details && !this.settings, (el) => el.child(this.contextLine(t)))
       .when(Boolean(warningsLine(this.answers.sprint?.body?.warnings)), (el) => el.child(this.warningsStrip(t, warningsLine(this.answers.sprint.body.warnings))))
       .child(v_flex().id("body").flex_1().min_h_0().child(this.body(t)))
-      .when((this.tab === "sprint" || this.tab === "prs") && !this.choices && !this.details && !this.settings, (el) => el.child(this.preview(t, this.answers[this.tab]?.body)))
-      .child(this.legend(t))
-      .child(this.status(t))
+      .child(this.footer(t))
       .when(Boolean(this.openPanel()), (el) => { const p = this.openPanel(); return el.child(this.filterPanel(t, p.items, p.hidden, p.field)); })
       .when(Boolean(this.menu), (el) => el.child(this.menuBox(t)))
       .when(Boolean(this.picker), (el) => el.child(this.pickerBox(t)))
-      .when(Boolean(this.prompt), (el) => el.child(this.promptBox(t)));
+      .when(Boolean(this.prompt), (el) => el.child(this.promptBox(t)))
+      .when(Boolean(this.keysOpen), (el) => el.child(this.keysBox(t)));
   }
 }

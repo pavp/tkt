@@ -91,3 +91,8 @@ test("z switches the Sprint's cards between detailed and compact, as the TUI's d
   assert.equal(boardAction("z", "prs"), null);
   assert.equal(boardAction("z", "backlog"), null);
 });
+
+test("? opens the list of every key, on any tab", async () => {
+  const { boardAction } = await import("../mod/lib/nav.js");
+  for (const tab of ["sprint", "prs", "backlog"]) assert.equal(boardAction("?", tab), "keys");
+});
