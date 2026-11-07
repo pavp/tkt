@@ -3,12 +3,13 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView, VirtualListScrollHandle } from "gpui-base";
-import { exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile } from "herdr";
+import { exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile, settings, fonts } from "herdr";
+import { tktTheme, monoFont } from "./lib/theme.js";
 import * as os from "os";
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
-import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN, withPeach } from "./lib/columns.js";
+import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN } from "./lib/columns.js";
 import { gutterOf, statusTone, prStatusTone, agentWord, prRefs, listColumns, pointsText } from "./lib/rows.js";
 import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview, prsToggle } from "./lib/prs.js";
@@ -293,13 +294,25 @@ export default class Tkt extends View {
     });
   }
 
+  theme() {
+    return tktTheme(theme(), this.palette);
+  }
+
+  /** el in the terminal's font, for ticket keys, PR numbers and paths. */
+  mono(el) {
+    if (this.monoFamily === undefined) {
+      try { this.monoFamily = monoFont(settings(), fonts()); } catch { this.monoFamily = ""; }
+    }
+    return this.monoFamily ? el.font_family(this.monoFamily) : el;
+  }
+
   checkbox(t, on) {
     return h_flex().w(18).h(18).flex_none().rounded(4).border(1).border_color(on ? t.accent : t.muted).bg(on ? t.accent : t.popover)
       .items_center().justify_center().text_size(13).font_semibold().text_color(t.background).child(on ? "✓" : "");
   }
 
   toggle(id, on, onClick) {
-    const t = withPeach(theme());
+    const t = this.theme();
     return div().id(id).px(10).py(2).rounded(5).border(1).border_color(on ? t.accent : t.border)
       .text_color(on ? t.foreground : t.muted).bg(on ? t.selected : t.chrome).hover((s) => s.bg(t.hover))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
@@ -429,7 +442,7 @@ export default class Tkt extends View {
     const ci = { pass: ["✓", t.ansi2], fail: ["✕", t.ansi1], pending: ["…", t.accent] }[pr.checks] ?? ["—", t.dim];
     return h_flex().h(ROW).px(12).gap(10).items_center().bg(sel ? t.selected : t.surface)
       .child(div().w(20).text_color(t[g.tone] ?? t.dim).child(g.text))
-      .child(div().w(60).text_color(sel ? t.foreground : t.dim).child(r.key))
+      .child(this.mono(div().w(60).text_color(sel ? t.foreground : t.dim)).child(r.key))
       .child(h_flex().w(190).gap(4).child(div().truncate().text_color(t[prStatusTone(r.raw)] ?? t.foreground).child(r.status))
         .when(Boolean(r.approvals), (el) => el.child(div().text_color(t.dim).child(`· ${r.approvals}`))))
       .child(div().w(90).truncate().text_color(t.muted).child(pr.author ?? ""))
@@ -1366,7 +1379,7 @@ export default class Tkt extends View {
       .child(h_flex().gap(6).items_center()
         .child(h_flex().gap(4).child(div().text_color(t.accent).child(sel ? "▸" : ""))
           .when(c.subtask, (el) => el.child(div().text_color(t.ansi6 ?? t.dim).child("↳")))
-          .child(div().text_color(sel ? t.foreground : t.dim).when(sel, (el) => el.font_semibold()).child(c.key)))
+          .child(this.mono(div().text_color(sel ? t.foreground : t.dim)).when(sel, (el) => el.font_semibold()).child(c.key)))
         .when(Boolean(c.points), (el) => el.child(div().text_color(t.dim).child(c.points)))
         .child(div().flex_1())
         .when(Boolean(flag), (el) => el.child(div().text_color(c.attention ? t.blocked : t[mark?.tone] ?? t.muted).child(flag)))
@@ -1410,7 +1423,7 @@ export default class Tkt extends View {
       .child(h_flex().w(110).gap(4)
         .when(Boolean(icon), (el) => el.child(div().text_color(t[icon?.tone] ?? t.dim).child(icon?.glyph ?? "")))
         .when(c.subtask, (el) => el.child(div().text_color(t.ansi6 ?? t.dim).child("↳")))
-        .child(div().text_color(sel ? t.foreground : t.dim).child(c.key)))
+        .child(this.mono(div().text_color(sel ? t.foreground : t.dim)).child(c.key)))
       .child(div().w(130).truncate().text_color(t[statusTone(tk.category)] ?? t.muted).child(c.status))
       .when(Boolean(cols.points), (el) => el.child(div().w(36).text_color(t.dim).child(pointsText(tk.points))))
       .when(Boolean(opts.backlog), (el) => el.child(div().w(150).child(tk.board ? div().px(5).rounded(4).bg(t.chrome).text_color(t.foreground).truncate().child(tk.board) : div())))
@@ -1499,7 +1512,7 @@ export default class Tkt extends View {
   }
 
   render(_cx) {
-    const t = withPeach(theme());
+    const t = this.theme();
     return v_flex().id("root").relative().size_full().bg(t.surface).text_size(13)
       .key_context("TktMod").track_focus(this.focus).on_key_down((e, cx) => this.key(e, cx))
       .on_action("tkt::NextTab", (_e, cx) => this.key({ key: "tab", keystroke: "tab", modifiers: {} }, cx))
