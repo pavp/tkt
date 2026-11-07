@@ -1050,9 +1050,15 @@ export default class Tkt extends View {
       const space = d.spaces.find((x) => x.key === st.statusSpace) ?? d.spaces[0];
       const loaded = space ? st.statuses[space.key] : null;
       st.chipAt = {};
+      const colTitle = (id) => d.columns.find((c) => c.id === id)?.title ?? id;
+      const hint = st.grab ? (st.grab.to !== st.grab.from ? `Space drops ${st.grab.name} in ${colTitle(st.grab.to)}, saved for ${space?.key}; esc cancels.` : `← → choose a column for ${st.grab.name}; esc cancels.`)
+        : st.drag ? (st.dropTarget && st.dropTarget !== st.drag.column ? `Release to move ${st.drag.name} to ${colTitle(st.dropTarget)}, saved for ${space?.key}.` : `Drag ${st.drag.name} onto another column; release elsewhere to cancel.`) : null;
       const head = h_flex().gap(16).items_end().pb(16)
-        .child(v_flex().flex_1().gap(4).child(div().text_size(18).font_semibold().text_color(t.foreground).child("Statuses"))
-          .child(div().text_size(13).text_color(t.muted).child("Which column of the board each Jira status falls in, and the mark its tickets show.")))
+        .child(v_flex().flex_1().min_w_0().gap(4).child(div().text_size(18).font_semibold().text_color(t.foreground).child("Statuses"))
+          .child(div().text_size(13).truncate().text_color(hint ? t.foreground : t.muted).child(hint ?? "Which column of the board each Jira status falls in, and the mark its tickets show.")))
+        .when(Boolean(loaded), (el) => el.child(h_flex().flex_none().gap(14).items_center().text_size(12).text_color(t.muted)
+          .child(h_flex().gap(6).items_center().child(div().w(6).h(6).rounded(3).bg(t.accent)).child("set by you"))
+          .child(div().child("auto: from Jira's category"))))
         .when(d.spaces.length > 1, (el) => el.child(this.segment(t, "status-space", d.spaces.map((x) => ({ label: x.key, on: x.key === space?.key, click: (cx) => { st.statusSpace = x.key; st.sel = 0; st.grab = null; this.attempt(() => this.readStatuses(), cx); cx.notify(); } })))));
       if (!space) content = head;
       else if (!loaded && !st.statusFailed?.[space.key]) content = v_flex().child(head).child(div().text_size(13).text_color(t.muted).child("Reading the statuses from Jira…"));
@@ -1100,11 +1106,7 @@ export default class Tkt extends View {
             const dr = st.drag, to = st.dropTarget;
             st.drag = null; st.press = null; st.dropTarget = null;
             if (dr && to && to !== dr.column) this.attempt(() => this.moveStatus(dr.space, dr.name, to), cx); else cx.notify();
-          }))
-          .child(h_flex().pt(14).gap(16).items_center().text_size(12).text_color(t.muted)
-            .child(div().flex_1().child(st.grab ? `← → choose a column for ${st.grab.name}, space to drop it there, esc to cancel.` : st.drag ? (st.dropTarget && st.dropTarget !== st.drag.column ? `Release to move ${st.drag.name} to ${d.columns.find((c) => c.id === st.dropTarget)?.title ?? st.dropTarget}; it is saved for ${space.key}.` : `Drag ${st.drag.name} onto another column; release elsewhere to cancel.`) : "Drag a status to another column, or select it and press space to pick it up. Enter changes its mark or brings it back to automatic."))
-            .child(h_flex().gap(6).items_center().child(div().w(6).h(6).rounded(3).bg(t.accent)).child("set by you"))
-            .child(div().child("auto: from Jira's category")));
+          }));
       }
     } else if (st.section === "clones") {
       content = v_flex().gap(8).child(intro("Local clones", "Folders tkt looks for clones in; the first one is where new clones go."))
