@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/pavp/tkt/internal/ticket"
 )
@@ -44,6 +47,7 @@ type gqlCall struct {
 func gqlServer(t *testing.T, respond func(q string) (int, string)) (string, *http.Client, *[]gqlCall) {
 	t.Helper()
 	var calls []gqlCall
+	var mu sync.Mutex
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/graphql" {
 			http.NotFound(w, r)
@@ -55,7 +59,9 @@ func gqlServer(t *testing.T, respond func(q string) (int, string)) (string, *htt
 		}
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &body)
+		mu.Lock()
 		calls = append(calls, gqlCall{auth: r.Header.Get("Authorization"), query: body.Query, vars: body.Variables})
+		mu.Unlock()
 		code, resp := respond(body.Query)
 		w.WriteHeader(code)
 		_, _ = io.WriteString(w, resp)
@@ -75,10 +81,11 @@ func staticTokens(m map[string]string) TokenFunc {
 
 func TestPullRequestsBatchesPerOwner(t *testing.T) {
 	base, h, calls := gqlServer(t, func(q string) (int, string) {
-		if strings.Contains(q, `owner: "example-org"`) {
-			return 200, `{"data":{
-			  "r0":{"open":{"nodes":[` + pr("example-org/api", 4, "feature/DEMO-1-x", "OPEN", "CHANGES_REQUESTED", "SUCCESS") + `]},"merged":{"nodes":[]}},
-			  "r1":{"open":{"nodes":[` + pr("example-org/web", 9, "feature/DEMO-1-x", "OPEN", "", "FAILURE") + `]},
+		switch {
+		case strings.Contains(q, `name: "api"`):
+			return 200, `{"data":{"r0":{"open":{"nodes":[` + pr("example-org/api", 4, "feature/DEMO-1-x", "OPEN", "CHANGES_REQUESTED", "SUCCESS") + `]},"merged":{"nodes":[]}}}}`
+		case strings.Contains(q, `name: "web"`):
+			return 200, `{"data":{"r0":{"open":{"nodes":[` + pr("example-org/web", 9, "feature/DEMO-1-x", "OPEN", "", "FAILURE") + `]},
 			        "merged":{"nodes":[` + pr("example-org/web", 7, "fix/DEMO-2", "MERGED", "APPROVED", "SUCCESS") + `]}}}}`
 		}
 		return 200, `{"data":{"r0":{"open":{"nodes":[` + pr("other-org/tool", 1, "chore/x", "OPEN", "REVIEW_REQUIRED", "PENDING") + `]},"merged":{"nodes":[]}}}}`
@@ -88,8 +95,13 @@ func TestPullRequestsBatchesPerOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(*calls) != 2 {
-		t.Fatalf("calls = %d, want one per owner", len(*calls))
+	if len(*calls) != 3 {
+		t.Fatalf("calls = %d, want one per repository", len(*calls))
+	}
+	for _, call := range *calls {
+		if n := strings.Count(call.query, "repository("); n != 1 {
+			t.Errorf("each query names one repository, got %d: %s", n, call.query)
+		}
 	}
 	q := (*calls)[0].query
 	for _, seg := range strings.Split(q, "open: ")[1:] {
@@ -103,8 +115,14 @@ func TestPullRequestsBatchesPerOwner(t *testing.T) {
 			t.Errorf("merged pull requests should ask only for what the board shows: %s", merged)
 		}
 	}
-	if (*calls)[0].auth != "Bearer work" || (*calls)[1].auth != "Bearer personal" {
-		t.Errorf("auth = %q, %q", (*calls)[0].auth, (*calls)[1].auth)
+	for _, call := range *calls {
+		want := "Bearer work"
+		if strings.Contains(call.query, `owner: "other-org"`) {
+			want = "Bearer personal"
+		}
+		if call.auth != want {
+			t.Errorf("each repository uses its owner's account: %q for %s", call.auth, call.query)
+		}
 	}
 	want := []ticket.PullRequest{
 		{Repo: "example-org/api", Number: 4, Title: "PR 4", URL: "https://github.com/example-org/api/pull/4", Branch: "feature/DEMO-1-x", State: ticket.PROpen, Checks: ticket.ChecksPass, Review: ticket.ReviewChangesRequested, Author: "alex", HeadSHA: "sha4"},
@@ -421,5 +439,32 @@ func TestReposUnknownOwner(t *testing.T) {
 	c := New(staticTokens(map[string]string{"nobody": "t"})).WithEndpoints(base, h)
 	if _, err := c.Repos(context.Background(), "nobody"); err == nil || err.Error() != "no GitHub organization or user named nobody" {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestPullRequestsAskSeveralRepositoriesAtOnceButFewAtATime(t *testing.T) {
+	var mu sync.Mutex
+	now, most := 0, 0
+	base, h, _ := gqlServer(t, func(string) (int, string) {
+		mu.Lock()
+		now++
+		most = max(most, now)
+		mu.Unlock()
+		time.Sleep(30 * time.Millisecond)
+		mu.Lock()
+		now--
+		mu.Unlock()
+		return 200, `{"data":{"r0":{"open":{"nodes":[]},"merged":{"nodes":[]}}}}`
+	})
+	c := New(staticTokens(map[string]string{"example-org": "t"})).WithEndpoints(base, h)
+	var repos []string
+	for i := range 10 {
+		repos = append(repos, fmt.Sprintf("example-org/repo%d", i))
+	}
+	if _, err := c.PullRequests(context.Background(), repos); err != nil {
+		t.Fatal(err)
+	}
+	if most < 2 || most > 4 {
+		t.Errorf("queries at once = %d, want between 2 and 4", most)
 	}
 }
