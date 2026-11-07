@@ -9,6 +9,8 @@ Objective: make the Sprint board with the team on load fast, and the Herdr mod's
 - S5 The daemon log trims long error bodies (GitHub HTML pages) and records each sync's duration.
 - S6 Existing behavior holds: with the team off the board, counts and the PRs repository filter show only the user's tickets.
 
+- S7 "hay manera de que el sync de team sea mas rapido?" / "si, empieza por la 1" — time each sync part; make the GitHub pull request listing faster without losing data.
+
 ## Tasks
 | ID | Specs | Route | Status |
 |---|---|---|---|
@@ -17,8 +19,10 @@ Objective: make the Sprint board with the team on load fast, and the Herdr mod's
 | T3 | S2 | inline, no Writer reason | done (mod commit): tests failed first; checked live |
 | T4 | S3 | inline, no Writer reason | done (mod commit): tests failed first; checked live |
 | T5 | S4 | inline, no Writer reason | done (mod commit): tests failed first; checked live |
+| T6 | S7 | inline, no Writer reason | done: phase timings b64cd29; pull requests per repository |
 
 ## Log
 - **L1** (2026-11-07) User: "la carga de sprint team tarda bastante podrias revisarla? ademas creo que el cache no funciona bien". Measured: GET /v1/board answers in 30 ms; a mapper found the causes (team toggle forces a full sync and drops team tickets; first paint waits for the team chain; mod reloads before the sync; cache bugs A and B; triple discovery; log dumps GitHub HTML, no sync timing). User: "aplica los cinco".
 - **L2** Risk: item 4 (async ordering between the team toggle and the sync).
 - **L3** Live, branch daemon: team toggle on answered in 47 ms with 22 team tickets after a completed team-off sync; syncs logged at 5.2–6.8 s. Mod: team off shows 5, on shows 22 about a second later while it refreshes. Config and board state unchanged. Deviation: slow syncs only (≥5 s) are logged, since a sync runs every minute. Turning the team off no longer asks for a sync. The running daemon is the branch build until the user restarts it.
+- **L4** (2026-11-07) Timings with the team on: mine 0.4s, panels 0.0s, team 0.9s (parallel), github 4.7–4.9s, reviews 1.6–1.8s; the team is not the bottleneck. The partial board already paints before GitHub (daemon.go:288). User: "si, empieza por la 1". Measured on real syncs (temporary builds logging every sync): one query per owner, github 3.5–4.7s, total 4.2–5.3s; one query per repository in parallel, github 1.6–2.3s, total 2.5–3.5s; fewer nested reviews/threads on top added nothing (1.7–2.5s) and could drop data, so it was not kept. TestPullRequestsBatchesPerOwner now asserts one query per repository with the owner's account (a deliberate design change, its other assertions kept); a cap of 4 at once.
