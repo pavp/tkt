@@ -1223,3 +1223,85 @@ func TestATeamBoardWhoseFilterCannotBeReadSaysSo(t *testing.T) {
 		t.Errorf("warnings = %q, want one naming the board whose filter could not be read", snap.Warnings)
 	}
 }
+
+func TestTeamTicketsFoundBeforeStayWhileTheTeamIsOff(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	js := &stubJira{
+		issues: []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate", Assignee: "Dev Example",
+			Sprints: []jira.Sprint{{ID: 42, Space: "DEMO", Name: "DEMO S42", State: "active"}}}},
+		linked: map[string][]jira.DevPullRequest{},
+	}
+	gh := &stubGitHub{prs: []ticket.PullRequest{{Repo: "example-org/web", Number: 70, Branch: "feature/DEMO-7-theirs", State: ticket.PROpen, Checks: ticket.ChecksPass}}}
+	prev := Snapshot{Tickets: []ticket.Ticket{
+		{Key: "DEMO-7", Summary: "Theirs", Team: true, Board: "Authorization Center"},
+		{Key: "DEMO-1", Summary: "Was theirs, now mine", Team: true},
+	}}
+	snap, err := FetchWith(context.Background(), teamCfg(), js, gh, now, prev, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(js.jqls, func(q string) bool { return strings.Contains(q, "assignee != currentUser()") }) {
+		t.Errorf("with the team off there is no team search: %v", js.jqls)
+	}
+	byKey := map[ticket.Key]ticket.Ticket{}
+	for _, tk := range snap.Tickets {
+		byKey[tk.Key] = tk
+	}
+	theirs, mine := byKey["DEMO-7"], byKey["DEMO-1"]
+	if !theirs.Team || theirs.Board != "Authorization Center" || len(theirs.PRs) != 1 || theirs.PRs[0].Number != 70 {
+		t.Errorf("the last team tickets are kept, with fresh pull requests, so turning the team on shows them at once: %+v", snap.Tickets)
+	}
+	if mine.Team || len(snap.Tickets) != 2 {
+		t.Errorf("a ticket now yours is yours, once: %+v", snap.Tickets)
+	}
+	if shown := ShownTickets(snap.Tickets, nil, false); len(shown) != 1 || shown[0].Key != "DEMO-1" {
+		t.Errorf("with the team off the board still shows only your tickets: %+v", shown)
+	}
+	boardless, err := FetchWith(context.Background(), cfg(), js, gh, now, prev, Options{})
+	if err != nil || slices.ContainsFunc(boardless.Tickets, func(tk ticket.Ticket) bool { return tk.Team }) {
+		t.Errorf("without team boards configured no team ticket is kept: %v %+v", err, boardless.Tickets)
+	}
+}
+
+func TestTheRepositoryCountsLeaveTeamPullRequestsOutWhileTheTeamIsOff(t *testing.T) {
+	snap := Snapshot{Tickets: []ticket.Ticket{
+		{Key: "DEMO-1", PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 1, State: ticket.PROpen}}},
+		{Key: "DEMO-7", Team: true, PRs: []ticket.PullRequest{{Repo: "example-org/api", Number: 2, State: ticket.PROpen}}},
+	}}
+	if got := Repos(ForTeam(snap, false), nil); got["example-org/web"] != 1 || len(got) != 1 {
+		t.Errorf("team off: %v", got)
+	}
+	if got := Repos(ForTeam(snap, true), nil); got["example-org/web"] != 1 || got["example-org/api"] != 1 {
+		t.Errorf("team on keeps counting them: %v", got)
+	}
+}
+
+func TestTheFirstPaintShowsTheLastTeamTicketsInsteadOfWaitingForTheTeamSearch(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	release := make(chan struct{})
+	js := &stubJira{
+		issues:   []jira.Issue{{ID: "1", Key: "DEMO-1", Summary: "Mine", Status: "In Progress", StatusCategory: "indeterminate"}},
+		team:     []jira.Issue{{ID: "7", Key: "DEMO-7", Summary: "Theirs, renamed", Status: "To Do", StatusCategory: "new"}},
+		linked:   map[string][]jira.DevPullRequest{},
+		sprints:  map[int][]int{5205: {11807}},
+		teamGate: release,
+	}
+	prev := Snapshot{Tickets: []ticket.Ticket{{Key: "DEMO-7", Summary: "Theirs", Team: true}}}
+	var partial Snapshot
+	snap, err := FetchWith(context.Background(), teamCfg(), js, &stubGitHub{}, now, prev, Options{Team: true, Partial: func(s Snapshot) {
+		partial = s
+		close(release)
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if js.teamStalled {
+		t.Errorf("the first paint waited for the team search")
+	}
+	if !slices.ContainsFunc(partial.Tickets, func(tk ticket.Ticket) bool { return tk.Key == "DEMO-7" && tk.Summary == "Theirs" && tk.Team }) {
+		t.Errorf("the first paint shows the last team tickets while the team search runs: %+v", partial.Tickets)
+	}
+	if !slices.ContainsFunc(snap.Tickets, func(tk ticket.Ticket) bool { return tk.Key == "DEMO-7" && tk.Summary == "Theirs, renamed" }) {
+		t.Errorf("the full board takes the team search's answer: %+v", snap.Tickets)
+	}
+}

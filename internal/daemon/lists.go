@@ -137,7 +137,11 @@ func (s *Server) prs(w http.ResponseWriter, r *http.Request) {
 	if s.opts.Repos != nil {
 		configured = s.opts.Repos()
 	}
-	for name, n := range board.Repos(snap, configured) {
+	var team bool
+	if s.opts.State != nil {
+		team = s.opts.State().Team
+	}
+	for name, n := range board.Repos(board.ForTeam(snap, team), configured) {
 		view.Repos = append(view.Repos, RepoFilter{Name: name, PRs: n, Hidden: f.HiddenRepos[name]})
 	}
 	slices.SortFunc(view.Repos, func(a, b RepoFilter) int { return strings.Compare(a.Name, b.Name) })

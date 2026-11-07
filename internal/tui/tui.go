@@ -444,7 +444,7 @@ func (m Model) boardRepos() map[string]int {
 	for _, r := range cfg.Repos() {
 		names = append(names, r.Name)
 	}
-	return board.Repos(m.snap, names)
+	return board.Repos(board.ForTeam(m.snap, m.team), names)
 }
 
 // repoNotice says how many repositories the filter leaves; it is empty while every one shows.

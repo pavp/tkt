@@ -234,31 +234,54 @@ func FetchWith(ctx context.Context, c *config.Config, js JiraSource, gh GitHubSo
 	}
 	var team []ticket.Ticket
 	joined := false
-	joinTeam := func() {
-		if joined || teamDone == nil {
+	takeTeam := func(r teamResult) {
+		joined = true
+		if r.err != nil {
+			snap.Warnings = append(snap.Warnings, "team tickets unavailable: "+r.err.Error())
 			return
 		}
-		joined = true
-		if r := <-teamDone; r.err != nil {
-			snap.Warnings = append(snap.Warnings, "team tickets unavailable: "+r.err.Error())
-		} else {
-			snap.Warnings = append(snap.Warnings, r.warnings...)
-			for _, is := range r.issues {
-				t := toTicket(is)
-				t.Team = true
-				for _, sp := range is.Sprints {
-					if name, ok := r.boards[sp.ID]; ok {
-						t.Board = name
-						break
-					}
+		snap.Warnings = append(snap.Warnings, r.warnings...)
+		for _, is := range r.issues {
+			t := toTicket(is)
+			t.Team = true
+			for _, sp := range is.Sprints {
+				if name, ok := r.boards[sp.ID]; ok {
+					t.Board = name
+					break
 				}
-				team = append(team, t)
 			}
+			team = append(team, t)
 		}
 	}
+	joinTeam := func() {
+		if joined {
+			return
+		}
+		if teamDone == nil {
+			joined = true
+			// Turning the team on then shows these at once, while the sync that reads them again runs.
+			if len(boards) > 0 {
+				team = keptTeam(prev.Tickets)
+			}
+			return
+		}
+		takeTeam(<-teamDone)
+	}
 	if opts.Partial != nil {
-		joinTeam()
-		opts.Partial(partialBoard(snap, tickets, team, linked, prev))
+		partialTeam := keptTeam(prev.Tickets)
+		if teamDone == nil || len(partialTeam) == 0 {
+			joinTeam()
+			partialTeam = team
+		} else {
+			// The first paint waits for the team search only when no earlier team tickets can stand in.
+			select {
+			case r := <-teamDone:
+				takeTeam(r)
+				partialTeam = team
+			default:
+			}
+		}
+		opts.Partial(partialBoard(snap, tickets, partialTeam, linked, prev))
 	}
 	r := <-prsDone
 	prs, prErr := r.prs, r.err
@@ -884,4 +907,23 @@ func (s Snapshot) Find(key ticket.Key) (ticket.Ticket, bool) {
 		}
 	}
 	return ticket.Ticket{}, false
+}
+
+// keptTeam is the team tickets of an earlier snapshot, subtasks included, without the pull requests and
+// subtasks attached to them, which this fetch attaches again.
+func keptTeam(prev []ticket.Ticket) []ticket.Ticket {
+	var out []ticket.Ticket
+	var walk func([]ticket.Ticket)
+	walk = func(ts []ticket.Ticket) {
+		for _, t := range ts {
+			if t.Team {
+				kept := t
+				kept.PRs, kept.Subtasks = nil, nil
+				out = append(out, kept)
+			}
+			walk(t.Subtasks)
+		}
+	}
+	walk(prev)
+	return out
 }

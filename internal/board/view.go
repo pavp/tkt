@@ -141,3 +141,13 @@ func SectionAt(rows []Row, i int) (title string, n int, ok bool) {
 	}
 	return "", 0, false
 }
+
+// ForTeam is snap with its team tickets only while the team is on: a snapshot keeps the last ones found
+// even when the team is off, so turning it on shows them at once.
+func ForTeam(snap Snapshot, team bool) Snapshot {
+	if team {
+		return snap
+	}
+	snap.Tickets = slices.DeleteFunc(slices.Clone(snap.Tickets), func(t ticket.Ticket) bool { return t.Team })
+	return snap
+}
