@@ -9,7 +9,7 @@ const lines = [
   { number: 3, label: "#3 merged · web", url: "https://github.com/example-org/web/pull/3" },
 ];
 
-test("a ticket's Pull requests (N) opens its pull requests, then copies each link, as the TUI's submenu does", () => {
+test("a ticket's Pull requests (N) lists each pull request once: enter opens it, c copies its link", () => {
   const t = { key: "DEMO-1", status: "In Progress", prs: [{ number: 9 }, { number: 3 }] };
   const item = ticketMenu(t, { prLines: lines }).items.find((i) => i.label === "Pull requests (2) ▸");
   assert.equal(item.action, "submenu");
@@ -18,8 +18,6 @@ test("a ticket's Pull requests (N) opens its pull requests, then copies each lin
   assert.deepEqual(item.menu.items, [
     { label: "#9 CI failing · api", action: "open", url: "https://github.com/example-org/api/pull/9" },
     { label: "#3 merged · web", action: "open", url: "https://github.com/example-org/web/pull/3" },
-    { label: "Copy the link of #9", action: "copy", value: "https://github.com/example-org/api/pull/9" },
-    { label: "Copy the link of #3", action: "copy", value: "https://github.com/example-org/web/pull/3" },
   ]);
 });
 

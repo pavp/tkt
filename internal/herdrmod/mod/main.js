@@ -14,7 +14,7 @@ import { gutterOf, statusTone, prStatusTone, agentLabel, prRefs, listColumns, po
 import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone, topKeys, noticeShown } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
 import { backlogRows, badges, backlogAgents } from "./lib/backlog.js";
-import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter, isConfirm, splitTail, itemGroup, footerKeys } from "./lib/menus.js";
+import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter, isConfirm, splitTail, itemGroup, footerKeys, prsSubmenu } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors, detailsKey, positionOf } from "./lib/details.js";
@@ -896,11 +896,20 @@ export default class Tkt extends View {
       .child(v_flex().child(h3("Details")).children(v.fields.map(([k, val], i) => field(k, val, i)))
         .child(h_flex().id("f-agent").min_h(26).gap(10).items_center().child(div().w(76).flex_none().text_size(12).text_color(t.muted).child("Agent"))
           .child(v.agent ? h_flex().gap(7).items_center().child(this.agentDot(t, v.agent)).child(div().text_size(12).text_color(t.foreground).child(agentLabel(v.agent))) : div().text_size(12).text_color(t.muted).child("no agent"))))
-      .child(v_flex().gap(6).child(h3("Pull requests")).children(v.prs.length === 0 ? [div().text_size(12).text_color(t.muted).child("—")] : v.prs.map((p, i) =>
-        v_flex().id(`dpr-${i}`).min_w_0().overflow_hidden().gap(3).px(11).py(9).rounded(8).bg(t.raised).border(1).border_color(t.border)
-          .child(h_flex().min_w_0().gap(7).items_center().child(div().font_semibold().text_size(11).text_color(p.mark === "✓" ? t.ansi2 : p.mark === "✕" ? ensure(t.ansi1, t.raised, 4.5) : t.muted).child(p.mark))
-            .child(this.mono(div().flex_1().min_w_0().truncate().text_size(11).text_color(t.muted)).child(p.ref)))
-          .child(div().truncate().text_size(12).text_color(t.foreground).child(p.title ?? "")))))
+      .child(v_flex().gap(6).child(h3(v.prs.length > 0 ? `Pull requests · ${v.prs.length}` : "Pull requests"))
+        .child(v.prs.length === 0 ? div().text_size(12).text_color(t.muted).child("—") : v_flex().rounded(8).border(1).border_color(t.border).bg(t.raised).overflow_hidden()
+          .children(v.prs.slice(0, 3).map((p, i) => h_flex().id(`dpr-${i}`).h(32).px(10).gap(8).items_center().min_w_0().hover((h) => h.bg(t.hover))
+            .when(i > 0, (el) => el.border_t(1).border_color(t.border))
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act({ action: "open", url: p.url, label: p.ref }, cx))
+            .child(div().w(12).flex_none().font_semibold().text_size(11).text_color(p.mark === "✓" ? t.ansi2 : p.mark === "✕" ? ensure(t.ansi1, t.raised, 4.5) : t.muted).child(["✓", "✕", "…", "—"].includes(p.mark) ? p.mark : "·"))
+            .child(this.mono(div().flex_none().text_size(11).text_color(t.muted)).child(`#${p.ref.split("#").pop()}`))
+            .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(["✓", "✕", "…", "—"].includes(p.mark) ? t.foreground : t.muted).child(p.title ?? ""))
+            .when(!["✓", "✕", "…", "—"].includes(p.mark), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(p.mark)))))
+          .when(v.prs.length > 3, (el) => el.child(h_flex().id("dpr-more").h(30).px(10).items_center().border_t(1).border_color(t.border).text_size(12)
+            .text_color(ensure(mix(t.accent, t.foreground, 0.3), t.raised, 4.5)).hover((h) => h.bg(t.hover))
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+            .on_click((_e, cx) => { this.menu = { ...prsSubmenu(d.key, v.prs.map((p) => ({ number: Number(p.ref.split("#").pop()), label: `#${p.ref.split("#").pop()} ${p.title ?? ""}`.trim(), url: p.url }))), sel: 0 }; cx.notify(); })
+            .child(`+${v.prs.length - 3} more ▸`)))))
       .child(v_flex().gap(4).child(h3("Actions"))
         .when(Boolean(primary), (el) => el.child(h_flex().id("dact-primary").h(32).justify_center().items_center().rounded(7).bg(t.accent).text_size(13).font_semibold()
           .border(2).border_color(primary && lit(primary) ? mix(t.accent, t.foreground, 0.4) : t.accent)
