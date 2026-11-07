@@ -33,7 +33,6 @@ export function ticketMenu(t, opts = {}) {
     items.push({ label: "Show details", action: "details", key });
     if (t.url) items.push({ label: "Open in Jira ↗", action: "open", url: t.url });
     items.push({ label: "Assign to… ▸", action: "assignMenu", key, now: t.assignee ?? "" });
-    if (t.url) items.push(copy("Copy the Jira link", t.url));
     items.push(copy(`Copy the key ${key}`, key));
     return keyed({ title: `Actions for ${key}`, subtitle: [t.status, who, t.board].filter(Boolean).join(" · "), items });
   }
@@ -41,7 +40,6 @@ export function ticketMenu(t, opts = {}) {
     const items = [{ label: "Show details", action: "details", key }];
     if (t.url) items.push({ label: "Open in Jira ↗", action: "open", url: t.url });
     items.push({ label: "Assign to… ▸", action: "assignMenu", key, now: t.assignee ?? "" });
-    if (t.url) items.push(copy("Copy the Jira link", t.url));
     items.push(copy(`Copy the key ${key}`, key));
     return keyed({ title: `Actions for ${key}`, subtitle: `${t.status} · ${who}`, items });
   }
@@ -50,14 +48,12 @@ export function ticketMenu(t, opts = {}) {
   if (t.url) items.push({ label: "Open in Jira ↗", action: "open", url: t.url });
   if (prs.length === 1) items.push({ label: `Open #${prs[0].number} in GitHub ↗`, action: "open", url: prs[0].url });
   if (prs.length > 1) {
-    const lines = opts.prLines ?? prs.map((p) => ({ number: p.number, label: `#${p.number}`, url: p.url }));
+    const lines = opts.prLines ?? prs.map((p) => ({ number: p.number, label: `#${p.number} ${p.title ?? ""}`.trim(), url: p.url }));
     items.push({ label: `Pull requests (${prs.length}) ▸`, action: "submenu", menu: prsSubmenu(key, lines) });
   }
   const reason = opts.attention?.[0] ?? attentionOf(t);
   if (reason) items.push(...feedbackItems(key, reason, opts.agent));
   items.push({ label: "Move to… ▸", action: "move", key }, { label: "Assign to… ▸", action: "assignMenu", key, now: t.assignee ?? "" });
-  if (prs.length === 1 && prs[0].url) items.push(copy("Copy the PR link", prs[0].url));
-  if (t.url) items.push(copy("Copy the Jira link", t.url));
   items.push(copy(`Copy the key ${key}`, key), { label: "Copy the ticket context (.ticket.md)", action: "copyContext", key });
   return keyed({ title: `Actions for ${key}`, subtitle: t.status, items });
 }
@@ -76,7 +72,7 @@ export function prMenu(row, opts = {}) {
     return keyed({
       title: `Pull request #${pr.number}`,
       subtitle: `${pr.repo || "unknown repository"} · ${how}`,
-      items: [{ label: "Open in GitHub ↗", action: "open", url: pr.url }, { label: "Review with ▸", action: "review", pr }, copy("Copy the PR link", pr.url)],
+      items: [{ label: "Open in GitHub ↗", action: "open", url: pr.url }, { label: "Review with ▸", action: "review", pr }],
       reviewers: reviewersOf(pr),
     });
   }
@@ -86,8 +82,6 @@ export function prMenu(row, opts = {}) {
   items.push({ label: "Review with ▸", action: "review", pr }, startItem(t.key, opts.agent), { label: `Show details of ${t.key}`, action: "details", key: t.key });
   if (t.url) items.push({ label: `Open ${t.key} in Jira ↗`, action: "open", url: t.url });
   items.push({ label: "Move to… ▸", action: "move", key: t.key }, { label: "Assign to… ▸", action: "assignMenu", key: t.key, now: t.assignee ?? "" });
-  if (pr.url) items.push(copy("Copy the PR link", pr.url));
-  if (t.url) items.push(copy("Copy the Jira link", t.url));
   items.push(copy(`Copy the key ${t.key}`, t.key));
   return keyed({ title: `Pull request #${pr.number}`, subtitle: `${t.key} · ${t.status}`, items, reviewers: reviewersOf(pr) });
 }
@@ -109,11 +103,9 @@ export function sprintMoveItem(t, { groups = [], activeSprints = [] } = {}) {
   };
 }
 
-/** A ticket's "Pull requests (N)" submenu from its card's lines: open each, then copy each link. */
+/** A ticket's "Pull requests (N)" submenu from its card's lines: each opens it, and c copies its link. */
 export function prsSubmenu(key, lines) {
-  const items = lines.map((l) => ({ label: l.label, action: "open", url: l.url }));
-  for (const l of lines) if (l.url) items.push(copy(`Copy the link of #${l.number}`, l.url));
-  return { title: `Pull requests of ${key}`, items };
+  return { title: `Pull requests of ${key}`, items: lines.map((l) => ({ label: l.label, action: "open", url: l.url })) };
 }
 
 /** The menu next opens from from, so esc goes back to from; a menu reopened under its own title keeps from's way back. */

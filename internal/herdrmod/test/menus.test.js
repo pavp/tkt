@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture } from "./fixtures.js";
-import { ticketMenu, prMenu } from "../mod/lib/menus.js";
+import { ticketMenu, prMenu, menuFooter } from "../mod/lib/menus.js";
 
 const labels = (m) => m.items.map((i) => i.label);
 
@@ -20,13 +20,12 @@ test("a ticket of yours offers what the TUI's menu offers, feedback first when i
     "Send its feedback to another agent ▸",
     "Move to… ▸",
     "Assign to… ▸",
-    "Copy the PR link",
-    "Copy the Jira link",
     "Copy the key DEMO-1",
     "Copy the ticket context (.ticket.md)",
   ]);
   assert.equal(m.items[0].action, "start");
   assert.equal(m.items[2].url, row.ticket.url);
+  assert.equal(menuFooter(m.items[2]), "enter run · c copy link · esc close", "c copies the link of the item that opens it, so no row repeats it");
 });
 
 test("without an agent, a ticket starts one and its feedback goes to an agent picked", () => {
@@ -40,7 +39,7 @@ test("a team ticket offers details, Jira, assign and copies", () => {
   const t = { key: "DEMO-8", status: "To Do", team: true, url: "https://example.atlassian.net/browse/DEMO-8" };
   const m = ticketMenu(t, {});
   assert.equal(m.subtitle, "To Do · unassigned");
-  assert.deepEqual(labels(m), ["Show details", "Open in Jira ↗", "Assign to… ▸", "Copy the Jira link", "Copy the key DEMO-8"]);
+  assert.deepEqual(labels(m), ["Show details", "Open in Jira ↗", "Assign to… ▸", "Copy the key DEMO-8"]);
 });
 
 test("a backlog ticket not yours asks before starting", () => {
@@ -50,13 +49,13 @@ test("a backlog ticket not yours asks before starting", () => {
   assert.equal(m.items[0].action, "notYours");
 });
 
-test("someone's pull request opens, reviews and copies its link", () => {
+test("someone's pull request opens and reviews, c copying its link", () => {
   const view = fixture("prs.json");
   const review = view.sections[2].rows[0];
   const m = prMenu(review, {});
   assert.equal(m.title, "Pull request #15");
   assert.equal(m.subtitle, "example-org/api · grace · review requested");
-  assert.deepEqual(labels(m), ["Open in GitHub ↗", "Review with ▸", "Copy the PR link"]);
+  assert.deepEqual(labels(m), ["Open in GitHub ↗", "Review with ▸"]);
 });
 
 test("one of your pull requests acts on it, then on its ticket", () => {
@@ -108,4 +107,12 @@ test("a menu item's trailing ▸ or ↗ goes to the right, and items group by wh
 test("the menu's key line reads as keys and what they do", async () => {
   const { footerKeys } = await import("../mod/lib/menus.js");
   assert.deepEqual(footerKeys("enter run · c copy link · esc close"), [["enter", "run"], ["c", "copy link"], ["esc", "close"]]);
+});
+
+test("a ticket's pull requests submenu names each one by number and title", () => {
+  const t = { key: "DEMO-5", status: "In Progress", url: "u", prs: [{ number: 12, title: "Add the filter", url: "a" }, { number: 13, title: "Fix the date range", url: "b" }] };
+  const m = ticketMenu(t, {});
+  const prs = m.items.find((i) => i.label === "Pull requests (2) ▸");
+  assert.deepEqual(prs.menu.items.map((i) => i.label), ["#12 Add the filter", "#13 Fix the date range"]);
+  assert.deepEqual(ticketMenu({ ...t, prs: [{ number: 12, url: "a" }, { number: 13, url: "b" }] }, {}).items.find((i) => i.action === "submenu").menu.items.map((i) => i.label), ["#12", "#13"], "a pull request without a title keeps its number");
 });

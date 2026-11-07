@@ -38,3 +38,27 @@ test("the details say where the ticket sits in the list it was opened from, and 
   assert.equal(positionOf(["A-1"], "B-9"), "");
   assert.equal(view({ ticket: { ...detail.ticket, category: "in_progress" } }, "Sprint").category, "in_progress");
 });
+
+test("→ moves into the details' actions, as Tab does", async () => {
+  const { detailsKey } = await import("../mod/lib/details.js");
+  assert.equal(detailsKey("right"), "actions");
+  assert.equal(detailsKey("l"), "actions");
+  assert.equal(detailsKey("tab"), "actions");
+  assert.equal(detailsKey("left"), "back");
+});
+
+
+test("the header sums a ticket's pull requests up by their checks, else by how many merged", async () => {
+  const { prSummary } = await import("../mod/lib/details.js");
+  assert.equal(prSummary([]), "");
+  assert.equal(prSummary([{ mark: "✓" }, { mark: "✓" }]), "2 PRs · ✓ checks passing");
+  assert.equal(prSummary([{ mark: "✓" }, { mark: "✕" }]), "2 PRs · ✕ checks failing", "a failure wins");
+  assert.equal(prSummary([{ mark: "…" }]), "1 PR · … checks running");
+  assert.equal(prSummary([{ mark: "merged" }, { mark: "merged" }, { mark: "closed" }]), "3 PRs · 2 merged");
+});
+
+test("comments from bots and automations are told apart by their author", async () => {
+  const { isBot } = await import("../mod/lib/details.js");
+  for (const who of ["Automation for Jira", "ScriptRunner for Jira", "dependabot[bot]", "Release Bot"]) assert.equal(isBot(who), true, who);
+  for (const who of ["Ada Lovelace", "Robert Botha", ""]) assert.equal(isBot(who), false, who);
+});

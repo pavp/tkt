@@ -85,3 +85,16 @@ test("the theme adds a sunken well behind columns and a pill tone over cards, fr
   assert.notEqual(t.pill, t.raised);
   assert.ok(contrast(t.muted, t.pill) >= 4.5, "text on a pill reads");
 });
+
+test("every card is a neutral lift over the column's well, the same for yours and the team's, and text reads on it", async () => {
+  const { tktTheme, contrast } = await import("../mod/lib/theme.js");
+  const t = tktTheme(herdrDark);
+  assert.ok(contrast(t.card, "#000000") > contrast(t.well, "#000000"), "a card is lighter than its well on a dark theme");
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(t.card.slice(i, i + 2), 16));
+  const [wr, wg, wb] = [1, 3, 5].map((i) => parseInt(t.well.slice(i, i + 2), 16));
+  assert.ok(Math.abs((b - r) - (wb - wr)) <= 2 && Math.abs((g - r) - (wg - wr)) <= 2, `${t.card} keeps the well's hue, no accent tint`);
+  assert.equal(t.cardBorder, undefined, "cards have no border of their own");
+  for (const k of ["foreground", "muted", "dim"]) assert.ok(contrast(t[k], t.card) >= 4.5, `${k} reads at ${contrast(t[k], t.card)} on a card`);
+  const light = tktTheme(herdrLight);
+  assert.ok(contrast(light.card, "#000000") > contrast(light.well, "#000000"), "a card is lighter than its well on a light theme too");
+});

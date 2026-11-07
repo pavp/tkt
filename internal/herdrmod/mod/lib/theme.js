@@ -65,7 +65,9 @@ export function tktTheme(theme, palette = "herdr") {
   const well = isHex(theme.surface) ? mix("#000000", theme.surface, light ? 0.04 : 0.14) : theme.surface;
   const pill = isHex(theme.raised) && isHex(theme.foreground) ? mix(theme.foreground, theme.raised, 0.06) : theme.raised;
   const bgs = [theme.surface, theme.raised, theme.chrome, theme.popover, well, pill];
-  const out = { ...sourceColors(theme, name), peach: PEACH, palette: name, well, pill };
+  const card = !isHex(well) ? theme.raised : light ? mix("#ffffff", well, 0.8) : isHex(theme.foreground) ? mix(theme.foreground, well, 0.05) : theme.raised;
+  bgs.push(card);
+  const out = { ...sourceColors(theme, name), peach: PEACH, palette: name, well, pill, card };
   for (const k of ["foreground", "muted", "dim"]) if (theme[k]) out[k] = readable(theme[k], bgs, TEXT);
   for (const k of ["ansi1", "ansi2", "ansi3", "ansi4", "ansi5", "ansi6", "ansi8"]) if (out[k]) out[k] = readable(out[k], bgs, MARK);
   return out;

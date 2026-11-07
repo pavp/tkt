@@ -42,5 +42,23 @@ export function neighbors(keys, key) {
 export function detailsKey(k) {
   if (["escape", "i", "left", "h"].includes(k)) return "back";
   if (k === "c") return "copy";
+  if (["right", "l", "tab"].includes(k)) return "actions";
   return null;
+}
+
+/** A ticket's pull requests in one phrase for the details' header: how their checks stand, else how many merged. */
+export function prSummary(prs) {
+  if (!prs || prs.length === 0) return "";
+  const count = `${prs.length} ${prs.length === 1 ? "PR" : "PRs"}`;
+  const marks = prs.map((p) => p.mark);
+  if (marks.includes("✕")) return `${count} · ✕ checks failing`;
+  if (marks.includes("…")) return `${count} · … checks running`;
+  if (marks.includes("✓")) return `${count} · ✓ checks passing`;
+  const merged = marks.filter((m) => m === "merged").length;
+  return merged > 0 ? `${count} · ${merged} merged` : count;
+}
+
+/** Whether a comment's author is a bot or an automation rather than a person. */
+export function isBot(who) {
+  return /\bbot\b|\[bot\]|automation|\bfor jira\b/i.test(who ?? "");
 }
