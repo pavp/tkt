@@ -7,7 +7,7 @@ import { exec, machines, knownAgents, theme, props, closeOverlay, appHome, readT
 import { tktTheme, monoFont, sourceColors, contrast, ensure, mix, CATPPUCCIN } from "./lib/theme.js";
 import * as os from "os";
 import * as fs from "fs/promises";
-import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom } from "./lib/client.js";
+import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom, shared } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN } from "./lib/columns.js";
 import { gutterOf, statusTone, prStatusTone, agentLabel, prRefs, listColumns, pointsText } from "./lib/rows.js";
@@ -23,7 +23,7 @@ import { MOD_VERSION } from "./lib/version.js";
 import { modKeyFor, withModKey } from "./lib/modkey.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
 import { stripChips, atTop } from "./lib/strip.js";
-import { packCache, unpackCache, cachedLabel } from "./lib/cache.js";
+import { packCache, unpackCache, cachedLabel, keptAnswer, pollAfter } from "./lib/cache.js";
 import { machineKey, stashed, restored } from "./lib/machines.js";
 import { scrolled, menuHeight, MENU_ROW, cardHeight, cardsBelow, revealed, keepVisible } from "./lib/scroll.js";
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget, listKey, sectionAfter } from "./lib/nav.js";
@@ -65,6 +65,7 @@ export default class Tkt extends View {
     this.choices = null;
     this.failures = 0;
     this.found = [];
+    this.lookOnce = shared(() => this.discover());
     this.menu = null;
     this.picker = null;
     this.jobs = [];
@@ -232,15 +233,17 @@ export default class Tkt extends View {
    *  several. */
   async call(method, path, body) {
     if (this.machine === undefined) {
-      const pick = await this.discover();
+      const pick = await this.lookOnce();
       if (pick.none && this.outdated.length > 0) throw new Error(outdatedNote(this.outdated));
       if (pick.none) throw new Error("tkt is not installed on this computer or on any machine connected to Herdr");
       if (pick.choose) {
         this.choices = pick.choose;
         throw new Error("tkt is on several machines: choose one");
       }
-      this.machine = pick.machine;
-      this.pendingUse = true;
+      if (this.machine === undefined) {
+        this.machine = pick.machine;
+        this.pendingUse = true;
+      }
     }
     try {
       const answer = await this.run(apiArgs(method, path, body), this.machine);
@@ -271,8 +274,8 @@ export default class Tkt extends View {
     cx.spawn(async (cx) => {
       try {
         const answers = await Promise.all(routes.map(([, route]) => this.call("GET", route)));
-        routes.forEach(([id], i) => { this.answers[id] = answers[i]; });
-        this.cachedAt = null;
+        routes.forEach(([id], i) => { this.answers[id] = keptAnswer(this.answers[id], answers[i]); });
+        if (routes.every(([id], i) => this.answers[id] === answers[i])) this.cachedAt = null;
         if (Date.now() - (this.cacheSaved ?? 0) > 60000) {
           this.cacheSaved = Date.now();
           try {
@@ -286,6 +289,11 @@ export default class Tkt extends View {
         if (this.pendingUse) {
           this.pendingUse = false;
           this.use(this.machine, cx);
+        }
+        const soon = pollAfter(answers[routes.findIndex(([id]) => id === this.tab)]);
+        if (soon && !this.soonLoad) {
+          this.soonLoad = true;
+          cx.timer.after(soon, (cx) => { this.soonLoad = false; this.load(cx); });
         }
       } catch (e) {
         this.error = e.message;
@@ -434,8 +442,10 @@ export default class Tkt extends View {
     this.attempt(async (cx) => {
       const a = await this.call("PATCH", "/v1/board/state", { team: !view.team });
       if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
-      await this.call("POST", "/v1/sync", {});
+      // tkt keeps the last team tickets while the team is off, so only turning it on needs them read again.
+      if (!view.team) await this.call("POST", "/v1/sync", {});
       this.notice = view.team ? "only your tickets" : "with the team's tickets · syncing…";
+      this.cacheSaved = 0;
       this.load(cx);
     }, cx);
   }

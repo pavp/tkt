@@ -96,3 +96,16 @@ test("how Herdr starts an agent goes with it when it is not just the agent's own
   assert.deepEqual(agentRuns(known), { pi: ["gentle-shell", "--agent", "pi"] });
   assert.deepEqual(agentRuns(undefined), {});
 });
+
+test("calls made together while the machine is unknown share one look for it", async () => {
+  const { shared } = await import("../mod/lib/client.js");
+  let looks = 0;
+  const look = shared(async () => { looks++; await new Promise((r) => setTimeout(r, 10)); return "mac"; });
+  assert.deepEqual(await Promise.all([look(), look(), look()]), ["mac", "mac", "mac"]);
+  assert.equal(looks, 1);
+  await look();
+  assert.equal(looks, 2, "a later call looks again");
+  const failing = shared(async () => { throw new Error("no tkt"); });
+  await assert.rejects(failing(), /no tkt/);
+  await assert.rejects(failing(), /no tkt/, "a failed look is not kept");
+});
