@@ -942,77 +942,100 @@ export default class Tkt extends View {
       controls.push(onClick);
       return controls.length - 1 === (st.sel ?? 0);
     };
-    const link = (id, text, onClick, tone) => {
+    const press = (el, onClick) => el.on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => onClick(cx));
+    const button = (id, text, onClick, kind = "plain") => {
       const on = focusable(onClick);
-      return div().id(id).px(6).py(1).rounded(4).bg(on ? t.selected : t.surface).text_color(tone ?? t.accent).hover((s) => s.bg(t.hover))
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => onClick(cx)).child(on ? `▸ ${text}` : text);
+      const danger = kind === "danger" && on;
+      const el = h_flex().id(id).flex_none().h(kind === "add" ? 28 : 26).px(10).items_center().rounded(kind === "add" ? 7 : 6).text_size(12).font_weight(500)
+        .border(1).border_color(on ? (danger ? mix(t.ansi1, t.surface, 0.45) : t.accent) : t.border)
+        .text_color(danger ? ensure(t.ansi1, t.surface, 4.5) : kind === "add" || kind === "value" ? ensure(mix(t.accent, t.foreground, 0.3), t.surface, 4.5) : t.foreground)
+        .bg(on ? mix(t.accent, t.surface, 0.1) : t.surface).hover((s) => s.border_color(t.accent));
+      return press(el, onClick).child(text);
     };
     st.controls = controls;
-    const heading = (text) => div().pt(10).pb(4).font_semibold().text_color(t.foreground).child(text);
-    const side = v_flex().id("settings-side").w(200).p(8).gap(2).border_r(1).border_color(t.border).children(SECTIONS.map((sec) =>
-      div().id(`sec-${sec.id}`).px(10).py(5).rounded(6).bg(st.section === sec.id ? t.selected : t.surface).text_color(st.section === sec.id ? t.foreground : t.muted)
-        .hover((s) => s.bg(t.hover)).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => { st.section = sec.id; st.sel = 0; cx.notify(); }).child(sec.title)));
+    const intro = (title, text) => v_flex().gap(4).pb(18).child(div().text_size(18).font_semibold().text_color(t.foreground).child(title)).child(div().text_size(13).text_color(t.muted).child(text));
+    const spaceTitle = (sp) => h_flex().gap(8).items_end().pb(8).child(this.mono(div().text_size(12).font_weight(500).text_color(t.foreground)).child(sp.key))
+      .when(Boolean(sp.name), (el) => el.child(div().text_size(13).font_semibold().text_color(t.foreground).child(sp.name)));
+    const table = (rows) => v_flex().rounded(10).border(1).border_color(t.border).overflow_hidden().children(rows);
+    const tableRow = (id, i, children) => h_flex().id(id).h(44).pl(14).pr(12).gap(14).items_center().bg(t.raised).when(i > 0, (el) => el.border_t(1).border_color(t.border)).children(children);
+    const side = v_flex().id("settings-side").w(220).flex_none().h_full().px(10).py(12).gap(2).bg(t.well).border_r(1).border_color(t.border).children(SECTIONS.map((sec) => {
+      const on = st.section === sec.id;
+      return press(h_flex().id(`sec-${sec.id}`).h(32).px(12).items_center().rounded(7).bg(on ? t.pill : t.well).text_size(13).font_weight(on ? 600 : 500)
+        .text_color(on ? t.foreground : t.muted).hover((s) => s.text_color(t.foreground)), (cx) => { st.section = sec.id; st.sel = 0; cx.notify(); }).child(sec.title);
+    }));
     let content = v_flex();
     if (st.section === "spaces") {
-      content = v_flex().children(d.spaces.map((sp) => v_flex().id(`sp-${sp.key}`).pb(8)
-        .child(heading([sp.key, sp.name].filter(Boolean).join(" · ")))
-        .children(sp.repos.map((r) => h_flex().id(`repo-${sp.key}-${r.repo}`).gap(10).py(2)
-          .child(div().w(260).truncate().text_color(t.foreground).child(r.repo)).child(div().flex_1().truncate().text_color(t.dim).child(r.path))
-          .child(link(`rm-${sp.key}-${r.repo}`, "remove", (cx) => { this.menu = { ...confirmRemove(`Remove ${r.repo} from ${sp.key}?`, reposPatch(sp, { remove: r.repo })), sel: 0 }; cx.notify(); }, t.muted))))
-        .when(sp.inferred.length > 0, (el) => el.child(div().text_size(12).text_color(t.dim).child(`also seen in its pull requests: ${sp.inferred.join(", ")}`)))
-        .child(link(`add-${sp.key}`, "+ Add a repository", (cx) => { this.ask({ kind: "addRepo", title: `Add to ${sp.key}: owner/name, then its folder`, space: sp }); cx.notify(); }))));
+      content = v_flex().child(intro("Spaces & repositories", "The repositories each Jira space works in. tkt finds their clones and pull requests through them."))
+        .children(d.spaces.map((sp) => v_flex().id(`sp-${sp.key}`).gap(8).pb(22).child(spaceTitle(sp))
+          .when(sp.repos.length > 0, (el) => el.child(table(sp.repos.map((r, i) => tableRow(`repo-${sp.key}-${r.repo}`, i, [
+            this.mono(div().w(260).flex_none().truncate().text_size(12).text_color(t.foreground)).child(r.repo),
+            this.mono(div().flex_1().min_w_0().truncate().text_size(11).text_color(r.path ? t.muted : t.dim)).child(r.path || "no local clone"),
+            button(`rm-${sp.key}-${r.repo}`, "Remove", (cx) => { this.menu = { ...confirmRemove(`Remove ${r.repo} from ${sp.key}?`, reposPatch(sp, { remove: r.repo })), sel: 0 }; cx.notify(); }, "danger")])))))
+          .when(sp.inferred.length > 0, (el) => el.child(h_flex().gap(4).text_size(12).text_color(t.muted).child("Also seen in its pull requests:").child(this.mono(div().text_size(11).text_color(t.foreground)).child(sp.inferred.join(", ")))))
+          .child(h_flex().child(button(`add-${sp.key}`, "+ Add a repository", (cx) => { this.ask({ kind: "addRepo", title: `Add to ${sp.key}: owner/name, then its folder`, space: sp }); cx.notify(); }, "add")))));
     } else if (st.section === "boards") {
-      content = v_flex().children(d.spaces.map((sp) => v_flex().id(`bs-${sp.key}`).pb(8).child(heading(sp.key))
-        .children((st.boards[sp.key] ?? sp.team_boards).map((b) => {
-          const on = sp.team_boards.some((x) => x.id === b.id);
-          const toggle = (cx) => {
-            if (!on) return this.attempt(() => this.patchSettings(boardsPatch(sp, b.id)), cx);
-            this.menu = { ...confirmRemove(`Remove the team board ${b.name} from ${sp.key}?`, boardsPatch(sp, b.id)), sel: 0 };
-            cx.notify();
-          };
-          const lit = focusable(toggle);
-          return h_flex().id(`b-${sp.key}-${b.id}`).gap(8).py(2).px(4).rounded(4).bg(lit ? t.selected : t.surface).on_click((_e, cx) => toggle(cx))
-            .child(this.checkbox(t, on)).child(div().text_color(t.foreground).child(b.name));
-        }))
-        .when(!st.boards[sp.key], (el) => el.child(link(`lb-${sp.key}`, "Choose from Jira's boards…", (cx) => this.attempt(async () => { st.boards[sp.key] = (await this.lookup("boards", sp.key)).boards; }, cx))))));
+      content = v_flex().child(intro("Team boards", "The scrum boards whose sprints the Team view and the Backlog show."))
+        .children(d.spaces.map((sp) => v_flex().id(`bs-${sp.key}`).gap(8).pb(22).child(spaceTitle(sp))
+          .children((st.boards[sp.key] ?? sp.team_boards).map((b) => {
+            const on = sp.team_boards.some((x) => x.id === b.id);
+            const toggle = (cx) => {
+              if (!on) return this.attempt(() => this.patchSettings(boardsPatch(sp, b.id)), cx);
+              this.menu = { ...confirmRemove(`Remove the team board ${b.name} from ${sp.key}?`, boardsPatch(sp, b.id)), sel: 0 };
+              cx.notify();
+            };
+            const lit = focusable(toggle);
+            return press(h_flex().id(`b-${sp.key}-${b.id}`).h(34).gap(10).px(10).items_center().rounded(7).border(1).border_color(lit ? t.accent : t.surface)
+              .bg(lit ? mix(t.accent, t.surface, 0.1) : t.surface), toggle).child(this.checkbox(t, on)).child(div().text_size(13).text_color(t.foreground).child(b.name));
+          }))
+          .when(!st.boards[sp.key], (el) => el.child(h_flex().child(button(`lb-${sp.key}`, "Choose from Jira's boards…", (cx) => this.attempt(async () => { st.boards[sp.key] = (await this.lookup("boards", sp.key)).boards; }, cx), "add"))))));
     } else if (st.section === "statuses") {
-      content = v_flex().children(d.spaces.map((sp) => {
-        const loaded = st.statuses[sp.key];
-        const block = v_flex().id(`ss-${sp.key}`).pb(8).child(heading(sp.key));
-        if (!loaded) return block.child(link(`ls-${sp.key}`, "Read the statuses from Jira…", (cx) => this.attempt(async () => { st.statuses[sp.key] = await this.lookup("statuses", sp.key); }, cx)));
-        return block.children(statusRows(loaded, d.columns).map((r) => h_flex().id(`s-${sp.key}-${r.name}`).gap(10).py(2)
-          .child(div().w(180).truncate().text_color(t.foreground).child(r.name))
-          .child(link(`sc-${sp.key}-${r.name}`, `${r.column}${r.columnAuto ? "" : " •"}`, (cx) => { this.menu = { title: `${r.name}: column`, sel: 0, items: d.columns.map((c) => ({ label: c.title, action: "settingsPatch", change: statusPatch(sp.key, r.name, { column: c.id }) })) }; cx.notify(); }, t.muted))
-          .child(link(`sm-${sp.key}-${r.name}`, `${r.mark}${r.markAuto ? "" : " •"}`, (cx) => { this.menu = { title: `${r.name}: mark`, sel: 0, items: d.marks.map((m) => ({ label: m, action: "settingsPatch", change: statusPatch(sp.key, r.name, { mark: m }) })) }; cx.notify(); }, t.muted))
-          .when(r.changed, (el) => el.child(link(`sr-${sp.key}-${r.name}`, "↺ automatic", (cx) => this.attempt(() => this.patchSettings(statusPatch(sp.key, r.name, null)), cx), t.dim)))));
-      }));
+      content = v_flex().child(intro("Statuses", "Which column of the board each Jira status falls in, and the mark its tickets show."))
+        .children(d.spaces.map((sp) => {
+          const loaded = st.statuses[sp.key];
+          const block = v_flex().id(`ss-${sp.key}`).gap(6).pb(22).child(spaceTitle(sp));
+          if (!loaded) return block.child(h_flex().child(button(`ls-${sp.key}`, "Read the statuses from Jira…", (cx) => this.attempt(async () => { st.statuses[sp.key] = await this.lookup("statuses", sp.key); }, cx), "add")));
+          return block.children(statusRows(loaded, d.columns).map((r) => h_flex().id(`s-${sp.key}-${r.name}`).gap(10).py(2).items_center()
+            .child(div().w(180).truncate().text_size(13).text_color(t.foreground).child(r.name))
+            .child(button(`sc-${sp.key}-${r.name}`, `${r.column}${r.columnAuto ? "" : " •"}`, (cx) => { this.menu = { title: `${r.name}: column`, sel: 0, items: d.columns.map((c) => ({ label: c.title, action: "settingsPatch", change: statusPatch(sp.key, r.name, { column: c.id }) })) }; cx.notify(); }, "value"))
+            .child(button(`sm-${sp.key}-${r.name}`, `${r.mark}${r.markAuto ? "" : " •"}`, (cx) => { this.menu = { title: `${r.name}: mark`, sel: 0, items: d.marks.map((m) => ({ label: m, action: "settingsPatch", change: statusPatch(sp.key, r.name, { mark: m }) })) }; cx.notify(); }, "value"))
+            .when(r.changed, (el) => el.child(button(`sr-${sp.key}-${r.name}`, "↺ automatic", (cx) => this.attempt(() => this.patchSettings(statusPatch(sp.key, r.name, null)), cx))))));
+        }));
     } else if (st.section === "clones") {
-      content = v_flex().child(heading("Folders tkt looks for clones in; the first one is where new clones go"))
-        .children(d.repo_roots.map((root) => h_flex().id(`root-${root}`).gap(10).py(2).child(div().flex_1().text_color(t.foreground).child(root))
-          .child(link(`rmr-${root}`, "remove", (cx) => { this.menu = { ...confirmRemove(`Remove the folder ${root}?`, rootsPatch(d.repo_roots, { remove: root })), sel: 0 }; cx.notify(); }, t.muted))))
-        .child(link("add-root", "+ Add a folder", (cx) => { this.ask({ kind: "addRoot", title: "A folder for clones, such as ~/src" }); cx.notify(); }));
+      content = v_flex().gap(8).child(intro("Local clones", "Folders tkt looks for clones in; the first one is where new clones go."))
+        .when(d.repo_roots.length > 0, (el) => el.child(table(d.repo_roots.map((root, i) => tableRow(`root-${root}`, i, [
+          this.mono(div().flex_1().min_w_0().truncate().text_size(12).text_color(t.foreground)).child(root),
+          ...(i === 0 ? [div().text_size(11).text_color(t.muted).child("new clones go here")] : []),
+          button(`rmr-${root}`, "Remove", (cx) => { this.menu = { ...confirmRemove(`Remove the folder ${root}?`, rootsPatch(d.repo_roots, { remove: root })), sel: 0 }; cx.notify(); }, "danger")])))))
+        .child(h_flex().child(button("add-root", "+ Add a folder", (cx) => { this.ask({ kind: "addRoot", title: "A folder for clones, such as ~/src" }); cx.notify(); }, "add")));
     } else if (st.section === "board") {
       const pick = (field, title) => (cx) => this.attempt(async () => {
         const names = (await this.lookup("fields")).fields ?? [];
         this.menu = { title, sel: 0, items: [{ label: "— none", action: "settingsPatch", change: { [field]: "" } }, ...names.map((n) => ({ label: n, action: "settingsPatch", change: { [field]: n } }))] };
       }, cx);
-      content = v_flex()
-        .child(heading("The field a ticket's label comes from")).child(link("label-field", d.label_field || "— none", pick("label_field", "Label field")))
-        .child(heading("The story points field")).child(link("points-field", d.points_field || "detected", pick("points_field", "Story points field")));
+      const setting = (title, text, control) => h_flex().gap(14).items_center().py(12).border_b(1).border_color(t.border)
+        .child(v_flex().flex_1().gap(3).child(div().text_size(13).font_semibold().text_color(t.foreground).child(title)).child(div().text_size(12).text_color(t.muted).child(text))).child(control);
+      content = v_flex().child(intro("Board", "Fields of your Jira site that the board reads."))
+        .child(setting("Ticket label", "The field a ticket's label comes from, shown on cards and in the details.", button("label-field", `${d.label_field || "— none"} ▾`, pick("label_field", "Label field"), "value")))
+        .child(setting("Story points", "The story points field; detected when unset.", button("points-field", `${d.points_field || "detected"} ▾`, pick("points_field", "Story points field"), "value")));
     } else if (st.section === "colors") {
       content = this.colorsSection(t, d, focusable);
     } else {
-      content = v_flex().child(heading("The machine whose tkt this window shows"))
-        .child(div().text_color(t.foreground).child(this.machine === undefined ? "none yet" : this.machine ?? "This computer"))
-        .child(link("change-machine", "Change machine…", (cx) => this.pick(cx)));
+      content = v_flex().child(intro("Machine", "The machine whose tkt this window shows."))
+        .child(h_flex().gap(14).items_center().py(12).border_b(1).border_color(t.border)
+          .child(div().flex_1().text_size(13).text_color(t.foreground).child(this.machine === undefined ? "none yet" : this.machine ?? "This computer"))
+          .child(button("change-machine", "Change machine…", (cx) => this.pick(cx), "value")));
     }
-    const nav = h_flex().px(12).py(6).gap(8).items_center().border_b(1).border_color(t.border)
-      .child(link("settings-back", "‹ Back", (cx) => { this.settings = null; cx.notify(); }, t.foreground))
-      .child(div().text_color(t.muted).child("Settings"));
+    const back = (cx) => { this.settings = null; cx.notify(); };
+    const backOn = focusable(back);
+    const nav = h_flex().h(44).px(14).gap(10).items_center().border_b(1).border_color(t.border)
+      .child(press(h_flex().id("settings-back").h(28).pl(6).pr(10).gap(6).items_center().rounded(7).border(1).border_color(backOn ? t.accent : t.border)
+        .text_size(12).font_weight(500).text_color(t.foreground).hover((s) => s.bg(t.hover)), back).child("‹").child("Board"))
+      .child(div().text_size(14).font_semibold().text_color(t.foreground).child("Settings"))
+      .child(div().flex_1())
+      .child(div().text_size(11).text_color(t.muted).child("Changes are saved to your config.toml"));
     return v_flex().id("settings").flex_1().min_h_0().child(nav)
       .child(h_flex().flex_1().min_h_0().items_start().child(side)
-        .child(this.scrollPane("settings-content", this.panes.settings, v_flex().p(14).child(content)).flex_1().h_full()));
+        .child(this.scrollPane("settings-content", this.panes.settings, v_flex().px(32).py(24).child(content)).flex_1().h_full()));
   }
 
   /** Settings › Colors: the palette, and how each color the palette gives reads once tkt raises it. */
@@ -1465,7 +1488,7 @@ export default class Tkt extends View {
     const sync = this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.cachedAt ? cachedLabel(this.cachedAt) : this.answers[this.tab]?.body?.sync_label ?? "";
     const warn = sync.startsWith("!");
     const title = (text) => div().flex_1().min_w_0().truncate().text_size(13).font_weight(500).text_color(t.foreground).child(text);
-    const keys = this.details ? [["esc", "back"], ["c", "copy as markdown"]] : topKeys(this.tab);
+    const keys = this.details ? [["esc", "back"], ["c", "copy as markdown"]] : this.settings ? [["↑↓", "move"], ["enter", "choose"], ["esc", "back to the board"]] : topKeys(this.tab);
     const line1 = h_flex().gap(10).items_center()
       .when(Boolean(this.details), (el) => el.child(title(`Details of ${this.details.key}`)))
       .when(Boolean(badge), (el) => el.child(div().flex_none().px(8).py(1).rounded(5).bg(t.pill).text_size(11).font_semibold().text_color(t.muted).child(badge.status))
