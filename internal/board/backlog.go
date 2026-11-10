@@ -21,6 +21,7 @@ type BacklogSource interface {
 	Myself(ctx context.Context) (jira.User, error)
 	OpenSprints(ctx context.Context, board int) ([]jira.Sprint, error)
 	BacklogIssues(ctx context.Context, board int, fields []string) ([]jira.Issue, error)
+	BoardFilter(ctx context.Context, board int) (int, error)
 }
 
 // Backlog is the configured team boards' open work: their active sprints, then their future sprints soonest
@@ -45,8 +46,11 @@ type BacklogSprint struct {
 	Tickets   []ticket.Ticket `json:"tickets,omitempty"`
 }
 
-// FetchBacklog asks every configured team board for its open sprints and backlog at once, then one search
-// for those sprints' tickets. A failing board becomes a warning; every board failing is an error.
+// FetchBacklog asks every configured team board for its open sprints and backlog at once, then each board
+// for its sprints' tickets through its own filter, as a sprint another board shares with it would otherwise
+// bring every ticket of that board. A sprint is named after its own board when that one is configured, and a
+// ticket after the first board in the configuration that shows it. A failing board becomes a warning; every
+// board failing is an error.
 func FetchBacklog(ctx context.Context, c *config.Config, js BacklogSource, now time.Time) (Backlog, error) {
 	out := Backlog{FetchedAt: now}
 	var boards []config.TeamBoard
@@ -82,6 +86,8 @@ func FetchBacklog(ctx context.Context, c *config.Config, js BacklogSource, now t
 	type boardResult struct {
 		sprints []jira.Sprint
 		issues  []jira.Issue
+		filter  int
+		warn    string
 		err     error
 	}
 	results := make([]boardResult, len(boards))
@@ -94,10 +100,24 @@ func FetchBacklog(ctx context.Context, c *config.Config, js BacklogSource, now t
 				return
 			}
 			issues, err := js.BacklogIssues(ctx, b.ID, fields)
-			results[i] = boardResult{sprints, issues, err}
+			results[i] = boardResult{sprints: sprints, issues: issues, err: err}
+			if err != nil || len(sprints) == 0 {
+				return
+			}
+			if filter, ferr := js.BoardFilter(ctx, b.ID); ferr != nil {
+				results[i].warn = fmt.Sprintf("the filter of team board %s could not be read, so its sprints show all their tickets: %v", b.Name, ferr)
+			} else {
+				results[i].filter = filter
+			}
 		})
 	}
 	wg.Wait()
+	names := map[int]string{}
+	for _, b := range boards {
+		if _, dup := names[b.ID]; !dup {
+			names[b.ID] = b.Name
+		}
+	}
 	failed := 0
 	seen := map[string]bool{}
 	sprintAt := map[int]int{}
@@ -107,10 +127,17 @@ func FetchBacklog(ctx context.Context, c *config.Config, js BacklogSource, now t
 			out.Warnings = append(out.Warnings, fmt.Sprintf("backlog of %s unavailable: %v", boards[i].Name, r.err))
 			continue
 		}
+		if r.warn != "" {
+			out.Warnings = append(out.Warnings, r.warn)
+		}
 		for _, sp := range r.sprints {
 			if _, dup := sprintAt[sp.ID]; !dup {
+				name, ok := names[sp.Board]
+				if !ok {
+					name = boards[i].Name
+				}
 				sprintAt[sp.ID] = len(out.Sprints)
-				out.Sprints = append(out.Sprints, BacklogSprint{Sprint: sp, BoardName: boards[i].Name})
+				out.Sprints = append(out.Sprints, BacklogSprint{Sprint: sp, BoardName: name})
 			}
 		}
 		for _, is := range r.issues {
@@ -123,23 +150,50 @@ func FetchBacklog(ctx context.Context, c *config.Config, js BacklogSource, now t
 	if failed == len(boards) {
 		return out, errors.New(out.Warnings[len(out.Warnings)-1])
 	}
-	if len(sprintAt) > 0 {
-		ids := make([]int, 0, len(sprintAt))
-		for id := range sprintAt {
-			ids = append(ids, id)
+	type sprintSearch struct {
+		ids    []int
+		issues []jira.Issue
+		err    error
+	}
+	searches := make([]sprintSearch, len(results))
+	for i, r := range results {
+		if r.err != nil || len(r.sprints) == 0 {
+			continue
+		}
+		ids := make([]int, len(r.sprints))
+		for n, sp := range r.sprints {
+			ids[n] = sp.ID
 		}
 		slices.Sort(ids)
-		issues, err := js.Search(ctx, jira.SprintsJQL(ids), fields)
-		if err != nil {
-			return out, err
+		searches[i].ids = ids
+		jql := jira.SprintsJQL(ids)
+		if r.filter > 0 {
+			jql = jira.BoardSprintsJQL(r.filter, ids)
 		}
-		for _, is := range issues {
+		wg.Go(func() {
+			searches[i].issues, searches[i].err = js.Search(ctx, jql, fields)
+		})
+	}
+	wg.Wait()
+	shown := map[int]map[string]bool{}
+	for i, s := range searches {
+		if s.err != nil {
+			return out, s.err
+		}
+		for _, is := range s.issues {
 			for _, sp := range is.Sprints {
-				if at, ok := sprintAt[sp.ID]; ok {
-					group := &out.Sprints[at]
-					group.Tickets = append(group.Tickets, toTicket(is, group.BoardName))
-					break
+				at, ok := sprintAt[sp.ID]
+				if !ok || !slices.Contains(s.ids, sp.ID) {
+					continue
 				}
+				if shown[sp.ID] == nil {
+					shown[sp.ID] = map[string]bool{}
+				}
+				if !shown[sp.ID][is.Key] {
+					shown[sp.ID][is.Key] = true
+					out.Sprints[at].Tickets = append(out.Sprints[at].Tickets, toTicket(is, boards[i].Name))
+				}
+				break
 			}
 		}
 	}

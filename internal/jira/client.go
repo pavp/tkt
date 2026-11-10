@@ -638,7 +638,8 @@ func (c *Client) BoardFilter(ctx context.Context, board int) (int, error) {
 	return int(id), err
 }
 
-// OpenSprints lists a board's active sprints and those not started yet, in the board's order.
+// OpenSprints lists a board's active sprints and those not started yet, in the board's order. Jira includes
+// another board's sprint once one of its tickets matches this board; its Board is then that origin board.
 func (c *Client) OpenSprints(ctx context.Context, board int) ([]Sprint, error) {
 	var out []Sprint
 	for at := 0; ; {
@@ -650,6 +651,7 @@ func (c *Client) OpenSprints(ctx context.Context, board int) ([]Sprint, error) {
 				State     string `json:"state"`
 				StartDate string `json:"startDate"`
 				EndDate   string `json:"endDate"`
+				Origin    int    `json:"originBoardId"`
 			} `json:"values"`
 		}
 		q := url.Values{"state": {"active,future"}, "maxResults": {"50"}, "startAt": {strconv.Itoa(at)}}
@@ -657,7 +659,7 @@ func (c *Client) OpenSprints(ctx context.Context, board int) ([]Sprint, error) {
 			return nil, err
 		}
 		for _, v := range page.Values {
-			sp := Sprint{ID: v.ID, Name: v.Name, State: v.State, Board: board}
+			sp := Sprint{ID: v.ID, Name: v.Name, State: v.State, Board: cmp.Or(v.Origin, board)}
 			if t, err := time.Parse(time.RFC3339, v.StartDate); err == nil {
 				sp.Start = t
 			}
@@ -717,6 +719,11 @@ func SprintsJQL(ids []int) string {
 		s[i] = strconv.Itoa(id)
 	}
 	return fmt.Sprintf("sprint in (%s) AND issuetype not in subTaskIssueTypes() ORDER BY Rank ASC", strings.Join(s, ", "))
+}
+
+// BoardSprintsJQL selects the given sprints' tickets that the board's saved filter shows.
+func BoardSprintsJQL(filter int, ids []int) string {
+	return fmt.Sprintf("filter = %d AND ", filter) + SprintsJQL(ids)
 }
 
 // sprintSchema is the custom type of Jira Software's Sprint field.
