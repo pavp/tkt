@@ -148,18 +148,18 @@ func TestBacklogGroupsActiveSprintsThenFutureSoonestFirstThenTheBacklog(t *testi
 
 func TestBacklogSharedSprintShowsOnlyTheTicketsTheBoardShows(t *testing.T) {
 	c := cfg()
-	c.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 4775, Name: "Customer & Vehicle Center"}, {ID: 418, Name: "User Access Center"}}
-	planner := jira.Sprint{ID: 91, Name: "Planner S91", State: "active", Board: 332}
+	c.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 700, Name: "Fleet Center"}, {ID: 418, Name: "User Access Center"}}
+	planner := jira.Sprint{ID: 91, Name: "Planner S91", State: "active", Board: 900}
 	uac := jira.Sprint{ID: 42, Name: "UAC S42", State: "active", Board: 418}
 	in := func(key string, sp jira.Sprint) jira.Issue {
 		return jira.Issue{Key: key, Summary: key, Status: "To Do", StatusCategory: "new", Sprints: []jira.Sprint{sp}}
 	}
 	js := &stubBacklog{
-		future:  map[int][]jira.Sprint{4775: {planner, uac}, 418: {uac}},
-		filters: map[int]int{4775: 900, 418: 901},
+		future:  map[int][]jira.Sprint{700: {planner, uac}, 418: {uac}},
+		filters: map[int]int{700: 30, 418: 31},
 		searches: map[string][]jira.Issue{
-			jira.BoardSprintsJQL(900, []int{42, 91}): {in("DEMO-375", planner), in("DEMO-279", uac)},
-			jira.BoardSprintsJQL(901, []int{42}):     {in("DEMO-279", uac), in("DEMO-400", uac)},
+			jira.BoardSprintsJQL(30, []int{42, 91}): {in("DEMO-375", planner), in("DEMO-279", uac)},
+			jira.BoardSprintsJQL(31, []int{42}):     {in("DEMO-279", uac), in("DEMO-400", uac)},
 		},
 		sprinted: []jira.Issue{in("DEMO-375", planner), in("DEMO-500", planner), in("DEMO-279", uac), in("DEMO-400", uac)},
 	}
@@ -174,10 +174,10 @@ func TestBacklogSharedSprintShowsOnlyTheTicketsTheBoardShows(t *testing.T) {
 		}
 	}
 	want := map[string][]string{
-		"Planner S91@Customer & Vehicle Center": {"DEMO-375@Customer & Vehicle Center"},
-		"UAC S42@User Access Center":            {"DEMO-279@Customer & Vehicle Center", "DEMO-400@User Access Center"},
+		"Planner S91@Fleet Center":   {"DEMO-375@Fleet Center"},
+		"UAC S42@User Access Center": {"DEMO-279@Fleet Center", "DEMO-400@User Access Center"},
 	}
-	if len(shown) != len(want) || !slices.Equal(shown["Planner S91@Customer & Vehicle Center"], want["Planner S91@Customer & Vehicle Center"]) || !slices.Equal(shown["UAC S42@User Access Center"], want["UAC S42@User Access Center"]) {
+	if len(shown) != len(want) || !slices.Equal(shown["Planner S91@Fleet Center"], want["Planner S91@Fleet Center"]) || !slices.Equal(shown["UAC S42@User Access Center"], want["UAC S42@User Access Center"]) {
 		t.Errorf("sprints = %v, want %v", shown, want)
 	}
 }

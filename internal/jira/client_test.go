@@ -462,7 +462,7 @@ func TestActiveSprints(t *testing.T) {
 func TestOpenSprintsArePagedWithTheirDates(t *testing.T) {
 	c, calls := server(t, map[string]string{
 		"GET /rest/agile/1.0/board/418/sprint":   `{"isLast":false,"values":[{"id":42,"name":"UAC S42","state":"active"},{"id":43,"name":"UAC S43","state":"future","startDate":"2026-11-03T09:00:00.000Z","endDate":"2026-11-17T17:00:00.000Z","originBoardId":418}]}`,
-		"GET /rest/agile/1.0/board/418/sprint#2": `{"isLast":true,"values":[{"id":44,"name":"UAC S44","state":"future"},{"id":91,"name":"Planner S91","state":"active","originBoardId":332}]}`,
+		"GET /rest/agile/1.0/board/418/sprint#2": `{"isLast":true,"values":[{"id":44,"name":"UAC S44","state":"future"},{"id":91,"name":"Planner S91","state":"active","originBoardId":900}]}`,
 	})
 	got, err := c.OpenSprints(context.Background(), 418)
 	if err != nil {
@@ -472,7 +472,7 @@ func TestOpenSprintsArePagedWithTheirDates(t *testing.T) {
 		{ID: 42, Name: "UAC S42", State: "active", Board: 418},
 		{ID: 43, Name: "UAC S43", State: "future", Board: 418, Start: time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC), End: time.Date(2026, 11, 17, 17, 0, 0, 0, time.UTC)},
 		{ID: 44, Name: "UAC S44", State: "future", Board: 418},
-		{ID: 91, Name: "Planner S91", State: "active", Board: 332},
+		{ID: 91, Name: "Planner S91", State: "active", Board: 900},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("sprints = %+v", got)
