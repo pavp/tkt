@@ -20,7 +20,7 @@ UI (phase 3 onward) lives in `web/` and is embedded with `go:embed`; its command
 - Go module: `github.com/pavp/tkt`. Entry point in `cmd/tkt/`; packages under `internal/`.
 - Domain code (`internal/ticket`) has no I/O and no dependency on adapters. Adapters (Jira, GitHub, git, Herdr) implement ports declared by the code that uses them.
 - `tkt` is the only component that talks to Jira and GitHub. Plugins, UI, tray app, and agents are thin clients.
-- `tkt` never creates branches or worktrees; the agent does, per project rules, and registers them with `tkt link`. The one invariant: branch names contain the ticket key (e.g. `feature/DEMO-123-slug`); `tkt link` rejects names without it.
+- `tkt` never creates branches or worktrees for a ticket; the agent does, per project rules, and registers them with `tkt link`. The one exception is a review on Herdr desktop: tkt adds the worktree of the pull request's existing branch itself and registers nothing. The one invariant: branch names contain the ticket key (e.g. `feature/DEMO-123-slug`); `tkt link` rejects names without it.
 - `.ticket.md` is generated per worktree and is gitignored; never commit it.
 - Daemon API changes: additive within `/v1`; breaking changes need a new version and an update to `docs/design.md` section 3.
 - Reading JSONL: never use a default `bufio.Scanner` (64 KB line cap). Set `Scanner.Buffer` or use `bufio.Reader`.
