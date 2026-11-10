@@ -317,15 +317,15 @@ func (a *App) cloneOf(ctx context.Context, c *config.Config, repo string) (strin
 
 // startTaskAgent prompts a free agent already in dir, else starts one in a pane opened beside a pane of dir, else
 // in a new workspace; panes without an agent are never taken over, since tkt cannot tell what runs in them. fresh
-// always starts one in a new workspace. It returns the pane the task went to.
+// always starts a new agent, never prompting one already there. It returns the pane the task went to.
 func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, kind, dir, label, prompt string, fresh bool) (string, error) {
-	same := func(p string) bool { return !fresh && p != "" && filepath.Clean(p) == filepath.Clean(dir) }
+	same := func(p string) bool { return p != "" && filepath.Clean(p) == filepath.Clean(dir) }
 	agents, err := h.Agents(ctx)
 	if err != nil {
 		return "", err
 	}
 	for _, ag := range agents {
-		if ag.Agent != "" && same(ag.Cwd) && (ag.Status == "idle" || ag.Status == "done") {
+		if !fresh && ag.Agent != "" && same(ag.Cwd) && (ag.Status == "idle" || ag.Status == "done") {
 			return ag.PaneID, h.Prompt(ctx, ag.PaneID, prompt)
 		}
 	}
