@@ -145,7 +145,7 @@ func TestHerdrStartOnDesktopMarksTheAgentsOwnTerminal(t *testing.T) {
 func TestBoardTaskOnDesktopGoesToTheAgentsOwnTerminal(t *testing.T) {
 	h, d := desktopHarness(t)
 	d.panes = []herdrport.Pane{{ID: "t1", WorkspaceID: "sp1", Cwd: "/src/web"}}
-	pane, err := h.app.startTaskAgent(context.Background(), d, "claude", "/src/web", "DEMO-7", "fix it", false)
+	pane, err := h.app.startTaskAgent(context.Background(), d, agentRequest{Kind: "claude", Dir: "/src/web", Label: "DEMO-7", Prompt: "fix it"})
 	if err != nil || pane != "t9" {
 		t.Fatalf("startTaskAgent = %q, %v", pane, err)
 	}

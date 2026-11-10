@@ -229,11 +229,14 @@ func (b *boardActions) startTask(task tui.AgentTask, prompt, dir, note, label st
 }
 
 func (a *App) startTask(ctx context.Context, task tui.AgentTask, prompt, dir, note, label string) error {
+	h := a.startHerdr(ctx)
+	if _, ok := h.(agentSpaces); ok && task.Review != nil && filepath.Clean(dir) != filepath.Clean(a.reviewsDir()) {
+		return a.startReviewSetup(ctx, h, task, dir, label)
+	}
 	if note != "" {
 		prompt += "\n\n" + note
 	}
-	h := a.startHerdr(ctx)
-	pane, err := a.startTaskAgent(ctx, h, task.Kind, dir, label, prompt, task.Review != nil)
+	pane, err := a.startTaskAgent(ctx, h, agentRequest{Kind: task.Kind, Dir: dir, Label: label, Prompt: prompt, Fresh: task.Review != nil})
 	if err != nil {
 		return fmt.Errorf("could not start an agent for the %s: %w", task.String(), err)
 	}
@@ -261,7 +264,7 @@ func (a *App) taskPlace(ctx context.Context, c *config.Config, task tui.AgentTas
 		}
 		note = "Do not change this checkout: create a worktree for " + branch + " following the project's rules, and review the pull request there."
 		if errors.Is(err, repos.ErrNotFound) {
-			dir = filepath.Join(a.Env.DataDir(), "reviews")
+			dir = a.reviewsDir()
 			note = "There is no local clone of " + task.Review.Repo + ": read the pull request with gh from its URL, and clone it into a temporary folder only if you need to run it."
 			err = os.MkdirAll(dir, 0o700)
 		}
@@ -315,10 +318,22 @@ func (a *App) cloneOf(ctx context.Context, c *config.Config, repo string) (strin
 	return a.Resolver(c).Resolve(ctx, r)
 }
 
+// reviewsDir is where a review without a local clone runs, the same folder every time.
+func (a *App) reviewsDir() string { return filepath.Join(a.Env.DataDir(), "reviews") }
+
+// agentRequest is the agent startTaskAgent prompts: of Kind (empty for the default), in Dir, its workspace labelled
+// Label. Fresh always starts a new agent; Started, when set, hears of a new one before it gets Prompt.
+type agentRequest struct {
+	Kind, Dir, Label, Prompt string
+	Fresh                    bool
+	Started                  func(pane, name, kind string)
+}
+
 // startTaskAgent prompts a free agent already in dir, else starts one in a pane opened beside a pane of dir, else
-// in a new workspace; panes without an agent are never taken over, since tkt cannot tell what runs in them. fresh
-// always starts a new agent, never prompting one already there. It returns the pane the task went to.
-func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, kind, dir, label, prompt string, fresh bool) (string, error) {
+// in a new workspace; panes without an agent are never taken over, since tkt cannot tell what runs in them. It
+// returns the pane the task went to.
+func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, req agentRequest) (string, error) {
+	kind, dir, label, prompt, fresh := req.Kind, req.Dir, req.Label, req.Prompt, req.Fresh
 	same := func(p string) bool { return p != "" && filepath.Clean(p) == filepath.Clean(dir) }
 	agents, err := h.Agents(ctx)
 	if err != nil {
@@ -362,6 +377,9 @@ func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, kind, dir, label, 
 	}
 	if split {
 		dropPlaceholder(ctx, h, pane, agent)
+	}
+	if req.Started != nil {
+		req.Started(agent, name, kind)
 	}
 	return agent, a.promptWhenNamed(ctx, h, name, prompt)
 }
