@@ -206,6 +206,15 @@ func (it item) mine() bool    { return it.pr != nil && it.ticket != nil }
 // own covers the user's pull requests, those of their tickets and those they opened for a ticket not theirs.
 func (it item) own() bool { return it.mine() || it.other && it.pr.Yours }
 
+// ownFeedback is the feedback of a pull request the user opened for a ticket not theirs, when it asks for some and
+// names the ticket its feedback goes under.
+func ownFeedback(it item) (ticket.Ticket, bool) {
+	if it.mine() || !it.own() || len(it.pr.Attention()) == 0 {
+		return ticket.Ticket{}, false
+	}
+	return ticket.FeedbackTicket(*it.pr)
+}
+
 type Model struct {
 	// lastClick and lastClickAt detect a double click, which the terminal does not report.
 	lastClick   ticket.Key
@@ -1310,7 +1319,12 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if it, ok := m.current(); ok && it.ticket != nil {
-			return m.startFix(it.ticket.Key)
+			return m.startFix(*it.ticket)
+		}
+		if it, ok := m.current(); ok {
+			if fb, ok := ownFeedback(it); ok {
+				return m.startFix(fb)
+			}
 		}
 	}
 	return m, nil

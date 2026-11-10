@@ -18,7 +18,11 @@ import (
 func taskBoard() board.Snapshot {
 	snap := contractBoard()
 	snap.Reviews = []ticket.PullRequest{{Repo: "example-org/web", Number: 820, Title: "Add pagination", Author: "alex", URL: "https://github.com/example-org/web/pull/820", State: ticket.PROpen}}
-	snap.Others = []ticket.PullRequest{{Repo: "example-org/api", Number: 40, Title: "Bump the client", Author: "grace", URL: "https://github.com/example-org/api/pull/40", State: ticket.PROpen}}
+	snap.Others = []ticket.PullRequest{
+		{Repo: "example-org/api", Number: 40, Title: "Bump the client", Author: "grace", URL: "https://github.com/example-org/api/pull/40", State: ticket.PROpen},
+		{Repo: "example-org/api", Number: 41, Title: "DEMO-9 Speed up exports", Branch: "speed-up-exports", Author: "ada", URL: "https://github.com/example-org/api/pull/41", State: ticket.PROpen, Unresolved: 1, Yours: true},
+		{Repo: "example-org/api", Number: 42, Title: "Tidy the docs", Branch: "tidy", Author: "ada", URL: "https://github.com/example-org/api/pull/42", State: ticket.PROpen, Unresolved: 1, Yours: true},
+	}
 	return snap
 }
 
@@ -50,6 +54,8 @@ func TestContractTaskAgents(t *testing.T) {
 	}{
 		{"a ticket's feedback", "/v1/tasks/agents?herdr=desktop&ticket=DEMO-1", "task-agents", Task{Key: "DEMO-1"}},
 		{"a review request", "/v1/tasks/agents?herdr=desktop&repo=example-org/web&number=820", "task-agents-review", Task{Review: &taskBoard().Reviews[0]}},
+		{"the feedback of a pull request of the user's", "/v1/tasks/agents?herdr=desktop&feedback=true&repo=example-org/api&number=41", "task-agents-feedback",
+			Task{Key: "DEMO-9", Known: &ticket.Ticket{Key: "DEMO-9", Summary: "DEMO-9 Speed up exports", PRs: []ticket.PullRequest{taskBoard().Others[1]}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -58,14 +64,18 @@ func TestContractTaskAgents(t *testing.T) {
 			s := tasksServer(t, func(_ context.Context, task Task, h string) (TaskAgents, error) {
 				got, herdr = task, h
 				out := taskAgents()
-				if task.Review != nil {
+				switch {
+				case task.Review != nil:
 					out.Phrase = "the review of #820"
 					out.Agents = out.Agents[1:]
+				case task.Key == "DEMO-9":
+					out.Phrase = "DEMO-9's feedback"
+					out.Agents = out.Agents[:1]
 				}
 				return out, nil
 			}, nil)
 			assertContract(t, s.Handler(), tt.path, s.token, tt.fixture)
-			if tt.want.Key != "" {
+			if tt.want.Key == "DEMO-1" {
 				if got.Key != "DEMO-1" || got.Known == nil || got.Known.Summary != "Filter accounts" || got.Review != nil {
 					t.Errorf("task %+v: the board's copy of the ticket goes with it", got)
 				}
@@ -93,6 +103,12 @@ func TestTaskAgentsRefusals(t *testing.T) {
 		{"not a ticket key", "/v1/tasks/agents?herdr=desktop&ticket=demo-1", nil, http.StatusBadRequest, "bad_key"},
 		{"not a pull request number", "/v1/tasks/agents?herdr=desktop&repo=example-org/web&number=x", nil, http.StatusBadRequest, "bad_request"},
 		{"a pull request the board lacks", "/v1/tasks/agents?herdr=desktop&repo=example-org/web&number=999", nil, http.StatusNotFound, "not_found"},
+		{"feedback naming no pull request", "/v1/tasks/agents?herdr=desktop&feedback=true", nil, http.StatusBadRequest, "bad_request"},
+		{"feedback not saying yes or no", "/v1/tasks/agents?herdr=desktop&feedback=maybe&repo=example-org/api&number=41", nil, http.StatusBadRequest, "bad_request"},
+		{"a ticket and a pull request's feedback", "/v1/tasks/agents?herdr=desktop&ticket=DEMO-1&feedback=true&repo=example-org/api&number=41", nil, http.StatusBadRequest, "bad_request"},
+		{"the feedback of someone else's pull request", "/v1/tasks/agents?herdr=desktop&feedback=true&repo=example-org/api&number=40", nil, http.StatusBadRequest, "bad_request"},
+		{"the feedback of a pull request naming no ticket", "/v1/tasks/agents?herdr=desktop&feedback=true&repo=example-org/api&number=42", nil, http.StatusBadRequest, "bad_request"},
+		{"the feedback of a pull request the board lacks", "/v1/tasks/agents?herdr=desktop&feedback=true&repo=example-org/api&number=999", nil, http.StatusNotFound, "not_found"},
 		{"the Herdr is not running", "/v1/tasks/agents?herdr=classic&ticket=DEMO-1", fmt.Errorf("%w: Herdr is not running", ErrHerdrUnavailable), http.StatusServiceUnavailable, "herdr_unavailable"},
 		{"the listing fails", "/v1/tasks/agents?herdr=classic&ticket=DEMO-1", errors.New("herdr: socket closed"), http.StatusUnprocessableEntity, "task_failed"},
 	}
@@ -133,6 +149,9 @@ func TestTaskRefusesWhatItCannotRun(t *testing.T) {
 		{"no Herdr named", "application/json", "", `{"ticket":"DEMO-1","to":"own"}`, nil, http.StatusBadRequest, "bad_request"},
 		{"no task", "application/json", "", `{"herdr":"desktop","to":"new"}`, nil, http.StatusBadRequest, "bad_request"},
 		{"a ticket and a review", "application/json", "", `{"herdr":"desktop","ticket":"DEMO-1","review":{"repo":"example-org/web","number":820},"to":"new"}`, nil, http.StatusBadRequest, "bad_request"},
+		{"a review and a pull request's feedback", "application/json", "", `{"herdr":"desktop","review":{"repo":"example-org/web","number":820},"feedback":{"repo":"example-org/api","number":41},"to":"new"}`, nil, http.StatusBadRequest, "bad_request"},
+		{"feedback without its pull request's number", "application/json", "", `{"herdr":"desktop","feedback":{"repo":"example-org/api"},"to":"new"}`, nil, http.StatusBadRequest, "bad_request"},
+		{"the feedback of someone else's pull request", "application/json", "", `{"herdr":"desktop","feedback":{"repo":"example-org/api","number":40},"to":"new"}`, nil, http.StatusBadRequest, "bad_request"},
 		{"not a ticket key", "application/json", "", `{"herdr":"desktop","ticket":"DEMO1","to":"new"}`, nil, http.StatusBadRequest, "bad_key"},
 		{"no destination", "application/json", "", `{"herdr":"desktop","ticket":"DEMO-1"}`, nil, http.StatusBadRequest, "bad_request"},
 		{"an unknown destination", "application/json", "", `{"herdr":"desktop","ticket":"DEMO-1","to":"shell"}`, nil, http.StatusBadRequest, "bad_request"},
@@ -181,6 +200,33 @@ func TestTaskPassesTheTaskFromTheBoard(t *testing.T) {
 			TaskRequest{Herdr: "classic", Review: &TaskReview{Repo: "example-org/api", Number: 40}, To: "open", Pane: "w1:p1"}, &taskBoard().Others[0]},
 		{"one of the user's pull requests", `{"herdr":"classic","review":{"repo":"example-org/api","number":12},"to":"new"}`,
 			TaskRequest{Herdr: "classic", Review: &TaskReview{Repo: "example-org/api", Number: 12}, To: "new"}, &taskBoard().Tickets[0].PRs[0]},
+	}
+	feedback := []struct {
+		name, body string
+		want       TaskRequest
+	}{
+		{"to its ticket's own agent", `{"herdr":"desktop","feedback":{"repo":"example-org/api","number":41},"to":"own"}`,
+			TaskRequest{Herdr: "desktop", Feedback: &TaskReview{Repo: "example-org/api", Number: 41}, To: "own"}},
+		{"to an open agent", `{"herdr":"classic","feedback":{"repo":"example-org/api","number":41},"to":"open","pane":"w1:p1"}`,
+			TaskRequest{Herdr: "classic", Feedback: &TaskReview{Repo: "example-org/api", Number: 41}, To: "open", Pane: "w1:p1"}},
+	}
+	for _, tt := range feedback {
+		t.Run("a pull request's feedback "+tt.name, func(t *testing.T) {
+			var got TaskRequest
+			var task Task
+			s := tasksServer(t, nil, func(_ context.Context, tk Task, req TaskRequest, _ func()) error { task, got = tk, req; return nil })
+			code, body := post(t, s.Handler(), "/v1/tasks", s.token, "application/json", "", tt.body)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("request %+v, want %+v", got, tt.want)
+			}
+			want := Task{Key: "DEMO-9", Known: &ticket.Ticket{Key: "DEMO-9", Summary: "DEMO-9 Speed up exports", PRs: []ticket.PullRequest{taskBoard().Others[1]}}}
+			if !reflect.DeepEqual(task, want) {
+				t.Errorf("task %+v, want DEMO-9 holding that pull request alone", task)
+			}
+			if code != http.StatusOK || body["state"] != "finished" {
+				t.Errorf("POST = %d %v, want 200 finished", code, body)
+			}
+		})
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

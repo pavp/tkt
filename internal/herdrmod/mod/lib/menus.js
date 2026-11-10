@@ -12,11 +12,13 @@ function startItem(key, agent) {
   return { label: agent ? "Go to the agent in Herdr" : "Start · open the agent", action: "start", key };
 }
 
-/** Feedback to the ticket's own agent when it has one, with another agent a step away; else to one picked. */
-function feedbackItems(key, reason, agent) {
+/** Feedback to the ticket's own agent when it has one, with another agent a step away; else to one picked. With pr,
+ *  that pull request's feedback alone goes, for one of yours whose ticket is not yours. */
+function feedbackItems(key, reason, agent, pr) {
   const [own, any] = FIX[reason] ?? CI;
-  if (agent) return [{ label: own, action: "fix", key }, { label: "Send its feedback to another agent ▸", action: "feedbackTo", key }];
-  return [{ label: any, action: "feedbackTo", key }];
+  const of = pr ? { key, pr } : { key };
+  if (agent) return [{ label: own, action: "fix", ...of }, { label: "Send its feedback to another agent ▸", action: "feedbackTo", ...of }];
+  return [{ label: any, action: "feedbackTo", ...of }];
 }
 
 const copy = (label, value) => ({ label, action: "copy", value });
@@ -58,6 +60,12 @@ export function ticketMenu(t, opts = {}) {
   return keyed({ title: `Actions for ${key}`, subtitle: t.status, items });
 }
 
+/** The details screen's menu for its ticket, with the reason it needs you and its agent from GET /v1/tickets/{key}. */
+export function detailsMenu(d) {
+  const v = d.view ?? {};
+  return ticketMenu(d.ticket, { agent: v.agent, attention: v.attention ? [v.attention] : [] });
+}
+
 // Without the daemon's card, a ticket's first reason is read from its pull requests as the card would say it.
 function attentionOf(t) {
   for (const pr of t.prs ?? []) if (pr.state === "open" && pr.checks === "fail") return "CI failing";
@@ -69,12 +77,10 @@ export function prMenu(row, opts = {}) {
   const pr = row.pr;
   if (row.other || row.review || !row.ticket) {
     const how = [pr.author || "unknown author", row.review ? "review requested" : ""].filter(Boolean).join(" · ");
-    return keyed({
-      title: `Pull request #${pr.number}`,
-      subtitle: `${pr.repo || "unknown repository"} · ${how}`,
-      items: [{ label: "Open in GitHub ↗", action: "open", url: pr.url }, { label: "Review with ▸", action: "review", pr }],
-      reviewers: reviewersOf(pr),
-    });
+    const items = [{ label: "Open in GitHub ↗", action: "open", url: pr.url }];
+    if (row.feedback_key && row.attention?.length) items.push(...feedbackItems(row.feedback_key, row.attention[0], opts.agent, { repo: pr.repo, number: pr.number }));
+    items.push({ label: "Review with ▸", action: "review", pr });
+    return keyed({ title: `Pull request #${pr.number}`, subtitle: `${pr.repo || "unknown repository"} · ${how}`, items, reviewers: reviewersOf(pr) });
   }
   const t = row.ticket;
   const items = [{ label: `Open #${pr.number} in GitHub ↗`, action: "open", url: pr.url }];

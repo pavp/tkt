@@ -14,7 +14,7 @@ import { gutterOf, statusTone, prStatusTone, agentLabel, prRefs, listColumns, po
 import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone, topKeys, noticeShown } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
 import { backlogRows, badges, backlogAgents } from "./lib/backlog.js";
-import { ticketMenu, prMenu, withBack, backOf, confirmRemove, menuFooter, isConfirm, splitTail, itemGroup, footerKeys, prsSubmenu } from "./lib/menus.js";
+import { ticketMenu, prMenu, detailsMenu, withBack, backOf, confirmRemove, menuFooter, isConfirm, splitTail, itemGroup, footerKeys, prsSubmenu } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors, detailsKey, positionOf, prSummary, isBot } from "./lib/details.js";
@@ -591,7 +591,7 @@ export default class Tkt extends View {
   }
 
   menuFor(row) {
-    if (this.tab === "prs") return prMenu(row.raw, { agent: this.answers.sprint?.body?.agents?.[row.ticketKey] });
+    if (this.tab === "prs") return prMenu(row.raw, { agent: this.answers.sprint?.body?.agents?.[row.ticketKey || row.raw.feedback_key] });
     const agents = this.answers.sprint?.body?.agents ?? {};
     if (this.tab === "backlog") return ticketMenu(row.ticket, { backlog: true, me: this.answers.backlog?.body?.me, agent: agents[row.key], groups: this.answers.backlog?.body?.groups, activeSprints: this.answers.backlog?.body?.active_sprints, prLines: row.card?.pull_requests });
     return ticketMenu(row.ticket, { agent: agents[row.key], attention: row.card?.attention, prLines: row.card?.pull_requests });
@@ -688,10 +688,11 @@ export default class Tkt extends View {
             break;
           }
           case "fix":
-            await this.sendTask({ ticket: item.key, to: "own" });
+            await this.sendTask(item.pr ? { feedback: item.pr, to: "own" } : { ticket: item.key, to: "own" });
             break;
           case "feedbackTo":
-            await this.openTask({ ticket: item.key }, `ticket=${encodeURIComponent(item.key)}`);
+            if (item.pr) await this.openTask({ feedback: item.pr }, `feedback=true&repo=${encodeURIComponent(item.pr.repo)}&number=${item.pr.number}`);
+            else await this.openTask({ ticket: item.key }, `ticket=${encodeURIComponent(item.key)}`);
             break;
           case "review":
             await this.openTask({ review: { repo: item.pr.repo, number: item.pr.number } }, `repo=${encodeURIComponent(item.pr.repo)}&number=${item.pr.number}`);
@@ -1072,7 +1073,7 @@ export default class Tkt extends View {
             .child(div().px(12).pt(9).pb(11).text_size(13).text_color(bot ? t.muted : body).child(TextView.markdown(`cbody-${i}`, c.body || ""))));
       })));
     const left = this.scrollPane("details-left", this.panes.details, leftContent).flex_1().min_w_0().h_full();
-    const menu = ticketMenu(d.ticket, { agent: v.agent, attention: v.attention ? [v.attention] : [] });
+    const menu = detailsMenu(d);
     const prUrls = new Set(v.prs.map((p) => p.url));
     const items = menu.items.filter((it) => it.action !== "details" && !(it.action === "open" && prUrls.has(it.url)) && !(it.action === "submenu" && it.label.startsWith("Pull requests")));
     const primary = items.find((it) => it.action === "start");
@@ -1748,7 +1749,7 @@ export default class Tkt extends View {
       } else if (a === "actions" && acts.length > 0) { this.details.actFocus = true; this.details.actSel = 0; this.showFocused(); }
       else if (a === "back") this.details = null;
       else if (a === "copy") this.act({ action: "copyContext", key: this.details.key, label: "copy" }, cx);
-      else if (kk === "enter" && this.details.ticket) this.menu = { ...ticketMenu(this.details.ticket, {}), sel: 0 };
+      else if (kk === "enter" && this.details.ticket) this.menu = { ...detailsMenu(this.details), sel: 0 };
       else if (to !== null) this.panes.details.offset = to;
     } else if (this.settings && !this.prompt && this.settings.markPicker) {
       this.markPickerKey(keyOf(e), k, cx);

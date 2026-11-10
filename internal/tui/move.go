@@ -123,14 +123,10 @@ func (m Model) showMoves(k ticket.Key, trs []Transition, back *menu) (tea.Model,
 	return m, nil
 }
 
-// startFix sends a ticket's feedback to its agent from the board's copy of the ticket, saying so meanwhile.
-// startFix sends a ticket's feedback to its agent; without one it asks which open agent takes it, and outside
-// Herdr it copies the prompt.
-func (m Model) startFix(k ticket.Key) (tea.Model, tea.Cmd) {
-	var known *ticket.Ticket
-	if t, ok := m.snap.Find(k); ok {
-		known = &t
-	}
+// startFix sends a ticket's feedback to its agent from the board's copy of the ticket, saying so meanwhile; without
+// an agent it asks which open agent takes it, and outside Herdr it copies the prompt.
+func (m Model) startFix(t ticket.Ticket) (tea.Model, tea.Cmd) {
+	k, known := t.Key, &t
 	task := AgentTask{Key: k, Known: known}
 	switch {
 	case !m.actions.InHerdr():

@@ -368,6 +368,16 @@ func (t Ticket) Checks() CheckState {
 	return worst
 }
 
+// FeedbackTicket is what one pull request's own feedback goes out as when no ticket of the user's holds it: the
+// first key it names, with that pull request alone. A title's key comes first, since a branch's words can look like one.
+func FeedbackTicket(pr PullRequest) (Ticket, bool) {
+	keys := append(KeysIn(strings.ToUpper(pr.Title)), BranchKeys(pr.Branch)...)
+	if len(keys) == 0 {
+		return Ticket{}, false
+	}
+	return Ticket{Key: keys[0], Summary: pr.Title, PRs: []PullRequest{pr}}, true
+}
+
 // AttachPRs gives each ticket the PRs whose branch or title carries its key, once each. A PR naming
 // several tickets belongs to each of them.
 func AttachPRs(tickets []Ticket, prs []PullRequest) []Ticket {

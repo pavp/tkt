@@ -5077,3 +5077,63 @@ func TestReviewRequestGoesToTheNewAgentChosen(t *testing.T) {
 		t.Errorf("calls %v", r.calls)
 	}
 }
+
+func TestMyPullRequestOfAnotherTicketSendsItsOwnFeedback(t *testing.T) {
+	mine := ticket.PullRequest{Repo: "example-org/web", Number: 854, Title: "DEMO-9 Speed up exports", Branch: "speed-up-exports", URL: "https://github.com/example-org/web/pull/854",
+		State: ticket.PROpen, Checks: ticket.ChecksPass, Unresolved: 1, Yours: true}
+	tests := []struct {
+		name  string
+		agent bool
+		want  string
+	}{
+		{"to the agent its key names", true, "Send the unresolved comments to the agent"},
+		{"to an agent to pick", false, "Send the unresolved comments to an agent ▸"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snap := prsSnapshot()
+			snap.Tickets = nil
+			snap.Others = []ticket.PullRequest{mine}
+			r := &recorder{}
+			m := tea.Model(New(snap, false, r, ViewList))
+			if tt.agent {
+				m = withAgent(m, "DEMO-9")
+			}
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+			m = press(m, "2")
+			if it, _ := m.(Model).current(); it.pr == nil || it.pr.Number != 854 {
+				t.Fatalf("selected %+v, want #854", it)
+			}
+			if v := stripANSI(press(m, "enter").View()); !strings.Contains(v, tt.want) {
+				t.Fatalf("menu lacks %q:\n%s", tt.want, v)
+			}
+			if !tt.agent {
+				return
+			}
+			if _, msg := run(m, "f"); msg != StatusMsg("fix DEMO-9 known") {
+				t.Errorf("f sends its feedback to the agent: %v", msg)
+			}
+		})
+	}
+}
+
+func TestSomeoneElsesPullRequestOffersNoFeedback(t *testing.T) {
+	snap := prsSnapshot()
+	snap.Tickets = nil
+	snap.Others = []ticket.PullRequest{{Repo: "example-org/web", Number: 855, Title: "DEMO-9 Speed up exports", URL: "https://github.com/example-org/web/pull/855", State: ticket.PROpen, Unresolved: 1, Author: "grace"}}
+	m := withAgent(tea.Model(New(snap, false, &recorder{}, ViewList)), "DEMO-9")
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2", "t")
+	for i := 0; i < 5; i++ {
+		if it, _ := m.(Model).current(); it.pr != nil && it.pr.Number == 855 {
+			break
+		}
+		m = press(m, "s")
+	}
+	if it, _ := m.(Model).current(); it.pr == nil || it.pr.Number != 855 {
+		t.Fatalf("selected %+v, want #855", it)
+	}
+	if v := stripANSI(press(m, "enter").View()); strings.Contains(v, "Send the unresolved comments") || !strings.Contains(v, "Review with") {
+		t.Errorf("someone else's pull request only opens and reviews:\n%s", v)
+	}
+}
