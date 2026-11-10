@@ -230,8 +230,8 @@ func (b *boardActions) startTask(task tui.AgentTask, prompt, dir, note, label st
 
 func (a *App) startTask(ctx context.Context, task tui.AgentTask, prompt, dir, note, label string) error {
 	h := a.startHerdr(ctx)
-	if _, ok := h.(agentSpaces); ok && task.Review != nil && filepath.Clean(dir) != filepath.Clean(a.reviewsDir()) {
-		return a.startReviewSetup(ctx, h, task, dir, label)
+	if s, ok := h.(agentSpaces); ok && task.Review != nil && filepath.Clean(dir) != filepath.Clean(a.reviewsDir()) {
+		return a.startReviewInWorktree(ctx, h, s, task, prompt, dir, label)
 	}
 	if note != "" {
 		prompt += "\n\n" + note

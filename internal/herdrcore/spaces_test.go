@@ -3,7 +3,6 @@ package herdrcore_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -65,34 +64,24 @@ func TestCreateWorkspaceStartsAShellLabelledWithANewSpace(t *testing.T) {
 	}
 }
 
-// The agent opens the space, and a shell in a second tab of it keeps the space (a worktree's, nested under its
-// repository's) in the sidebar once the agent is closed, without splitting the agent's tab.
-func TestOpenAgentSpaceOpensTheAgentWithAShellInAnotherTab(t *testing.T) {
+// The agent is the space's only terminal: closing it closes the space.
+func TestOpenAgentSpaceOpensASpaceWithTheAgentAlone(t *testing.T) {
 	task := "Work on DEMO-123\nthen tkt link DEMO-123"
-	shellTab := []string{"run", "--bg", "--json", "--no-parent", "--cwd", "/home/dev/code/api", "--label", "herdr.space=spnew", "--label", "herdr.tab=tbnew2"}
 	tests := []struct {
 		name, kind string
 		hcOuts     []string
 		wantArgv   []string
 		wantSend   bool
 	}{
-		{"claude gets its task as its first message", "claude", []string{ran, ranShell}, []string{"claude", task}, false},
-		{"codex too, with what it needs under hc", "codex", []string{ran, ranShell}, []string{"codex", "--no-daemon", task}, false},
-		{"another agent is prompted once ready", "pi", []string{ran, ranShell, got("t12", status("idle"), placed), got("t12", status("idle"), placed), rpc(`{"started":true}`)}, []string{"pi"}, true},
+		{"claude gets its task as its first message", "claude", []string{ran}, []string{"claude", task}, false},
+		{"codex too, with what it needs under hc", "codex", []string{ran}, []string{"codex", "--no-daemon", task}, false},
+		{"another agent is prompted once ready", "pi", []string{ran, got("t12", status("idle"), placed), got("t12", status("idle"), placed), rpc(`{"started":true}`)}, []string{"pi"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			hc := &seqHC{outs: tt.hcOuts}
 			app := &fakeApp{outs: []herdrcore.Output{appStatus}}
 			c := idsClient(hc, app)
-			seen := map[string]int{}
-			herdrcore.SetNewID(c, func(prefix string) string {
-				seen[prefix]++
-				if seen[prefix] > 1 {
-					return fmt.Sprintf("%snew%d", prefix, seen[prefix])
-				}
-				return prefix + "new"
-			})
 			ws, pane, err := c.OpenAgentSpace(context.Background(), "/home/dev/code/api", "DEMO-123 · api", tt.kind, task)
 			if err != nil {
 				t.Fatal(err)
@@ -101,11 +90,11 @@ func TestOpenAgentSpaceOpensTheAgentWithAShellInAnotherTab(t *testing.T) {
 				t.Errorf("OpenAgentSpace = %+v, %+v", ws, pane)
 			}
 			calls := hcArgs(hc)
-			if want := append(append(append([]string{}, runNewArgs...), "--"), tt.wantArgv...); len(calls) < 2 || !reflect.DeepEqual(calls[0], want) {
+			if want := append(append(append([]string{}, runNewArgs...), "--"), tt.wantArgv...); len(calls) < 1 || !reflect.DeepEqual(calls[0], want) {
 				t.Errorf("first hc run = %q\nwant           %q (the agent opens the space)", calls, want)
 			}
-			if len(calls) < 2 || !reflect.DeepEqual(calls[1], shellTab) {
-				t.Errorf("second hc run = %q\nwant            %q (a shell in another tab of the same space)", calls, shellTab)
+			if runs := slices.DeleteFunc(slices.Clone(calls), func(a []string) bool { return a[0] != "run" }); len(runs) != 1 {
+				t.Errorf("hc runs = %q, want only the agent's", runs)
 			}
 			sent := len(hc.calls) > 0 && strings.Contains(hc.calls[len(hc.calls)-1].stdin, `"terminal.send"`)
 			if sent != tt.wantSend {

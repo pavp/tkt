@@ -185,7 +185,6 @@ func newHerdrCmd(a *App) *cobra.Command {
 			return a.herdrSidebar(cmd, true)
 		}},
 		&cobra.Command{Use: "close-setup HANDOFF", Short: "Close the setup agent of a Start that tkt link handed on (Herdr desktop)", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return a.closeSetup(cmd.Context(), args[0]) }},
-		newReviewReadyCmd(a),
 		&cobra.Command{Use: "on-worktree", Short: "Link a worktree Herdr just created and hand its ticket to an agent there (event hook)", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return a.herdrOnWorktree(cmd) }},
 	)
 	return cmd
