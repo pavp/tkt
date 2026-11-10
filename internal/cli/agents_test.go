@@ -132,13 +132,15 @@ func TestCopyTaskPrompt(t *testing.T) {
 	}
 }
 
-func TestNewAgentReviewsInANewWorkspaceOfItsOwn(t *testing.T) {
+func TestNewAgentReviewsBesideTheCloneInANewAgent(t *testing.T) {
 	tests := []struct {
 		name, agents, panes string
+		wantSplit, wantNew  bool
 	}{
-		{name: "a free agent in the clone is left alone", agents: `[{"pane_id":"w5:p1","workspace_id":"w5","agent":"claude","name":"claude-5","agent_status":"done","cwd":"WEB"}]`, panes: `[{"pane_id":"w5:p1","workspace_id":"w5","cwd":"WEB"}]`},
-		{name: "a busy clone gets no pane beside", agents: `[{"pane_id":"w5:p1","workspace_id":"w5","agent":"claude","agent_status":"working","cwd":"WEB"}]`, panes: `[{"pane_id":"w5:p1","workspace_id":"w5","cwd":"WEB"}]`},
-		{name: "nothing open there", agents: `[]`, panes: `[]`},
+		{name: "a free agent in the clone gets a new agent beside it", agents: `[{"pane_id":"w5:p1","workspace_id":"w5","agent":"claude","name":"claude-5","agent_status":"done","cwd":"WEB"}]`, panes: `[{"pane_id":"w5:p1","workspace_id":"w5","cwd":"WEB"}]`, wantSplit: true},
+		{name: "a busy clone gets a pane beside", agents: `[{"pane_id":"w5:p1","workspace_id":"w5","agent":"claude","agent_status":"working","cwd":"WEB"}]`, panes: `[{"pane_id":"w5:p1","workspace_id":"w5","cwd":"WEB"}]`, wantSplit: true},
+		{name: "a shell in the clone gets a pane beside", agents: `[]`, panes: `[{"pane_id":"w6:p1","workspace_id":"w6","cwd":"WEB"}]`, wantSplit: true},
+		{name: "nothing open there opens a workspace", agents: `[]`, panes: `[]`, wantNew: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -152,13 +154,19 @@ func TestNewAgentReviewsInANewWorkspaceOfItsOwn(t *testing.T) {
 			if msg := b.NewAgentTask(tui.AgentTask{Review: &pr})(); msg != (tea.QuitMsg{}) {
 				t.Fatalf("msg %v", msg)
 			}
-			if count(f, "pane.split") != 0 || count(f, "workspace.create") != 1 || f.Last("workspace.create")["cwd"] != web || f.Last("agent.start")["pane_id"] != "w9:p1" {
-				t.Errorf("split %d, created %v, start %v: want a new agent in a new workspace of the clone", count(f, "pane.split"), f.Last("workspace.create"), f.Last("agent.start"))
+			if (count(f, "pane.split") > 0) != tt.wantSplit || (count(f, "workspace.create") > 0) != tt.wantNew {
+				t.Errorf("split %d, created %d", count(f, "pane.split"), count(f, "workspace.create"))
+			}
+			if tt.wantSplit && (f.Last("pane.split")["cwd"] != web || f.Last("agent.start")["pane_id"] != "w5:p9") {
+				t.Errorf("split %v, start %v", f.Last("pane.split"), f.Last("agent.start"))
+			}
+			if tt.wantNew && f.Last("workspace.create")["cwd"] != web {
+				t.Errorf("create %v", f.Last("workspace.create"))
 			}
 			text, _ := f.Last("agent.prompt")["text"].(string)
 			if f.Last("agent.prompt")["target"] != "claude" || !strings.Contains(text, "Review pull request") ||
 				!strings.Contains(text, "create a worktree for its branch feature/DEMO-9-pages following the project's rules") {
-				t.Errorf("prompt %v", f.Last("agent.prompt"))
+				t.Errorf("prompt %v: want a new agent told to make a worktree", f.Last("agent.prompt"))
 			}
 		})
 	}
