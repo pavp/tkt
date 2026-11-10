@@ -32,6 +32,16 @@ type handoff struct {
 	At        time.Time `json:"at"`
 	// Desktop is set when Herdr desktop ran the Start: its panes mean nothing to Herdr 0.9.5, nor the reverse.
 	Desktop bool `json:"desktop,omitempty"`
+	// Review, with no Key, is a review whose setup agent creates the worktree and runs `tkt herdr review-ready`.
+	Review *ticket.PullRequest `json:"review,omitempty"`
+}
+
+// subject names the handoff in messages and logs: the ticket key, or "owner/name#N" for a review.
+func (ho handoff) subject() string {
+	if ho.Review != nil {
+		return fmt.Sprintf("%s#%d", ho.Review.Repo, ho.Review.Number)
+	}
+	return string(ho.Key)
 }
 
 const handoffTTL = time.Hour
@@ -39,6 +49,13 @@ const handoffTTL = time.Hour
 // takeHandoff removes and returns the pending handoff for key in repo that Herdr desktop (or Herdr 0.9.5) saved,
 // dropping stale ones on the way.
 func (a *App) takeHandoff(key ticket.Key, repo string, desktop bool) (handoff, bool) {
+	return a.takeHandoffWhere(func(ho handoff) bool {
+		return ho.Review == nil && ho.Key == key && strings.EqualFold(ho.Repo, repo) && ho.Desktop == desktop
+	})
+}
+
+// takeHandoffWhere removes and returns the first pending handoff match accepts, dropping stale ones on the way.
+func (a *App) takeHandoffWhere(match func(handoff) bool) (handoff, bool) {
 	st := a.loadState()
 	var found handoff
 	ok := false
@@ -46,7 +63,7 @@ func (a *App) takeHandoff(key ticket.Key, repo string, desktop bool) (handoff, b
 	for _, ho := range st.Handoffs {
 		switch {
 		case a.Now().Sub(ho.At) > handoffTTL:
-		case !ok && ho.Key == key && strings.EqualFold(ho.Repo, repo) && ho.Desktop == desktop:
+		case !ok && match(ho):
 			found, ok = ho, true
 		default:
 			kept = append(kept, ho)
@@ -74,13 +91,13 @@ func (a *App) handedOff(ctx context.Context, h HerdrAPI, ho handoff, err error) 
 	if err == nil {
 		return true
 	}
-	a.tellHandoff(ctx, h, fmt.Sprintf("could not hand %s to an agent in its worktree (%v); its agent stays in pane %s", ho.Key, err, ho.Pane))
+	a.tellHandoff(ctx, h, fmt.Sprintf("could not hand %s to an agent in its worktree (%v); its agent stays in pane %s", ho.subject(), err, ho.Pane))
 	return false
 }
 
 func (a *App) closeHandedOff(ctx context.Context, h HerdrAPI, ho handoff) {
 	if err := closeSetupAgent(ctx, h, ho, func(string, ...any) {}); err != nil {
-		a.tellHandoff(ctx, h, fmt.Sprintf("could not close the setup agent of %s in pane %s: %v", ho.Key, ho.Pane, err))
+		a.tellHandoff(ctx, h, fmt.Sprintf("could not close the setup agent of %s in pane %s: %v", ho.subject(), ho.Pane, err))
 	}
 }
 
@@ -142,6 +159,12 @@ func (a *App) handOffFromLink(ctx context.Context, key ticket.Key, repo, dir str
 	if !a.handedOff(ctx, h, ho, err) {
 		return
 	}
+	a.closeLater(ctx, h, s, ho, pane, dir)
+}
+
+// closeLater has herdr-core close the setup agent once the command it runs returns, as closing it ends that command's
+// terminal.
+func (a *App) closeLater(ctx context.Context, h HerdrAPI, s agentSpaces, ho handoff, pane herdrport.Pane, dir string) {
 	b, err := json.Marshal(closeJob{Handoff: ho, Space: pane.WorkspaceID, Pane: pane.ID})
 	exe := ""
 	if err == nil {
@@ -153,10 +176,10 @@ func (a *App) handOffFromLink(ctx context.Context, key ticket.Key, repo, dir str
 		err = s.RunDetached(ctx, data, []string{"sh", "-c", `echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) close-setup started" >>"$2"; exec "$0" herdr close-setup "$1" >>"$2" 2>&1`, exe, string(b), filepath.Join(data, "handoff.log")})
 	}
 	if err != nil {
-		a.tellHandoff(ctx, h, fmt.Sprintf("could not close the setup agent of %s in pane %s: %v", ho.Key, ho.Pane, err))
+		a.tellHandoff(ctx, h, fmt.Sprintf("could not close the setup agent of %s in pane %s: %v", ho.subject(), ho.Pane, err))
 		return
 	}
-	fmt.Fprintf(a.Stderr, "tkt: %s goes on in a new space at %s; this setup agent closes now\n", ho.Key, dir)
+	fmt.Fprintf(a.Stderr, "tkt: %s goes on in a new space at %s; this setup agent closes now\n", ho.subject(), dir)
 }
 
 // startSpaceHandoff names the new space after the worktree's folder, which tells it from the setup agent's space.
@@ -184,7 +207,7 @@ func (a *App) closeSetup(ctx context.Context, raw string) error {
 	}
 	ho := job.Handoff
 	logf := func(format string, args ...any) {
-		a.printf("%s close-setup %s: %s\n", a.Now().Format(time.RFC3339), ho.Key, fmt.Sprintf(format, args...))
+		a.printf("%s close-setup %s: %s\n", a.Now().Format(time.RFC3339), ho.subject(), fmt.Sprintf(format, args...))
 	}
 	logf("closing the setup agent %s (space %q, first pane %q)", ho.Pane, ho.Workspace, ho.Host)
 	if err := a.Sleep(ctx, 2*time.Second); err != nil {
@@ -197,7 +220,7 @@ func (a *App) closeSetup(ctx context.Context, raw string) error {
 	}
 	if err := closeSetupAgent(ctx, h, ho, logf); err != nil {
 		logf("failed: %v", err)
-		a.tellHandoff(ctx, h, fmt.Sprintf("could not close the setup agent of %s in pane %s: %v", ho.Key, ho.Pane, err))
+		a.tellHandoff(ctx, h, fmt.Sprintf("could not close the setup agent of %s in pane %s: %v", ho.subject(), ho.Pane, err))
 	}
 	if job.Pane != "" {
 		if err := focusAgent(ctx, h, herdrport.Pane{ID: job.Pane, WorkspaceID: job.Space}); err != nil {
