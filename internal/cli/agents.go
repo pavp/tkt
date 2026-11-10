@@ -233,7 +233,7 @@ func (a *App) startTask(ctx context.Context, task tui.AgentTask, prompt, dir, no
 		prompt += "\n\n" + note
 	}
 	h := a.startHerdr(ctx)
-	pane, err := a.startTaskAgent(ctx, h, task.Kind, dir, label, prompt)
+	pane, err := a.startTaskAgent(ctx, h, task.Kind, dir, label, prompt, task.Review != nil)
 	if err != nil {
 		return fmt.Errorf("could not start an agent for the %s: %w", task.String(), err)
 	}
@@ -245,7 +245,7 @@ func (a *App) startTask(ctx context.Context, task tui.AgentTask, prompt, dir, no
 }
 
 // taskPlace is the folder a new agent works on a task in, and what it is told about it. A review runs in the
-// repository's clone and the agent picks its own tools. A fix runs in the ticket's worktree, else in a checkout
+// repository's clone, the agent creating a worktree for the pull request's branch there. A fix runs in the ticket's worktree, else in a checkout
 // already on its pull request's branch, else in the clone: checking the branch out there when the clone is free,
 // creating a worktree for it otherwise, since tkt never creates worktrees itself. A review needs no clone: without
 // one it runs in the data directory's reviews folder, the same every time; a fix without one returns noClone. clone,
@@ -255,6 +255,11 @@ func (a *App) taskPlace(ctx context.Context, c *config.Config, task tui.AgentTas
 		_, name, _ := strings.Cut(task.Review.Repo, "/")
 		label = fmt.Sprintf("review · %s#%d", name, task.Review.Number)
 		dir, err = a.cloneOf(ctx, c, task.Review.Repo)
+		branch := "the pull request's branch"
+		if task.Review.Branch != "" {
+			branch = "its branch " + task.Review.Branch
+		}
+		note = "Do not change this checkout: create a worktree for " + branch + " following the project's rules, and review the pull request there."
 		if errors.Is(err, repos.ErrNotFound) {
 			dir = filepath.Join(a.Env.DataDir(), "reviews")
 			note = "There is no local clone of " + task.Review.Repo + ": read the pull request with gh from its URL, and clone it into a temporary folder only if you need to run it."
@@ -311,10 +316,10 @@ func (a *App) cloneOf(ctx context.Context, c *config.Config, repo string) (strin
 }
 
 // startTaskAgent prompts a free agent already in dir, else starts one in a pane opened beside a pane of dir, else
-// in a new workspace; panes without an agent are never taken over, since tkt cannot tell what runs in them. It
-// returns the pane the task went to.
-func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, kind, dir, label, prompt string) (string, error) {
-	same := func(p string) bool { return p != "" && filepath.Clean(p) == filepath.Clean(dir) }
+// in a new workspace; panes without an agent are never taken over, since tkt cannot tell what runs in them. fresh
+// always starts one in a new workspace. It returns the pane the task went to.
+func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, kind, dir, label, prompt string, fresh bool) (string, error) {
+	same := func(p string) bool { return !fresh && p != "" && filepath.Clean(p) == filepath.Clean(dir) }
 	agents, err := h.Agents(ctx)
 	if err != nil {
 		return "", err
@@ -375,7 +380,7 @@ func reviewPrompt(pr ticket.PullRequest) string {
 		title = who
 	}
 	return fmt.Sprintf("Review pull request %s (%s#%d%s).\n\n"+
-		"Use your own tools to read it (for example `gh pr view` and `gh pr diff`); check it out or run it only if you need to.\n"+
+		"Review it with the /review-6-lens skill; without it, with a review tool you have, or your own tools (for example `gh pr view` and `gh pr diff`).\n"+
 		"Then report your findings here, most important first: what you would change and why, with the file and line.\n"+
 		"Do not comment on, approve or request changes on the pull request in GitHub: the user decides what to post.",
 		pr.URL, pr.Repo, pr.Number, title)
