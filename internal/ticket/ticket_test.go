@@ -220,3 +220,28 @@ func TestAttachPRsMatchesTitlesOnce(t *testing.T) {
 		t.Errorf("PRs = %+v", got[0].PRs)
 	}
 }
+
+func TestFeedbackTicket(t *testing.T) {
+	tests := []struct {
+		name string
+		pr   PullRequest
+		want Key
+		ok   bool
+	}{
+		{"the key in the title", PullRequest{Number: 854, Title: "DEMO-7 Export reports", Branch: "export-reports"}, "DEMO-7", true},
+		{"the title's key before a branch word that looks like one", PullRequest{Number: 3, Title: "DEMO-7 Export", Branch: "fix-123-export"}, "DEMO-7", true},
+		{"the key in the branch alone", PullRequest{Number: 4, Title: "Export reports", Branch: "feature/demo-7-export"}, "DEMO-7", true},
+		{"no key anywhere", PullRequest{Number: 5, Title: "Bump the client", Branch: "bump"}, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := FeedbackTicket(tt.pr)
+			if ok != tt.ok || got.Key != tt.want {
+				t.Fatalf("FeedbackTicket = %q, %v; want %q, %v", got.Key, ok, tt.want, tt.ok)
+			}
+			if ok && (got.Summary != tt.pr.Title || !reflect.DeepEqual(got.PRs, []PullRequest{tt.pr})) {
+				t.Errorf("ticket %+v, want the pull request's title and that pull request alone", got)
+			}
+		})
+	}
+}

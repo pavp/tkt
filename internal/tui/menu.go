@@ -30,7 +30,7 @@ type menuItem struct {
 	prompt *formPrompt
 	// move and fix, when set, open that ticket's Move to… menu or send its feedback to its agent.
 	move ticket.Key
-	fix  ticket.Key
+	fix  *ticket.Ticket
 }
 
 // menu lists what can be done with the selected ticket or review request.
@@ -67,7 +67,11 @@ func (m Model) buildMenu(it item) *menu {
 		if it.review() {
 			subtitle += " · review requested"
 		}
-		items := []menuItem{{label: "Open in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}, m.reviewItem(pr)}
+		items := []menuItem{{label: "Open in GitHub ↗", key: "p", link: pr.URL, run: func() tea.Cmd { return a.Open(pr.URL) }}}
+		if fb, ok := ownFeedback(it); ok {
+			items = append(items, m.feedbackItems(fb, pr.Attention()[0])...)
+		}
+		items = append(items, m.reviewItem(pr))
 		items = append(items, menuItem{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
 		return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: cmp.Or(pr.Repo, "unknown repository") + " · " + subtitle, reviewed: &pr, items: items}
 	}
@@ -341,8 +345,8 @@ func (m Model) runMenuItem(i int) (tea.Model, tea.Cmd) {
 	if it.move != "" {
 		return m.openMoves(it.move, parent)
 	}
-	if it.fix != "" {
-		return m.startFix(it.fix)
+	if it.fix != nil {
+		return m.startFix(*it.fix)
 	}
 	if it.run == nil {
 		m.menu = parent

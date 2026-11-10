@@ -61,6 +61,8 @@ type PRRow struct {
 	NeedsYou  bool                `json:"needs_you,omitempty"`
 	// Attention is why the pull request needs its author, for the fix its menu offers.
 	Attention []string `json:"attention,omitempty"`
+	// FeedbackKey, on a pull request of the user's whose ticket is not theirs, is the key its feedback goes under.
+	FeedbackKey ticket.Key `json:"feedback_key,omitempty"`
 }
 
 // BacklogView is the Backlog as the board lays it out: its sprints, then the tickets in no sprint.
@@ -148,8 +150,12 @@ func (s *Server) prs(w http.ResponseWriter, r *http.Request) {
 	for _, g := range board.PRGroups(snap, f) {
 		sec := PRSection{Group: g.Group, Title: g.Title, Count: len(g.Rows), Needs: g.Needs, Collapsed: board.Folded(collapsed, g.Group), Rows: []PRRow{}}
 		for _, row := range g.Rows {
-			sec.Rows = append(sec.Rows, PRRow{Key: fmt.Sprintf("#%d", row.PR.Number), PR: row.PR, Ticket: row.Ticket, Other: row.Other, Review: row.Review(),
-				Status: row.Status(), Approvals: row.PR.ApprovalsText(), NeedsYou: board.NeedsYou(*row.PR), Attention: reasons(row.PR.Attention())})
+			out := PRRow{Key: fmt.Sprintf("#%d", row.PR.Number), PR: row.PR, Ticket: row.Ticket, Other: row.Other, Review: row.Review(),
+				Status: row.Status(), Approvals: row.PR.ApprovalsText(), NeedsYou: board.NeedsYou(*row.PR), Attention: reasons(row.PR.Attention())}
+			if fb, ok := ticket.FeedbackTicket(*row.PR); ok && row.Other && row.PR.Yours {
+				out.FeedbackKey = fb.Key
+			}
+			sec.Rows = append(sec.Rows, out)
 		}
 		view.Sections = append(view.Sections, sec)
 	}

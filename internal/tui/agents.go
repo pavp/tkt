@@ -166,7 +166,7 @@ func (m Model) feedbackItems(t ticket.Ticket, r ticket.Reason) []menuItem {
 		return []menuItem{{label: "Copy the feedback prompt", key: "f", run: func() tea.Cmd { return m.actions.CopyTaskPrompt(task) }}}
 	case m.snap.Agents[string(t.Key)] != "":
 		return []menuItem{
-			{label: fixLabel(r), key: "f", fix: t.Key},
+			{label: fixLabel(r), key: "f", fix: &t},
 			{label: "Send its feedback to another agent ▸", sub: func() *menu { return m.agentChoice(task) }},
 		}
 	}

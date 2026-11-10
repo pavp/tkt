@@ -116,3 +116,23 @@ test("a ticket's pull requests submenu names each one by number and title", () =
   assert.deepEqual(prs.menu.items.map((i) => i.label), ["#12 Add the filter", "#13 Fix the date range"]);
   assert.deepEqual(ticketMenu({ ...t, prs: [{ number: 12, url: "a" }, { number: 13, url: "b" }] }, {}).items.find((i) => i.action === "submenu").menu.items.map((i) => i.label), ["#12", "#13"], "a pull request without a title keeps its number");
 });
+
+test("your pull request of a ticket not yours sends its own feedback, by the pull request", async () => {
+  const { prMenu: menu } = await import("../mod/lib/menus.js");
+  const row = { ...fixture("prs.json").sections[1].rows[1], attention: ["Unresolved comments"] };
+  assert.equal(row.feedback_key, "DEMO-7");
+  const own = menu(row, { agent: "idle" });
+  assert.deepEqual(labels(own), ["Open in GitHub ↗", "Send the unresolved comments to the agent", "Send its feedback to another agent ▸", "Review with ▸"]);
+  assert.deepEqual(own.items.slice(1, 3).map((i) => [i.action, i.pr]), [["fix", { repo: "example-org/web", number: 33 }], ["feedbackTo", { repo: "example-org/web", number: 33 }]]);
+  assert.deepEqual(labels(menu(row, {})), ["Open in GitHub ↗", "Send the unresolved comments to an agent ▸", "Review with ▸"]);
+  const quiet = fixture("prs.json").sections[1].rows[1];
+  assert.deepEqual(labels(menu(quiet, { agent: "idle" })), ["Open in GitHub ↗", "Review with ▸"], "nothing to send while it asks for nothing");
+});
+
+test("the details' menu offers the feedback its ticket needs, to its agent", async () => {
+  const { detailsMenu } = await import("../mod/lib/menus.js");
+  const t = { key: "DEMO-1", status: "In Review", prs: [{ number: 12, repo: "example-org/api", state: "open", checks: "pass", url: "https://github.com/example-org/api/pull/12" }] };
+  const m = detailsMenu({ ticket: t, view: { attention: "Unresolved comments", agent: "idle" } });
+  assert.ok(labels(m).includes("Send the unresolved comments to the agent"), labels(m).join(" | "));
+  assert.equal(m.items[0].label, "Go to the agent in Herdr");
+});
