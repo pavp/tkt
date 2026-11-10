@@ -21,6 +21,9 @@ type stubBacklog struct {
 	backlog  map[int][]jira.Issue
 	sprinted []jira.Issue
 	failing  map[int]error
+	filters  map[int]int
+	unread   map[int]error
+	searches map[string][]jira.Issue
 	jqls     []string
 }
 
@@ -28,7 +31,17 @@ func (s *stubBacklog) Search(_ context.Context, jql string, _ []string) ([]jira.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.jqls = append(s.jqls, jql)
+	if is, ok := s.searches[jql]; ok {
+		return is, nil
+	}
 	return s.sprinted, nil
+}
+
+func (s *stubBacklog) BoardFilter(_ context.Context, board int) (int, error) {
+	if err := s.unread[board]; err != nil {
+		return 0, err
+	}
+	return s.filters[board], nil
 }
 
 func (s *stubBacklog) FieldID(_ context.Context, name string) (string, error) {
@@ -118,8 +131,9 @@ func TestBacklogGroupsActiveSprintsThenFutureSoonestFirstThenTheBacklog(t *testi
 	if k := keys(got.Backlog); !slices.Equal(k, []string{"DEMO-180@User Access Center", "DEMO-305@Authorization Center"}) {
 		t.Errorf("backlog = %v", k)
 	}
-	if !slices.Equal(js.jqls, []string{jira.SprintsJQL([]int{11, 12, 43, 44})}) {
-		t.Errorf("one search covers every future sprint: %v", js.jqls)
+	slices.Sort(js.jqls)
+	if want := []string{jira.SprintsJQL([]int{11, 12}), jira.SprintsJQL([]int{43, 44})}; !slices.Equal(js.jqls, want) {
+		t.Errorf("each board searches its own sprints: %v", js.jqls)
 	}
 	if !got.HasPoints {
 		t.Error("the space has a story points field")
@@ -129,6 +143,63 @@ func TestBacklogGroupsActiveSprintsThenFutureSoonestFirstThenTheBacklog(t *testi
 	}
 	if !got.FetchedAt.Equal(now) {
 		t.Errorf("fetched at %v", got.FetchedAt)
+	}
+}
+
+func TestBacklogSharedSprintShowsOnlyTheTicketsTheBoardShows(t *testing.T) {
+	c := cfg()
+	c.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 700, Name: "Fleet Center"}, {ID: 418, Name: "User Access Center"}}
+	planner := jira.Sprint{ID: 91, Name: "Planner S91", State: "active", Board: 900}
+	uac := jira.Sprint{ID: 42, Name: "UAC S42", State: "active", Board: 418}
+	in := func(key string, sp jira.Sprint) jira.Issue {
+		return jira.Issue{Key: key, Summary: key, Status: "To Do", StatusCategory: "new", Sprints: []jira.Sprint{sp}}
+	}
+	js := &stubBacklog{
+		future:  map[int][]jira.Sprint{700: {planner, uac}, 418: {uac}},
+		filters: map[int]int{700: 30, 418: 31},
+		searches: map[string][]jira.Issue{
+			jira.BoardSprintsJQL(30, []int{42, 91}): {in("DEMO-375", planner), in("DEMO-279", uac)},
+			jira.BoardSprintsJQL(31, []int{42}):     {in("DEMO-279", uac), in("DEMO-400", uac)},
+		},
+		sprinted: []jira.Issue{in("DEMO-375", planner), in("DEMO-500", planner), in("DEMO-279", uac), in("DEMO-400", uac)},
+	}
+	got, err := FetchBacklog(context.Background(), c, js, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := map[string][]string{}
+	for _, sp := range got.Sprints {
+		for _, t := range sp.Tickets {
+			shown[sp.Name+"@"+sp.BoardName] = append(shown[sp.Name+"@"+sp.BoardName], string(t.Key)+"@"+t.Board)
+		}
+	}
+	want := map[string][]string{
+		"Planner S91@Fleet Center":   {"DEMO-375@Fleet Center"},
+		"UAC S42@User Access Center": {"DEMO-279@Fleet Center", "DEMO-400@User Access Center"},
+	}
+	if len(shown) != len(want) || !slices.Equal(shown["Planner S91@Fleet Center"], want["Planner S91@Fleet Center"]) || !slices.Equal(shown["UAC S42@User Access Center"], want["UAC S42@User Access Center"]) {
+		t.Errorf("sprints = %v, want %v", shown, want)
+	}
+}
+
+func TestBacklogBoardWithAnUnreadableFilterShowsItsWholeSprints(t *testing.T) {
+	sp := jira.Sprint{ID: 42, Name: "UAC S42", State: "active", Board: 418}
+	js := &stubBacklog{
+		future:   map[int][]jira.Sprint{418: {sp}},
+		unread:   map[int]error{418: errors.New("jira: 403")},
+		sprinted: []jira.Issue{{Key: "DEMO-279", Summary: "Grant", Status: "To Do", StatusCategory: "new", Sprints: []jira.Sprint{sp}}},
+	}
+	c := cfg()
+	c.Spaces[0].TeamBoards = []config.TeamBoard{{ID: 418, Name: "User Access Center"}}
+	got, err := FetchBacklog(context.Background(), c, js, time.Now())
+	if err != nil || len(got.Sprints) != 1 || len(got.Sprints[0].Tickets) != 1 {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if !slices.Equal(js.jqls, []string{jira.SprintsJQL([]int{42})}) {
+		t.Errorf("searches = %v", js.jqls)
+	}
+	if !slices.ContainsFunc(got.Warnings, func(w string) bool { return strings.Contains(w, "User Access Center") && strings.Contains(w, "403") }) {
+		t.Errorf("warnings = %v", got.Warnings)
 	}
 }
 
