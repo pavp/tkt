@@ -259,15 +259,12 @@ func (c *Client) OpenAgentSpace(ctx context.Context, folder, name, kind, task st
 	if prompts {
 		argv = append(argv, task)
 	}
-	ws, shell, labels, err := c.newSpaceLabels(ctx, folder, name, nil)
+	ws, address, labels, err := c.newSpaceLabels(ctx, folder, name, argv)
 	if err != nil {
 		return ws, herdrport.Pane{}, err
 	}
-	address, err := c.start(ctx, runReq{argv: argv, cwd: folder, labels: labels})
-	if err != nil {
-		_ = c.ClosePane(ctx, shell)
-		return ws, herdrport.Pane{}, err
-	}
+	// The shell keeps the space in the sidebar once the agent is closed; its own tab leaves the agent's unsplit.
+	_, _ = c.start(ctx, runReq{cwd: folder, labels: map[string]string{labelSpace: labels[labelSpace], labelTab: c.newID("tb")}})
 	pane := herdrport.Pane{ID: address, WorkspaceID: ws.ID, Cwd: folder}
 	if prompts {
 		return ws, pane, nil
