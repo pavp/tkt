@@ -39,10 +39,28 @@ test("the agents to save are Herdr's installed agents, by key, once each", async
 test("tkt found on one machine is used; on several, the person chooses unless one was chosen before", async () => {
   const { pickMachine } = await import("../mod/lib/client.js");
   assert.deepEqual(pickMachine([null], undefined), { machine: null });
-  assert.deepEqual(pickMachine(["wsl-dev"], null), { machine: "wsl-dev" });
+  assert.deepEqual(pickMachine(["wsl-dev"], null, 3), { machine: "wsl-dev" }, "the chosen machine missed three looks: the one found");
   assert.deepEqual(pickMachine([null, "wsl-dev"], undefined), { choose: [null, "wsl-dev"] });
   assert.deepEqual(pickMachine([null, "wsl-dev"], "wsl-dev"), { machine: "wsl-dev" });
   assert.deepEqual(pickMachine([], undefined), { none: true });
+});
+
+test("a chosen machine that does not answer is waited for, not replaced, until it missed three looks", async () => {
+  const { pickMachine } = await import("../mod/lib/client.js");
+  assert.deepEqual(pickMachine([null], "wsl-dev"), { wait: "wsl-dev" });
+  assert.deepEqual(pickMachine([null, "build"], "wsl-dev", 2), { wait: "wsl-dev" });
+  assert.deepEqual(pickMachine(["wsl-dev"], null), { wait: null }, "this computer counts as chosen too");
+  assert.deepEqual(pickMachine([null], "wsl-dev", 3), { machine: null });
+  assert.deepEqual(pickMachine([null, "build"], "wsl-dev", 3), { choose: [null, "build"] });
+});
+
+test("the chosen machine is shared by every copy of the mod, read from this copy's storage until then", async () => {
+  const { chosenMachine } = await import("../mod/lib/client.js");
+  assert.equal(chosenMachine({ on: "wsl-dev" }, null), "wsl-dev");
+  assert.equal(chosenMachine({ on: null }, "wsl-dev"), null, "this computer, chosen in another copy, wins");
+  assert.equal(chosenMachine(undefined, "wsl-dev"), "wsl-dev");
+  assert.equal(chosenMachine(null, undefined), undefined, "nothing chosen anywhere");
+  assert.equal(chosenMachine({ on: 7 }, undefined), undefined, "a value no mod wrote is ignored");
 });
 
 test("the machine in use is looked for again after it failed a few times in a row", async () => {

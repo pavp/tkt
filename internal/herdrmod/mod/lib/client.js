@@ -45,13 +45,24 @@ export function agentKinds(known) {
   return kinds;
 }
 
-/** Which machine's tkt to use, given the machines it was found on: the only one, the one chosen before while
- *  it still has tkt, else {choose} so the person picks; looking never starts a daemon anywhere. */
-export function pickMachine(found, chosen) {
+/** Which machine's tkt to use, given the machines it was found on: the one chosen before; {wait} while that one
+ *  missed fewer looks than WAIT_LOOKS; else the only one, or {choose} so the person picks. Looking never starts a
+ *  daemon anywhere. */
+export function pickMachine(found, chosen, misses = 0) {
   if (found.length === 0) return { none: true };
-  if (found.length === 1) return { machine: found[0] };
   if (chosen !== undefined && found.includes(chosen)) return { machine: chosen };
+  if (chosen !== undefined && misses < WAIT_LOOKS) return { wait: chosen };
+  if (found.length === 1) return { machine: found[0] };
   return { choose: found };
+}
+
+// A chosen machine missing from this many looks in a row, such as one Herdr has not reached yet, gives way.
+const WAIT_LOOKS = 3;
+
+/** The machine chosen in any copy of the mod ({on} in Herdr's shared state), else in this copy's own storage. */
+export function chosenMachine(sharedValue, local) {
+  const on = sharedValue?.on;
+  return on === null || typeof on === "string" ? on : local;
 }
 
 // A machine whose tkt fails this many requests in a row is looked for again: it may have lost tkt.
