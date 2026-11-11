@@ -3,11 +3,11 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView, VirtualListScrollHandle, Popup } from "gpui-base";
-import { notify, exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile, settings, fonts } from "herdr";
+import { notify, exec, machines, shared as sharedValue, setShared, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile, settings, fonts } from "herdr";
 import { tktTheme, scrim, monoFont, sourceColors, contrast, ensure, mix, CATPPUCCIN } from "./lib/theme.js";
 import * as os from "os";
 import * as fs from "fs/promises";
-import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom, shared } from "./lib/client.js";
+import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom, shared, chosenMachine } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
 import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN } from "./lib/columns.js";
 import { gutterOf, statusTone, prStatusTone, agentLabel, prRefs, listColumns, pointsText } from "./lib/rows.js";
@@ -45,12 +45,13 @@ const TABS = [
 const POLL = 5000;
 const ROW = 32;
 
+/** The machine chosen in any copy of the mod: Herdr gives each copy (each layout, each block) its own storage. */
 function remembered() {
+  let local;
   try {
-    return JSON.parse(localStorage.getItem("machine") ?? "undefined");
-  } catch {
-    return undefined;
-  }
+    local = JSON.parse(localStorage.getItem("machine") ?? "undefined");
+  } catch {}
+  return chosenMachine(sharedValue("tkt.machine"), local);
 }
 
 /** The Start the mod waits on, kept so a mod closed before it ended can tell how it did when opened again. */
@@ -167,7 +168,9 @@ export default class Tkt extends View {
       if (state === "old") this.outdated.push(on);
     }
     this.found = found;
-    return pickMachine(found, remembered());
+    const pick = pickMachine(found, remembered(), this.misses ?? 0);
+    this.misses = pick.wait !== undefined ? (this.misses ?? 0) + 1 : 0;
+    return pick;
   }
 
   /** Opens the list of machines with tkt, looked for again, so the person can switch. */
@@ -207,7 +210,9 @@ export default class Tkt extends View {
       }));
   }
 
-  use(on, cx) {
+  /** Shows tkt on machine on; keep saves it as the choice of every copy, which a machine used only because the
+   *  chosen one stopped answering does not. */
+  use(on, cx, keep = true) {
     const switched = this.machine !== undefined && machineKey(this.machine) !== machineKey(on);
     if (switched) {
       this.states[machineKey(this.machine)] = stashed(this);
@@ -220,9 +225,13 @@ export default class Tkt extends View {
     this.machine = on;
     if (switched) this.loadView(cx);
     this.choices = null;
-    try {
-      localStorage.setItem("machine", JSON.stringify(on));
-    } catch {}
+    this.misses = 0;
+    if (keep) {
+      setShared("tkt.machine", { on: on ?? null });
+      try {
+        localStorage.setItem("machine", JSON.stringify(on ?? null));
+      } catch {}
+    }
     cx.spawn(async (cx) => {
       try {
         const h = await this.call("GET", "/health");
@@ -260,13 +269,16 @@ export default class Tkt extends View {
       const pick = await this.lookOnce();
       if (pick.none && this.outdated.length > 0) throw new Error(outdatedNote(this.outdated));
       if (pick.none) throw new Error("tkt is not installed on this computer or on any machine connected to Herdr");
+      if (pick.wait !== undefined) throw new Error(`tkt on ${pick.wait ?? "this computer"} is not answering yet; trying again`);
       if (pick.choose) {
         this.choices = pick.choose;
         throw new Error("tkt is on several machines: choose one");
       }
       if (this.machine === undefined) {
+        const chosen = remembered();
         this.machine = pick.machine;
         this.pendingUse = true;
+        this.keepPick = chosen === undefined || chosen === pick.machine;
       }
     }
     try {
@@ -313,7 +325,7 @@ export default class Tkt extends View {
         this.error = null;
         if (this.pendingUse) {
           this.pendingUse = false;
-          this.use(this.machine, cx);
+          this.use(this.machine, cx, this.keepPick ?? true);
         }
         const soon = pollAfter(answers[routes.findIndex(([id]) => id === this.tab)]);
         if (soon && !this.soonLoad) {
