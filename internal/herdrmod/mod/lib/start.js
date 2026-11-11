@@ -77,3 +77,28 @@ export function pickerKey(p, k) {
   }
   return null;
 }
+
+const SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+
+/** How a Start the mod waits on reads ({key, since, failed?}): in its modal, and in the footer once hidden. */
+export function startingView(s, now) {
+  if (s.failed) return { title: `${s.key}'s Start failed`, line: s.failed, footer: `${s.key}'s Start failed: ${s.failed}`, keys: [["enter", "close"], ["esc", "close"]] };
+  const secs = Math.max(0, Math.floor((now - s.since) / 1000));
+  const elapsed = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+  const spin = SPIN[Math.floor(Math.max(0, now - s.since) / 100) % SPIN.length];
+  return { title: `Starting ${s.key}`, spin, line: "Preparing its worktree…", elapsed, footer: `${spin} Starting ${s.key} · preparing its worktree… ${elapsed}`, keys: [["esc", "keep working · it runs on"]] };
+}
+
+/** What a key does to the open Start modal, "hide" or "close"; null swallows it, as the modal blocks the board. */
+export function startingKey(s, k) {
+  if (s.failed) return k === "escape" || k === "enter" ? "close" : null;
+  return k === "escape" ? "hide" : null;
+}
+
+/** Where a Start's job stands from GET /v1/jobs/{id}; an unreachable daemon is asked again. */
+export function startingJob(a) {
+  if (!a?.status) return { state: "running" };
+  if (a.status !== 200) return { state: "failed", message: a.body?.message ?? `tkt answered ${a.status}` };
+  if (a.body?.state === "failed") return { state: "failed", message: a.body.message ?? "it failed" };
+  return { state: a.body?.state === "running" ? "running" : "done" };
+}
