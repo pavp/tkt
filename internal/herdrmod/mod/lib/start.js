@@ -92,9 +92,11 @@ export function startingKey(s, k) {
   return k === "escape" ? "hide" : null;
 }
 
-/** Where a Start's job stands from GET /v1/jobs/{id}; an unreachable daemon is asked again. */
+/** Where a Start's job stands from GET /v1/jobs/{id}; an unreachable daemon is asked again, and a job tkt no longer
+ *  keeps (it ended over ten minutes ago, or the daemon restarted) is gone, not failed. */
 export function startingJob(a) {
   if (!a?.status) return { state: "running" };
+  if (a.status === 404) return { state: "gone" };
   if (a.status !== 200) return { state: "failed", message: a.body?.message ?? `tkt answered ${a.status}` };
   if (a.body?.state === "failed") return { state: "failed", message: a.body.message ?? "it failed" };
   return { state: a.body?.state === "running" ? "running" : "done" };
@@ -104,4 +106,18 @@ export function startingJob(a) {
 export function startingNotice(key, job) {
   if (job.state === "failed") return { text: `${key}'s Start failed: ${job.message}`, tone: "error" };
   return { text: `started ${key}: its agent is in Herdr`, tone: "ok" };
+}
+
+/** The Herdr notification a hidden Start posts when it ends. */
+export function startingToast(key, job) {
+  if (job.state === "failed") return { title: `${key}'s Start failed`, body: job.message, level: "error" };
+  return { title: `Started ${key}`, body: "Its agent is in Herdr.", level: "success" };
+}
+
+// A Start runs four minutes at most and tkt keeps its job ten more.
+const RESUME_WINDOW = 15 * 60_000;
+
+/** Whether a Start saved when the mod closed is still worth following: same machine, and tkt may still know its job. */
+export function resumable(pending, machine, now) {
+  return Boolean(pending?.id) && pending.machine === machine && now - pending.since < RESUME_WINDOW;
 }

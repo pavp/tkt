@@ -3,7 +3,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView, VirtualListScrollHandle, Popup } from "gpui-base";
-import { exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile, settings, fonts } from "herdr";
+import { notify, exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile, settings, fonts } from "herdr";
 import { tktTheme, scrim, monoFont, sourceColors, contrast, ensure, mix, CATPPUCCIN } from "./lib/theme.js";
 import * as os from "os";
 import * as fs from "fs/promises";
@@ -15,7 +15,7 @@ import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone, 
 import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
 import { backlogRows, badges, backlogAgents } from "./lib/backlog.js";
 import { ticketMenu, prMenu, detailsMenu, withBack, backOf, confirmRemove, menuFooter, isConfirm, splitTail, itemGroup, footerKeys, prsSubmenu } from "./lib/menus.js";
-import { firstPicker, answer, taskPicker, pickerKey, startingView, startingKey, startingJob, startingNotice } from "./lib/start.js";
+import { firstPicker, answer, taskPicker, pickerKey, startingView, startingKey, startingJob, startingNotice, startingToast, resumable } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors, detailsKey, positionOf, prSummary, isBot } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, palettePatch, statusBoard, markChoices, dragStarted, laneAt, statusMove, grabKey } from "./lib/settings.js";
@@ -51,6 +51,18 @@ function remembered() {
   } catch {
     return undefined;
   }
+}
+
+/** The Start the mod waits on, kept so a mod closed before it ended can tell how it did when opened again. */
+function loadPending() {
+  try { return JSON.parse(localStorage.getItem("pendingStart") ?? "null"); } catch { return null; }
+}
+
+function savePending(p) {
+  try {
+    if (p) localStorage.setItem("pendingStart", JSON.stringify(p));
+    else localStorage.removeItem("pendingStart");
+  } catch {}
 }
 
 export default class Tkt extends View {
@@ -281,6 +293,7 @@ export default class Tkt extends View {
   }
 
   load(cx) {
+    this.resumeStart(cx);
     const routes = routesFor(TABS, this.tab, { bots: this.bots, refreshBacklog: this.refreshBacklog });
     if (this.tab === "backlog") this.refreshBacklog = false;
     cx.spawn(async (cx) => {
@@ -1548,6 +1561,7 @@ export default class Tkt extends View {
     }
     if (a.status === 202) {
       this.starting = { key, id: a.body.id, since: Date.now() };
+      savePending({ key, id: a.body.id, since: this.starting.since, machine: machineKey(this.machine) });
       this.followStart(cx);
     }
     else if (a.status === 200) this.notice = `went to ${key}'s agent`;
@@ -1566,16 +1580,31 @@ export default class Tkt extends View {
         let job = { state: "running" };
         try { job = startingJob(await this.call("GET", `/v1/jobs/${s.id}`)); } catch {}
         if (this.starting !== s) return;
-        if (job.state === "failed" && !s.hidden) s.failed = job.message;
+        if (job.state !== "running") savePending(null);
+        if (job.state === "gone") this.starting = null;
+        else if (job.state === "failed" && !s.hidden) s.failed = job.message;
         else if (job.state !== "running") {
           this.starting = null;
           this.startNotice = startingNotice(s.key, job);
           this.notice = this.startNotice.text;
+          notify(startingToast(s.key, job));
         }
       }
       cx.notify();
       this.followStart(cx);
     }));
+  }
+
+  /** Follows again, hidden, a Start the mod was closed on, once tkt's machine is known, so how it ended is not lost. */
+  resumeStart(cx) {
+    if (this.starting || this.machine === undefined) return;
+    const pending = loadPending();
+    if (!resumable(pending, machineKey(this.machine), Date.now())) {
+      if (pending) savePending(null);
+      return;
+    }
+    this.starting = { key: pending.key, id: pending.id, since: pending.since, hidden: true };
+    this.followStart(cx);
   }
 
   /** The Start the mod waits on, over the dimmed board, which it blocks until hidden or, after a failure, closed. */
