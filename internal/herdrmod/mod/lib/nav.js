@@ -109,6 +109,23 @@ export function listKey(sel, n, k) {
 
 export function sectionAfter(ids, current, k) {
   const at = ids.indexOf(current);
-  const d = { tab: 1, right: 1, l: 1, "shift-tab": -1, left: -1, h: -1 }[k];
+  const d = { tab: 1, "shift-tab": -1 }[k];
   return d === undefined ? null : ids[(at + d + ids.length) % ids.length];
+}
+
+/** Where a key takes Settings' focus ({zone: "menu" | "content", section, sel}) across `count` controls: up and down
+ *  move within the menu, showing each section, or within the content; right or enter enter the content, left goes back
+ *  to the menu, tab cycles the sections. Null when the key is not a move. */
+export function settingsNav(at, ids, count, k) {
+  const section = sectionAfter(ids, at.section, k);
+  if (section) return { ...at, section, sel: 0 };
+  if (at.zone === "menu") {
+    const i = listKey(ids.indexOf(at.section), ids.length, k);
+    if (i !== null) return { ...at, section: ids[i], sel: 0 };
+    if (["right", "l", "enter", " "].includes(k)) return count > 0 ? { ...at, zone: "content", sel: 0 } : at;
+    return null;
+  }
+  const sel = listKey(at.sel, count, k);
+  if (sel !== null) return { ...at, sel };
+  return k === "left" || k === "h" ? { ...at, zone: "menu" } : null;
 }
