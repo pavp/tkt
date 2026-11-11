@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture } from "./fixtures.js";
-import { firstPicker, answer, taskPicker, startingView, startingKey, startingJob, startingNotice } from "../mod/lib/start.js";
+import { firstPicker, answer, taskPicker, startingView, startingKey, startingJob, startingNotice, startingToast, resumable } from "../mod/lib/start.js";
 
 test("a ticket with worktrees asks which, as the TUI's Open picker", () => {
   const p = firstPicker("DEMO-7", fixture("start-worktrees.json"));
@@ -81,11 +81,25 @@ test("a Start's job ends running, failed with its message, or done", () => {
   assert.deepEqual(startingJob({ status: 200, body: { state: "running" } }), { state: "running" });
   assert.deepEqual(startingJob({ status: 200, body: { state: "failed", message: "boom" } }), { state: "failed", message: "boom" });
   assert.deepEqual(startingJob({ status: 200, body: { state: "done" } }), { state: "done" });
-  assert.deepEqual(startingJob({ status: 404, body: { message: "no such job" } }), { state: "failed", message: "no such job" });
+  assert.deepEqual(startingJob({ status: 404, body: { message: "no such job" } }), { state: "gone" });
+  assert.deepEqual(startingJob({ status: 500, body: { message: "boom" } }), { state: "failed", message: "boom" });
   assert.deepEqual(startingJob({ status: 0 }), { state: "running" });
 });
 
 test("how a hidden Start ended stays in the footer in color: green when its agent opened, red when it failed", () => {
   assert.deepEqual(startingNotice("DEMO-7", { state: "done" }), { text: "started DEMO-7: its agent is in Herdr", tone: "ok" });
   assert.deepEqual(startingNotice("DEMO-7", { state: "failed", message: "boom" }), { text: "DEMO-7's Start failed: boom", tone: "error" });
+});
+
+test("a hidden Start that ends posts a Herdr notification: green when its agent opened, red with tkt's message when it failed", () => {
+  assert.deepEqual(startingToast("DEMO-7", { state: "done" }), { title: "Started DEMO-7", body: "Its agent is in Herdr.", level: "success" });
+  assert.deepEqual(startingToast("DEMO-7", { state: "failed", message: "boom" }), { title: "DEMO-7's Start failed", body: "boom", level: "error" });
+});
+
+test("a Start saved before the mod closed is followed again on the same machine while tkt still keeps its job", () => {
+  const pending = { key: "DEMO-7", id: "j1", since: 1000, machine: "wsl-dev" };
+  assert.equal(resumable(pending, "wsl-dev", 1000 + 60_000), true);
+  assert.equal(resumable(pending, "this computer", 1000 + 60_000), false);
+  assert.equal(resumable(pending, "wsl-dev", 1000 + 16 * 60_000), false);
+  assert.equal(resumable(null, "wsl-dev", 1000), false);
 });
