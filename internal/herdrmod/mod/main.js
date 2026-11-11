@@ -1546,7 +1546,7 @@ export default class Tkt extends View {
       return;
     }
     if (a.status === 202) {
-      this.notice = `starting ${key}: its agent opens in Herdr`;
+      this.notice = `starting ${key}: preparing its worktree, then its agent opens in Herdr`;
       this.jobs.push({ id: a.body.id, what: `${key}'s Start` });
     }
     else if (a.status === 200) this.notice = `went to ${key}'s agent`;

@@ -49,7 +49,7 @@ func desktopSetupAgent() *handoff {
 func TestHerdrStartOnDesktopAsksTheSetupAgentForGitAndTktLink(t *testing.T) {
 	h, d := desktopHarness(t)
 	h.clone(t, "web")
-	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "claude"); code != 0 {
+	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "codex"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
 	if len(d.texts) != 1 {

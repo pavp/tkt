@@ -99,14 +99,14 @@ func TestAnUnattendedStartOpensTheAgentInTheHerdrNamed(t *testing.T) {
 	h, d := daemonDesktop(t)
 	web := h.clone(t, "web")
 	settledAt := -1
-	err := h.app.daemonStart(context.Background(), "DEMO-7", daemon.StartRequest{Herdr: "desktop", Repos: []string{"web"}, Agent: "claude"}, func() { settledAt = len(d.calls) })
+	err := h.app.daemonStart(context.Background(), "DEMO-7", daemon.StartRequest{Herdr: "desktop", Repos: []string{"web"}, Agent: "codex"}, func() { settledAt = len(d.calls) })
 	if err != nil {
 		t.Fatalf("daemonStart: %v\n%s", err, h.errOut)
 	}
 	if settledAt != 0 {
 		t.Errorf("settled after %d Herdr calls, want before the first", settledAt)
 	}
-	if len(d.calls) == 0 || d.calls[0] != `workspace "" `+web || !strings.Contains(strings.Join(d.calls, "\n"), "start claude t1") {
+	if len(d.calls) == 0 || d.calls[0] != `workspace "" `+web || !strings.Contains(strings.Join(d.calls, "\n"), "start codex t1") {
 		t.Errorf("Herdr desktop calls = %q", d.calls)
 	}
 	if strings.Contains(strings.Join(d.calls, "\n"), "w1:p1") {
@@ -190,8 +190,8 @@ func TestTheTerminalStartStillAsks(t *testing.T) {
 		asked       string
 		wantCode    int
 	}{
-		{"the repositories", "2\n", []string{"herdr", "start", "DEMO-7", "--agent", "claude"}, "Start in which repositories? (e.g. 1,2) [1] ", 0},
-		{"whether to clone", "n\n", []string{"herdr", "start", "DEMO-7", "--repo", "web", "--agent", "claude"}, "example-org/web is not cloned locally. Clone it into ", 1},
+		{"the repositories", "2\n", []string{"herdr", "start", "DEMO-7", "--agent", "codex"}, "Start in which repositories? (e.g. 1,2) [1] ", 0},
+		{"whether to clone", "n\n", []string{"herdr", "start", "DEMO-7", "--repo", "web", "--agent", "codex"}, "example-org/web is not cloned locally. Clone it into ", 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
