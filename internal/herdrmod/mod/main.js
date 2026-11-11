@@ -26,7 +26,7 @@ import { stripChips, atTop } from "./lib/strip.js";
 import { packCache, unpackCache, cachedLabel, keptAnswer, pollAfter } from "./lib/cache.js";
 import { machineKey, stashed, restored } from "./lib/machines.js";
 import { scrolled, menuHeight, MENU_ROW, cardHeight, cardsBelow, revealed, keepVisible, rowsBelow, rowTop } from "./lib/scroll.js";
-import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget, listKey, sectionAfter } from "./lib/nav.js";
+import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget, listKey, settingsNav } from "./lib/nav.js";
 import { peopleQuery, peopleStatus, peopleItems, SEARCH_WAIT } from "./lib/people.js";
 import { filterDraft, filterRows, filterKey } from "./lib/filterpanel.js";
 import { completing, suggestions, accepted, ownersOf } from "./lib/complete.js";
@@ -1186,7 +1186,7 @@ export default class Tkt extends View {
   async openSettings() {
     const a = await this.call("GET", "/v1/settings");
     if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
-    this.settings = { section: this.settings?.section ?? "spaces", data: a.body, statuses: {}, statusFailed: {}, fields: null };
+    this.settings = { section: this.settings?.section ?? "spaces", zone: this.settings?.zone ?? "menu", data: a.body, statuses: {}, statusFailed: {}, fields: null };
     if (this.settings.section === "statuses") await this.readStatuses();
   }
 
@@ -1243,7 +1243,7 @@ export default class Tkt extends View {
     const controls = [];
     const focusable = (onClick) => {
       controls.push(onClick);
-      return controls.length - 1 === (st.sel ?? 0);
+      return st.zone !== "menu" && controls.length - 1 === (st.sel ?? 0);
     };
     const press = (el, onClick) => el.on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => onClick(cx));
     const button = (id, text, onClick, kind = "plain") => {
@@ -1263,8 +1263,9 @@ export default class Tkt extends View {
     const tableRow = (id, i, children) => h_flex().id(id).h(44).pl(14).pr(12).gap(14).items_center().bg(t.raised).when(i > 0, (el) => el.border_t(1).border_color(t.border)).children(children);
     const side = v_flex().id("settings-side").w(220).flex_none().h_full().px(10).py(12).gap(2).bg(t.well).border_r(1).border_color(t.border).children(SECTIONS.map((sec) => {
       const on = st.section === sec.id;
-      return press(h_flex().id(`sec-${sec.id}`).h(32).px(12).items_center().rounded(7).bg(on ? t.pill : t.well).text_size(13).font_weight(on ? 600 : 500)
-        .text_color(on ? t.foreground : t.muted).hover((s) => s.text_color(t.foreground)), (cx) => { st.section = sec.id; st.sel = 0; st.chipFocus = false; st.drag = null; st.press = null; st.grab = null; if (sec.id === "statuses") this.attempt(() => this.readStatuses(), cx); cx.notify(); }).child(sec.title);
+      const lit = on && st.zone === "menu";
+      return press(h_flex().id(`sec-${sec.id}`).h(32).px(12).items_center().rounded(7).border(1).border_color(lit ? t.accent : t.well).bg(on ? t.pill : t.well).text_size(13).font_weight(on ? 600 : 500)
+        .text_color(on ? t.foreground : t.muted).hover((s) => s.text_color(t.foreground)), (cx) => { st.section = sec.id; st.zone = "menu"; st.sel = 0; st.chipFocus = false; st.drag = null; st.press = null; st.grab = null; if (sec.id === "statuses") this.attempt(() => this.readStatuses(), cx); cx.notify(); }).child(sec.title);
     }));
     let content = v_flex();
     let below = 0;
@@ -1501,7 +1502,7 @@ export default class Tkt extends View {
       return true;
     }
     const to = statusMove(statusBoard(st.statuses[chip.space], st.data.columns), { column: chip.column, name: chip.name }, kk);
-    if (!to) return false;
+    if (!to || ((kk === "left" || kk === "h") && to.column === chip.column && to.name === chip.name)) return false;
     const idx = Object.keys(st.chipAt).find((i) => st.chipAt[i].name === to.name);
     if (idx !== undefined) {
       st.sel = Number(idx);
@@ -1836,16 +1837,18 @@ export default class Tkt extends View {
       else if (to !== null) this.panes.details.offset = to;
     } else if (this.settings && !this.prompt && this.settings.markPicker) {
       this.markPickerKey(keyOf(e), k, cx);
-    } else if (this.settings && !this.prompt && this.statusesKey(k === "escape" ? "escape" : keyOf(e), cx)) {
+    } else if (this.settings && !this.prompt && this.settings.zone !== "menu" && this.statusesKey(k === "escape" ? "escape" : keyOf(e), cx)) {
       // handled by the Statuses board
     } else if (this.settings && !this.prompt) {
       const st = this.settings;
       const kk = keyOf(e);
-      const section = sectionAfter(SECTIONS.map((x) => x.id), st.section, kk);
-      const to = listKey(st.sel ?? 0, (st.controls ?? []).length, kk);
+      const nav = settingsNav({ zone: st.zone ?? "menu", section: st.section, sel: st.sel ?? 0 }, SECTIONS.map((x) => x.id), (st.controls ?? []).length, kk);
       if (k === "escape") this.settings = null;
-      else if (section) { st.section = section; st.sel = 0; st.chipFocus = false; st.drag = null; st.press = null; st.grab = null; this.panes.settings.offset = 0; if (section === "statuses") this.attempt(() => this.readStatuses(), cx); }
-      else if (to !== null) { st.sel = to; st.chipFocus = Boolean(st.chipAt?.[to]); }
+      else if (nav && nav.section !== st.section) {
+        Object.assign(st, nav, { chipFocus: false, drag: null, press: null, grab: null });
+        this.panes.settings.offset = 0;
+        if (nav.section === "statuses") this.attempt(() => this.readStatuses(), cx);
+      } else if (nav) Object.assign(st, nav, { chipFocus: nav.zone === "content" && Boolean(st.chipAt?.[nav.sel]) });
       else if ((kk === "enter" || kk === " ") && st.controls?.[st.sel ?? 0]) st.controls[st.sel ?? 0](cx);
       else {
         const off = scrolled(this.panes.settings, kk);

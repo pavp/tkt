@@ -75,14 +75,31 @@ test("a list of options moves with up and down and stops at its ends", async () 
   assert.equal(listKey(0, 0, "down"), 0);
 });
 
-test("Settings' sections follow tab and right, shift-tab and left back, as the TUI's", async () => {
+test("Settings' sections follow tab, and shift-tab back, as the TUI's", async () => {
   const { sectionAfter } = await import("../mod/lib/nav.js");
   const ids = ["spaces", "boards", "statuses"];
   assert.equal(sectionAfter(ids, "spaces", "tab"), "boards");
-  assert.equal(sectionAfter(ids, "statuses", "right"), "spaces");
+  assert.equal(sectionAfter(ids, "statuses", "tab"), "spaces");
   assert.equal(sectionAfter(ids, "spaces", "shift-tab"), "statuses");
-  assert.equal(sectionAfter(ids, "boards", "left"), "spaces");
   assert.equal(sectionAfter(ids, "boards", "x"), null);
+});
+
+test("Settings' arrows move up and down the menu or the content, and left and right between them", async () => {
+  const { settingsNav } = await import("../mod/lib/nav.js");
+  const ids = ["spaces", "boards", "statuses"];
+  const menu = { zone: "menu", section: "boards", sel: 0 };
+  assert.deepEqual(settingsNav(menu, ids, 3, "down"), { zone: "menu", section: "statuses", sel: 0 }, "down shows the next section");
+  assert.deepEqual(settingsNav(menu, ids, 3, "up"), { zone: "menu", section: "spaces", sel: 0 });
+  assert.deepEqual(settingsNav({ ...menu, section: "statuses" }, ids, 3, "down"), { zone: "menu", section: "statuses", sel: 0 }, "the menu stops at its ends");
+  for (const k of ["right", "l", "enter", " "]) assert.deepEqual(settingsNav(menu, ids, 3, k), { zone: "content", section: "boards", sel: 0 }, `${k} enters the content`);
+  assert.deepEqual(settingsNav(menu, ids, 0, "right"), menu, "a section without controls keeps the menu");
+  const content = { zone: "content", section: "boards", sel: 1 };
+  assert.deepEqual(settingsNav(content, ids, 3, "down"), { ...content, sel: 2 });
+  assert.deepEqual(settingsNav(content, ids, 3, "up"), { ...content, sel: 0 });
+  assert.deepEqual(settingsNav(content, ids, 3, "left"), { zone: "menu", section: "boards", sel: 1 }, "left goes back to the menu");
+  assert.equal(settingsNav(content, ids, 3, "right"), null);
+  assert.equal(settingsNav(content, ids, 3, "enter"), null, "enter is the control's");
+  assert.deepEqual(settingsNav(content, ids, 3, "tab"), { zone: "content", section: "statuses", sel: 0 });
 });
 
 test("z switches the Sprint's cards between detailed and compact, as the TUI's density", async () => {
