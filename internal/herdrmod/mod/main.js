@@ -4,7 +4,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView, VirtualListScrollHandle, Popup } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile, settings, fonts } from "herdr";
-import { tktTheme, monoFont, sourceColors, contrast, ensure, mix, CATPPUCCIN } from "./lib/theme.js";
+import { tktTheme, scrim, monoFont, sourceColors, contrast, ensure, mix, CATPPUCCIN } from "./lib/theme.js";
 import * as os from "os";
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom, shared } from "./lib/client.js";
@@ -15,7 +15,7 @@ import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone, 
 import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
 import { backlogRows, badges, backlogAgents } from "./lib/backlog.js";
 import { ticketMenu, prMenu, detailsMenu, withBack, backOf, confirmRemove, menuFooter, isConfirm, splitTail, itemGroup, footerKeys, prsSubmenu } from "./lib/menus.js";
-import { firstPicker, answer, taskPicker, pickerKey } from "./lib/start.js";
+import { firstPicker, answer, taskPicker, pickerKey, startingView, startingKey, startingJob, startingNotice } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors, detailsKey, positionOf, prSummary, isBot } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, palettePatch, statusBoard, markChoices, dragStarted, laneAt, statusMove, grabKey } from "./lib/settings.js";
@@ -77,6 +77,7 @@ export default class Tkt extends View {
     this.menu = null;
     this.picker = null;
     this.jobs = [];
+    this.starting = null;
     this.details = null;
     this.settings = null;
     this.prompt = null;
@@ -672,7 +673,7 @@ export default class Tkt extends View {
             await this.openDetails(item.key);
             break;
           case "start":
-            await this.openStart(item.key);
+            await this.openStart(item.key, cx);
             break;
           case "notYours":
             this.menu = { title: `${item.key} is not yours`, subtitle: "", sel: 0, items: [
@@ -684,7 +685,7 @@ export default class Tkt extends View {
           case "assignMeStart": {
             const a = await this.call("PUT", `/v1/tickets/${item.key}/assignee`, { to: "me" });
             if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
-            await this.openStart(item.key);
+            await this.openStart(item.key, cx);
             break;
           }
           case "fix":
@@ -1528,17 +1529,17 @@ export default class Tkt extends View {
       .child(div().pt(9).border_t(1).border_color(t.border).child(this.keyLine(t, [["← →", "choose"], ["enter", "save"], ["esc", "cancel"]]))));
   }
 
-  async openStart(key) {
+  async openStart(key, cx) {
     const a = await this.call("GET", `/v1/tickets/${key}/start?herdr=desktop`);
     if (a.status !== 200) throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
     const p = firstPicker(key, a.body);
     if (p.error) throw new Error(p.error);
-    if (p.post) return this.postStart(key, p.post);
+    if (p.post) return this.postStart(key, p.post, cx);
     this.choices_ = a.body;
     this.picker = { ...p, checked: new Set(p.rows.filter((r) => r.checked).map((r) => r.value)) };
   }
 
-  async postStart(key, body) {
+  async postStart(key, body, cx) {
     const a = await this.call("POST", `/v1/tickets/${key}/start`, body);
     if (a.status === 409 && a.body?.code === "needs_answer" && a.body.needs === "clone") {
       this.picker = { step: "clone", key, body, title: `Start ${key}`, question: "Clone the repositories that have no clone here?", sel: 0, checked: new Set(),
@@ -1546,11 +1547,50 @@ export default class Tkt extends View {
       return;
     }
     if (a.status === 202) {
-      this.notice = `starting ${key}: preparing its worktree, then its agent opens in Herdr`;
-      this.jobs.push({ id: a.body.id, what: `${key}'s Start` });
+      this.starting = { key, id: a.body.id, since: Date.now() };
+      this.followStart(cx);
     }
     else if (a.status === 200) this.notice = `went to ${key}'s agent`;
     else throw new Error(a.body?.message ?? `tkt answered ${a.status}`);
+  }
+
+  /** Redraws the Start the mod waits on and asks its job how it ended, until it ends; a failure the modal shows stays
+   *  until closed, one it no longer shows goes to the footer. */
+  followStart(cx) {
+    const s = this.starting;
+    if (!s || s.failed) return;
+    cx.timer.after(250, (cx) => cx.spawn(async (cx) => {
+      if (this.starting !== s) return;
+      if (Date.now() - (s.polled ?? 0) >= 2000) {
+        s.polled = Date.now();
+        let job = { state: "running" };
+        try { job = startingJob(await this.call("GET", `/v1/jobs/${s.id}`)); } catch {}
+        if (this.starting !== s) return;
+        if (job.state === "failed" && !s.hidden) s.failed = job.message;
+        else if (job.state !== "running") {
+          this.starting = null;
+          this.startNotice = startingNotice(s.key, job);
+          this.notice = this.startNotice.text;
+        }
+      }
+      cx.notify();
+      this.followStart(cx);
+    }));
+  }
+
+  /** The Start the mod waits on, over the dimmed board, which it blocks until hidden or, after a failure, closed. */
+  startingBox(t) {
+    const v = startingView(this.starting, Date.now());
+    return div().id("starting-block").absolute().inset_0().on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .child(this.dialog(t, "starting", 400, v_flex().gap(12).px(18).py(16)
+        .child(div().text_size(14).font_semibold().text_color(t.foreground).child(v.title))
+        .child(this.starting.failed
+          ? div().text_size(12).text_color(ensure(t.ansi1, t.popover, 4.5)).child(v.line)
+          : h_flex().gap(8).items_center().text_size(13)
+            .child(this.icon("spinner", 15).text_color(t.accent).spin(800))
+            .child(div().flex_1().text_color(t.foreground).child(v.line))
+            .child(this.mono(div().flex_none().text_size(12).text_color(t.muted)).child(v.elapsed)))
+        .child(div().pt(9).border_t(1).border_color(t.border).child(this.keyLine(t, v.keys)))));
   }
 
   async openTask(subject, query) {
@@ -1577,7 +1617,7 @@ export default class Tkt extends View {
     this.picker = null;
     cx.spawn(async (cx) => {
       try {
-        if (p.step === "clone") await this.postStart(p.key, { ...p.body, clone: row.value });
+        if (p.step === "clone") await this.postStart(p.key, { ...p.body, clone: row.value }, cx);
         else if (p.step === "taskClone") { if (row.value) await this.sendTask({ ...p.body, clone: true }); }
         else if (p.step === "task") {
           if (row.task) await this.sendTask({ ...p.subject, ...row.task });
@@ -1586,7 +1626,7 @@ export default class Tkt extends View {
         } else if (p.step === "kind") await this.sendTask({ ...p.subject, to: "new", agent: row.value });
         else {
           const next = answer(p, values, this.choices_);
-          if (next.post) await this.postStart(p.key, next.post);
+          if (next.post) await this.postStart(p.key, next.post, cx);
           else this.picker = { ...next.picker, checked: new Set() };
         }
       } catch (e) {
@@ -1630,7 +1670,7 @@ export default class Tkt extends View {
   /** A centered box over the dimmed window, as every menu, picker, prompt and confirmation. */
   dialog(t, id, width, content) {
     return div().id(id).absolute().inset_0()
-      .child(div().absolute().inset_0().bg(t.background).opacity(0.62))
+      .child(div().absolute().inset_0().bg(scrim(t.surface)))
       .child(v_flex().absolute().inset_0().items_center().justify_center()
         .child(v_flex().id(`${id}-box`).w(width).rounded(12).bg(t.popover).border(1).border_color(t.border).shadow_xl()
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(content)));
@@ -1709,6 +1749,13 @@ export default class Tkt extends View {
   key(e, cx) {
     if (!this.prompt && !this.panel && keyOf(e) === "q") e = { ...e, key: "escape", keystroke: "escape", key_char: undefined };
     const k = e.key;
+    if (this.starting && !this.starting.hidden) {
+      const what = startingKey(this.starting, k);
+      if (what === "close") this.starting = null;
+      if (what === "hide") this.starting.hidden = true;
+      cx.notify();
+      return;
+    }
     if (this.keysOpen) { this.keysOpen = false; cx.notify(); return; }
     if (this.machineMenu) {
       const m = this.machineMenu;
@@ -1978,10 +2025,17 @@ export default class Tkt extends View {
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.openMachines(cx)).child(where).child("▾"))
         .anchor("top_right").when(Boolean(this.machineMenu), (el) => el.content(this.machineBox(t))));
     const error = this.error ? problemOf(this.error, this.machine) : "";
-    const notice = this.notice;
+    const running = this.starting?.hidden ? startingView(this.starting, Date.now()) : null;
+    const notice = running ? running.footer : this.notice;
+    // The tone holds only while the footer still shows the Start's own line, not a later notice.
+    const tone = running?.tone ?? (this.startNotice?.text === notice ? this.startNotice.tone : null);
+    const toneColor = { accent: t.accent, ok: ensure(t.ansi2, t.chrome, 4.5), error: ensure(t.ansi1, t.chrome, 4.5) }[tone];
     const label = mix(t.ansi4, t.chrome, 0.14);
     const line2 = h_flex().gap(8).items_center()
       .child(error ? div().flex_1().min_w_0().truncate().text_size(12).text_color(ensure(t.ansi1, t.chrome, 4.5)).child(error)
+        : notice && toneColor ? h_flex().flex_1().min_w_0().gap(6).items_center()
+          .child(running ? this.icon("spinner", 12).text_color(toneColor).spin(800) : div().w(6).h(6).flex_none().rounded(3).bg(toneColor))
+          .child(div().flex_1().min_w_0().truncate().text_size(12).font_weight(500).text_color(toneColor).child(notice))
         : notice ? div().flex_1().min_w_0().truncate().text_size(12).text_color(t.foreground).child(notice)
           : h_flex().flex_1().min_w_0().gap(8).items_center()
             .when(Boolean(p?.label), (el) => el.child(div().flex_none().px(8).rounded(4).bg(label).text_size(11).text_color(ensure(mix(t.ansi4, t.foreground, 0.45), label, 4.5)).child(p.label)))
@@ -1995,7 +2049,7 @@ export default class Tkt extends View {
     const body = this.answers[this.tab]?.body;
     const opts = { strip: (this.answers.sprint?.body?.reviews ?? []).length > 0, bots: body?.hidden_bots ?? 0, merged: Boolean(body?.merged) };
     return div().id("keys").absolute().inset_0()
-      .child(div().absolute().inset_0().bg(t.background).opacity(0.55))
+      .child(div().absolute().inset_0().bg(scrim(t.surface)))
       .child(v_flex().absolute().inset_0().items_center().justify_center()
         .child(v_flex().id("keys-box").w(520).p(16).gap(10).rounded(12).bg(t.popover).border(1).border_color(t.border).shadow_lg()
           .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); this.keysOpen = false; cx.notify(); })
@@ -2362,6 +2416,7 @@ export default class Tkt extends View {
       .when(Boolean(this.picker), (el) => el.child(this.pickerBox(t)))
       .when(Boolean(this.prompt), (el) => el.child(this.promptBox(t)))
       .when(Boolean(this.keysOpen), (el) => el.child(this.keysBox(t)))
+      .when(Boolean(this.starting && !this.starting.hidden), (el) => el.child(this.startingBox(t)))
       .when(Boolean(this.settings?.drag && this.settings?.ghost), (el) => el.child(this.statusGhost(t)));
   }
 }

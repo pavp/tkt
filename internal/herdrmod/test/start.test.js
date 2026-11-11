@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture } from "./fixtures.js";
-import { firstPicker, answer, taskPicker } from "../mod/lib/start.js";
+import { firstPicker, answer, taskPicker, startingView, startingKey, startingJob, startingNotice } from "../mod/lib/start.js";
 
 test("a ticket with worktrees asks which, as the TUI's Open picker", () => {
   const p = firstPicker("DEMO-7", fixture("start-worktrees.json"));
@@ -46,4 +46,46 @@ test("a Start with nothing to choose but the agent asks for it, or starts at onc
   assert.equal(asks.sel, 1);
   assert.deepEqual(firstPicker("DEMO-1", { opens: true, worktrees: [], repos: [], agents: ["claude"] }), { post: { herdr: "desktop", agent: "claude" } });
   assert.deepEqual(firstPicker("DEMO-1", { opens: false, worktrees: [], repos: [], agents: ["claude", "pi"] }), { post: { herdr: "desktop" } });
+});
+
+test("a running Start reads as a spinner, its step and the time it has taken, in the modal and the footer", () => {
+  const s = { key: "DEMO-7", since: 1000 };
+  const v = startingView(s, 1000 + 72_000);
+  assert.equal(v.title, "Starting DEMO-7");
+  assert.equal(v.line, "Preparing its worktree…");
+  assert.equal(v.elapsed, "1:12");
+  assert.equal(v.footer, "Starting DEMO-7 · preparing its worktree… 1:12");
+  assert.equal(v.tone, "accent");
+  assert.equal(v.spinning, true);
+  assert.deepEqual(v.keys, [["esc", "keep working · it runs on"]]);
+});
+
+test("a failed Start keeps its modal open with tkt's message until it is closed", () => {
+  const v = startingView({ key: "DEMO-7", since: 0, failed: "could not create the worktree of DEMO-7 in /src/web: boom" }, 5000);
+  assert.equal(v.title, "DEMO-7's Start failed");
+  assert.equal(v.line, "could not create the worktree of DEMO-7 in /src/web: boom");
+  assert.deepEqual(v.keys, [["enter", "close"]]);
+});
+
+test("the Start modal takes every key: esc hides a running one, enter or esc closes a failed one", () => {
+  const running = { key: "DEMO-7", since: 0 };
+  assert.equal(startingKey(running, "escape"), "hide");
+  for (const k of ["enter", "down", "s", "tab"]) assert.equal(startingKey(running, k), null);
+  const failed = { ...running, failed: "boom" };
+  assert.equal(startingKey(failed, "escape"), "close");
+  assert.equal(startingKey(failed, "enter"), "close");
+  assert.equal(startingKey(failed, "down"), null);
+});
+
+test("a Start's job ends running, failed with its message, or done", () => {
+  assert.deepEqual(startingJob({ status: 200, body: { state: "running" } }), { state: "running" });
+  assert.deepEqual(startingJob({ status: 200, body: { state: "failed", message: "boom" } }), { state: "failed", message: "boom" });
+  assert.deepEqual(startingJob({ status: 200, body: { state: "done" } }), { state: "done" });
+  assert.deepEqual(startingJob({ status: 404, body: { message: "no such job" } }), { state: "failed", message: "no such job" });
+  assert.deepEqual(startingJob({ status: 0 }), { state: "running" });
+});
+
+test("how a hidden Start ended stays in the footer in color: green when its agent opened, red when it failed", () => {
+  assert.deepEqual(startingNotice("DEMO-7", { state: "done" }), { text: "started DEMO-7: its agent is in Herdr", tone: "ok" });
+  assert.deepEqual(startingNotice("DEMO-7", { state: "failed", message: "boom" }), { text: "DEMO-7's Start failed: boom", tone: "error" });
 });
