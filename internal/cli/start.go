@@ -163,7 +163,7 @@ func (a *App) planStart(ctx context.Context, args []string, opts startOpts) (sta
 				}
 			}
 			plan.Existing = &w
-			plan.Prompt = workspace.ContinuePrompt(key, is.Summary)
+			plan.Prompt = workspace.InLanguage(workspace.ContinuePrompt(key, is.Summary), c.Language)
 			return plan, nil
 		}
 	}
@@ -202,7 +202,7 @@ func (a *App) planStart(ctx context.Context, args []string, opts startOpts) (sta
 	if cat := ticket.CategoryFor(is.Status, is.StatusCategory, space.Categories()); cat == ticket.ToDo {
 		a.printf("→ Suggested: move %s to In Progress in Jira (tkt does not change Jira yet)\n", key)
 	}
-	plan.Prompt = workspace.StartPrompt(key, is.Summary)
+	plan.Prompt = workspace.InLanguage(workspace.StartPrompt(key, is.Summary), c.Language)
 	return plan, nil
 }
 

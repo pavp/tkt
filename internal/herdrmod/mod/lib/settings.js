@@ -6,6 +6,7 @@ export const SECTIONS = [
   { id: "statuses", title: "Statuses" },
   { id: "clones", title: "Local clones" },
   { id: "board", title: "Board" },
+  { id: "agents", title: "Agents" },
   { id: "colors", title: "Colors" },
   { id: "machine", title: "Machine" },
 ];
@@ -13,6 +14,11 @@ export const SECTIONS = [
 /** The mod's colors: the Herdr theme's ("herdr") or tkt's own ("tkt"). */
 export function palettePatch(palette) {
   return { palette };
+}
+
+/** The language agents talk to the user in: English ("en") or Spanish ("es"). */
+export function languagePatch(language) {
+  return { language };
 }
 
 /** A space's repositories with one added ({repo, path}) or one removed (its name). */

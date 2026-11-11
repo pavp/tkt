@@ -19,12 +19,13 @@ const (
 	sectionColumns
 	sectionRoots
 	sectionBoard
+	sectionAgents
 )
 
-var sectionNames = []string{"Spaces & repositories", "Team boards", "Statuses", "Local clones", "Board"}
+var sectionNames = []string{"Spaces & repositories", "Team boards", "Statuses", "Local clones", "Board", "Agents"}
 
 // shortSectionNames stand in when the full names do not fit, as in the tray panel.
-var shortSectionNames = []string{"Repos", "Team boards", "Statuses", "Clones", "Board"}
+var shortSectionNames = []string{"Repos", "Teams", "Statuses", "Clones", "Board", "Agents"}
 
 type rowKind int
 
@@ -41,6 +42,7 @@ const (
 	rowAddTeamBoard
 	rowStatus
 	rowStatusInfo
+	rowLanguage
 )
 
 type settingsRow struct {
@@ -131,6 +133,9 @@ func (s *settingsView) rows() []settingsRow {
 	var out []settingsRow
 	if s.section == sectionBoard {
 		return []settingsRow{{kind: rowLabel, name: s.cfg.Jira.LabelField}, {kind: rowPoints, name: s.cfg.Jira.PointsField}}
+	}
+	if s.section == sectionAgents {
+		return []settingsRow{{kind: rowLanguage, name: ""}, {kind: rowLanguage, idx: 1, name: "es"}}
 	}
 	if s.section == sectionColumns {
 		return s.columnRows()
@@ -252,6 +257,11 @@ func (m Model) settingsAction(action string) (tea.Model, tea.Cmd) {
 		return m.cycleColumn(r)
 	case r.kind == rowStatus, action == "m":
 		return m, nil
+	case r.kind == rowLanguage:
+		if action != "enter" {
+			return m, nil
+		}
+		return m.saveSettings(func(c *config.Config) { c.Language = r.name })
 	case action == "d" && r.kind == rowRepo:
 		sp := s.cfg.Spaces[r.space]
 		s.confirm = &settingsConfirm{
@@ -633,9 +643,18 @@ func (m Model) settingsLines() ([]string, []int) {
 			line = mark + pad("Ticket label", 14) + " " + orDash(r.name)
 		case rowPoints:
 			line = mark + pad("Story points", 14) + " " + cmp.Or(r.name, dim.Render("auto (Story Points or Story point estimate)"))
+		case rowLanguage:
+			radio := "( ) "
+			if (s.cfg.Language == "es") == (r.name == "es") {
+				radio = "(•) "
+			}
+			line = mark + radio + map[string]string{"": "English", "es": "Español"}[r.name]
 		}
 		if s.section == sectionRoots && i == 0 {
 			lines, at = append(lines, dim.Render("Folders where tkt looks for your local clones")), append(at, -1)
+		}
+		if s.section == sectionAgents && i == 0 {
+			lines, at = append(lines, truncate(dim.Render("The language agents talk to you in; their code and commits keep the repository's conventions"), m.width)), append(at, -1)
 		}
 		if s.section == sectionBoard && i == 0 {
 			lines, at = append(lines, truncate(dim.Render("Jira fields: a label shown first on the selected ticket's detail line, and the story points"), m.width)), append(at, -1)
@@ -778,6 +797,9 @@ func (m Model) settingsFooter() string {
 		status = keyDim.Render(s.msg)
 	}
 	legend := [][2]string{{"↑↓ ws", "move"}, {"tab", "section"}, {"enter", "edit · pin"}, {"a", "add"}, {"d", "remove"}, {"esc ,", "back to the board"}}
+	if s.section == sectionAgents {
+		legend = [][2]string{{"↑↓ ws", "move"}, {"tab", "section"}, {"enter", "choose"}, {"esc ,", "back to the board"}}
+	}
 	if s.section == sectionColumns {
 		legend = [][2]string{{"↑↓ ws", "move"}, {"tab", "section"}, {"enter", "next column"}, {"m", "next mark"}, {"d", "automatic"}, {"esc ,", "back to the board"}}
 	}

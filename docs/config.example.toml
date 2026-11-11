@@ -8,6 +8,10 @@ repo_roots = ["~/dev/work"]
 # and dependabot), or "off" (only your assigned tickets).
 reviews = "direct"
 
+# The language the agents tkt starts talk to you in: "en" (default) or "es". Their prompts stay in English, and
+# their code, commits and pull requests follow each repository's own conventions.
+# language = "es"
+
 [jira]
 site = "example.atlassian.net"
 email = "you@example.com"

@@ -163,7 +163,7 @@ func (a *App) feedbackPrompt(ctx context.Context, c *config.Config, t ticket.Tic
 	if b.Len() == 0 {
 		return "", fmt.Errorf("%s has no failing CI, requested changes, unresolved comments or conflicts on its open pull requests", t.Key)
 	}
-	return fmt.Sprintf("Feedback on Jira ticket %s (%s):\n\n%sFix these, run the relevant tests locally, and push to the same branch.", t.Key, t.Summary, b.String()), nil
+	return workspace.InLanguage(fmt.Sprintf("Feedback on Jira ticket %s (%s):\n\n%sFix these, run the relevant tests locally, and push to the same branch.", t.Key, t.Summary, b.String()), c.Language), nil
 }
 
 func writeReview(b *strings.Builder, pr ticket.PullRequest, r github.ChangeRequest) {

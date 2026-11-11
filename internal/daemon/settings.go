@@ -51,6 +51,7 @@ type SettingsView struct {
 	LabelField  string          `json:"label_field"`
 	PointsField string          `json:"points_field"`
 	Palette     string          `json:"palette"`
+	Language    string          `json:"language"`
 	Columns     []ColumnChoice  `json:"columns"`
 	Marks       []string        `json:"marks"`
 }
@@ -93,6 +94,7 @@ type settingsPatch struct {
 	LabelField  *string               `json:"label_field"`
 	PointsField *string               `json:"points_field"`
 	Palette     *string               `json:"palette"`
+	Language    *string               `json:"language"`
 	Spaces      map[string]spacePatch `json:"spaces"`
 }
 
@@ -116,6 +118,14 @@ func shownPalette(p string) string {
 	return "herdr"
 }
 
+// shownLanguage is the language agents talk in: Spanish when chosen, English otherwise, a hand-written unknown value included.
+func shownLanguage(l string) string {
+	if l == "es" {
+		return l
+	}
+	return "en"
+}
+
 func markName(m ticket.Mark) string {
 	if m == ticket.MarkNone {
 		return "none"
@@ -127,7 +137,7 @@ func (s *Server) settingsView(c config.Config) SettingsView {
 	s.mu.Lock()
 	inferred := s.snap.Repos
 	s.mu.Unlock()
-	v := SettingsView{Spaces: []SpaceSettings{}, RepoRoots: orNoneOf(c.RepoRoots), LabelField: c.Jira.LabelField, PointsField: c.Jira.PointsField, Palette: shownPalette(c.Palette)}
+	v := SettingsView{Spaces: []SpaceSettings{}, RepoRoots: orNoneOf(c.RepoRoots), LabelField: c.Jira.LabelField, PointsField: c.Jira.PointsField, Palette: shownPalette(c.Palette), Language: shownLanguage(c.Language)}
 	for _, sp := range c.Spaces {
 		out := SpaceSettings{Key: sp.Key, Name: sp.Name, Repos: []RepoSetting{}, Inferred: orNoneOf(board.InferredRepos(sp, inferred[sp.Key])), TeamBoards: []BoardChoice{}}
 		for _, r := range sp.Repos {
@@ -402,6 +412,16 @@ func (s *Server) applySettings(ctx context.Context, c *config.Config, p settings
 			c.Palette = ""
 		default:
 			return refuse("unknown palette %q (use herdr or tkt)", v)
+		}
+	}
+	if p.Language != nil {
+		switch v := strings.TrimSpace(*p.Language); v {
+		case "es":
+			c.Language = v
+		case "en", "":
+			c.Language = ""
+		default:
+			return refuse("unknown language %q (use en or es)", v)
 		}
 	}
 	s.mu.Lock()
