@@ -31,6 +31,11 @@ function luminance(c) {
 }
 
 /** The WCAG contrast ratio of two colors, 1 to 21. */
+/** The veil behind menus and dialogs: black, lighter over a light surface, so the board behind clearly waits. */
+export function scrim(surface) {
+  return isHex(surface) && luminance(surface) > 0.4 ? "#00000052" : "#000000a6";
+}
+
 export function contrast(a, b) {
   const x = luminance(a), y = luminance(b);
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);

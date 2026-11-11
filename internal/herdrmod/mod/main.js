@@ -4,7 +4,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, v_virtual_list, Scrollbar, InputState, Input, TextView, VirtualListScrollHandle, Popup } from "gpui-base";
 import { exec, machines, knownAgents, theme, props, closeOverlay, appHome, readTextFile, writeTextFile, settings, fonts } from "herdr";
-import { tktTheme, monoFont, sourceColors, contrast, ensure, mix, CATPPUCCIN } from "./lib/theme.js";
+import { tktTheme, scrim, monoFont, sourceColors, contrast, ensure, mix, CATPPUCCIN } from "./lib/theme.js";
 import * as os from "os";
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom, shared } from "./lib/client.js";
@@ -15,7 +15,7 @@ import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone, 
 import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
 import { backlogRows, badges, backlogAgents } from "./lib/backlog.js";
 import { ticketMenu, prMenu, detailsMenu, withBack, backOf, confirmRemove, menuFooter, isConfirm, splitTail, itemGroup, footerKeys, prsSubmenu } from "./lib/menus.js";
-import { firstPicker, answer, taskPicker, pickerKey, startingView, startingKey, startingJob } from "./lib/start.js";
+import { firstPicker, answer, taskPicker, pickerKey, startingView, startingKey, startingJob, startingNotice } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors, detailsKey, positionOf, prSummary, isBot } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, palettePatch, statusBoard, markChoices, dragStarted, laneAt, statusMove, grabKey } from "./lib/settings.js";
@@ -1567,8 +1567,11 @@ export default class Tkt extends View {
         try { job = startingJob(await this.call("GET", `/v1/jobs/${s.id}`)); } catch {}
         if (this.starting !== s) return;
         if (job.state === "failed" && !s.hidden) s.failed = job.message;
-        else if (job.state === "failed") { this.starting = null; this.notice = `${s.key}'s Start failed: ${job.message}`; }
-        else if (job.state === "done") { this.starting = null; this.notice = `started ${s.key}: its agent is in Herdr`; }
+        else if (job.state !== "running") {
+          this.starting = null;
+          this.startNotice = startingNotice(s.key, job);
+          this.notice = this.startNotice.text;
+        }
       }
       cx.notify();
       this.followStart(cx);
@@ -1584,7 +1587,7 @@ export default class Tkt extends View {
         .child(this.starting.failed
           ? div().text_size(12).text_color(ensure(t.ansi1, t.popover, 4.5)).child(v.line)
           : h_flex().gap(8).items_center().text_size(13)
-            .child(div().w(14).flex_none().text_color(t.accent).child(v.spin))
+            .child(this.icon("spinner", 15).text_color(t.accent).spin(800))
             .child(div().flex_1().text_color(t.foreground).child(v.line))
             .child(this.mono(div().flex_none().text_size(12).text_color(t.muted)).child(v.elapsed)))
         .child(div().pt(9).border_t(1).border_color(t.border).child(this.keyLine(t, v.keys)))));
@@ -1667,7 +1670,7 @@ export default class Tkt extends View {
   /** A centered box over the dimmed window, as every menu, picker, prompt and confirmation. */
   dialog(t, id, width, content) {
     return div().id(id).absolute().inset_0()
-      .child(div().absolute().inset_0().bg(t.background).opacity(0.62))
+      .child(div().absolute().inset_0().bg(scrim(t.surface)))
       .child(v_flex().absolute().inset_0().items_center().justify_center()
         .child(v_flex().id(`${id}-box`).w(width).rounded(12).bg(t.popover).border(1).border_color(t.border).shadow_xl()
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(content)));
@@ -2022,10 +2025,17 @@ export default class Tkt extends View {
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.openMachines(cx)).child(where).child("▾"))
         .anchor("top_right").when(Boolean(this.machineMenu), (el) => el.content(this.machineBox(t))));
     const error = this.error ? problemOf(this.error, this.machine) : "";
-    const notice = this.starting?.hidden ? startingView(this.starting, Date.now()).footer : this.notice;
+    const running = this.starting?.hidden ? startingView(this.starting, Date.now()) : null;
+    const notice = running ? running.footer : this.notice;
+    // The tone holds only while the footer still shows the Start's own line, not a later notice.
+    const tone = running?.tone ?? (this.startNotice?.text === notice ? this.startNotice.tone : null);
+    const toneColor = { accent: t.accent, ok: ensure(t.ansi2, t.chrome, 4.5), error: ensure(t.ansi1, t.chrome, 4.5) }[tone];
     const label = mix(t.ansi4, t.chrome, 0.14);
     const line2 = h_flex().gap(8).items_center()
       .child(error ? div().flex_1().min_w_0().truncate().text_size(12).text_color(ensure(t.ansi1, t.chrome, 4.5)).child(error)
+        : notice && toneColor ? h_flex().flex_1().min_w_0().gap(6).items_center()
+          .child(running ? this.icon("spinner", 12).text_color(toneColor).spin(800) : div().w(6).h(6).flex_none().rounded(3).bg(toneColor))
+          .child(div().flex_1().min_w_0().truncate().text_size(12).font_weight(500).text_color(toneColor).child(notice))
         : notice ? div().flex_1().min_w_0().truncate().text_size(12).text_color(t.foreground).child(notice)
           : h_flex().flex_1().min_w_0().gap(8).items_center()
             .when(Boolean(p?.label), (el) => el.child(div().flex_none().px(8).rounded(4).bg(label).text_size(11).text_color(ensure(mix(t.ansi4, t.foreground, 0.45), label, 4.5)).child(p.label)))
@@ -2039,7 +2049,7 @@ export default class Tkt extends View {
     const body = this.answers[this.tab]?.body;
     const opts = { strip: (this.answers.sprint?.body?.reviews ?? []).length > 0, bots: body?.hidden_bots ?? 0, merged: Boolean(body?.merged) };
     return div().id("keys").absolute().inset_0()
-      .child(div().absolute().inset_0().bg(t.background).opacity(0.55))
+      .child(div().absolute().inset_0().bg(scrim(t.surface)))
       .child(v_flex().absolute().inset_0().items_center().justify_center()
         .child(v_flex().id("keys-box").w(520).p(16).gap(10).rounded(12).bg(t.popover).border(1).border_color(t.border).shadow_lg()
           .on_mouse_down("left", (_e, cx) => { cx.stop_propagation(); this.keysOpen = false; cx.notify(); })

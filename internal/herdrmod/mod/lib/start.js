@@ -78,15 +78,12 @@ export function pickerKey(p, k) {
   return null;
 }
 
-const SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
-
 /** How a Start the mod waits on reads ({key, since, failed?}): in its modal, and in the footer once hidden. */
 export function startingView(s, now) {
-  if (s.failed) return { title: `${s.key}'s Start failed`, line: s.failed, footer: `${s.key}'s Start failed: ${s.failed}`, keys: [["enter", "close"], ["esc", "close"]] };
+  if (s.failed) return { title: `${s.key}'s Start failed`, line: s.failed, footer: `${s.key}'s Start failed: ${s.failed}`, tone: "error", keys: [["enter", "close"]] };
   const secs = Math.max(0, Math.floor((now - s.since) / 1000));
   const elapsed = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
-  const spin = SPIN[Math.floor(Math.max(0, now - s.since) / 100) % SPIN.length];
-  return { title: `Starting ${s.key}`, spin, line: "Preparing its worktree…", elapsed, footer: `${spin} Starting ${s.key} · preparing its worktree… ${elapsed}`, keys: [["esc", "keep working · it runs on"]] };
+  return { title: `Starting ${s.key}`, line: "Preparing its worktree…", elapsed, footer: `Starting ${s.key} · preparing its worktree… ${elapsed}`, tone: "accent", spinning: true, keys: [["esc", "keep working · it runs on"]] };
 }
 
 /** What a key does to the open Start modal, "hide" or "close"; null swallows it, as the modal blocks the board. */
@@ -101,4 +98,10 @@ export function startingJob(a) {
   if (a.status !== 200) return { state: "failed", message: a.body?.message ?? `tkt answered ${a.status}` };
   if (a.body?.state === "failed") return { state: "failed", message: a.body.message ?? "it failed" };
   return { state: a.body?.state === "running" ? "running" : "done" };
+}
+
+/** The footer's line once a hidden Start ends, colored so it is noticed. */
+export function startingNotice(key, job) {
+  if (job.state === "failed") return { text: `${key}'s Start failed: ${job.message}`, tone: "error" };
+  return { text: `started ${key}: its agent is in Herdr`, tone: "ok" };
 }

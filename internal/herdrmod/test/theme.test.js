@@ -98,3 +98,10 @@ test("every card is a neutral lift over the column's well, the same for yours an
   const light = tktTheme(herdrLight);
   assert.ok(contrast(light.card, "#000000") > contrast(light.well, "#000000"), "a card is lighter than its well on a light theme too");
 });
+
+test("the veil behind menus and dialogs darkens the window, less over a light theme", async () => {
+  const { scrim } = await import("../mod/lib/theme.js");
+  assert.equal(scrim("#1e1e2e"), "#000000a6");
+  assert.equal(scrim("#eff1f5"), "#00000052");
+  assert.equal(scrim(undefined), "#000000a6");
+});
