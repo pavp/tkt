@@ -151,6 +151,35 @@ func TestPatchSettingsChoosesTheModPalette(t *testing.T) {
 	}
 }
 
+func TestPatchSettingsChoosesTheAgentLanguage(t *testing.T) {
+	tests := []struct {
+		name, body, saved, shown string
+	}{
+		{"Spanish", `{"language":"es"}`, "es", "es"},
+		{"back to English", `{"language":" en "}`, "", "en"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeSettings{cfg: settingsConfig()}
+			f.cfg.Language = "es"
+			s := settingsServer(t, f)
+			rec := patchSettings(s, tt.body, "application/json", "")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("patch = %d %s", rec.Code, rec.Body)
+			}
+			want := settingsConfig()
+			want.Language = tt.saved
+			if !reflect.DeepEqual(f.cfg, want) || f.saves != 1 {
+				t.Errorf("saved %d times:\n%+v\nwant\n%+v", f.saves, f.cfg, want)
+			}
+			var got SettingsView
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.Language != tt.shown {
+				t.Errorf("answer = %s (%v), want language %q", rec.Body, err, tt.shown)
+			}
+		})
+	}
+}
+
 func TestSettingsLookupsRefuseAnUnknownSpace(t *testing.T) {
 	for _, path := range []string{"/v1/settings/statuses", "/v1/settings/statuses?space=NOPE", "/v1/settings/boards?space=demo"} {
 		f := &fakeSettings{cfg: settingsConfig()}
@@ -267,6 +296,7 @@ func TestPatchSettingsRefusesWithoutWriting(t *testing.T) {
 		{"an empty status change", `{"spaces":{"DEMO":{"statuses":{"To Do":{}}}}}`, "application/json", "", http.StatusBadRequest, `"To Do" needs a column, a mark, or null`},
 		{"ignoring a configured repository", `{"spaces":{"DEMO":{"ignore":["example-org/web"]}}}`, "application/json", "", http.StatusBadRequest, "example-org/web is not a repository inferred for DEMO"},
 		{"an unknown palette", `{"palette":"pink"}`, "application/json", "", http.StatusBadRequest, `unknown palette "pink" (use herdr or tkt)`},
+		{"an unknown language", `{"language":"fr"}`, "application/json", "", http.StatusBadRequest, `unknown language "fr" (use en or es)`},
 		{"a wrong type", `{"label_field":3}`, "application/json", "", http.StatusBadRequest, "the body is not a settings change"},
 		{"a second value", `{"label_field":"A"}{"label_field":"B"}`, "application/json", "", http.StatusBadRequest, "the body is not a settings change"},
 		{"not JSON", `{"label_field":"A"}`, "text/plain", "", http.StatusUnsupportedMediaType, "send the request as application/json"},

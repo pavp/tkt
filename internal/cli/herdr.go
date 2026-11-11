@@ -570,7 +570,7 @@ func (a *App) startSetupAgent(ctx context.Context, h HerdrAPI, plan startPlan, k
 	if _, ok := h.(agentSpaces); ok {
 		prompt = desktopSetupPrompt(plan.Key, plan.Summary)
 	}
-	return a.promptStarted(ctx, h, name, where, prompt, err)
+	return a.promptStarted(ctx, h, name, where, a.inLanguage(prompt), err)
 }
 
 // repoSpace is a pane in a space at the clone dir, else the shell of a space tkt opens there, unnamed so Herdr desktop

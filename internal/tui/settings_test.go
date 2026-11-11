@@ -354,7 +354,7 @@ func TestSettingsTicketLabelHintsAnUnknownField(t *testing.T) {
 
 func TestSettingsSectionsCycle(t *testing.T) {
 	m, _ := settingsBoard(t)
-	for i, want := range []string{"Jira boards whose active sprints", "The column each Jira status lands in", "Folders where tkt looks", "Ticket label", "example-org/web"} {
+	for i, want := range []string{"Jira boards whose active sprints", "The column each Jira status lands in", "Folders where tkt looks", "Ticket label", "talk to you in", "example-org/web"} {
 		m = send(m, keyTab)
 		if v := stripANSI(m.View()); !strings.Contains(v, want) {
 			t.Errorf("tab %d: missing %q:\n%s", i+1, want, v)
@@ -533,5 +533,25 @@ func TestColumnSettingsFitTheTrayPanel(t *testing.T) {
 	}
 	if !strings.Contains(v, "Statuses") || !strings.Contains(v, "Pending test") {
 		t.Errorf("the tray panel shows the section:\n%s", v)
+	}
+}
+
+func TestSettingsChoosesTheLanguageAgentsTalkIn(t *testing.T) {
+	m, r := settingsBoard(t)
+	m = send(send(send(send(send(m, keyTab), keyTab), keyTab), keyTab), keyTab)
+	v := stripANSI(m.View())
+	if !strings.Contains(v, "(•) English") || !strings.Contains(v, "( ) Español") || !strings.Contains(v, "talk to you in") || !strings.Contains(v, "enter choose") {
+		t.Fatalf("agents section:\n%s", v)
+	}
+	m = send(selectSettingsRow(t, m, "Español"), keyEnter)
+	if len(r.saved) != 1 || r.saved[0].Language != "es" {
+		t.Fatalf("saved = %+v", r.saved)
+	}
+	if v := stripANSI(m.View()); !strings.Contains(v, "(•) Español") || !strings.Contains(v, "( ) English") {
+		t.Errorf("the saved language is not marked:\n%s", v)
+	}
+	send(press(m, "w"), keyEnter)
+	if len(r.saved) != 2 || r.saved[1].Language != "" {
+		t.Errorf("English saves nothing, as unset: %+v", r.saved)
 	}
 }

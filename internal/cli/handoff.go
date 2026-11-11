@@ -175,7 +175,7 @@ func (a *App) closeLater(ctx context.Context, h HerdrAPI, s agentSpaces, ho hand
 // startSpaceHandoff names the new space after the worktree's folder, which tells it from the setup agent's space.
 func (a *App) startSpaceHandoff(ctx context.Context, h HerdrAPI, s agentSpaces, ho handoff, dir string) (herdrport.Pane, error) {
 	label := string(ho.Key) + " · " + filepath.Base(dir)
-	_, pane, err := s.OpenAgentSpace(ctx, dir, label, ho.Kind, workspace.HandoffPrompt(ho.Key, ho.Summary, ho.Clone))
+	_, pane, err := s.OpenAgentSpace(ctx, dir, label, ho.Kind, a.inLanguage(workspace.HandoffPrompt(ho.Key, ho.Summary, ho.Clone)))
 	if err != nil {
 		return pane, err
 	}
@@ -250,7 +250,7 @@ func (a *App) startHandoff(ctx context.Context, h HerdrAPI, ho handoff, ws strin
 	markAgent(ctx, h, pane, ho.Key)
 	_ = h.FocusWorkspace(ctx, ws)
 	_ = h.FocusPane(ctx, pane)
-	prompted, err := a.promptAgent(ctx, h, name, "workspace "+ws, workspace.HandoffPrompt(ho.Key, ho.Summary, ho.Clone), err)
+	prompted, err := a.promptAgent(ctx, h, name, "workspace "+ws, a.inLanguage(workspace.HandoffPrompt(ho.Key, ho.Summary, ho.Clone)), err)
 	if err == nil && !prompted {
 		err = fmt.Errorf("the agent in %s did not get its prompt", pane)
 	}

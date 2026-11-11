@@ -136,7 +136,7 @@ func (b *boardActions) CopyTaskPrompt(task tui.AgentTask) tea.Cmd {
 
 func (a *App) taskPrompt(ctx context.Context, c *config.Config, task tui.AgentTask) (string, error) {
 	if task.Review != nil {
-		return reviewPrompt(*task.Review), nil
+		return workspace.InLanguage(reviewPrompt(*task.Review), c.Language), nil
 	}
 	t, err := a.taskTicket(ctx, c, task)
 	if err != nil {

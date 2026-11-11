@@ -1,10 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture } from "./fixtures.js";
-import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows } from "../mod/lib/settings.js";
+import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, statusRows, languagePatch } from "../mod/lib/settings.js";
 
-test("Settings has the TUI's sections, the mod's Colors, and the machine the window uses", () => {
-  assert.deepEqual(SECTIONS.map((s) => s.title), ["Spaces & repositories", "Team boards", "Statuses", "Local clones", "Board", "Colors", "Machine"]);
+test("Settings has the TUI's sections, the agents' language, the mod's Colors, and the machine the window uses", () => {
+  assert.deepEqual(SECTIONS.map((s) => s.title), ["Spaces & repositories", "Team boards", "Statuses", "Local clones", "Board", "Agents", "Colors", "Machine"]);
+});
+
+test("the agents' language is a settings patch of only it, read from the daemon's settings", () => {
+  assert.equal(fixture("settings.json").language, "en");
+  assert.deepEqual(languagePatch("es"), { language: "es" });
 });
 
 test("a repository is added to or removed from its space as the whole list", () => {

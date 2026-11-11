@@ -18,7 +18,7 @@ import { ticketMenu, prMenu, detailsMenu, withBack, backOf, confirmRemove, menuF
 import { firstPicker, answer, taskPicker, pickerKey, startingView, startingKey, startingJob, startingNotice, startingToast, resumable } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
 import { detailView, neighbors, detailsKey, positionOf, prSummary, isBot } from "./lib/details.js";
-import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, palettePatch, statusBoard, markChoices, dragStarted, laneAt, statusMove, grabKey } from "./lib/settings.js";
+import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, palettePatch, languagePatch, statusBoard, markChoices, dragStarted, laneAt, statusMove, grabKey } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
 import { modKeyFor, withModKey } from "./lib/modkey.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
@@ -1381,6 +1381,12 @@ export default class Tkt extends View {
       content = v_flex().child(intro("Board", "Fields of your Jira site that the board reads."))
         .child(setting("Ticket label", "The field a ticket's label comes from, shown on cards and in the details.", button("label-field", `${d.label_field || "— none"} ▾`, pick("label_field", "Label field"), "value")))
         .child(setting("Story points", "The story points field; detected when unset.", button("points-field", `${d.points_field || "detected"} ▾`, pick("points_field", "Story points field"), "value")));
+    } else if (st.section === "agents") {
+      const language = d.language ?? "en";
+      const option = (id, title, sub) => this.choice(t, focusable, `language-${id}`, language === id, title, sub, (cx) => this.attempt(() => this.patchSettings(languagePatch(id)), cx));
+      content = v_flex().w(420).gap(8).child(intro("Agents", "The language the agents tkt starts talk to you in. Their code, commits and pull requests follow each repository's own conventions."))
+        .child(option("en", "English", "Agents talk to you in English."))
+        .child(option("es", "Español", "Agents talk to you in Spanish."));
     } else if (st.section === "colors") {
       content = this.colorsSection(t, d, focusable);
     } else {
@@ -1405,20 +1411,21 @@ export default class Tkt extends View {
             .child(div().px(10).py(1).rounded(10).border(1).border_color(t.border).bg(t.pill).shadow_md().text_size(11).text_color(t.muted).child(`↓ ${below} more`))))));
   }
 
+  /** One of a setting's choices: a radio card that saves it when clicked or entered. */
+  choice(t, focusable, id, on, title, sub, choose) {
+    const lit = focusable(choose);
+    return h_flex().id(id).gap(12).p(12).rounded(9).border(1).border_color(on || lit ? t.accent : t.border).bg(on ? t.selected : t.raised)
+      .hover((s) => s.border_color(t.accent)).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => choose(cx))
+      .child(h_flex().w(16).h(16).flex_none().rounded(8).border(2).border_color(on ? t.accent : t.dim).items_center().justify_center()
+        .child(div().w(8).h(8).rounded(4).bg(on ? t.accent : t.raised)))
+      .child(v_flex().flex_1().min_w_0().gap(3).child(div().font_semibold().text_color(t.foreground).child(title)).child(div().text_size(12).text_color(t.muted).child(sub)));
+  }
+
   /** Settings › Colors: the palette, and how each color the palette gives reads once tkt raises it. */
   colorsSection(t, d, focusable) {
     const palette = d.palette ?? "herdr";
     const source = sourceColors(theme(), palette);
-    const option = (id, title, sub) => {
-      const on = palette === id;
-      const choose = (cx) => this.attempt(() => this.patchSettings(palettePatch(id)), cx);
-      const lit = focusable(choose);
-      return h_flex().id(`palette-${id}`).gap(12).p(12).rounded(9).border(1).border_color(on || lit ? t.accent : t.border).bg(on ? t.selected : t.raised)
-        .hover((s) => s.border_color(t.accent)).on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => choose(cx))
-        .child(h_flex().w(16).h(16).flex_none().rounded(8).border(2).border_color(on ? t.accent : t.dim).items_center().justify_center()
-          .child(div().w(8).h(8).rounded(4).bg(on ? t.accent : t.raised)))
-        .child(v_flex().flex_1().min_w_0().gap(3).child(div().font_semibold().text_color(t.foreground).child(title)).child(div().text_size(12).text_color(t.muted).child(sub)));
-    };
+    const option = (id, title, sub) => this.choice(t, focusable, `palette-${id}`, palette === id, title, sub, (cx) => this.attempt(() => this.patchSettings(palettePatch(id)), cx));
     const ratio = (c, min, note) => {
       const r = contrast(c, t.raised);
       const ok = r >= min;

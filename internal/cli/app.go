@@ -24,6 +24,7 @@ import (
 	"github.com/pavp/tkt/internal/jira"
 	"github.com/pavp/tkt/internal/paths"
 	"github.com/pavp/tkt/internal/repos"
+	"github.com/pavp/tkt/internal/workspace"
 )
 
 var Version = "dev"
@@ -131,6 +132,15 @@ func (a *App) LoadConfig() (*config.Config, error) {
 	}
 	a.expandPaths(c)
 	return c, nil
+}
+
+// inLanguage is prompt in the language the configuration asks agents to talk in.
+func (a *App) inLanguage(prompt string) string {
+	c, err := config.Load(a.ConfigPath())
+	if err != nil {
+		return prompt
+	}
+	return workspace.InLanguage(prompt, c.Language)
 }
 
 func (a *App) expandPaths(c *config.Config) {

@@ -302,6 +302,14 @@ This worktree was just created for the ticket from the main checkout at %[3]s, a
 4. Then implement the ticket.`, key, summary, clone)
 }
 
+// InLanguage adds to an agent's prompt the language it talks to the user in; English, the prompts' own, adds nothing.
+func InLanguage(prompt, language string) string {
+	if language != "es" {
+		return prompt
+	}
+	return prompt + "\n\nTalk to the user in Spanish. Code, commits, pull requests and other files follow this repository's own conventions."
+}
+
 // ContinuePrompt is the first message when the agent opens in an existing worktree.
 func ContinuePrompt(key ticket.Key, summary string) string {
 	return fmt.Sprintf("Continue work on Jira ticket %s: %s. Refresh the context with `tkt context %s --images .ticket-assets > .ticket.md` and read .ticket.md first.", key, summary, key)

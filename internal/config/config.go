@@ -27,11 +27,13 @@ type Config struct {
 	// Reviews selects which review requests the board shows: direct (default), team, or off.
 	Reviews string `toml:"reviews,omitempty"`
 	// Palette picks the Herdr desktop mod's colors: the Herdr theme's (empty, "herdr") or tkt's own ("tkt").
-	Palette string  `toml:"palette,omitempty"`
-	Jira    Jira    `toml:"jira"`
-	GitHub  GitHub  `toml:"github,omitempty"`
-	Context Context `toml:"context,omitempty"`
-	Spaces  []Space `toml:"spaces"`
+	Palette string `toml:"palette,omitempty"`
+	// Language is the one agents talk to the user in: English (empty, "en") or Spanish ("es").
+	Language string  `toml:"language,omitempty"`
+	Jira     Jira    `toml:"jira"`
+	GitHub   GitHub  `toml:"github,omitempty"`
+	Context  Context `toml:"context,omitempty"`
+	Spaces   []Space `toml:"spaces"`
 }
 
 type Jira struct {
