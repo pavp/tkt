@@ -463,6 +463,12 @@ func (a *App) herdrStart(ctx context.Context, args []string, opts startOpts) err
 	}
 	settle(ctx)
 	for i, dir := range plan.Dirs {
+		if s, ok := h.(agentSpaces); ok && kind == "claude" {
+			if err := a.startHeadless(ctx, h, s, plan, kind, dir, plan.Repos[i]); err != nil {
+				return err
+			}
+			continue
+		}
 		label := string(plan.Key) + " · " + filepath.Base(dir)
 		if err := a.startSetupAgent(ctx, h, plan, kind, dir, plan.Repos[i], label, i == 0); err != nil {
 			// Started from the board, this command's output is gone once it returns, so Herdr says it too.

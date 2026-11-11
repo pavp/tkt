@@ -130,10 +130,10 @@ func desktopHarness(t *testing.T) (*harness, *desktopHerdr) {
 func TestHerdrStartOnDesktopMarksTheAgentsOwnTerminal(t *testing.T) {
 	h, d := desktopHarness(t)
 	web := h.clone(t, "web")
-	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "claude"); code != 0 {
+	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "codex"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	want := []string{fmt.Sprintf("workspace %q %s", "", web), "focus workspace sp1", "focus t1", "start claude t1", "focus t9", "mark t9 DEMO-7", "prompt claude"}
+	want := []string{fmt.Sprintf("workspace %q %s", "", web), "focus workspace sp1", "focus t1", "start codex t1", "focus t9", "mark t9 DEMO-7", "prompt codex"}
 	if !reflect.DeepEqual(d.calls, want) {
 		t.Errorf("calls = %q\nwant    %q", d.calls, want)
 	}
@@ -232,7 +232,7 @@ func TestHerdrStartOnDesktopWaitsForTheAnswerToTheAgentsQuestion(t *testing.T) {
 		wantPrompt bool
 		wantOut    string
 	}{
-		{"answered", nil, true, "✓ claude started in"},
+		{"answered", nil, true, "✓ codex started in"},
 		{"not answered in time", herdrcore.ErrTimeout, false, "! It did not get ready in time; give it this prompt:"},
 	}
 	for _, tt := range tests {
@@ -240,14 +240,14 @@ func TestHerdrStartOnDesktopWaitsForTheAnswerToTheAgentsQuestion(t *testing.T) {
 			h, d := desktopHarness(t)
 			h.clone(t, "web")
 			d.startErr, d.waitErr = herdrport.ErrNotReady, tt.waitErr
-			if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "claude"); code != 0 {
+			if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "codex"); code != 0 {
 				t.Fatalf("exit %d: %s", code, h.errOut)
 			}
 			out := h.out.String()
 			if n := strings.Count(out, "is asking a question; answer it there and the prompt follows"); n != 1 {
 				t.Errorf("told the user %d times: %q", n, out)
 			}
-			if !strings.Contains(out, tt.wantOut) || slices.Contains(d.calls, "prompt claude") != tt.wantPrompt || !slices.Contains(d.calls, "wait claude idle") {
+			if !strings.Contains(out, tt.wantOut) || slices.Contains(d.calls, "prompt codex") != tt.wantPrompt || !slices.Contains(d.calls, "wait codex idle") {
 				t.Errorf("calls = %q, output = %q", d.calls, out)
 			}
 		})
@@ -260,13 +260,13 @@ func TestHerdrStartOnDesktopOpensARepoSpaceWithAShellFirst(t *testing.T) {
 	h, d := desktopHarness(t)
 	delete(h.env, "HC_TERMINAL_ID")
 	web := h.clone(t, "web")
-	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "claude"); code != 0 {
+	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "codex"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
 	if want := fmt.Sprintf("workspace %q %s", "", web); len(d.calls) == 0 || d.calls[0] != want {
 		t.Errorf("calls = %q, want first %q", d.calls, want)
 	}
-	if slices.Contains(d.calls, "close t1") || !slices.Contains(d.calls, "start claude t1") {
+	if slices.Contains(d.calls, "close t1") || !slices.Contains(d.calls, "start codex t1") {
 		t.Errorf("calls = %q", d.calls)
 	}
 	hos := h.app.loadState().Handoffs
@@ -283,10 +283,10 @@ func TestHerdrStartOnDesktopOpensTheSetupAgentInTheRepoSpace(t *testing.T) {
 	h, d := desktopHarness(t)
 	web := h.clone(t, "web")
 	d.panes = []herdrport.Pane{{ID: "t2", Cwd: web}, {ID: "t3", WorkspaceID: "sp4", Cwd: web}}
-	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "claude"); code != 0 {
+	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "codex"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	want := []string{"focus workspace sp4", "focus t3", "start claude t3", "focus t9", "mark t9 DEMO-7", "prompt claude"}
+	want := []string{"focus workspace sp4", "focus t3", "start codex t3", "focus t9", "mark t9 DEMO-7", "prompt codex"}
 	if !reflect.DeepEqual(d.calls, want) {
 		t.Errorf("calls = %q\nwant    %q", d.calls, want)
 	}
@@ -297,7 +297,7 @@ func TestHerdrStartOnDesktopNeverHandsTheRepoShellToTheCloser(t *testing.T) {
 	web := h.clone(t, "web")
 	d.panes = []herdrport.Pane{{ID: "u5", WorkspaceID: "sp4", Cwd: web}}
 	d.paneErr = errors.New("hc get failed")
-	code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "claude")
+	code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "codex")
 	if code == 0 || slices.Contains(d.calls, "mark u5 DEMO-7") || len(h.app.loadState().Handoffs) != 0 {
 		t.Errorf("exit %d, calls %q, handoffs %+v", code, d.calls, h.app.loadState().Handoffs)
 	}
@@ -312,10 +312,10 @@ func TestHerdrStartOnDesktopWithoutTheWindowTellsOnceAndGoesOn(t *testing.T) {
 	h, d := desktopHarness(t)
 	h.clone(t, "web")
 	d.window = herdrcore.ErrNoWindow
-	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "claude"); code != 0 {
+	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "codex"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	if n := strings.Count(h.out.String()+h.errOut.String(), windowNote); n != 1 || !slices.Contains(d.calls, "prompt claude") {
+	if n := strings.Count(h.out.String()+h.errOut.String(), windowNote); n != 1 || !slices.Contains(d.calls, "prompt codex") {
 		t.Errorf("told %d times, calls %q, output %q", n, d.calls, h.out)
 	}
 }
