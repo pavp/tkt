@@ -1384,3 +1384,40 @@ func TestUnlinkWithoutLinksOrMarkedAgentsStillFails(t *testing.T) {
 		t.Error("cleared another ticket's agent")
 	}
 }
+
+func TestLinkMarksThePaneItRunsInWithTheTicket(t *testing.T) {
+	cases := []struct {
+		name string
+		env  map[string]string
+		mark bool
+	}{
+		{"in a Herdr pane", map[string]string{"HERDR_ENV": "1", "HERDR_PANE_ID": "w1:p2"}, true},
+		{"outside Herdr", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, f, _ := herdrHarness(t)
+			h.inCheckout("feature/DEMO-7-export", "/src/web-DEMO-7", "git@github.com:example-org/web.git")
+			for k, v := range tc.env {
+				h.env[k] = v
+			}
+			if code := h.exec("link"); code != 0 {
+				t.Fatalf("exit %d: %s", code, h.errOut)
+			}
+			if links, _ := h.app.links().Load(); len(links) != 1 {
+				t.Errorf("links = %+v", links)
+			}
+			if !tc.mark {
+				if n := count(f, "pane.report_metadata"); n != 0 {
+					t.Errorf("report_metadata calls = %d", n)
+				}
+				return
+			}
+			got := f.Last("pane.report_metadata")
+			tokens, _ := got["tokens"].(map[string]any)
+			if got["pane_id"] != "w1:p2" || got["source"] != "plugin:tkt" || tokens["tkt_key"] != "DEMO-7" {
+				t.Errorf("report_metadata = %v", got)
+			}
+		})
+	}
+}

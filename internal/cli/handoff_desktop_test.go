@@ -72,7 +72,7 @@ func TestLinkOnDesktopHandsThePendingTicketToAnAgentInANewSpace(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
 	logPath := filepath.Join(h.app.Env.DataDir(), "handoff.log")
-	want := []string{`space "DEMO-7 · web-DEMO-7" /src/web-DEMO-7 claude`, "mark t20 DEMO-7", "focus workspace sp20", "focus t20", "detach " + h.app.Env.DataDir()}
+	want := []string{"mark t9 DEMO-7", `space "DEMO-7 · web-DEMO-7" /src/web-DEMO-7 claude`, "mark t20 DEMO-7", "focus workspace sp20", "focus t20", "detach " + h.app.Env.DataDir()}
 	if !reflect.DeepEqual(d.calls, want) {
 		t.Errorf("calls = %q\nwant    %q", d.calls, want)
 	}
@@ -168,7 +168,7 @@ func TestLinkOnDesktopWithoutAPendingHandoffOnlyLinks(t *testing.T) {
 	if code := h.exec("link"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	if len(d.calls) != 0 || len(*detached) != 0 || len(d.detached) != 0 {
+	if !reflect.DeepEqual(d.calls, []string{"mark t9 DEMO-7"}) || len(*detached) != 0 || len(d.detached) != 0 {
 		t.Errorf("calls = %q, detached = %+v", d.calls, *detached)
 	}
 	if !strings.Contains(h.out.String(), "✓ DEMO-7 ← feature/DEMO-7-export (example-org/web)") {
@@ -234,7 +234,7 @@ func TestLinkOnDesktopAtTheMainCheckoutKeepsTheHandoff(t *testing.T) {
 	if code := h.exec("link"); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.errOut)
 	}
-	if len(d.calls) != 0 || len(d.detached) != 0 {
+	if !reflect.DeepEqual(d.calls, []string{"mark t9 DEMO-7"}) || len(d.detached) != 0 {
 		t.Errorf("handed off from the main checkout: %q", d.calls)
 	}
 	if !strings.Contains(h.errOut.String(), "the main checkout stays free: create a separate worktree for DEMO-7 with git and run `tkt link DEMO-7` there") {
@@ -256,7 +256,7 @@ func TestEachHerdrCompletesOnlyTheHandoffsItsStartSaved(t *testing.T) {
 		if code := h.exec("link"); code != 0 {
 			t.Fatalf("exit %d: %s", code, h.errOut)
 		}
-		if len(d.calls) != 0 || len(h.app.loadState().Handoffs) != 1 {
+		if !reflect.DeepEqual(d.calls, []string{"mark t9 DEMO-7"}) || len(h.app.loadState().Handoffs) != 1 {
 			t.Errorf("calls = %q, handoffs = %+v", d.calls, h.app.loadState().Handoffs)
 		}
 	})
