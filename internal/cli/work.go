@@ -85,7 +85,8 @@ func newLinkCmd(a *App) *cobra.Command {
 		Short: "Register the current worktree as the work on a ticket",
 		Long: "Register the current worktree and branch as the work on a ticket, so the board shows it right away.\n" +
 			"Agents run it after creating their branch. The branch name must contain the ticket key; without\n" +
-			"KEY, the key is taken from the branch. In a Herdr desktop terminal it also completes a Start waiting\n" +
+			"KEY, the key is taken from the branch. Inside Herdr it marks its pane with the ticket, so the agent\n" +
+			"there stays on it after removing the worktree. In a Herdr desktop terminal it also completes a Start waiting\n" +
 			"for this worktree: the ticket's agent opens in a new space there and the setup agent closes.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -111,6 +112,10 @@ func newLinkCmd(a *App) *cobra.Command {
 			w := workspace.Work{Key: key, Repo: co.repo, Branch: co.branch, Path: co.top, Source: src, LinkedAt: a.Now()}
 			if err := a.links().Add(w); err != nil {
 				return err
+			}
+			// The mark keeps the agent on its ticket after it removes this worktree and its branch.
+			if pane, _ := a.callerPane(); pane != "" && a.NewHerdr != nil {
+				markAgent(cmd.Context(), a.NewHerdr(), pane, key)
 			}
 			known := false
 			for _, r := range c.Repos() {
