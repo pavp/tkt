@@ -11,6 +11,7 @@ func TestStableExecutablePrefersTheSameBinaryOnPath(t *testing.T) {
 		"/opt/homebrew/bin/tkt":                  "/opt/homebrew/Cellar/tkt/0.1.0/bin/tkt",
 		"/opt/homebrew/Cellar/tkt/0.1.0/bin/tkt": "/opt/homebrew/Cellar/tkt/0.1.0/bin/tkt",
 		"/tmp/tkt":                               "/tmp/tkt",
+		"/home/linuxbrew/.linuxbrew/bin/tkt":     "/home/linuxbrew/.linuxbrew/Cellar/tkt/0.1.0/bin/tkt",
 	}
 	eval := func(p string) (string, error) {
 		if r, ok := links[p]; ok {
@@ -25,6 +26,7 @@ func TestStableExecutablePrefersTheSameBinaryOnPath(t *testing.T) {
 		{"another tkt on PATH is not used", "/tmp/tkt", "/opt/homebrew/bin/tkt", "/tmp/tkt"},
 		{"not on PATH", "/opt/homebrew/Cellar/tkt/0.1.0/bin/tkt", "", "/opt/homebrew/Cellar/tkt/0.1.0/bin/tkt"},
 		{"an upgrade removed the running binary", "/opt/homebrew/Cellar/tkt/0.0.9/bin/tkt", "/opt/homebrew/bin/tkt", "/opt/homebrew/bin/tkt"},
+		{"an upgrade removed the running binary and tkt is not on PATH", "/home/linuxbrew/.linuxbrew/Cellar/tkt/0.0.9/bin/tkt", "", "/home/linuxbrew/.linuxbrew/bin/tkt"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
