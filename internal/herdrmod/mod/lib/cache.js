@@ -36,3 +36,9 @@ export function pollAfter(answer) {
   if (!answer) return null;
   return answer.status === 503 || answer.body?.syncing || answer.body?.partial ? 1500 : null;
 }
+
+/** The view kept under `view:<machine>`, else columns: kept apart from the board's copy, which is saved only once a
+ *  minute, so a view changed just before closing still opens as chosen. */
+export function keptView(raw) {
+  return raw === "list" ? "list" : "columns";
+}

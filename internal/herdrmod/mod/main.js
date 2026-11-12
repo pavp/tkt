@@ -23,7 +23,7 @@ import { MOD_VERSION } from "./lib/version.js";
 import { modKeyFor, withModKey } from "./lib/modkey.js";
 import { tabCount, contextText, scopeNotice, routesFor, viewButton } from "./lib/header.js";
 import { stripChips, atTop } from "./lib/strip.js";
-import { packCache, unpackCache, cachedLabel, keptAnswer, pollAfter } from "./lib/cache.js";
+import { packCache, unpackCache, cachedLabel, keptAnswer, pollAfter, keptView } from "./lib/cache.js";
 import { machineKey, stashed, restored } from "./lib/machines.js";
 import { scrolled, menuHeight, MENU_ROW, cardHeight, cardsBelow, revealed, keepVisible, rowsBelow, rowTop } from "./lib/scroll.js";
 import { direction, tabAfter, stepList, stepColumns, targets, keyOf, boardAction, firstTarget, listKey, settingsNav } from "./lib/nav.js";
@@ -52,6 +52,20 @@ function remembered() {
     local = JSON.parse(localStorage.getItem("machine") ?? "undefined");
   } catch {}
   return chosenMachine(sharedValue("tkt.machine"), local);
+}
+
+function storedView(on) {
+  try {
+    return keptView(localStorage.getItem(`view:${machineKey(on)}`));
+  } catch {
+    return "columns";
+  }
+}
+
+function storeView(on, view) {
+  try {
+    localStorage.setItem(`view:${machineKey(on)}`, view);
+  } catch {}
 }
 
 /** The Start the mod waits on, kept so a mod closed before it ended can tell how it did when opened again. */
@@ -110,10 +124,10 @@ export default class Tkt extends View {
     // GPUI moves the focus with tab; bound in the mod's own key context, tab switches tabs as in the TUI.
     cx.bind_keys([{ keystroke: "tab", action: "tkt::NextTab", context: "TktMod" }, { keystroke: "shift-tab", action: "tkt::PrevTab", context: "TktMod" }]);
     this.outdated = [];
-    this.view = "columns";
+    this.view = storedView(remembered());
     this.range = { start: 0, end: 0 };
     this.shownRange = { start: 0, end: 0 };
-    this.selected = this.answers[this.tab]?.body ? firstTarget(targets(this.tab, "columns", this.answers[this.tab].body)) : null;
+    this.selected = this.answers[this.tab]?.body ? firstTarget(targets(this.tab, this.view, this.answers[this.tab].body)) : null;
     this.inStrip = false;
     this.stripSel = 0;
     this.bots = false;
@@ -221,6 +235,7 @@ export default class Tkt extends View {
       this.menu = null;
       this.panel = null;
       this.cacheSaved = 0;
+      this.view = storedView(on);
     }
     this.machine = on;
     if (switched) this.loadView(cx);
@@ -343,7 +358,10 @@ export default class Tkt extends View {
     cx.spawn(async (cx) => {
       try {
         const a = await this.call("GET", "/v1/board/state");
-        if (a.status === 200 && a.body?.view) this.view = a.body.view;
+        if (a.status === 200 && a.body?.view) {
+          this.view = a.body.view;
+          storeView(this.machine, a.body.view);
+        }
       } catch {}
       cx.notify();
     });
@@ -352,6 +370,7 @@ export default class Tkt extends View {
   /** Columns or list, saved as the board's view, which the TUI reads when it opens. */
   setView(view, cx) {
     this.view = view;
+    storeView(this.machine, view);
     cx.spawn(async () => {
       try {
         await this.call("PATCH", "/v1/board/state", { view });

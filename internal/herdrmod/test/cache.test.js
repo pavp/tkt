@@ -43,3 +43,11 @@ test("while the daemon syncs, the board is asked again sooner than the usual pol
   assert.equal(pollAfter({ status: 200, body: {} }), null);
   assert.equal(pollAfter(undefined), null);
 });
+
+test("the window opens on the view it kept, so a list never shows as columns while tkt answers", async () => {
+  const { keptView } = await import("../mod/lib/cache.js");
+  assert.equal(keptView("list"), "list");
+  assert.equal(keptView("columns"), "columns");
+  assert.equal(keptView(null), "columns");
+  assert.equal(keptView("grid"), "columns");
+});
