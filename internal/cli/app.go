@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -216,9 +217,15 @@ func executable() (string, error) {
 
 // stableExecutable resolves exe, but returns the tkt found on PATH when it is the same binary: package
 // managers such as Homebrew run tkt through a symlink whose target moves on every upgrade, and the Herdr
-// plugin and agent launch commands store this path.
+// plugin and agent launch commands store this path. On Linux exe names the running binary even after an
+// upgrade removed it, so the daemon's upgrade check then takes the tkt on PATH instead.
 func stableExecutable(exe string, lookPath func(string) (string, error), eval func(string) (string, error)) (string, error) {
 	resolved, err := eval(exe)
+	if errors.Is(err, fs.ErrNotExist) {
+		if onPath, lerr := lookPath("tkt"); lerr == nil {
+			return filepath.Abs(onPath)
+		}
+	}
 	if err != nil {
 		return "", err
 	}
