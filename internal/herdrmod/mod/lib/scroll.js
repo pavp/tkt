@@ -1,6 +1,7 @@
 /** Scrolling from the keyboard where GPUI scrolls only virtual lists from code. Pure, for `node --test`. */
 
 const LINE = 24;
+const CHIP_GAP = 4;
 
 /** The pane's new offset for a key (pane = {offset, view, content} in px), or null when the key does not scroll. */
 export function scrolled({ offset, view, content }, k) {
@@ -19,11 +20,12 @@ export function menuHeight(items, windowHeight) {
   return Math.min(items, fits) * MENU_ROW;
 }
 
-/** A card's height in px: its padding and border, the key, summary, pull request and details lines, and its label
- *  line when the board has a label field. */
-export function cardHeight({ lines, label, compact = false }) {
+/** A card's height in px: its padding and border, the key, summary, pull request and details lines, its pull
+ *  request chips in the rows they pack into, and its label line when the board has a label field. */
+export function cardHeight({ lines, chips = 1, label, compact = false }) {
   if (compact) return 2 + 16 + 18 + 5 + 20;
-  return 2 + 20 + 18 + 7 + lines * 20 + 7 + 20 + (label ? 7 + 18 : 0) + 7 + 16;
+  const rows = Math.max(1, chips);
+  return 2 + 20 + 18 + 7 + lines * 20 + 7 + rows * 20 + (rows - 1) * CHIP_GAP + (label ? 7 + 18 : 0) + 7 + 16;
 }
 
 /** How many cards of heights, gap apart, end below what a pane shows, for its "↓ N more"; none while unmeasured. */

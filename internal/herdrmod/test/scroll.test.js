@@ -28,6 +28,7 @@ test("a card's height follows its summary lines and its label line, so the colum
   const short = cardHeight({ lines: 1, label: false });
   assert.equal(cardHeight({ lines: 2, label: false }) - short, 20);
   assert.equal(cardHeight({ lines: 1, label: true }) - short, 25);
+  assert.equal(cardHeight({ lines: 1, chips: 2 }) - short, 24, "a second row of pull request chips adds a row and its gap");
   assert.ok(cardHeight({ lines: 2, label: true, compact: true }) < short, "a compact card shows only its first row and one title line");
   assert.equal(cardHeight({ lines: 2, label: true, compact: true }), cardHeight({ lines: 1, label: false, compact: true }));
 });

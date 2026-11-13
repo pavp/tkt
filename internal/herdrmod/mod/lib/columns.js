@@ -104,3 +104,31 @@ export const EMPTY_COLUMN = "— nothing here";
 
 /** The TUI's peach (Catppuccin), which no ANSI color matches: blocked marks and what needs you use it. */
 export const PEACH = "#fab387";
+
+const CHIP_ROOM = 24;
+const CHIP_COST = 4;
+
+/** A card's chips: each open pull request with its CI mark, then how many finished when any did. */
+export function cardChips(prs, finished = "") {
+  return [...(prs ?? []).map((p) => ({ ref: p.ref, mark: p.mark, tone: p.tone })), ...(finished ? [{ text: finished }] : [])];
+}
+
+/** A card's chips packed into the rows that fit it, so a ticket with many pull requests grows its card instead of
+ *  spilling its chips out of it; a chip wider than a row keeps a row of its own. */
+export function chipRows(chips, room = CHIP_ROOM) {
+  const rows = [];
+  let row = [];
+  let used = 0;
+  for (const chip of chips) {
+    const width = (chip.ref ? chip.ref.length + 1 + chip.mark.length : chip.text.length) + CHIP_COST;
+    if (row.length > 0 && used + width > room) {
+      rows.push(row);
+      row = [];
+      used = 0;
+    }
+    row.push(chip);
+    used += width;
+  }
+  if (row.length > 0) rows.push(row);
+  return rows;
+}
