@@ -9,7 +9,7 @@ import * as os from "os";
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom, shared, chosenMachine } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
-import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, EMPTY_COLUMN } from "./lib/columns.js";
+import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, cardChips, chipRows, EMPTY_COLUMN } from "./lib/columns.js";
 import { gutterOf, statusTone, prStatusTone, agentLabel, prRefs, listColumns, pointsText } from "./lib/rows.js";
 import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone, topKeys, noticeShown } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
@@ -2019,7 +2019,7 @@ export default class Tkt extends View {
       const ci = at.cols.findIndex((c) => c.includes(this.selected));
       const col = columnCards(body)[ci];
       if (col) {
-        const heights = col.cards.map((c) => cardHeight({ lines: wrapWords(c.summary, 34, this.compact ? 1 : 2).length, label: Boolean(body.label_field), compact: this.compact }) + (this.compact ? 6 : 8));
+        const heights = col.cards.map((c) => this.cardBox(c, body.label_field).height + (this.compact ? 6 : 8));
         const i = at.cols[ci].indexOf(this.selected);
         const pane = this.colPane(col.category);
         pane.offset = revealed(pane, heights.slice(0, i).reduce((a, b) => a + b, 0), heights[i]);
@@ -2224,11 +2224,19 @@ export default class Tkt extends View {
     return this.segment(t, "view", [{ label: "Columns", on: this.view === "columns", click: (cx) => this.setView("columns", cx) }, { label: "List", on: this.view === "list", click: (cx) => this.setView("list", cx) }]);
   }
 
+  /** A card's geometry wherever its height is needed: its summary lines, its pull request chips in the rows they
+   *  pack into, and the height they make together. */
+  cardBox(c, labelField) {
+    const lines = wrapWords(c.summary, 34, this.compact ? 1 : 2);
+    const chips = chipRows(cardChips(c.prs, c.finished));
+    return { lines, chips, height: cardHeight({ lines: lines.length, chips: chips.length, label: Boolean(labelField), compact: this.compact }) };
+  }
+
   card(t, c, labelField) {
     const mark = markOf(c.mark, c.status);
     const flag = cardFlag(c.attention, mark, c.points ? 11 : 14);
     const compact = Boolean(this.compact);
-    const lines = wrapWords(c.summary, 34, compact ? 1 : 2);
+    const { lines, chips, height } = this.cardBox(c, labelField);
     const sel = this.selected === c.key && !this.inStrip;
     const icon = typeIcon(c.typeKind);
     const alarm = Boolean(c.attention) || c.mark === "blocked";
@@ -2240,7 +2248,7 @@ export default class Tkt extends View {
       .child(div().flex_1())
       .when(Boolean(flag), (el) => el.child(div().px(6).rounded(5).bg(flagBg).text_size(10).font_semibold().text_color(alarm ? ensure(t.ansi1, flagBg, 4.5) : t.muted).child(flag)))
       .when(Boolean(c.agent), (el) => el.child(this.agentDot(t, c.agent)));
-    const card = v_flex().id(`card-${c.key}`).h(cardHeight({ lines: lines.length, label: Boolean(labelField), compact })).px(11).py(compact ? 8 : 10).gap(compact ? 5 : 7)
+    const card = v_flex().id(`card-${c.key}`).h(height).px(11).py(compact ? 8 : 10).gap(compact ? 5 : 7)
       .relative().rounded(8).border(1).border_color(t.card).bg(t.card).shadow_sm().hover((s) => s.border_color(mix(t.foreground, t.card, 0.18)))
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => { this.selected = c.key; this.clicked(c.key, () => this.menuFor(this.selectedRow(this.answers.sprint?.body) ?? {}), cx); })
@@ -2250,11 +2258,15 @@ export default class Tkt extends View {
       .when(sel, (el) => el.child(div().absolute().top(-4).left(-4).right(-4).bottom(-4).rounded(11).border(1.5).border_color(t.accent)));
     if (compact) return card;
     const label = mix(t.ansi4, t.raised, 0.14);
+    const chip = (p, id) => (p.ref
+      ? h_flex().id(id).gap(5).px(7).rounded(5).bg(t.pill)
+        .child(this.mono(div().text_color(t.muted)).child(p.ref)).child(div().font_semibold().text_color(ci[p.mark] ?? t.muted).child(p.mark))
+      : h_flex().id(id).child(div().text_color(t.muted).child(p.text)));
     return card
-      .child(h_flex().h(20).gap(6).items_center().text_size(11).children(c.prs.length === 0 && !c.finished ? [div().text_color(t.muted).child("—")] :
-        c.prs.map((p, i) => h_flex().id(`card-${c.key}-pr${i}`).gap(5).px(7).rounded(5).bg(t.pill)
-          .child(this.mono(div().text_color(t.muted)).child(p.ref)).child(div().font_semibold().text_color(ci[p.mark] ?? t.muted).child(p.mark))))
-        .when(Boolean(c.finished), (el) => el.child(div().text_color(t.muted).child(c.finished))))
+      .child(v_flex().gap(4).text_size(11)
+        .when(chips.length === 0, (el) => el.child(h_flex().h(20).items_center().child(div().text_color(t.muted).child("—"))))
+        .children(chips.map((row, i) => h_flex().id(`card-${c.key}-prs${i}`).h(20).gap(6).items_center()
+          .children(row.map((p, j) => chip(p, `card-${c.key}-pr${i}-${j}`))))))
       .when(Boolean(labelField), (el) => el.child(h_flex().h(18).items_center()
         .when(Boolean(c.label), (row) => row.child(div().px(8).rounded(4).bg(label).text_size(11).text_color(ensure(mix(t.ansi4, t.foreground, 0.45), label, 4.5)).child(c.label)))))
       .child(h_flex().h(16).gap(6).items_center().text_size(11)
@@ -2374,7 +2386,7 @@ export default class Tkt extends View {
         const tone = t[statusTone(col.category)] ?? t.muted;
         const selIn = !this.inStrip && col.cards.some((c) => c.key === this.selected);
         const pane = this.colPane(col.category);
-        const heights = col.cards.map((c) => cardHeight({ lines: wrapWords(c.summary, 34, this.compact ? 1 : 2).length, label: Boolean(board.label_field), compact: this.compact }));
+        const heights = col.cards.map((c) => this.cardBox(c, board.label_field).height);
         const below = cardsBelow(heights, gap, pane);
         return v_flex().id(`col-${col.category}`).flex_1().min_w(220).h_full().min_h_0().rounded(10).pt(2).bg(tone).child(v_flex().flex_1().min_h_0().rounded(9).border(1).overflow_hidden()
           .border_color(t.border).bg(t.well)
