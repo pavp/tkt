@@ -41,15 +41,24 @@ test("a card's chips are its open pull requests, then how many finished", () => 
   assert.deepEqual(cardChips([], ""), []);
 });
 
-test("chips pack into the rows a card fits, so many of them never spill out of the card", () => {
-  const chips = ["#887", "#888", "#889", "#890"].map((ref) => ({ ref, mark: "✓" }));
-  assert.deepEqual(chipRows(chips, 24).map((row) => row.length), [2, 2]);
-  assert.deepEqual(chipRows(chips.slice(0, 3), 24).map((row) => row.length), [2, 1]);
-  assert.deepEqual(chipRows(chips.slice(0, 1), 24).map((row) => row.map((c) => c.ref)), [["#887"]]);
+test("chips pack into the pixel rows a card fits, so many of them never spill out of the card", () => {
+  const narrow = ["#887", "#888", "#889", "#890"].map((ref) => ({ ref, mark: "✓" }));
+  const five = [...narrow, { ref: "#891", mark: "✓" }];
+  assert.deepEqual(chipRows(narrow, 180).map((row) => row.length), [3, 1], "a card at its narrowest width holds three");
+  assert.deepEqual(chipRows(narrow, 211).map((row) => row.length), [3, 1], "the reported card, 4 pull requests: one row of three");
+  assert.deepEqual(chipRows(five, 211).map((row) => row.length), [3, 2]);
+  assert.deepEqual(chipRows(narrow, 240).map((row) => row.length), [4], "a wider card holds them all in one row");
+  assert.deepEqual(chipRows(five, 300).map((row) => row.length), [5]);
+});
+
+test("how many finished pull requests fit beside the last chips decides its row", () => {
+  const chips = cardChips([{ ref: "#890", mark: "✓" }, { ref: "#891", mark: "✓" }], "7 merged");
+  assert.deepEqual(chipRows(chips, 211).map((row) => row.map((c) => c.ref ?? c.text)), [["#890", "#891", "7 merged"]]);
+  assert.deepEqual(chipRows(chips, 120).map((row) => row.map((c) => c.ref ?? c.text)), [["#890", "#891"], ["7 merged"]]);
 });
 
 test("a chip wider than a card's row keeps a row of its own rather than being dropped", () => {
   const long = [{ ref: "#1234567890123456789", mark: "✓" }, { ref: "#1", mark: "✓" }];
-  assert.deepEqual(chipRows(long, 24).map((row) => row.map((c) => c.ref)), [["#1234567890123456789"], ["#1"]]);
-  assert.deepEqual(chipRows([], 24), []);
+  assert.deepEqual(chipRows(long, 180).map((row) => row.map((c) => c.ref)), [["#1234567890123456789"], ["#1"]]);
+  assert.deepEqual(chipRows([], 180), []);
 });

@@ -105,29 +105,35 @@ export const EMPTY_COLUMN = "— nothing here";
 /** The TUI's peach (Catppuccin), which no ANSI color matches: blocked marks and what needs you use it. */
 export const PEACH = "#fab387";
 
-const CHIP_ROOM = 24;
-const CHIP_COST = 4;
+const CHIP_CHAR = 7;
+const CHIP_INSET = 19;
+const CHIP_GAP = 6;
+/** The px a card's inner row loses to its column, container and padding, so a column's measured width minus this is
+ *  the room its cards hold. */
+export const CARD_CHIP_INSET = 36;
+const CHIP_ROOM = 220 - CARD_CHIP_INSET;
 
 /** A card's chips: each open pull request with its CI mark, then how many finished when any did. */
 export function cardChips(prs, finished = "") {
   return [...(prs ?? []).map((p) => ({ ref: p.ref, mark: p.mark, tone: p.tone })), ...(finished ? [{ text: finished }] : [])];
 }
 
-/** A card's chips packed into the rows that fit it, so a ticket with many pull requests grows its card instead of
- *  spilling its chips out of it; a chip wider than a row keeps a row of its own. */
+/** A card's chips packed into the rows that fit its inner width in px, so a ticket with many pull requests grows its
+ *  card instead of spilling its chips out of it; `room` is that width, the narrowest card's when unmeasured, and a
+ *  chip wider than a row keeps a row of its own. */
 export function chipRows(chips, room = CHIP_ROOM) {
   const rows = [];
   let row = [];
   let used = 0;
   for (const chip of chips) {
-    const width = (chip.ref ? chip.ref.length + 1 + chip.mark.length : chip.text.length) + CHIP_COST;
-    if (row.length > 0 && used + width > room) {
+    const width = (chip.ref ? chip.ref.length + chip.mark.length : chip.text.length) * CHIP_CHAR + CHIP_INSET;
+    if (row.length > 0 && used + CHIP_GAP + width > room) {
       rows.push(row);
       row = [];
       used = 0;
     }
+    used += (row.length > 0 ? CHIP_GAP : 0) + width;
     row.push(chip);
-    used += width;
   }
   if (row.length > 0) rows.push(row);
   return rows;
