@@ -9,7 +9,7 @@ import * as os from "os";
 import * as fs from "fs/promises";
 import { apiArgs, parseAnswer, machineOrder, pickMachine, agentKinds, agentRuns, failed, tktOn, outdatedNote, needsUpdate, safeModPath, tktPathFrom, shared, chosenMachine } from "./lib/client.js";
 import { listRows, stickyAt, moreAround } from "./lib/list.js";
-import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, cardChips, chipRows, EMPTY_COLUMN } from "./lib/columns.js";
+import { columnCards, cardOf, wrapWords, markOf, typeIcon, agentGlyph, cardFlag, cardChips, chipRows, CARD_CHIP_INSET, EMPTY_COLUMN } from "./lib/columns.js";
 import { gutterOf, statusTone, prStatusTone, agentLabel, prRefs, listColumns, pointsText } from "./lib/rows.js";
 import { previewOf, legendFor, problemOf, warningsLine, previewBadge, syncTone, topKeys, noticeShown } from "./lib/footer.js";
 import { prRows, toggled, reposChip, prPreview } from "./lib/prs.js";
@@ -1020,7 +1020,10 @@ export default class Tkt extends View {
    *  from code. */
   scrollPane(id, pane, content) {
     return v_flex().id(id).min_h_0().overflow_hidden()
-      .on_size_change((size) => { pane.view = size.height; })
+      .on_size_change((size, cx) => {
+        pane.view = size.height;
+        if (pane.width !== size.width) { pane.width = size.width; cx.notify(); }
+      })
       .on_scroll_wheel((e, cx) => {
         const max = Math.max(0, pane.content - pane.view);
         pane.offset = Math.max(0, Math.min(max, pane.offset - e.delta.y));
@@ -2019,9 +2022,9 @@ export default class Tkt extends View {
       const ci = at.cols.findIndex((c) => c.includes(this.selected));
       const col = columnCards(body)[ci];
       if (col) {
-        const heights = col.cards.map((c) => this.cardBox(c, body.label_field).height + (this.compact ? 6 : 8));
-        const i = at.cols[ci].indexOf(this.selected);
         const pane = this.colPane(col.category);
+        const heights = col.cards.map((c) => this.cardBox(c, body.label_field, pane).height + (this.compact ? 6 : 8));
+        const i = at.cols[ci].indexOf(this.selected);
         pane.offset = revealed(pane, heights.slice(0, i).reduce((a, b) => a + b, 0), heights[i]);
       }
       return;
@@ -2225,18 +2228,20 @@ export default class Tkt extends View {
   }
 
   /** A card's geometry wherever its height is needed: its summary lines, its pull request chips in the rows they
-   *  pack into, and the height they make together. */
-  cardBox(c, labelField) {
+   *  pack into, and the height they make together. The column's pane gives the width those rows hold; while it is
+   *  unmeasured the narrowest card's room does. */
+  cardBox(c, labelField, pane) {
     const lines = wrapWords(c.summary, 34, this.compact ? 1 : 2);
-    const chips = chipRows(cardChips(c.prs, c.finished));
+    const room = pane?.width > 0 ? Math.max(0, pane.width - CARD_CHIP_INSET) : undefined;
+    const chips = chipRows(cardChips(c.prs, c.finished), room);
     return { lines, chips, height: cardHeight({ lines: lines.length, chips: chips.length, label: Boolean(labelField), compact: this.compact }) };
   }
 
-  card(t, c, labelField) {
+  card(t, c, labelField, pane) {
     const mark = markOf(c.mark, c.status);
     const flag = cardFlag(c.attention, mark, c.points ? 11 : 14);
     const compact = Boolean(this.compact);
-    const { lines, chips, height } = this.cardBox(c, labelField);
+    const { lines, chips, height } = this.cardBox(c, labelField, pane);
     const sel = this.selected === c.key && !this.inStrip;
     const icon = typeIcon(c.typeKind);
     const alarm = Boolean(c.attention) || c.mark === "blocked";
@@ -2386,7 +2391,7 @@ export default class Tkt extends View {
         const tone = t[statusTone(col.category)] ?? t.muted;
         const selIn = !this.inStrip && col.cards.some((c) => c.key === this.selected);
         const pane = this.colPane(col.category);
-        const heights = col.cards.map((c) => this.cardBox(c, board.label_field).height);
+        const heights = col.cards.map((c) => this.cardBox(c, board.label_field, pane).height);
         const below = cardsBelow(heights, gap, pane);
         return v_flex().id(`col-${col.category}`).flex_1().min_w(220).h_full().min_h_0().rounded(10).pt(2).bg(tone).child(v_flex().flex_1().min_h_0().rounded(9).border(1).overflow_hidden()
           .border_color(t.border).bg(t.well)
@@ -2399,7 +2404,7 @@ export default class Tkt extends View {
           .child(col.cards.length === 0 ? h_flex().py(28).justify_center().text_size(12).text_color(t.muted).child(EMPTY_COLUMN)
             : v_flex().relative().flex_1().min_h_0().px(2).pb(4)
               .child(this.scrollPane(`col-${col.category}-cards`, pane,
-                v_flex().gap(gap).p(6).children(col.cards.map((c) => this.card(t, c, board.label_field)))).flex_1())
+                v_flex().gap(gap).p(6).children(col.cards.map((c) => this.card(t, c, board.label_field, pane)))).flex_1())
               .when(below > 0, (el) => el.child(h_flex().absolute().bottom(10).left(0).right(0).justify_center()
                 .child(div().px(10).py(1).rounded(10).border(1).border_color(t.border).bg(t.pill).shadow_md().text_size(11).text_color(t.muted).child(`↓ ${below} more`))))));
       }));
@@ -2431,7 +2436,7 @@ export default class Tkt extends View {
   }
 
   colPane(category) {
-    if (!this.colPanes[category]) this.colPanes[category] = { offset: 0, view: 0, content: 0 };
+    if (!this.colPanes[category]) this.colPanes[category] = { offset: 0, view: 0, content: 0, width: 0 };
     return this.colPanes[category];
   }
 
