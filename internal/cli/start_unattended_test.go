@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/pavp/tkt/internal/daemon"
+	"github.com/pavp/tkt/internal/herdrcore"
 	"github.com/pavp/tkt/internal/herdrport"
 )
 
@@ -164,6 +165,16 @@ func TestAnUnattendedStartNeedsTheHerdrRunning(t *testing.T) {
 	}
 	if _, err := h.app.daemonStartChoices(context.Background(), "DEMO-7", "desktop"); !errors.Is(err, daemon.ErrHerdrUnavailable) {
 		t.Errorf("daemonStartChoices = %v, want Herdr desktop unavailable", err)
+	}
+}
+
+func TestAnUnattendedStartWithoutHCSaysHCIsMissing(t *testing.T) {
+	h, _ := daemonDesktop(t)
+	h.app.HerdrRunning = func(context.Context) (bool, bool) { return false, false }
+	h.app.HerdrDesktopFound = func() error { return herdrcore.ErrNotInstalled }
+	err := h.app.daemonStart(context.Background(), "DEMO-7", daemon.StartRequest{Herdr: "desktop", Repos: []string{"web"}, Agent: "claude"}, func() {})
+	if !errors.Is(err, daemon.ErrHerdrUnavailable) || !strings.Contains(err.Error(), "no hc on PATH or in ~/.local/bin") {
+		t.Errorf("daemonStart = %v, want Herdr desktop unavailable for want of hc", err)
 	}
 }
 
