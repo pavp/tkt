@@ -132,6 +132,35 @@ func TestCopyTaskPrompt(t *testing.T) {
 	}
 }
 
+func TestReviewPromptPointsAtTheIntent(t *testing.T) {
+	tests := []struct {
+		name, branch, wantTicket, notTicket string
+	}{
+		{name: "a branch with a key of a known space names its ticket", branch: "feature/DEMO-7-login", wantTicket: "`tkt show DEMO-7`"},
+		{name: "a branch without a known key names none", branch: "fix-123-typo", notTicket: "FIX-123"},
+		{name: "no branch names none", notTicket: "`tkt show DEMO"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, h, _ := agentsHarness(t)
+			pr := ticket.PullRequest{Repo: "example-org/web", Number: 820, URL: "https://github.com/example-org/web/pull/820", Branch: tt.branch}
+			b.CopyTaskPrompt(tui.AgentTask{Review: &pr})()
+			in := h.run.stdin["pbcopy"]
+			for _, want := range []string{"the pull request's description", "without asking"} {
+				if !strings.Contains(in, want) {
+					t.Errorf("prompt lacks %q: %q", want, in)
+				}
+			}
+			if tt.wantTicket != "" && !strings.Contains(in, tt.wantTicket) {
+				t.Errorf("prompt lacks %q: %q", tt.wantTicket, in)
+			}
+			if tt.notTicket != "" && strings.Contains(in, tt.notTicket) {
+				t.Errorf("prompt names %q: %q", tt.notTicket, in)
+			}
+		})
+	}
+}
+
 func TestNewAgentReviewsBesideTheCloneInANewAgent(t *testing.T) {
 	tests := []struct {
 		name, agents, panes string

@@ -136,7 +136,7 @@ func (b *boardActions) CopyTaskPrompt(task tui.AgentTask) tea.Cmd {
 
 func (a *App) taskPrompt(ctx context.Context, c *config.Config, task tui.AgentTask) (string, error) {
 	if task.Review != nil {
-		return workspace.InLanguage(reviewPrompt(*task.Review), c.Language), nil
+		return workspace.InLanguage(reviewPrompt(*task.Review, c.SpaceKeys()), c.Language), nil
 	}
 	t, err := a.taskTicket(ctx, c, task)
 	if err != nil {
@@ -386,7 +386,7 @@ func (a *App) startTaskAgent(ctx context.Context, h HerdrAPI, req agentRequest) 
 
 // reviewPrompt asks an agent to review a pull request with its own tools and to keep its findings to itself: what
 // reaches GitHub is up to the user.
-func reviewPrompt(pr ticket.PullRequest) string {
+func reviewPrompt(pr ticket.PullRequest, spaces []string) string {
 	who := ""
 	if pr.Author != "" {
 		who = " by @" + pr.Author
@@ -397,9 +397,15 @@ func reviewPrompt(pr ticket.PullRequest) string {
 	} else if who != "" {
 		title = who
 	}
+	ticketHint := "If its branch, title or description names a ticket key, read that ticket with `tkt show <KEY>` for its acceptance criteria."
+	if key, ok := ticket.KeyInBranch(pr.Branch, spaces); ok {
+		ticketHint = fmt.Sprintf("Its branch names ticket %s: read it with `tkt show %s` for its acceptance criteria.", key, key)
+	}
 	return fmt.Sprintf("Review pull request %s (%s#%d%s).\n\n"+
 		"Review it with the /review-6-lens skill; without it, with a review tool you have, or your own tools (for example `gh pr view` and `gh pr diff`).\n"+
+		"Take what the change should do from the pull request's description (`gh pr view`). %s\n"+
+		"When neither states the intent, review without a spec and say so, without asking.\n"+
 		"Then report your findings here, most important first: what you would change and why, with the file and line.\n"+
 		"Do not comment on, approve or request changes on the pull request in GitHub: the user decides what to post.",
-		pr.URL, pr.Repo, pr.Number, title)
+		pr.URL, pr.Repo, pr.Number, title, ticketHint)
 }

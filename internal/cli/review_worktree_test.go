@@ -31,7 +31,7 @@ func startDesktopReview(t *testing.T, h *harness, pr ticket.PullRequest) error {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return h.app.startTask(context.Background(), task, reviewPrompt(pr), dir, note, label)
+	return h.app.startTask(context.Background(), task, reviewPrompt(pr, nil), dir, note, label)
 }
 
 func TestNewAgentReviewOnDesktopCreatesTheWorktreeAndOpensItsSpace(t *testing.T) {
