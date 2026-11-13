@@ -77,6 +77,7 @@ func TestChosenHerdr(t *testing.T) {
 		t.Errorf("both running: plugin err = %v", err)
 	}
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 	if _, err := selectApp(nil, false, true).chosenHerdr().Panes(context.Background()); !errors.Is(err, herdrcore.ErrNotInstalled) {
 		t.Errorf("desktop without hc: err = %v", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +19,7 @@ import (
 )
 
 var (
-	ErrNotInstalled = errors.New("herdr desktop is not installed (no hc on PATH)")
+	ErrNotInstalled = errors.New("herdr desktop is not installed (no hc on PATH or in ~/.local/bin)")
 	ErrNotRunning   = errors.New("herdr desktop is not running: open Herdr")
 	ErrNotFound     = errors.New("herdr desktop: no such terminal")
 )
@@ -70,18 +71,34 @@ func (c *Client) RunAgentsAs(f func(kind string) []string) { c.runOf = f }
 // LookAgentsWith makes the client find agents with f, which returns an agent's executable, rather than tkt's PATH.
 func (c *Client) LookAgentsWith(f func(kind string) (string, error)) { c.lookPath = f }
 
-// New finds hc, and herdr-app when it is there, on PATH.
+// New finds hc, and herdr-app when it is there, on PATH, else in ~/.local/bin where Herdr desktop installs them: a
+// daemon started outside a login shell, or handed over by one, runs with a PATH that lacks it.
 func New() (*Client, error) {
-	path, err := exec.LookPath("hc")
+	path, err := lookInstalled("hc")
 	if err != nil {
 		return nil, ErrNotInstalled
 	}
 	c := NewWith(execRunner{path})
 	c.lookPath = exec.LookPath
-	if app, err := exec.LookPath("herdr-app"); err == nil {
+	if app, err := lookInstalled("herdr-app"); err == nil {
 		c.app = execRunner{app}
 	}
 	return c, nil
+}
+
+func lookInstalled(name string) (string, error) {
+	path, err := exec.LookPath(name)
+	if err == nil {
+		return path, nil
+	}
+	home, herr := os.UserHomeDir()
+	if herr != nil {
+		return "", err
+	}
+	if local, lerr := exec.LookPath(filepath.Join(home, ".local", "bin", name)); lerr == nil {
+		return local, nil
+	}
+	return "", err
 }
 
 func NewWith(hc Runner) *Client {

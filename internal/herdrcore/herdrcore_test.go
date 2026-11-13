@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -155,8 +157,29 @@ func TestErrors(t *testing.T) {
 
 func TestNewWithoutHC(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 	if _, err := herdrcore.New(); !errors.Is(err, herdrcore.ErrNotInstalled) {
 		t.Errorf("New = %v, want ErrNotInstalled", err)
+	}
+}
+
+func TestNewFindsHCInTheUsersLocalBinOffPath(t *testing.T) {
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "hc"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("HOME", home)
+	c, err := herdrcore.New()
+	if err != nil {
+		t.Fatalf("New = %v, want the hc in ~/.local/bin", err)
+	}
+	if !c.Running(context.Background()) {
+		t.Error("Running = false, want the found hc to answer")
 	}
 }
 

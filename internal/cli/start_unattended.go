@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/pavp/tkt/internal/daemon"
+	"github.com/pavp/tkt/internal/herdrcore"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/workspace"
 )
@@ -61,6 +62,11 @@ func (a *App) unattendedIn(ctx context.Context, name string, settled func()) (co
 			if h.flavor == flavor {
 				return context.WithValue(ctx, unattendedKey{}, unattended{flavor: flavor, herdr: h.api, settled: settled}), nil
 			}
+		}
+	}
+	if flavor == herdrDesktop && a.HerdrDesktopFound != nil {
+		if err := a.HerdrDesktopFound(); errors.Is(err, herdrcore.ErrNotInstalled) {
+			return ctx, fmt.Errorf("%w: %w", daemon.ErrHerdrUnavailable, err)
 		}
 	}
 	return ctx, fmt.Errorf("%w: %s is not running", daemon.ErrHerdrUnavailable, flavor)
