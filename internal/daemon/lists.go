@@ -63,6 +63,30 @@ type PRRow struct {
 	Attention []string `json:"attention,omitempty"`
 	// FeedbackKey, on a pull request of the user's whose ticket is not theirs, is the key its feedback goes under.
 	FeedbackKey ticket.Key `json:"feedback_key,omitempty"`
+	// Stack is the stack the pull request belongs to in its group, left out when it stands alone; After is the
+	// number of the pull request of the stack it sits on.
+	Stack *PRRowStack `json:"stack,omitempty"`
+	After int         `json:"after,omitempty"`
+	// On is the base branch of the first pull request of a stack shown in this group, when the one it sits on is
+	// in another group or hidden.
+	On string `json:"on,omitempty"`
+	// Step is the pull request's place in its whole stack's merge order, from 1 at the bottom; pull requests on
+	// the same parent share it.
+	Step int `json:"step,omitempty"`
+}
+
+// PRRowStack is a stack of the PRs tab: Key, which folds it as a group's key does, its name and worst status, and
+// its pull requests' URLs from the bottom.
+type PRRowStack struct {
+	Key    string   `json:"key"`
+	Name   string   `json:"name"`
+	Status string   `json:"status"`
+	URLs   []string `json:"urls"`
+	// Shown counts the stack's pull requests in this group; First marks the first of them, which the stack's
+	// title goes above when it shows two or more.
+	Shown     int  `json:"shown"`
+	First     bool `json:"first,omitempty"`
+	Collapsed bool `json:"collapsed"`
 }
 
 // BacklogView is the Backlog as the board lays it out: its sprints, then the tickets in no sprint.
@@ -147,11 +171,33 @@ func (s *Server) prs(w http.ResponseWriter, r *http.Request) {
 		view.Repos = append(view.Repos, RepoFilter{Name: name, PRs: n, Hidden: f.HiddenRepos[name]})
 	}
 	slices.SortFunc(view.Repos, func(a, b RepoFilter) int { return strings.Compare(a.Name, b.Name) })
+	stacks := wholeStacks(snap)
 	for _, g := range board.PRGroups(snap, f) {
 		sec := PRSection{Group: g.Group, Title: g.Title, Count: len(g.Rows), Needs: g.Needs, Collapsed: board.Folded(collapsed, g.Group), Rows: []PRRow{}}
-		for _, row := range g.Rows {
+		shown := map[string]int{}
+		rows := board.StackedRows(g.Rows)
+		for _, row := range rows {
+			if w := stacks[prID(*row.PR)]; w != nil {
+				shown[prID(w.PRs[0].PullRequest)]++
+			}
+		}
+		for _, row := range rows {
 			out := PRRow{Key: fmt.Sprintf("#%d", row.PR.Number), PR: row.PR, Ticket: row.Ticket, Other: row.Other, Review: row.Review(),
-				Status: row.Status(), Approvals: row.PR.ApprovalsText(), NeedsYou: board.NeedsYou(*row.PR), Attention: reasons(row.PR.Attention())}
+				Status: row.Status(), Approvals: row.PR.ApprovalsText(), NeedsYou: board.NeedsYou(*row.PR), Attention: reasons(row.PR.Attention()), After: row.After}
+			if w := stacks[prID(*row.PR)]; w != nil {
+				bottom := prID(w.PRs[0].PullRequest)
+				key := "stack:" + bottom
+				out.Stack = &PRRowStack{Key: key, Name: w.Name, Status: w.Status, Shown: shown[bottom], First: row.Stack == nil || row.After == 0, Collapsed: board.Folded(collapsed, key)}
+				for _, p := range w.PRs {
+					out.Stack.URLs = append(out.Stack.URLs, p.URL)
+					if prID(p.PullRequest) == prID(*row.PR) {
+						out.Step = p.Depth + 1
+					}
+				}
+				if out.Stack.First && prID(*row.PR) != bottom {
+					out.On = row.PR.Base
+				}
+			}
 			if fb, ok := ticket.FeedbackTicket(*row.PR); ok && row.Other && row.PR.Yours {
 				out.FeedbackKey = fb.Key
 			}
@@ -320,4 +366,25 @@ func (s *Server) moveToSprint(w http.ResponseWriter, r *http.Request) {
 	s.markBacklogStale()
 	s.syncSoon()
 	writeJSON(w, http.StatusOK, map[string]any{"key": key, "sprint": req.Sprint})
+}
+
+func prID(pr ticket.PullRequest) string { return fmt.Sprintf("%s#%d", pr.Repo, pr.Number) }
+
+// wholeStacks maps each pull request the board knows that sits in a stack of two or more to that whole stack,
+// so a stack split across the PRs tab's groups is named and copied whole.
+func wholeStacks(snap board.Snapshot) map[string]*board.PRStack {
+	var prs []ticket.PullRequest
+	for _, k := range snap.KnownPRs() {
+		prs = append(prs, k.PullRequest)
+	}
+	out := map[string]*board.PRStack{}
+	for _, s := range board.PRStacks(prs) {
+		if len(s.PRs) < 2 {
+			continue
+		}
+		for _, p := range s.PRs {
+			out[prID(p.PullRequest)] = &s
+		}
+	}
+	return out
 }

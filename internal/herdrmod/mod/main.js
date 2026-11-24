@@ -588,6 +588,17 @@ export default class Tkt extends View {
   }
 
   prRow(t, r) {
+    if (r.kind === "stack") {
+      const sel = this.selected === `group:${r.group}` && !this.inStrip;
+      const tone = r.tone === "ansi1" ? ensure(t.ansi1, t.surface, 4.5) : t[r.tone] ?? t.foreground;
+      return this.blockBox(t, r.block, sel)
+        .child(div().flex_none().text_color(t.muted).child(this.icon("stack", 13)))
+        .child(div().min_w_0().truncate().text_size(11).text_color(t.muted).child(r.title))
+        .child(div().flex_none().text_size(11).font_semibold().text_color(tone).child(r.status))
+        .child(div().flex_1())
+        .when(sel, (el) => el.child(h_flex().flex_none().gap(5).items_center().text_size(11).text_color(t.muted).child(this.keyCap(t, "P")).child(`copy ${r.urls.length} URLs`)))
+        .child(div().w(12).flex_none().text_size(10).text_color(t.muted).child(r.collapsed ? "▸" : "▾"));
+    }
     if (r.kind === "title") {
       return this.sectionTitle(t, r, { fold: Boolean(r.collapsed), sel: this.selected === `group:${r.group}`,
         extra: r.needs ? [div().text_size(11).text_color(ensure(t.ansi3, t.surface, 4.5)).child(`${r.needs} need you`)] : [] });
@@ -597,14 +608,17 @@ export default class Tkt extends View {
     const pr = r.raw.pr ?? {};
     const ci = { pass: ["✓", t.ansi2], fail: ["✕", ensure(t.ansi1, t.surface, 4.5)], pending: ["…", t.muted] }[pr.checks] ?? ["—", t.dim];
     const tone = t[prStatusTone(r.raw)] ?? t.foreground;
-    return this.rowBox(t, sel)
+    const place = [r.stackNote && `⧉ ${r.stackNote}`, r.on && `on ${r.on}`].filter(Boolean).join(" · ");
+    return this.blockBox(t, r.block, sel)
       .child(div().w(20).flex_none().text_size(12).font_semibold().text_color(t[g.tone] ?? t.muted).child(g.text))
       .child(this.mono(div().w(44).flex_none().text_size(11).text_color(sel ? t.accent : t.muted)).child(r.key))
       .child(h_flex().w(160).flex_none().gap(4).child(div().truncate().text_size(12).text_color(ensure(tone, t.surface, 4.5)).child(r.status))
         .when(Boolean(r.approvals), (el) => el.child(div().text_size(12).text_color(t.muted).child(`· ${r.approvals}`))))
       .child(div().w(140).flex_none().truncate().text_size(12).text_color(t.muted).child(pr.author ?? ""))
       .child(div().w(24).flex_none().font_semibold().text_color(ci[1] ?? t.dim).child(ci[0]))
-      .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(pr.draft ? t.muted : t.foreground).child(r.title));
+      .when(r.step > 0, (el) => el.child(this.mono(h_flex().w(16).h(16).flex_none().items_center().justify_center().rounded(4).border(1).border_color(t.border).text_size(10).text_color(t.muted)).child(String(r.step))))
+      .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(pr.draft ? t.muted : t.foreground).child(r.title))
+      .when(Boolean(place), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(place)));
   }
 
   prsList(t, view) {
@@ -617,7 +631,7 @@ export default class Tkt extends View {
         rows.slice(range.start, range.end).map((r) => this.prRow(t, r))).size_full().track_scroll(this.scrolls["pr-rows"]).on_item_click((key, cx) => {
         const r = rows[Number(key)];
         if (!r) return;
-        if (r.kind === "title") this.patchState({ collapsed: toggled(view.collapsed, r.group) }, cx);
+        if (r.kind === "title" || r.kind === "stack") this.patchState({ collapsed: toggled(view.collapsed, r.group) }, cx);
         else {
           this.selected = r.key + r.group;
           this.clicked(this.selected, () => this.menuFor(r), cx);
@@ -1188,6 +1202,11 @@ export default class Tkt extends View {
         .child(div().flex_none().text_color(t.muted).child(this.icon("stack", 13)))
         .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(t.muted).child(`Stack of ${e.stack.prs.length} · ${e.stack.name}`))
         .child(div().flex_none().text_size(11).font_semibold().text_color(tone(e.stack.tone)).child(e.stack.status))
+        .child(h_flex().id(`dpr-${i}-copy`).w(22).h(22).flex_none().items_center().justify_center().rounded(5).text_color(t.muted)
+          .hover((h) => h.bg(t.hover).text_color(t.foreground))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => { cx.stop_propagation(); this.act({ action: "copy", value: e.stack.prs.map((p) => p.url).join("\n"), what: `the stack's ${e.stack.prs.length} URLs` }, cx); })
+          .child(this.icon("copy", 12)))
         .child(div().w(10).flex_none().text_size(11).text_color(t.muted).child(e.folded ? "▸" : "▾"));
     }
     const p = e.pr;
@@ -1984,6 +2003,11 @@ export default class Tkt extends View {
       if (this.tab === "prs") return this.patchState({ team_prs: !this.answers.prs?.body?.team_prs }, cx);
       return this.toggleTeam(cx);
     }
+    if (action === "copyPR" && this.tab === "prs" && this.selected?.startsWith("group:stack:")) {
+      const stack = prRows(this.answers.prs?.body).find((r) => r.kind === "stack" && `group:${r.group}` === this.selected);
+      if (stack) this.act({ action: "copy", value: stack.urls.join("\n"), what: `the stack's ${stack.urls.length} URLs` }, cx);
+      return;
+    }
     if (action === "menu" && this.selected?.startsWith("group:")) {
       const body = this.answers[this.tab]?.body;
       return this.patchState({ collapsed: toggled(body?.collapsed, this.selected.slice("group:".length)) }, cx);
@@ -2109,7 +2133,7 @@ export default class Tkt extends View {
     const board = !this.choices && !this.details && !this.settings;
     const row = board && this.tab === "sprint" ? this.selectedRow(body) : board && this.tab === "backlog" ? this.boardRow(this.selected) : null;
     const badge = row ? previewBadge(row) : null;
-    const p = row ? previewOf(row) : board && this.tab === "prs" ? prPreview(prRows(body).find((r) => r.kind === "row" && r.key + r.group === this.selected)) : null;
+    const p = row ? previewOf(row) : board && this.tab === "prs" ? prPreview(prRows(body).find((r) => r.kind === "row" ? r.key + r.group === this.selected : r.kind === "stack" && `group:${r.group}` === this.selected)) : null;
     const where = this.machine === undefined ? "looking for tkt…" : `tkt on ${this.machine ?? "this computer"}`;
     const sync = this.tab === "backlog" && this.answers.backlog?.body?.error ? `! ${this.answers.backlog.body.error}` : this.cachedAt ? cachedLabel(this.cachedAt) : this.answers[this.tab]?.body?.sync_label ?? "";
     const warn = sync.startsWith("!");
@@ -2339,6 +2363,18 @@ export default class Tkt extends View {
   }
 
   /** A list row's box: the selected one tinted and outlined in the accent. */
+  /** A row of the PRs tab inside a stack's block: its part of the block's tinted box (top, mid, bottom, or the
+   *  whole box when folded), so the stack reads as one container while every row keeps the table's columns. */
+  blockBox(t, block, sel) {
+    if (!block) return this.rowBox(t, sel);
+    const top = block === "top" || block === "only";
+    const bottom = block === "bottom" || block === "only";
+    return h_flex().h(ROW).px(12).gap(10).items_center().border_x(1).border_color(t.border)
+      .bg(sel ? mix(t.accent, t.surface, 0.12) : mix(t.foreground, t.surface, 0.035))
+      .when(top, (el) => el.border_t(1).rounded_t(8))
+      .when(bottom, (el) => el.border_b(1).rounded_b(8));
+  }
+
   rowBox(t, sel) {
     return h_flex().h(ROW).px(12).gap(10).items_center().rounded(6).border(1).border_color(sel ? t.accent : t.surface).bg(sel ? mix(t.accent, t.surface, 0.1) : t.surface);
   }

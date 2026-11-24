@@ -57,6 +57,30 @@ func TestContractPRs(t *testing.T) {
 	}
 }
 
+func TestContractPRsStack(t *testing.T) {
+	for _, tt := range []struct {
+		name, fixture string
+		state         board.ListState
+	}{
+		{"a stack", "prs-stack", board.ListState{}},
+		{"a folded stack", "prs-stack-folded", board.ListState{Collapsed: []string{"stack:example-org/web#39"}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			seed := contractPRs()
+			seed.Reviews = append(seed.Reviews, ticket.PullRequest{Repo: "example-org/web", Number: 39, Title: "Shape the export", URL: "https://github.com/example-org/web/pull/39", State: ticket.PROpen, Author: "grace", Branch: "feat/DEMO-2-export-0-shape", Base: "main"})
+			seed.Tickets[1].PRs = append(seed.Tickets[1].PRs,
+				ticket.PullRequest{Repo: "example-org/web", Number: 41, Title: "Export the CSV", URL: "https://github.com/example-org/web/pull/41", State: ticket.PROpen, Branch: "feat/DEMO-2-export-2-csv", Base: "feat/DEMO-2-export-1-query", Checks: ticket.ChecksFail},
+				ticket.PullRequest{Repo: "example-org/web", Number: 40, Title: "Query the export", URL: "https://github.com/example-org/web/pull/40", State: ticket.PROpen, Branch: "feat/DEMO-2-export-1-query", Base: "feat/DEMO-2-export-0-shape", Merge: ticket.MergeReady})
+			s, err := New(Options{Dir: t.TempDir(), Version: "1.2.3", Sync: (&fakeSync{}).sync, Interval: time.Hour, Seed: &seed,
+				Lists: func() board.ListState { return tt.state }, Now: func() time.Time { return seed.FetchedAt.Add(3 * time.Minute) }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertContract(t, s.Handler(), "/v1/prs", s.token, tt.fixture)
+		})
+	}
+}
+
 func TestPRsBeforeAnyBoardIsUnavailable(t *testing.T) {
 	s := newServer(t, &fakeSync{}, nil)
 	code, body := get(t, s.Handler(), http.MethodGet, "/v1/prs", s.token)

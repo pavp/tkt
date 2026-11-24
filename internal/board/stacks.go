@@ -2,6 +2,7 @@ package board
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/pavp/tkt/internal/ticket"
@@ -28,16 +29,27 @@ type KnownPR struct {
 	Key ticket.Key
 }
 
-// KnownPRs lists every pull request of the snapshot: its tickets', then the review requests and everyone
-// else's, these with the ticket their branch names.
+// KnownPRs lists every pull request of the snapshot once: its tickets', then the review requests and everyone
+// else's, these with the ticket their branch names; a team ticket's pull request is also among everyone else's.
 func (s Snapshot) KnownPRs() []KnownPR {
 	var out []KnownPR
+	seen := map[string]bool{}
+	first := func(pr ticket.PullRequest) bool {
+		id := pr.Repo + "#" + strconv.Itoa(pr.Number)
+		defer func() { seen[id] = true }()
+		return !seen[id]
+	}
 	for _, t := range s.Tickets {
 		for _, pr := range t.PRs {
-			out = append(out, KnownPR{PullRequest: pr, Key: t.Key})
+			if first(pr) {
+				out = append(out, KnownPR{PullRequest: pr, Key: t.Key})
+			}
 		}
 	}
 	for _, pr := range append(slices.Clone(s.Reviews), s.Others...) {
+		if !first(pr) {
+			continue
+		}
 		k := KnownPR{PullRequest: pr}
 		if keys := ticket.BranchKeys(pr.Branch); len(keys) > 0 {
 			k.Key = keys[0]
@@ -150,4 +162,48 @@ func stackName(s []ticket.StackedPR) string {
 		return kind + "/" + common
 	}
 	return common
+}
+
+// StackedRow is a row of the PRs tab with the stack it belongs to, nil when it stands alone, and the number of
+// the pull request it sits on.
+type StackedRow struct {
+	PRRow
+	Stack *PRStack
+	After int
+}
+
+// StackedRows orders a group's rows so each stack's rows follow each other from its bottom, where the stack's
+// first row was; rows standing alone keep their place.
+func StackedRows(rows []PRRow) []StackedRow {
+	prs := make([]ticket.PullRequest, len(rows))
+	at := map[string]int{}
+	for i, r := range rows {
+		prs[i] = *r.PR
+		at[r.PR.Repo+"#"+strconv.Itoa(r.PR.Number)] = i
+	}
+	type placed struct {
+		first int
+		stack PRStack
+	}
+	var stacks []placed
+	for _, s := range PRStacks(prs) {
+		first := len(rows)
+		for _, p := range s.PRs {
+			first = min(first, at[p.Repo+"#"+strconv.Itoa(p.Number)])
+		}
+		stacks = append(stacks, placed{first, s})
+	}
+	slices.SortStableFunc(stacks, func(a, b placed) int { return a.first - b.first })
+	var out []StackedRow
+	for _, p := range stacks {
+		s := p.stack
+		for _, sp := range s.PRs {
+			r := StackedRow{PRRow: rows[at[sp.Repo+"#"+strconv.Itoa(sp.Number)]], After: sp.After}
+			if len(s.PRs) > 1 {
+				r.Stack = &s
+			}
+			out = append(out, r)
+		}
+	}
+	return out
 }

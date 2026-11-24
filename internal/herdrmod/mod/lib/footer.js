@@ -20,7 +20,7 @@ export function legendFor(tab, view, { strip = false, bots = 0, merged = false }
   if (tab === "prs" && bots > 0) legend.push(["b", "bots"]);
   legend.push(["click", tab === "sprint" && strip ? "select · review menu" : "select"], ["double-click", "actions"], ["enter", tab === "sprint" ? "actions" : "actions · fold group"]);
   if (tab === "backlog") legend.push(["i", "details"], ["o", "Jira ↗"], ["O", "copy link"], ["tab 1-3", "switch tab"], ["v", merged ? "split" : "merge"]);
-  else legend.push(["f", "send feedback"], ["i", "details"], ["o", "Jira ↗"], ["p", "PR ↗"], ["O P", "copy link"], ["tab 1-3", "switch tab"]);
+  else legend.push(["f", "send feedback"], ["i", "details"], ["o", "Jira ↗"], ["p", "PR ↗"], ["O P", tab === "prs" ? "copy link · P on a stack copies its URLs" : "copy link"], ["tab 1-3", "switch tab"]);
   if (tab === "sprint") legend.push(["v", "view"]);
   if (columns) legend.push(["z", "density"]);
   if (tab !== "backlog") legend.push(["t", tab === "prs" ? "requested" : "team"]);

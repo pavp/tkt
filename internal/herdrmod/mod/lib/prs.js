@@ -1,3 +1,5 @@
+import { stackTone } from "./details.js";
+
 /** The PRs tab's rows from /v1/prs: each group's title (with its count, how many need you, folded or not), then
  *  its pull requests unless folded. */
 export function prRows(view) {
@@ -6,6 +8,13 @@ export function prRows(view) {
     rows.push({ kind: "title", group: s.group, title: s.title, count: s.count, needs: s.needs, collapsed: Boolean(s.collapsed) });
     if (s.collapsed) continue;
     for (const r of s.rows ?? []) {
+      const grouped = (r.stack?.shown ?? 0) >= 2;
+      if (grouped && r.stack.first) {
+        const here = r.stack.shown < r.stack.urls.length ? ` · ${r.stack.shown} here` : "";
+        rows.push({ kind: "stack", group: r.stack.key, title: `Stack of ${r.stack.urls.length} · ${r.stack.name}${here}`, block: r.stack.collapsed ? "only" : "top", status: r.stack.status,
+          tone: stackTone(r.stack.status), count: r.stack.shown, collapsed: Boolean(r.stack.collapsed), urls: r.stack.urls });
+      }
+      if (grouped && r.stack.collapsed) continue;
       rows.push({
         kind: "row",
         key: r.key,
@@ -20,10 +29,20 @@ export function prRows(view) {
         other: Boolean(r.other),
         who: r.pr?.author || r.ticket?.assignee || "",
         approvals: r.approvals ?? "",
+        after: r.after ?? 0,
+        on: r.on ?? "",
+        step: grouped ? r.step ?? 0 : 0,
+        inStack: grouped,
+        stackKey: grouped ? r.stack.key : "",
+        block: grouped ? "mid" : undefined,
+        stackNote: r.stack && !grouped ? `1 of ${r.stack.urls.length}` : "",
         raw: r,
       });
     }
   }
+  rows.forEach((r, i) => {
+    if (r.block === "mid" && rows[i + 1]?.stackKey !== r.stackKey) r.block = "bottom";
+  });
   return rows;
 }
 
@@ -44,6 +63,7 @@ const CI = { fail: "failing ✕", pending: "running …", pass: "passing ✓" };
 
 /** The preview of a selected PRs-tab row, worded as the TUI's (its preview for pull requests). */
 export function prPreview(row) {
+  if (row?.kind === "stack") return { title: row.title, line: `${row.status} · enter to ${row.collapsed ? "unfold" : "fold"} · P copies the stack's ${row.urls.length} URLs` };
   if (!row || row.kind !== "row") return null;
   const pr = row.raw?.pr ?? {};
   const ci = `CI ${CI[pr.checks] ?? "not reported"}`;

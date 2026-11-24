@@ -111,7 +111,7 @@ func TestKnownPRsNameTheirTicket(t *testing.T) {
 	snap := Snapshot{
 		Tickets: []ticket.Ticket{{Key: "DEMO-1", PRs: []ticket.PullRequest{{Repo: "o/web", Number: 1, Branch: "feat/DEMO-1-a"}}}},
 		Reviews: []ticket.PullRequest{{Repo: "o/web", Number: 5, Branch: "feat/DEMO-5-x"}},
-		Others:  []ticket.PullRequest{{Repo: "o/web", Number: 6, Branch: "chore/bump"}},
+		Others:  []ticket.PullRequest{{Repo: "o/web", Number: 6, Branch: "chore/bump"}, {Repo: "o/web", Number: 1, Branch: "feat/DEMO-1-a"}},
 	}
 	var got []string
 	for _, k := range snap.KnownPRs() {
@@ -119,5 +119,24 @@ func TestKnownPRsNameTheirTicket(t *testing.T) {
 	}
 	if want := "1:DEMO-1,5:DEMO-5,6:"; strings.Join(got, ",") != want {
 		t.Errorf("known = %q, want %s", got, want)
+	}
+}
+
+func TestStackedRowsKeepAStackTogetherWhereItsFirstRowWas(t *testing.T) {
+	pr := func(n int, branch, base string) *ticket.PullRequest {
+		return &ticket.PullRequest{Repo: "example-org/web", Number: n, Branch: branch, Base: base, State: ticket.PROpen}
+	}
+	rows := []PRRow{{PR: pr(922, "refactor/m-3", "refactor/m-2")}, {PR: pr(10, "fix/x", "main")}, {PR: pr(920, "refactor/m-1", "main")}, {PR: pr(921, "refactor/m-2", "refactor/m-1")}}
+	var got []string
+	for _, r := range StackedRows(rows) {
+		s := "#" + strconv.Itoa(r.PR.Number)
+		if r.Stack != nil {
+			s += " of " + strconv.Itoa(len(r.Stack.PRs)) + " " + r.Stack.Name + " after " + strconv.Itoa(r.After)
+		}
+		got = append(got, s)
+	}
+	want := []string{"#920 of 3 refactor/m after 0", "#921 of 3 refactor/m after 920", "#922 of 3 refactor/m after 921", "#10"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("rows = %q\nwant %q", got, want)
 	}
 }

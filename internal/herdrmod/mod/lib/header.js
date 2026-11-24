@@ -30,6 +30,8 @@ export function contextText(tab, body, { loading = false } = {}) {
     const reviews = rows.filter((r) => r.review).length;
     const parts = [`${mine.length} open`];
     if (needs > 0) parts.push(`${needs} needs you`);
+    const stacks = new Set(rows.filter((r) => (r.stack?.urls?.length ?? 0) > 1).map((r) => r.stack.key)).size;
+    if (stacks > 0) parts.push(`${stacks} ${plural(stacks, "stack", "stacks")}`);
     parts.push(`${reviews} review ${plural(reviews, "request", "requests")}`);
     return parts.join(" · ");
   }
