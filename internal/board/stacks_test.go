@@ -111,7 +111,7 @@ func TestKnownPRsNameTheirTicket(t *testing.T) {
 	snap := Snapshot{
 		Tickets: []ticket.Ticket{{Key: "DEMO-1", PRs: []ticket.PullRequest{{Repo: "o/web", Number: 1, Branch: "feat/DEMO-1-a"}}}},
 		Reviews: []ticket.PullRequest{{Repo: "o/web", Number: 5, Branch: "feat/DEMO-5-x"}},
-		Others:  []ticket.PullRequest{{Repo: "o/web", Number: 6, Branch: "chore/bump"}},
+		Others:  []ticket.PullRequest{{Repo: "o/web", Number: 6, Branch: "chore/bump"}, {Repo: "o/web", Number: 1, Branch: "feat/DEMO-1-a"}},
 	}
 	var got []string
 	for _, k := range snap.KnownPRs() {

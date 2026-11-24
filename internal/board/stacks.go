@@ -29,16 +29,27 @@ type KnownPR struct {
 	Key ticket.Key
 }
 
-// KnownPRs lists every pull request of the snapshot: its tickets', then the review requests and everyone
-// else's, these with the ticket their branch names.
+// KnownPRs lists every pull request of the snapshot once: its tickets', then the review requests and everyone
+// else's, these with the ticket their branch names; a team ticket's pull request is also among everyone else's.
 func (s Snapshot) KnownPRs() []KnownPR {
 	var out []KnownPR
+	seen := map[string]bool{}
+	first := func(pr ticket.PullRequest) bool {
+		id := pr.Repo + "#" + strconv.Itoa(pr.Number)
+		defer func() { seen[id] = true }()
+		return !seen[id]
+	}
 	for _, t := range s.Tickets {
 		for _, pr := range t.PRs {
-			out = append(out, KnownPR{PullRequest: pr, Key: t.Key})
+			if first(pr) {
+				out = append(out, KnownPR{PullRequest: pr, Key: t.Key})
+			}
 		}
 	}
 	for _, pr := range append(slices.Clone(s.Reviews), s.Others...) {
+		if !first(pr) {
+			continue
+		}
 		k := KnownPR{PullRequest: pr}
 		if keys := ticket.BranchKeys(pr.Branch); len(keys) > 0 {
 			k.Key = keys[0]
