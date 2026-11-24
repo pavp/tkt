@@ -11,7 +11,7 @@ export function prRows(view) {
       const grouped = (r.stack?.shown ?? 0) >= 2;
       if (grouped && r.stack.first) {
         const here = r.stack.shown < r.stack.urls.length ? ` · ${r.stack.shown} here` : "";
-        rows.push({ kind: "stack", group: r.stack.key, title: `${r.stack.name} · ${r.stack.urls.length} PRs${here}`, block: r.stack.collapsed ? "only" : "top", status: r.stack.status,
+        rows.push({ kind: "stack", group: r.stack.key, title: `Stack of ${r.stack.urls.length} · ${r.stack.name}${here}`, block: r.stack.collapsed ? "only" : "top", status: r.stack.status,
           tone: stackTone(r.stack.status), count: r.stack.shown, collapsed: Boolean(r.stack.collapsed), urls: r.stack.urls });
       }
       if (grouped && r.stack.collapsed) continue;

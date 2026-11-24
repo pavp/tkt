@@ -37,6 +37,11 @@ test("the context line sums the tab up in the TUI's words", () => {
     { group: "team:web", count: 2, rows: [{ key: "#6", other: true, needs_you: true }, { key: "#7", review: true }] },
   ] };
   assert.equal(contextText("prs", own), "2 open · 1 needs you · 1 review request", "the user's own pull requests for a ticket not theirs count as open; others' with Team on do not");
+  const stacked = { sections: [
+    { group: "mine:web", count: 3, rows: [{ key: "#1", stack: { key: "stack:o/web#1", urls: ["u1", "u2"] } }, { key: "#2", stack: { key: "stack:o/web#1", urls: ["u1", "u2"] } }, { key: "#3" }] },
+    { group: "review:api", count: 1, rows: [{ key: "#9", review: true, stack: { key: "stack:o/api#8", urls: ["u8", "u9"] } }] },
+  ] };
+  assert.equal(contextText("prs", stacked), "3 open · 2 stacks · 1 review request", "stacks count once each, wherever their rows sit");
   assert.equal(contextText("backlog", backlog), "2 boards · 2 sprints · 9 in backlog");
   assert.equal(contextText("backlog", undefined, { loading: true }), "loading backlog…");
 });
