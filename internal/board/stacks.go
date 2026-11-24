@@ -115,28 +115,39 @@ func stackStatus(pr ticket.PullRequest) string {
 	return PRStatus(pr)
 }
 
-// stackName is the part its branches share, cut at a separator, or the bottom's branch when they share no
-// more than their kind ("feat/").
+// stackName is the part its branches share, cut at a separator and with their kind ("feat/") when they all have
+// the same one, or the bottom's branch when they share no more than their kind.
 func stackName(s []ticket.StackedPR) string {
 	bottom := s[0].Branch
-	common := bottom
+	kind, common, found := strings.Cut(bottom, "/")
+	if !found {
+		kind, common = "", bottom
+	}
+	sameKind := true
 	for _, p := range s[1:] {
+		k, rest, ok := strings.Cut(p.Branch, "/")
+		if !ok {
+			k, rest = "", p.Branch
+		}
+		sameKind = sameKind && k == kind
 		n := 0
-		for n < len(common) && n < len(p.Branch) && common[n] == p.Branch[n] {
+		for n < len(common) && n < len(rest) && common[n] == rest[n] {
 			n++
 		}
-		common = common[:n]
-	}
-	if common != bottom {
-		if i := strings.LastIndexAny(common, "-_/."); i >= 0 {
-			common = common[:i]
-		} else {
-			common = ""
+		if n < len(common) {
+			common = common[:n]
+			if i := strings.LastIndexAny(common, "-_/."); i >= 0 {
+				common = common[:i]
+			} else {
+				common = ""
+			}
 		}
 	}
-	kind, _, _ := strings.Cut(bottom, "/")
-	if common == "" || common == kind {
+	switch {
+	case common == "":
 		return bottom
+	case sameKind && kind != "":
+		return kind + "/" + common
 	}
 	return common
 }

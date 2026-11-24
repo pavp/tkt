@@ -36,6 +36,12 @@ func TestPRStacks(t *testing.T) {
 			[]string{"#1 Merged after 0", "#2 Ready to merge after 1", "#3 CI failing after 2"},
 		},
 		{
+			"branches of different kinds are named by what they share after it",
+			[]ticket.PullRequest{open(1, "chore/demo-12-calver-1-tagging", "trunk"), open(2, "docs/demo-12-calver-2-docs", "chore/demo-12-calver-1-tagging")},
+			"demo-12-calver", "Ready to merge",
+			[]string{"#1 Ready to merge after 0", "#2 Ready to merge after 1"},
+		},
+		{
 			"branches sharing only their kind are named by the bottom's branch",
 			[]ticket.PullRequest{open(1, "feat/login", "main"), open(2, "feat/signup", "feat/login")},
 			"feat/login", "Ready to merge",
