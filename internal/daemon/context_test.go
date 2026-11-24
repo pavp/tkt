@@ -48,7 +48,7 @@ func TestTicketContextIsTheCopiedMarkdown(t *testing.T) {
 func TestTicketDetailHearsTheTicketsAgent(t *testing.T) {
 	seed := &board.Snapshot{FetchedAt: fetched, Tickets: []ticket.Ticket{{Key: "DEMO-1"}}, Agents: map[string]string{"DEMO-1": "working"}}
 	agents := map[string]string{}
-	detail := func(_ context.Context, key ticket.Key, _ *ticket.Ticket, agent string) (any, error) {
+	detail := func(_ context.Context, key ticket.Key, _ *ticket.Ticket, agent string, _ []board.KnownPR) (any, error) {
 		agents[string(key)] = agent
 		return map[string]string{"key": string(key)}, nil
 	}

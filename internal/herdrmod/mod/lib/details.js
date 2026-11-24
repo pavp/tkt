@@ -6,7 +6,7 @@ export function detailView(d, from) {
   const stacks = d.pr_stacks ?? (t.prs ?? []).map((p) => ({ name: "", status: "", prs: [{ ...p, depth: 0 }] }));
   const prOf = (p) => {
     const [mark, tone] = p.state === "open" ? CHECKS[p.checks] ?? ["—", "dim"] : [p.state, "dim"];
-    return { ref: `${p.repo}#${p.number}`, title: p.title, url: p.url, mark, tone, depth: p.depth ?? 0, number: p.number, status: p.status ?? "", after: p.after ?? 0, updated: p.updated_at ?? "" };
+    return { ref: `${p.repo}#${p.number}`, title: p.title, url: p.url, mark, tone, depth: p.depth ?? 0, number: p.number, status: p.status ?? "", after: p.after ?? 0, updated: p.updated_at ?? "", otherTicket: p.ticket && p.ticket !== t.key ? p.ticket : "" };
   };
   const fields = [["Status", t.status], ["Type", t.type], ["Points", t.points ? String(t.points) : ""], ["Assignee", t.assignee || "unassigned"], ["Label", t.label], ["Board", t.board]];
   return {

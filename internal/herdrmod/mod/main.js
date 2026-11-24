@@ -1201,6 +1201,7 @@ export default class Tkt extends View {
         .child(h_flex().gap(8).items_center().pl(18).text_size(11)
           .child(div().flex_none().text_color(tone(stackTone(p.status))).child(p.status))
           .when(p.after > 0, (el) => el.child(div().flex_none().text_color(t.muted).child(`after #${p.after}`)))
+          .when(Boolean(p.otherTicket), (el) => el.child(this.mono(div().flex_none().px(5).rounded(4).border(1).border_color(t.border).text_size(10).text_color(t.muted)).child(p.otherTicket)))
           .when(marked(p), (el) => el.child(div().flex_none().font_semibold().text_color(markColor(p)).child(p.mark))));
     }
     return base(h_flex()).gap(8).items_center()
