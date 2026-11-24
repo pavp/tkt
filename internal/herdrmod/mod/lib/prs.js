@@ -12,7 +12,7 @@ export function prRows(view) {
       if (grouped && r.stack.first) {
         const here = r.stack.shown < r.stack.urls.length ? ` · ${r.stack.shown} here` : "";
         rows.push({ kind: "stack", group: r.stack.key, title: `Stack of ${r.stack.urls.length} · ${r.stack.name}${here}`, status: r.stack.status,
-          tone: stackTone(r.stack.status), count: r.stack.shown, collapsed: Boolean(r.stack.collapsed) });
+          tone: stackTone(r.stack.status), count: r.stack.shown, collapsed: Boolean(r.stack.collapsed), urls: r.stack.urls });
       }
       if (grouped && r.stack.collapsed) continue;
       rows.push({
@@ -56,6 +56,7 @@ const CI = { fail: "failing ✕", pending: "running …", pass: "passing ✓" };
 
 /** The preview of a selected PRs-tab row, worded as the TUI's (its preview for pull requests). */
 export function prPreview(row) {
+  if (row?.kind === "stack") return { title: row.title, line: `${row.status} · enter to ${row.collapsed ? "unfold" : "fold"} · P copies the stack's ${row.urls.length} URLs` };
   if (!row || row.kind !== "row") return null;
   const pr = row.raw?.pr ?? {};
   const ci = `CI ${CI[pr.checks] ?? "not reported"}`;

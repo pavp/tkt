@@ -82,3 +82,10 @@ test("the arrows stop on a stack's title, which enter folds as a group's", async
   const at = ids.indexOf("group:stack:example-org/web#39");
   assert.deepEqual(ids.slice(at, at + 3), ["group:stack:example-org/web#39", "#40mine:example-org/web", "#41mine:example-org/web"]);
 });
+
+test("a stack's title holds its URLs, and its preview says how to fold and copy it", async () => {
+  const { prPreview } = await import("../mod/lib/prs.js");
+  const stack = prRows(fixture("prs-stack.json")).find((r) => r.kind === "stack");
+  assert.equal(stack.urls.length, 3);
+  assert.deepEqual(prPreview(stack), { title: "Stack of 3 · feat/DEMO-2-export · 2 here", line: "CI failing · enter to fold · P copies the stack's 3 URLs" });
+});
