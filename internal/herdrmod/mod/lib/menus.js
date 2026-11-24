@@ -67,7 +67,7 @@ export function detailsMenu(d) {
   const stacks = v.stackUrls ?? [];
   if (stacks.length === 0) return menu;
   const urls = stacks.join("\n").split("\n").length;
-  return { ...menu, items: [...menu.items, copy(`Copy the ${stacks.length > 1 ? "stacks'" : "stack's"} ${urls} URLs`, stacks.join("\n\n"))] };
+  return { ...menu, items: [...menu.items, { ...copy(`Copy the ${stacks.length > 1 ? "stacks'" : "stack's"} ${urls} URLs`, stacks.join("\n\n")), what: `the ${stacks.length > 1 ? "stacks'" : "stack's"} ${urls} URLs` }] };
 }
 
 // Without the daemon's card, a ticket's first reason is read from its pull requests as the card would say it.

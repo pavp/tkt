@@ -103,13 +103,17 @@ func TestDaemonDetailStacksTheTicketsPullRequests(t *testing.T) {
 	}
 	raw, _ := json.Marshal(got)
 	var body struct {
-		Stacks [][]struct {
-			Number int `json:"number"`
-			Depth  int `json:"depth"`
+		Stacks []struct {
+			Name, Status string
+			PRs          []struct {
+				Number, Depth, After int
+				Status               string
+			} `json:"prs"`
 		} `json:"pr_stacks"`
 	}
-	if err := json.Unmarshal(raw, &body); err != nil || len(body.Stacks) != 1 || len(body.Stacks[0]) != 2 ||
-		body.Stacks[0][0].Number != 1 || body.Stacks[0][0].Depth != 0 || body.Stacks[0][1].Number != 2 || body.Stacks[0][1].Depth != 1 {
+	if err := json.Unmarshal(raw, &body); err != nil || len(body.Stacks) != 1 || body.Stacks[0].Name != "feat/DEMO-1" || body.Stacks[0].Status != "Open" ||
+		len(body.Stacks[0].PRs) != 2 || body.Stacks[0].PRs[0].Number != 1 || body.Stacks[0].PRs[1].Number != 2 || body.Stacks[0].PRs[1].Depth != 1 ||
+		body.Stacks[0].PRs[1].After != 1 || body.Stacks[0].PRs[1].Status != "Open" {
 		t.Errorf("pr_stacks = %s", raw)
 	}
 	none, _ := h.app.daemonDetail(context.Background(), "DEMO-1", &ticket.Ticket{Key: "DEMO-1"}, "")

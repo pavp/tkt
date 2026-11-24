@@ -3,7 +3,11 @@ const CHECKS = { fail: ["✕", "blocked"], pending: ["…", "working"], pass: ["
 /** The details screen of GET /v1/tickets/{key}, opened from the tab named from. */
 export function detailView(d, from) {
   const t = d.ticket ?? {};
-  const stacks = d.pr_stacks ?? (t.prs ?? []).map((p) => [{ ...p, depth: 0 }]);
+  const stacks = d.pr_stacks ?? (t.prs ?? []).map((p) => ({ name: "", status: "", prs: [{ ...p, depth: 0 }] }));
+  const prOf = (p) => {
+    const [mark, tone] = p.state === "open" ? CHECKS[p.checks] ?? ["—", "dim"] : [p.state, "dim"];
+    return { ref: `${p.repo}#${p.number}`, title: p.title, url: p.url, mark, tone, depth: p.depth ?? 0, number: p.number, status: p.status ?? "", after: p.after ?? 0, updated: p.updated_at ?? "" };
+  };
   const fields = [["Status", t.status], ["Type", t.type], ["Points", t.points ? String(t.points) : ""], ["Assignee", t.assignee || "unassigned"], ["Label", t.label], ["Board", t.board]];
   return {
     key: t.key,
@@ -17,14 +21,47 @@ export function detailView(d, from) {
     description: d.description ?? "",
     acceptance: d.acceptance_criteria ?? "",
     subtasks: (t.subtasks ?? []).map((s) => ({ key: s.key, status: s.status, summary: s.summary })),
-    prs: stacks.flat().map((p) => {
-      const [mark, tone] = p.state === "open" ? CHECKS[p.checks] ?? ["—", "dim"] : [p.state, "dim"];
-      return { ref: `${p.repo}#${p.number}`, title: p.title, url: p.url, mark, tone, depth: p.depth ?? 0 };
-    }),
-    stackUrls: stacks.filter((s) => s.length > 1).map((s) => s.map((p) => p.url).join("\n")),
+    prs: stacks.flatMap((s) => s.prs.map(prOf)),
+    stacks: stacks.map((s) => ({ name: s.name, status: s.status, tone: stackTone(s.status), prs: s.prs.map(prOf) })),
+    stackUrls: stacks.filter((s) => s.prs.length > 1).map((s) => s.prs.map((p) => p.url).join("\n")),
     comments: (d.comments ?? []).map((c) => ({ who: c.author, when: (c.created ?? "").slice(0, 10), body: c.body })),
     work: (d.work ?? []).map((w) => ({ where: `${w.repo} · ${w.branch}`, path: w.path ?? "" })),
   };
+}
+
+/** The details' pull request entries: the first three stacks, a stack of several as its title row then, unless
+ *  folded, its pull requests on two lines each; h is each entry's height. more holds the pull requests after them. */
+export function prEntries(stacks, folded, limit = 3) {
+  const entries = [];
+  for (const s of stacks.slice(0, limit)) {
+    if (s.prs.length === 1) {
+      entries.push({ kind: "pr", pr: s.prs[0], h: 32 });
+      continue;
+    }
+    const key = s.prs[0].ref;
+    entries.push({ kind: "stack", stack: s, key, folded: Boolean(folded[key]), h: 30 });
+    if (!folded[key]) for (const p of s.prs) entries.push({ kind: "row", pr: p, h: 46 });
+  }
+  return { entries, more: stacks.slice(limit).flatMap((s) => s.prs) };
+}
+
+/** The theme color a pull request status reads in: red when it needs acting on, green when it can go in. */
+export function stackTone(status) {
+  if (/^(CI failing|Changes requested|Conflicts)$|unresolved$/.test(status ?? "")) return "ansi1";
+  if (["Ready to merge", "Approved"].includes(status)) return "ansi2";
+  if (["Draft", "Merged", "Closed"].includes(status)) return "muted";
+  return "foreground";
+}
+
+/** How long ago iso was, as "2m", "14h", "4d" or "5w"; empty when iso is not a time. */
+export function age(iso, now = Date.now()) {
+  const at = Date.parse(iso ?? "");
+  if (Number.isNaN(at)) return "";
+  const m = Math.max(0, Math.floor((now - at) / 60000));
+  if (m < 60) return `${m}m`;
+  if (m < 60 * 24) return `${Math.floor(m / 60)}h`;
+  if (m < 60 * 24 * 14) return `${Math.floor(m / (60 * 24))}d`;
+  return `${Math.floor(m / (60 * 24 * 7))}w`;
 }
 
 /** "2 of 8": where key sits in the list the details were opened from; empty when it is not in it. */
