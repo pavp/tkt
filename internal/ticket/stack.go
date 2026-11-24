@@ -4,6 +4,8 @@ package ticket
 type StackedPR struct {
 	PullRequest
 	Depth int `json:"depth"`
+	// After is the number of the pull request it sits on, 0 at the bottom.
+	After int `json:"after,omitempty"`
 }
 
 // Stacks groups prs into stacks, a pull request following the one of its repository whose branch is its base,
@@ -31,7 +33,11 @@ func Stacks(prs []PullRequest) [][]StackedPR {
 	var walk func(i, depth int, into *[]StackedPR)
 	walk = func(i, depth int, into *[]StackedPR) {
 		seen[i] = true
-		*into = append(*into, StackedPR{PullRequest: prs[i], Depth: depth})
+		after := 0
+		if depth > 0 {
+			after = prs[parent[i]].Number
+		}
+		*into = append(*into, StackedPR{PullRequest: prs[i], Depth: depth, After: after})
 		for _, c := range children[i] {
 			if !seen[c] {
 				walk(c, depth+1, into)

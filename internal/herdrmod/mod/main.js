@@ -17,7 +17,7 @@ import { backlogRows, badges, backlogAgents } from "./lib/backlog.js";
 import { ticketMenu, prMenu, detailsMenu, withBack, backOf, confirmRemove, menuFooter, isConfirm, splitTail, itemGroup, footerKeys, prsSubmenu } from "./lib/menus.js";
 import { firstPicker, answer, taskPicker, pickerKey, startingView, startingKey, startingJob, startingNotice, startingToast, resumable } from "./lib/start.js";
 import { moveMenu, formMenu, assignMenu, confirmAssign, missingField } from "./lib/move.js";
-import { detailView, neighbors, detailsKey, positionOf, prSummary, isBot } from "./lib/details.js";
+import { detailView, neighbors, detailsKey, positionOf, prSummary, isBot, prEntries, stackTone, age } from "./lib/details.js";
 import { SECTIONS, reposPatch, boardsPatch, statusPatch, rootsPatch, palettePatch, languagePatch, statusBoard, markChoices, dragStarted, laneAt, statusMove, grabKey } from "./lib/settings.js";
 import { MOD_VERSION } from "./lib/version.js";
 import { modKeyFor, withModKey } from "./lib/modkey.js";
@@ -674,6 +674,11 @@ export default class Tkt extends View {
 
   /** Runs a menu item; the screens Start, Move, Assign, details and feedback open come with their own tasks. */
   act(item, cx) {
+    if (item.action === "toggleStack") {
+      this.details.folded = { ...this.details.folded, [item.key]: !this.details.folded?.[item.key] };
+      cx.notify();
+      return;
+    }
     const from = this.menu;
     this.menu = null;
     cx.spawn(async (cx) => {
@@ -1127,10 +1132,11 @@ export default class Tkt extends View {
     const primary = items.find((it) => it.action === "start");
     const group = (it) => it.action === "copy" || it.action === "copyContext" ? 3 : it.action === "open" || it.action === "submenu" ? 1 : 2;
     const rest = items.filter((it) => it !== primary).sort((a, b) => group(a) - group(b));
-    const prItems = v.prs.slice(0, 3).map((p) => ({ action: "open", url: p.url, label: p.ref }));
-    const moreItem = v.prs.length > 3 ? { action: "submenu", label: "more", menu: prsSubmenu(d.key, v.prs.map((p) => ({ number: Number(p.ref.split("#").pop()), label: `#${p.ref.split("#").pop()} ${p.title ?? ""}`.trim(), url: p.url }))) } : null;
+    const layout = prEntries(v.stacks, d.folded ?? {});
+    const prItems = layout.entries.map((e) => e.kind === "stack" ? { action: "toggleStack", key: e.key, label: `Stack of ${e.stack.prs.length}` } : { action: "open", url: e.pr.url, label: e.pr.ref });
+    const moreItem = layout.more.length > 0 ? { action: "submenu", label: "more", menu: prsSubmenu(d.key, layout.more.map((p) => ({ number: p.number, label: `#${p.number} ${p.title ?? ""}`.trim(), url: p.url }))) } : null;
     d.actions = [...(primary ? [primary] : []), ...rest, ...prItems, ...(moreItem ? [moreItem] : [])];
-    d.focusY = this.detailsFocusY(d, prItems.length, Boolean(moreItem), Boolean(primary), rest.map(group));
+    d.focusY = this.detailsFocusY(d, layout.entries.map((e) => e.h), Boolean(moreItem), Boolean(primary), rest.map(group));
     const lit = (it) => Boolean(d.actFocus) && d.actions[d.actSel ?? 0] === it;
     const h3 = (text) => div().pb(6).text_size(12).font_semibold().text_color(t.muted).child(text);
     const labelName = this.answers.sprint?.body?.label_field || "Label";
@@ -1146,20 +1152,13 @@ export default class Tkt extends View {
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(it, cx)).child(it.label)]));
     const pullRequests = v_flex().id("dsec-prs").gap(6).on_size_change((size) => { d.hPrs = size.height; }).child(h3(v.prs.length > 0 ? `Pull requests · ${v.prs.length}` : "Pull requests"))
       .child(v.prs.length === 0 ? div().text_size(12).text_color(t.muted).child("none linked") : v_flex().id("dpr-box").on_size_change((size) => { d.hPrBox = size.height; }).rounded(8).border(1).border_color(t.border).bg(t.raised).overflow_hidden()
-        .children(v.prs.slice(0, 3).map((p, i) => h_flex().id(`dpr-${i}`).h(32).px(10).gap(8).items_center().min_w_0().hover((h) => h.bg(t.hover))
-          .when(lit(prItems[i]), (el) => el.bg(mix(t.accent, t.raised, 0.14)))
-          .when(i > 0, (el) => el.border_t(1).border_color(t.border))
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act({ action: "open", url: p.url, label: p.ref }, cx))
-          .child(div().w(12).flex_none().font_semibold().text_size(11).text_color(p.mark === "✓" ? t.ansi2 : p.mark === "✕" ? ensure(t.ansi1, t.raised, 4.5) : t.muted).child(["✓", "✕", "…", "—"].includes(p.mark) ? p.mark : "·"))
-          .child(this.mono(div().flex_none().text_size(11).text_color(t.muted)).child(`#${p.ref.split("#").pop()}`))
-          .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(["✓", "✕", "…", "—"].includes(p.mark) ? t.foreground : t.muted).child(p.title ?? ""))
-          .when(!["✓", "✕", "…", "—"].includes(p.mark), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(p.mark)))))
-        .when(v.prs.length > 3, (el) => el.child(h_flex().id("dpr-more").h(30).px(10).items_center().border_t(1).border_color(t.border).text_size(12)
+        .children(layout.entries.map((e, i) => this.detailsPrEntry(t, e, i, prItems[i], lit(prItems[i]))))
+        .when(Boolean(moreItem), (el) => el.child(h_flex().id("dpr-more").h(30).px(10).items_center().border_t(1).border_color(t.border).text_size(12)
           .text_color(ensure(mix(t.accent, t.foreground, 0.3), t.raised, 4.5)).hover((h) => h.bg(t.hover))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .when(lit(moreItem), (el) => el.bg(mix(t.accent, t.raised, 0.14)))
           .on_click((_e, cx) => this.act(moreItem, cx))
-          .child(`+${v.prs.length - 3} more ▸`))));
+          .child(`+${layout.more.length} more ▸`))));
     const agentRow = h_flex().id("d-agent").h(32).px(10).gap(8).items_center().rounded(8).border(1).border_color(t.border).bg(t.raised)
       .child(v.agent ? this.agentDot(t, v.agent) : div().w(8).h(8).rounded(4).border(1).border_color(t.dim))
       .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(v.agent ? t.foreground : t.muted).child(v.agent ? agentLabel(v.agent) : "no agent"))
@@ -1175,6 +1174,42 @@ export default class Tkt extends View {
     return v_flex().id("details").flex_1().min_h_0().child(nav).child(h_flex().flex_1().min_h_0().items_start().child(left).child(right));
   }
 
+  /** One entry of the details' pull requests: a pull request alone, a stack's title, or a stack's pull request. */
+  detailsPrEntry(t, e, i, item, lit) {
+    const marked = (p) => ["✓", "✕", "…", "—"].includes(p.mark);
+    const markColor = (p) => p.mark === "✓" ? t.ansi2 : p.mark === "✕" ? ensure(t.ansi1, t.raised, 4.5) : t.muted;
+    const tone = (name) => name === "ansi1" ? ensure(t.ansi1, t.raised, 4.5) : t[name] ?? t.foreground;
+    const base = (el) => el.id(`dpr-${i}`).h(e.h).px(10).min_w_0().hover((h) => h.bg(t.hover))
+      .when(lit, (el) => el.bg(mix(t.accent, t.raised, 0.14)))
+      .when(i > 0, (el) => el.border_t(1).border_color(t.border))
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(item, cx));
+    if (e.kind === "stack") {
+      return base(h_flex()).gap(6).items_center().bg(mix(t.raised, t.well, 0.5))
+        .child(div().flex_none().text_color(t.muted).child(this.icon("stack", 13)))
+        .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(t.muted).child(`Stack of ${e.stack.prs.length} · ${e.stack.name}`))
+        .child(div().flex_none().text_size(11).font_semibold().text_color(tone(e.stack.tone)).child(e.stack.status))
+        .child(div().w(10).flex_none().text_size(11).text_color(t.muted).child(e.folded ? "▸" : "▾"));
+    }
+    const p = e.pr;
+    if (e.kind === "row") {
+      return base(v_flex()).justify_center().gap(3).pl(14)
+        .child(h_flex().gap(6).items_center().min_w_0()
+          .child(div().flex_none().text_color(tone(stackTone(p.status))).child(this.icon("pull-request", 12)))
+          .child(this.mono(div().flex_none().text_size(11).text_color(t.muted)).child(`#${p.number}`))
+          .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(t.foreground).child(p.title ?? ""))
+          .child(div().flex_none().text_size(11).text_color(t.muted).child(age(p.updated))))
+        .child(h_flex().gap(8).items_center().pl(18).text_size(11)
+          .child(div().flex_none().text_color(tone(stackTone(p.status))).child(p.status))
+          .when(p.after > 0, (el) => el.child(div().flex_none().text_color(t.muted).child(`after #${p.after}`)))
+          .when(marked(p), (el) => el.child(div().flex_none().font_semibold().text_color(markColor(p)).child(p.mark))));
+    }
+    return base(h_flex()).gap(8).items_center()
+      .child(div().w(12).flex_none().font_semibold().text_size(11).text_color(markColor(p)).child(marked(p) ? p.mark : "·"))
+      .child(this.mono(div().flex_none().text_size(11).text_color(t.muted)).child(`#${p.ref.split("#").pop()}`))
+      .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(marked(p) ? t.foreground : t.muted).child(p.title ?? ""))
+      .when(!marked(p), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(p.mark)));
+  }
+
   /** Scrolls the details' right column to the item the keyboard is on; the last one shows the column's end. */
   showFocused() {
     const d = this.details;
@@ -1187,7 +1222,7 @@ export default class Tkt extends View {
 
   /** Where each item the keyboard reaches in the details' right column sits, as [top, height]: the actions from their
    *  fixed row heights, then the pull requests below the measured Actions section. */
-  detailsFocusY(d, prs, more, primary, groups) {
+  detailsFocusY(d, prHeights, more, primary, groups) {
     const out = [];
     let y = 22 + 22 + 4;
     if (primary) { out.push([y, 32]); y += 36; }
@@ -1197,8 +1232,9 @@ export default class Tkt extends View {
       y += 32;
     });
     const rowsTop = 22 + (d.hActs ?? 0) + 22 + Math.max(0, (d.hPrs ?? 0) - (d.hPrBox ?? 0));
-    for (let i = 0; i < prs; i++) out.push([rowsTop + i * 33, 32]);
-    if (more) out.push([rowsTop + prs * 33, 30]);
+    let top = rowsTop;
+    for (const h of prHeights) { out.push([top, h]); top += h + 1; }
+    if (more) out.push([top, 30]);
     return out;
   }
 

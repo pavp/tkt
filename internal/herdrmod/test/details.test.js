@@ -21,17 +21,39 @@ test("the details say what the TUI's details say", () => {
   assert.deepEqual(v.fields, [["Status", "In Progress"], ["Type", "Story"], ["Points", "3"], ["Assignee", "Ada Lovelace"], ["Label", "Web"], ["Board", "Core"]]);
   assert.equal(v.attention, "CI failing");
   assert.deepEqual(v.subtasks, [{ key: "DEMO-4", status: "To Do", summary: "Write the query" }]);
-  assert.deepEqual(v.prs, [{ ref: "example-org/api#12", title: "Filter accounts", url: "u12", mark: "✕", tone: "blocked", depth: 0 }]);
+  assert.deepEqual(v.prs, [{ ref: "example-org/api#12", title: "Filter accounts", url: "u12", mark: "✕", tone: "blocked", depth: 0, number: 12, status: "", after: 0, updated: "" }]);
   assert.deepEqual(v.stackUrls, []);
   assert.deepEqual(v.work, [{ where: "example-org/api · feature/DEMO-1-filter", path: "/src/api-DEMO-1" }]);
   assert.equal(v.comments[0].who, "Alan Turing");
 });
 
 test("the pull requests follow the daemon's stacks, each stack's URLs from its bottom to its top", () => {
-  const pr = (number, url) => ({ repo: "example-org/web", number, title: `PR ${number}`, url, state: "open", checks: "pass" });
-  const v = detailView({ ...detail, pr_stacks: [[{ ...pr(1, "u1"), depth: 0 }, { ...pr(2, "u2"), depth: 1 }, { ...pr(3, "u3"), depth: 2 }], [{ ...pr(9, "u9"), depth: 0 }]] }, "Sprint");
+  const pr = (number, url, extra = {}) => ({ repo: "example-org/web", number, title: `PR ${number}`, url, state: "open", checks: "pass", ...extra });
+  const v = detailView({ ...detail, pr_stacks: [
+    { name: "refactor/module", status: "CI failing", prs: [
+      { ...pr(1, "u1"), depth: 0, status: "Ready to merge", updated_at: "2026-11-23T10:00:00Z" },
+      { ...pr(2, "u2"), depth: 1, after: 1, status: "Ready to merge" },
+      { ...pr(3, "u3", { checks: "fail" }), depth: 2, after: 2, status: "CI failing" }] },
+    { name: "fix/x", status: "Approved", prs: [{ ...pr(9, "u9"), depth: 0, status: "Approved" }] }] }, "Sprint");
   assert.deepEqual(v.prs.map((p) => [p.ref, p.depth]), [["example-org/web#1", 0], ["example-org/web#2", 1], ["example-org/web#3", 2], ["example-org/web#9", 0]]);
   assert.deepEqual(v.stackUrls, ["u1\nu2\nu3"], "a pull request alone is no stack");
+  assert.deepEqual(v.stacks.map((s) => [s.name, s.status, s.tone, s.prs.length]), [["refactor/module", "CI failing", "ansi1", 3], ["fix/x", "Approved", "ansi2", 1]]);
+  assert.deepEqual(v.stacks[0].prs.map((p) => [p.number, p.status, p.after, p.updated]), [[1, "Ready to merge", 0, "2026-11-23T10:00:00Z"], [2, "Ready to merge", 1, ""], [3, "CI failing", 2, ""]]);
+});
+
+test("without the daemon's stacks, each pull request is a stack of its own", () => {
+  const v = detailView(detail, "Sprint");
+  assert.deepEqual(v.stacks.map((s) => s.prs.map((p) => p.number)), [[12]]);
+});
+
+test("a pull request's age reads in minutes, hours, days, then weeks", async () => {
+  const { age } = await import("../mod/lib/details.js");
+  const now = Date.parse("2026-11-24T12:00:00Z");
+  assert.equal(age("2026-11-24T11:58:00Z", now), "2m");
+  assert.equal(age("2026-11-23T22:00:00Z", now), "14h");
+  assert.equal(age("2026-11-20T12:00:00Z", now), "4d");
+  assert.equal(age("2026-10-20T12:00:00Z", now), "5w");
+  assert.equal(age("", now), "");
 });
 
 test("the arrows go to the previous and next ticket of the list it was opened from", () => {
@@ -69,4 +91,16 @@ test("comments from bots and automations are told apart by their author", async 
   const { isBot } = await import("../mod/lib/details.js");
   for (const who of ["Automation for Jira", "ScriptRunner for Jira", "dependabot[bot]", "Release Bot"]) assert.equal(isBot(who), true, who);
   for (const who of ["Ada Lovelace", "Robert Botha", ""]) assert.equal(isBot(who), false, who);
+});
+
+test("the details' pull requests show three entries, a stack as its title then its rows unless folded", async () => {
+  const { prEntries } = await import("../mod/lib/details.js");
+  const pr = (n) => ({ ref: `o/web#${n}`, url: `u${n}`, number: n });
+  const stacks = [{ name: "feat/a", prs: [pr(1), pr(2)] }, { prs: [pr(5)] }, { prs: [pr(6)] }, { prs: [pr(7)] }];
+  const open = prEntries(stacks, {});
+  assert.deepEqual(open.entries.map((e) => [e.kind, e.pr?.number ?? e.key, e.h]),
+    [["stack", "o/web#1", 30], ["row", 1, 46], ["row", 2, 46], ["pr", 5, 32], ["pr", 6, 32]]);
+  assert.deepEqual(open.more.map((p) => p.number), [7]);
+  const folded = prEntries(stacks, { "o/web#1": true });
+  assert.deepEqual(folded.entries.map((e) => [e.kind, e.folded ?? null]), [["stack", true], ["pr", null], ["pr", null]]);
 });

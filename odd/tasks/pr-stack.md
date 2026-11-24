@@ -17,7 +17,7 @@ Forecast (slice-plan, 2026-11-24): total 410–715 authored changed lines; slice
 |---|---|---|---|---|---|
 | T1 | S1 (base and age from GitHub, stack order in `ticket`) | 1 | inline, no Writer reason | done (RED: did not compile → GREEN, twice) | 9e6ad4c, slice 1 rework |
 | T2 | S2 (details: stacks in merge order, Copy the stack's N URLs) | 1 | inline, no Writer reason | done (RED: 1 Go + 3 node tests → GREEN); slice 1 = 319 changed lines | 9e6ad4c, slice 1 rework |
-| T3 | S1 (stack group in the mod's details: board stacks, daemon shape, card) | 2 | inline, no Writer reason | pending | |
+| T3 | S1 (stack group in the mod's details: board stacks, daemon shape, card) | 2 | inline, no Writer reason | done (RED: Go build + 5 node tests → GREEN); slice 2 = 378 changed lines | slice 2 commit |
 | T4 | S1, S2, S3, S5 (PRs view in the mod) | 3 | inline, no Writer reason | pending | |
 | T5 | S1, S2, S4 (TUI details and PRs tab) | 4 | inline, no Writer reason | pending | |
 
@@ -46,3 +46,4 @@ Native grouping: once the last slice's PR is open, group with `gh stack link <pr
 - L7 (2026-11-24, user, with a screenshot): "algo asi me imaginaba" — "Stack of 3 · refactor/no-ticket-module-i… · Ready ▾", rows "#922 refactor: … 14h" / "Ready to merge  after #921  ✓", top first. Then: "si al mismo nivel pero unidas por una linea que diga el stack como en la foto que te he pasado". S1, S2 rewritten; T2 reopened (the ↳ rows leave slice 1); re-forecast below.
 - L8 (2026-11-24, user): "el orden me gusta mas el que propones" → rows in merge order, bottom of the stack first (#920, #921, #922), as the copy.
 - L9 (2026-11-24, user): "si, adelante" → 4 slices confirmed, Stacked. Slice 1 rework: `updatedAt`, staircase rows removed; `go test ./...` 1550, node 188, vet and gofmt clean.
+- L10 (2026-11-24) Slice 2: `go test ./...` 1554, node 191, vet and gofmt clean. Not yet observed in the running mod (render against the canvas and the screenshot) nor walked blind.
