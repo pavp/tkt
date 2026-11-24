@@ -593,9 +593,10 @@ export default class Tkt extends View {
       const tone = r.tone === "ansi1" ? ensure(t.ansi1, t.surface, 4.5) : t[r.tone] ?? t.foreground;
       return this.blockBox(t, r.block, sel)
         .child(div().flex_none().text_color(t.muted).child(this.icon("stack", 13)))
-        .child(div().flex_1().min_w_0().truncate().text_size(11).text_color(t.muted).child(r.title))
-        .when(sel, (el) => el.child(h_flex().flex_none().gap(5).items_center().text_size(11).text_color(t.muted).child(this.keyCap(t, "P")).child(`copy ${r.urls.length} URLs`)))
+        .child(div().min_w_0().truncate().text_size(11).text_color(t.muted).child(r.title))
         .child(div().flex_none().text_size(11).font_semibold().text_color(tone).child(r.status))
+        .child(div().flex_1())
+        .when(sel, (el) => el.child(h_flex().flex_none().gap(5).items_center().text_size(11).text_color(t.muted).child(this.keyCap(t, "P")).child(`copy ${r.urls.length} URLs`)))
         .child(div().w(12).flex_none().text_size(10).text_color(t.muted).child(r.collapsed ? "▸" : "▾"));
     }
     if (r.kind === "title") {
