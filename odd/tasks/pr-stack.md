@@ -9,6 +9,7 @@ Forecast (slice-plan, 2026-11-24): total 410–715 authored changed lines; slice
 - S2. "ademas agregarle una opcion para copiar directamente todas las url del stack" → "Copy the stack's N URLs" copies the stack's URLs one per line in merge order (bottom first), stacks apart by a blank line.
 - S3. "vamos con ambas" → both places: the ticket's details (S1, S2) and the PRs view (S1, S2).
 - S4. Assumption (stated to the user, plan confirmed): the TUI gets the same as the mod (slice 3), since the mod and the TUI keep parity.
+- S6. "si, la opción 2" → the details build each stack from every pull request the daemon's last sync knows (the user's tickets', review requests, everyone else's), keeping the stacks that hold one of the ticket's pull requests; a pull request of another ticket names that ticket's key. No extra API call. A pull request the sync never listed stays out.
 - S5. Assumption (stated to the user, plan confirmed): in the PRs view a stack is built inside each section; a pull request whose parent is not shown says "on `<base branch>`" instead of silently cutting the chain. Design approved in chat before slice 2, in full window and tray panel.
 
 ## Tasks
@@ -18,8 +19,9 @@ Forecast (slice-plan, 2026-11-24): total 410–715 authored changed lines; slice
 | T1 | S1 (base and age from GitHub, stack order in `ticket`) | 1 | inline, no Writer reason | done (RED: did not compile → GREEN, twice) | 9e6ad4c, 8d057be |
 | T2 | S2 (details: stacks in merge order, Copy the stack's N URLs) | 1 | inline, no Writer reason | done (RED: 1 Go + 3 node tests → GREEN); slice 1 = 319 changed lines | 9e6ad4c, 8d057be |
 | T3 | S1 (stack group in the mod's details: board stacks, daemon shape, card) | 2 | inline, no Writer reason | done (RED: Go build + 5 node tests → GREEN); slice 2 = 378 changed lines | 29d6fcf |
-| T4 | S1, S2, S3, S5 (PRs view in the mod) | 3 | inline, no Writer reason | pending | |
-| T5 | S1, S2, S4 (TUI details and PRs tab) | 4 | inline, no Writer reason | pending | |
+| T6 | S6 (whole stacks across tickets in the details) | 3 | inline, no Writer reason | done (RED: Go build + daemon/cli/board assertions, 1 node test → GREEN) | slice 3 commit |
+| T4 | S1, S2, S3, S5 (PRs view in the mod) | 4 | inline, no Writer reason | pending | |
+| T5 | S1, S2, S4 (TUI details and PRs tab) | 5 | inline, no Writer reason | pending | |
 
 Re-forecast (slice-plan, 2026-11-24, after L7): total ~800–1160.
 
@@ -27,13 +29,14 @@ Re-forecast (slice-plan, 2026-11-24, after L7): total ~800–1160.
 |---|---|---|---|---|
 | 1 | `feat/pr-stack-1-detail` | `main` | measured 319 | — |
 | 2 | `feat/pr-stack-2-detail-card` | `feat/pr-stack-1-detail` | 205–340 | 1 |
-| 3 | `feat/pr-stack-3-pr-view` | `feat/pr-stack-2-detail-card` | 220–340 | 2 |
-| 4 | `feat/pr-stack-4-tui` | `feat/pr-stack-3-pr-view` | 120–220 | 3 |
+| 3 | `feat/pr-stack-3-whole-stack` | `feat/pr-stack-2-detail-card` | 60–100 | 2 |
+| 4 | `feat/pr-stack-4-pr-view` | `feat/pr-stack-3-whole-stack` | 220–340 | 3 |
+| 5 | `feat/pr-stack-5-tui` | `feat/pr-stack-4-pr-view` | 120–220 | 4 |
 
-Native grouping: once the last slice's PR is open, group with `gh stack link <pr-slice-1> <pr-slice-2> <pr-slice-3> <pr-slice-4>`; merging any PR then takes every unmerged PR below it. Every branch must live in ONE repository, and the implementer reads back each PR's base and diff and reports that, never the attempt — a PR whose diff grew is mis-grouped, and `gh stack unstack <stack>` must dissolve the stack before any base can be corrected.
+Native grouping: once the last slice's PR is open, group with `gh stack link <pr-slice-1> <pr-slice-2> <pr-slice-3> <pr-slice-4> <pr-slice-5>`; merging any PR then takes every unmerged PR below it. Every branch must live in ONE repository, and the implementer reads back each PR's base and diff and reports that, never the attempt — a PR whose diff grew is mis-grouped, and `gh stack unstack <stack>` must dissolve the stack before any base can be corrected.
 
 > Before each commit, run `git diff --numstat <base>` and sum additions + deletions, skipping binary rows (`-\t-`) and generated paths (lockfiles, `__snapshots__/`, files marked `linguist-generated` in `.gitattributes`); if the current work unit — slice or single unit — is over 400 real changed lines, stop: hand the accumulated diff to `slice-diff` (budget 400), then re-forecast every slice not yet started with `slice-plan` (budget 400) — a slice that overran invalidates the estimates that assumed its size, not just its own. Slices already merged stay as they are.
-> Slice 1 base: `main`. Slice 2 base: `feat/pr-stack-1-detail`. Slice 3 base: `feat/pr-stack-2-detail-card`. Slice 4 base: `feat/pr-stack-3-pr-view`.
+> Slice 1 base: `main`. Slice 2 base: `feat/pr-stack-1-detail`. Slice 3 base: `feat/pr-stack-2-detail-card`. Slice 4 base: `feat/pr-stack-3-whole-stack`. Slice 5 base: `feat/pr-stack-4-pr-view`.
 
 ## Log
 
@@ -47,3 +50,5 @@ Native grouping: once the last slice's PR is open, group with `gh stack link <pr
 - L8 (2026-11-24, user): "el orden me gusta mas el que propones" → rows in merge order, bottom of the stack first (#920, #921, #922), as the copy.
 - L9 (2026-11-24, user): "si, adelante" → 4 slices confirmed, Stacked. Slice 1 rework: `updatedAt`, staircase rows removed; `go test ./...` 1550, node 188, vet and gofmt clean.
 - L10 (2026-11-24) Slice 2: `go test ./...` 1554, node 191, vet and gofmt clean. Not yet observed in the running mod (render against the canvas and the screenshot) nor walked blind.
+- L11 (2026-11-24, side note relayed by the user): a ticket's details stack only that ticket's pull requests, so a stack split across tickets shows in part and "Copy the stack's N URLs" copies that part silently. Options given: warn only, or build the whole stack from every pull request the sync knows. User: "si, la opción 2" → new slice 3 `feat/pr-stack-3-whole-stack` (60–100 lines); the PRs view becomes slice 4 and the TUI slice 5.
+- L12 (2026-11-24, user): "cuando termines abres el mod para yo ver el resultado" → install the branch build and open the mod once slice 3 is committed.

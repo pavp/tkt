@@ -31,8 +31,9 @@ const Protocol = 1
 type SyncFunc func(ctx context.Context, partial func(board.Snapshot)) (board.Snapshot, error)
 
 // DetailFunc loads one ticket with its description and comments; known is the board's copy of the ticket,
-// when the board holds it, and agent the state of its agent in Herdr, empty when none runs.
-type DetailFunc func(ctx context.Context, key ticket.Key, known *ticket.Ticket, agent string) (any, error)
+// when the board holds it, agent the state of its agent in Herdr, empty when none runs, and prs every pull request
+// the board knows, so stacks reaching other tickets show whole.
+type DetailFunc func(ctx context.Context, key ticket.Key, known *ticket.Ticket, agent string, prs []board.KnownPR) (any, error)
 
 // ContextFunc builds the Markdown the TUI's "copy context" puts on the clipboard.
 type ContextFunc func(ctx context.Context, key ticket.Key) (string, error)
@@ -443,10 +444,14 @@ func (s *Server) ticket(w http.ResponseWriter, r *http.Request) {
 	snap, have := s.snap, s.have
 	s.mu.Unlock()
 	var known *ticket.Ticket
-	if t, ok := snap.Find(key); have && ok {
-		known = &t
+	var prs []board.KnownPR
+	if have {
+		prs = snap.KnownPRs()
+		if t, ok := snap.Find(key); ok {
+			known = &t
+		}
 	}
-	d, err := s.opts.Detail(r.Context(), key, known, snap.Agents[string(key)])
+	d, err := s.opts.Detail(r.Context(), key, known, snap.Agents[string(key)], prs)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "detail_failed", err.Error())
 		return

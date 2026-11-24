@@ -162,7 +162,7 @@ type ticketView struct {
 
 // daemonDetail serves GET /v1/tickets/{key} with the configuration read afresh, like each sync. Work that cannot
 // be listed is left out rather than failing the detail.
-func (a *App) daemonDetail(ctx context.Context, key ticket.Key, known *ticket.Ticket, agent string) (any, error) {
+func (a *App) daemonDetail(ctx context.Context, key ticket.Key, known *ticket.Ticket, agent string, prs []board.KnownPR) (any, error) {
 	c, err := a.LoadConfig()
 	if err != nil {
 		return nil, err
@@ -171,7 +171,7 @@ func (a *App) daemonDetail(ctx context.Context, key ticket.Key, known *ticket.Ti
 	if err != nil {
 		return nil, err
 	}
-	v := ticketView{detail: d, Attention: d.Ticket.Attention(), Agent: agent, PRStacks: board.PRStacks(d.Ticket.PRs)}
+	v := ticketView{detail: d, Attention: d.Ticket.Attention(), Agent: agent, PRStacks: board.PRStacksWith(key, d.Ticket.PRs, prs)}
 	if all, err := a.allWork(ctx, c); err == nil {
 		v.Work = workspace.For(all, key)
 	}

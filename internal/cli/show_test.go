@@ -212,7 +212,7 @@ func TestShowTakesTheDetailFromARunningDaemon(t *testing.T) {
 		board: &board.Snapshot{FetchedAt: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC), Tickets: []ticket.Ticket{
 			{Key: "DEMO-1", Summary: "Filter accounts by date", PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 900, State: ticket.PROpen}}},
 		}},
-		detail: func(_ context.Context, key ticket.Key, known *ticket.Ticket, _ string) (any, error) {
+		detail: func(_ context.Context, key ticket.Key, known *ticket.Ticket, _ string, _ []board.KnownPR) (any, error) {
 			return detail{Ticket: *known, Description: "Loaded by the daemon"}, nil
 		},
 	}
@@ -240,7 +240,7 @@ func TestShowTakesTheDetailFromARunningDaemon(t *testing.T) {
 func TestDaemonDetailUsesTheBoardsPullRequests(t *testing.T) {
 	h := showHarness(t)
 	known := &ticket.Ticket{Key: "DEMO-1", PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 900, State: ticket.PROpen}}}
-	got, err := h.app.daemonDetail(context.Background(), "DEMO-1", known, "")
+	got, err := h.app.daemonDetail(context.Background(), "DEMO-1", known, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

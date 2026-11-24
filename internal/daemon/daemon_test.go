@@ -111,10 +111,12 @@ func TestTicketsServesTheSeedThenEachSync(t *testing.T) {
 }
 
 func TestTicketDetail(t *testing.T) {
-	seed := &board.Snapshot{FetchedAt: fetched, Tickets: []ticket.Ticket{{Key: "DEMO-1", Summary: "Filter accounts"}}}
+	seed := &board.Snapshot{FetchedAt: fetched, Tickets: []ticket.Ticket{{Key: "DEMO-1", Summary: "Filter accounts"}},
+		Reviews: []ticket.PullRequest{{Repo: "example-org/web", Number: 5, Branch: "feat/DEMO-5-x"}}}
 	var gotKnown *ticket.Ticket
-	detail := func(_ context.Context, key ticket.Key, known *ticket.Ticket, _ string) (any, error) {
-		gotKnown = known
+	var gotPRs []board.KnownPR
+	detail := func(_ context.Context, key ticket.Key, known *ticket.Ticket, _ string, prs []board.KnownPR) (any, error) {
+		gotKnown, gotPRs = known, prs
 		if key == "DEMO-9" {
 			return nil, errors.New("jira: DEMO-9 not found")
 		}
@@ -144,6 +146,9 @@ func TestTicketDetail(t *testing.T) {
 		}
 		if (gotKnown != nil) != tt.known || (tt.known && gotKnown.Summary != "Filter accounts") {
 			t.Errorf("%s: known = %+v", tt.name, gotKnown)
+		}
+		if tt.code == http.StatusOK && (len(gotPRs) != 1 || gotPRs[0].Number != 5 || gotPRs[0].Key != "DEMO-5") {
+			t.Errorf("%s: the detail gets every pull request the board knows: %+v", tt.name, gotPRs)
 		}
 	}
 }

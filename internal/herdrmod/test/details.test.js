@@ -21,7 +21,7 @@ test("the details say what the TUI's details say", () => {
   assert.deepEqual(v.fields, [["Status", "In Progress"], ["Type", "Story"], ["Points", "3"], ["Assignee", "Ada Lovelace"], ["Label", "Web"], ["Board", "Core"]]);
   assert.equal(v.attention, "CI failing");
   assert.deepEqual(v.subtasks, [{ key: "DEMO-4", status: "To Do", summary: "Write the query" }]);
-  assert.deepEqual(v.prs, [{ ref: "example-org/api#12", title: "Filter accounts", url: "u12", mark: "✕", tone: "blocked", depth: 0, number: 12, status: "", after: 0, updated: "" }]);
+  assert.deepEqual(v.prs, [{ ref: "example-org/api#12", title: "Filter accounts", url: "u12", mark: "✕", tone: "blocked", depth: 0, number: 12, status: "", after: 0, updated: "", otherTicket: "" }]);
   assert.deepEqual(v.stackUrls, []);
   assert.deepEqual(v.work, [{ where: "example-org/api · feature/DEMO-1-filter", path: "/src/api-DEMO-1" }]);
   assert.equal(v.comments[0].who, "Alan Turing");
@@ -39,6 +39,8 @@ test("the pull requests follow the daemon's stacks, each stack's URLs from its b
   assert.deepEqual(v.stackUrls, ["u1\nu2\nu3"], "a pull request alone is no stack");
   assert.deepEqual(v.stacks.map((s) => [s.name, s.status, s.tone, s.prs.length]), [["refactor/module", "CI failing", "ansi1", 3], ["fix/x", "Approved", "ansi2", 1]]);
   assert.deepEqual(v.stacks[0].prs.map((p) => [p.number, p.status, p.after, p.updated]), [[1, "Ready to merge", 0, "2026-11-23T10:00:00Z"], [2, "Ready to merge", 1, ""], [3, "CI failing", 2, ""]]);
+  const mixed = detailView({ ...detail, pr_stacks: [{ name: "feat/x", status: "Open", prs: [{ ...pr(1, "u1"), ticket: "DEMO-7" }, { ...pr(12, "u12"), ticket: "DEMO-1", after: 1 }] }] }, "Sprint");
+  assert.deepEqual(mixed.stacks[0].prs.map((p) => p.otherTicket), ["DEMO-7", ""], "a pull request of another ticket names it");
 });
 
 test("without the daemon's stacks, each pull request is a stack of its own", () => {

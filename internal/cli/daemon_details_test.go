@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/daemon"
 	"github.com/pavp/tkt/internal/ticket"
 	"github.com/pavp/tkt/internal/tui"
@@ -97,7 +98,7 @@ func TestDaemonDetailStacksTheTicketsPullRequests(t *testing.T) {
 		{Repo: "example-org/web", Number: 2, Branch: "feat/DEMO-1-b", Base: "feat/DEMO-1-a", State: ticket.PROpen},
 		{Repo: "example-org/web", Number: 1, Branch: "feat/DEMO-1-a", Base: "main", State: ticket.PROpen},
 	}}
-	got, err := h.app.daemonDetail(context.Background(), "DEMO-1", known, "")
+	got, err := h.app.daemonDetail(context.Background(), "DEMO-1", known, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +117,21 @@ func TestDaemonDetailStacksTheTicketsPullRequests(t *testing.T) {
 		body.Stacks[0].PRs[1].After != 1 || body.Stacks[0].PRs[1].Status != "Open" {
 		t.Errorf("pr_stacks = %s", raw)
 	}
-	none, _ := h.app.daemonDetail(context.Background(), "DEMO-1", &ticket.Ticket{Key: "DEMO-1"}, "")
+	pool := []board.KnownPR{{PullRequest: ticket.PullRequest{Repo: "example-org/web", Number: 3, Branch: "feat/DEMO-7-c", Base: "feat/DEMO-1-b", State: ticket.PROpen}, Key: "DEMO-7"}}
+	whole, _ := h.app.daemonDetail(context.Background(), "DEMO-1", known, "", pool)
+	raw, _ = json.Marshal(whole)
+	var all struct {
+		Stacks []struct {
+			PRs []struct {
+				Number int
+				Ticket string
+			} `json:"prs"`
+		} `json:"pr_stacks"`
+	}
+	if err := json.Unmarshal(raw, &all); err != nil || len(all.Stacks) != 1 || len(all.Stacks[0].PRs) != 3 || all.Stacks[0].PRs[2].Number != 3 || all.Stacks[0].PRs[2].Ticket != "DEMO-7" || all.Stacks[0].PRs[0].Ticket != "DEMO-1" {
+		t.Errorf("a stack reaching another ticket = %s", raw)
+	}
+	none, _ := h.app.daemonDetail(context.Background(), "DEMO-1", &ticket.Ticket{Key: "DEMO-1"}, "", nil)
 	if raw, _ := json.Marshal(none); strings.Contains(string(raw), "pr_stacks") {
 		t.Errorf("a ticket without pull requests has no stacks: %s", raw)
 	}
@@ -130,7 +145,7 @@ func TestDaemonDetailCarriesTheDetailsPanel(t *testing.T) {
 		t.Fatal(err)
 	}
 	known := &ticket.Ticket{Key: "DEMO-1", PRs: []ticket.PullRequest{{Repo: "example-org/web", Number: 900, State: ticket.PROpen, Checks: ticket.ChecksFail, Yours: true}}}
-	got, err := h.app.daemonDetail(context.Background(), "DEMO-1", known, "working")
+	got, err := h.app.daemonDetail(context.Background(), "DEMO-1", known, "working", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +169,7 @@ func TestDaemonDetailCarriesTheDetailsPanel(t *testing.T) {
 	if err := json.Unmarshal(body["work"], &work); err != nil || len(work) != 1 || work[0].Path != dir || work[0].Branch != w.Branch {
 		t.Errorf("work = %s", body["work"])
 	}
-	quiet, _ := h.app.daemonDetail(context.Background(), "DEMO-1", &ticket.Ticket{Key: "DEMO-1"}, "")
+	quiet, _ := h.app.daemonDetail(context.Background(), "DEMO-1", &ticket.Ticket{Key: "DEMO-1"}, "", nil)
 	if raw, _ := json.Marshal(quiet); strings.Contains(string(raw), `"agent"`) || strings.Contains(string(raw), `"attention"`) {
 		t.Errorf("a ticket needing nothing, without an agent: %s", raw)
 	}
