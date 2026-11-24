@@ -129,6 +129,18 @@ test("your pull request of a ticket not yours sends its own feedback, by the pul
   assert.deepEqual(labels(menu(quiet, { agent: "idle" })), ["Open in GitHub ↗", "Review with ▸"], "nothing to send while it asks for nothing");
 });
 
+test("the details' menu copies each stack's URLs, and offers nothing without a stack", async () => {
+  const { detailsMenu } = await import("../mod/lib/menus.js");
+  const t = { key: "DEMO-1", status: "In Review", prs: [] };
+  const m = detailsMenu({ ticket: t, view: { stackUrls: ["u1\nu2\nu3"] } });
+  const item = m.items.find((i) => i.label === "Copy the stack's 3 URLs");
+  assert.deepEqual(item && { action: item.action, value: item.value }, { action: "copy", value: "u1\nu2\nu3" }, labels(m).join(" | "));
+  const two = detailsMenu({ ticket: t, view: { stackUrls: ["u1\nu2", "u5\nu6"] } });
+  assert.deepEqual(two.items.filter((i) => i.label.startsWith("Copy the stack")).map((i) => [i.label, i.value]),
+    [["Copy the stacks' 4 URLs", "u1\nu2\n\nu5\nu6"]]);
+  assert.ok(!labels(detailsMenu({ ticket: t, view: {} })).some((l) => l.includes("stack")));
+});
+
 test("the details' menu offers the feedback its ticket needs, to its agent", async () => {
   const { detailsMenu } = await import("../mod/lib/menus.js");
   const t = { key: "DEMO-1", status: "In Review", prs: [{ number: 12, repo: "example-org/api", state: "open", checks: "pass", url: "https://github.com/example-org/api/pull/12" }] };

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Key is a Jira issue key such as DEMO-123.
@@ -241,11 +242,13 @@ const (
 )
 
 type PullRequest struct {
-	Repo   string         `json:"repo"`
-	Number int            `json:"number"`
-	Title  string         `json:"title"`
-	URL    string         `json:"url"`
-	Branch string         `json:"branch"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	URL    string `json:"url"`
+	Branch string `json:"branch"`
+	// Base is the branch the pull request merges into; another pull request's branch when it is stacked on it.
+	Base   string         `json:"base,omitempty"`
 	State  PRState        `json:"state"`
 	Checks CheckState     `json:"checks"`
 	Review ReviewDecision `json:"review"`
@@ -255,6 +258,8 @@ type PullRequest struct {
 	// Yours marks a pull request the user's gh account opened, whichever ticket it belongs to.
 	Yours   bool   `json:"yours,omitempty"`
 	HeadSHA string `json:"head_sha,omitempty"`
+	// UpdatedAt is when the pull request last changed on GitHub.
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
 	// Approvals counts the reviewers whose latest review approves the pull request.
 	Approvals int `json:"approvals,omitempty"`
 	// ApprovedBy and ChangesRequestedBy name the reviewers whose latest review approves or asks for changes.
