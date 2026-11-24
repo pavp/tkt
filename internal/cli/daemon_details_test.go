@@ -91,6 +91,33 @@ func TestDaemonContextIsWhatTheBoardCopies(t *testing.T) {
 	}
 }
 
+func TestDaemonDetailStacksTheTicketsPullRequests(t *testing.T) {
+	h := showHarness(t)
+	known := &ticket.Ticket{Key: "DEMO-1", PRs: []ticket.PullRequest{
+		{Repo: "example-org/web", Number: 2, Branch: "feat/DEMO-1-b", Base: "feat/DEMO-1-a", State: ticket.PROpen},
+		{Repo: "example-org/web", Number: 1, Branch: "feat/DEMO-1-a", Base: "main", State: ticket.PROpen},
+	}}
+	got, err := h.app.daemonDetail(context.Background(), "DEMO-1", known, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(got)
+	var body struct {
+		Stacks [][]struct {
+			Number int `json:"number"`
+			Depth  int `json:"depth"`
+		} `json:"pr_stacks"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil || len(body.Stacks) != 1 || len(body.Stacks[0]) != 2 ||
+		body.Stacks[0][0].Number != 1 || body.Stacks[0][0].Depth != 0 || body.Stacks[0][1].Number != 2 || body.Stacks[0][1].Depth != 1 {
+		t.Errorf("pr_stacks = %s", raw)
+	}
+	none, _ := h.app.daemonDetail(context.Background(), "DEMO-1", &ticket.Ticket{Key: "DEMO-1"}, "")
+	if raw, _ := json.Marshal(none); strings.Contains(string(raw), "pr_stacks") {
+		t.Errorf("a ticket without pull requests has no stacks: %s", raw)
+	}
+}
+
 func TestDaemonDetailCarriesTheDetailsPanel(t *testing.T) {
 	h := showHarness(t)
 	dir := t.TempDir()

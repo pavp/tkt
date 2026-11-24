@@ -241,11 +241,13 @@ const (
 )
 
 type PullRequest struct {
-	Repo   string         `json:"repo"`
-	Number int            `json:"number"`
-	Title  string         `json:"title"`
-	URL    string         `json:"url"`
-	Branch string         `json:"branch"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	URL    string `json:"url"`
+	Branch string `json:"branch"`
+	// Base is the branch the pull request merges into; another pull request's branch when it is stacked on it.
+	Base   string         `json:"base,omitempty"`
 	State  PRState        `json:"state"`
 	Checks CheckState     `json:"checks"`
 	Review ReviewDecision `json:"review"`

@@ -21,9 +21,17 @@ test("the details say what the TUI's details say", () => {
   assert.deepEqual(v.fields, [["Status", "In Progress"], ["Type", "Story"], ["Points", "3"], ["Assignee", "Ada Lovelace"], ["Label", "Web"], ["Board", "Core"]]);
   assert.equal(v.attention, "CI failing");
   assert.deepEqual(v.subtasks, [{ key: "DEMO-4", status: "To Do", summary: "Write the query" }]);
-  assert.deepEqual(v.prs, [{ ref: "example-org/api#12", title: "Filter accounts", url: "u12", mark: "✕", tone: "blocked" }]);
+  assert.deepEqual(v.prs, [{ ref: "example-org/api#12", title: "Filter accounts", url: "u12", mark: "✕", tone: "blocked", depth: 0 }]);
+  assert.deepEqual(v.stackUrls, []);
   assert.deepEqual(v.work, [{ where: "example-org/api · feature/DEMO-1-filter", path: "/src/api-DEMO-1" }]);
   assert.equal(v.comments[0].who, "Alan Turing");
+});
+
+test("the pull requests follow the daemon's stacks, each stack's URLs from its bottom to its top", () => {
+  const pr = (number, url) => ({ repo: "example-org/web", number, title: `PR ${number}`, url, state: "open", checks: "pass" });
+  const v = detailView({ ...detail, pr_stacks: [[{ ...pr(1, "u1"), depth: 0 }, { ...pr(2, "u2"), depth: 1 }, { ...pr(3, "u3"), depth: 2 }], [{ ...pr(9, "u9"), depth: 0 }]] }, "Sprint");
+  assert.deepEqual(v.prs.map((p) => [p.ref, p.depth]), [["example-org/web#1", 0], ["example-org/web#2", 1], ["example-org/web#3", 2], ["example-org/web#9", 0]]);
+  assert.deepEqual(v.stackUrls, ["u1\nu2\nu3"], "a pull request alone is no stack");
 });
 
 test("the arrows go to the previous and next ticket of the list it was opened from", () => {

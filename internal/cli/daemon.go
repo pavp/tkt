@@ -154,9 +154,10 @@ func (a *App) handOverIfUpgraded(ctx context.Context) bool {
 // agent's state and its work.
 type ticketView struct {
 	detail
-	Attention []ticket.Reason  `json:"attention,omitempty"`
-	Agent     string           `json:"agent,omitempty"`
-	Work      []workspace.Work `json:"work,omitempty"`
+	Attention []ticket.Reason      `json:"attention,omitempty"`
+	Agent     string               `json:"agent,omitempty"`
+	Work      []workspace.Work     `json:"work,omitempty"`
+	PRStacks  [][]ticket.StackedPR `json:"pr_stacks,omitempty"`
 }
 
 // daemonDetail serves GET /v1/tickets/{key} with the configuration read afresh, like each sync. Work that cannot
@@ -170,7 +171,7 @@ func (a *App) daemonDetail(ctx context.Context, key ticket.Key, known *ticket.Ti
 	if err != nil {
 		return nil, err
 	}
-	v := ticketView{detail: d, Attention: d.Ticket.Attention(), Agent: agent}
+	v := ticketView{detail: d, Attention: d.Ticket.Attention(), Agent: agent, PRStacks: ticket.Stacks(d.Ticket.PRs)}
 	if all, err := a.allWork(ctx, c); err == nil {
 		v.Work = workspace.For(all, key)
 	}

@@ -125,7 +125,7 @@ func (c *Client) query(ctx context.Context, owner, q string, vars map[string]any
 	return json.Unmarshal(env.Data, out)
 }
 
-const prFields = `number title url state isDraft mergeStateStatus headRefName headRefOid reviewDecision
+const prFields = `number title url state isDraft mergeStateStatus headRefName headRefOid baseRefName reviewDecision
   author { login __typename }
   repository { nameWithOwner }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
@@ -134,7 +134,7 @@ const prFields = `number title url state isDraft mergeStateStatus headRefName he
 
 // mergedFields is what a merged pull request needs: the board shows it as merged, so its checks, reviews
 // and threads, the costliest fields, are left out (they halved the listing's time).
-const mergedFields = `number title url state headRefName headRefOid
+const mergedFields = `number title url state headRefName headRefOid baseRefName
   author { login __typename }
   repository { nameWithOwner }`
 
@@ -145,6 +145,7 @@ type prNode struct {
 	State            string `json:"state"`
 	HeadRefName      string `json:"headRefName"`
 	HeadRefOid       string `json:"headRefOid"`
+	BaseRefName      string `json:"baseRefName"`
 	ReviewDecision   string `json:"reviewDecision"`
 	IsDraft          bool   `json:"isDraft"`
 	MergeStateStatus string `json:"mergeStateStatus"`
@@ -187,6 +188,7 @@ func (n prNode) toPR() ticket.PullRequest {
 		URL:     n.URL,
 		Branch:  n.HeadRefName,
 		HeadSHA: n.HeadRefOid,
+		Base:    n.BaseRefName,
 	}
 	switch n.State {
 	case "MERGED":

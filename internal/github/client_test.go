@@ -140,6 +140,27 @@ func TestPullRequestsBatchesPerOwner(t *testing.T) {
 	}
 }
 
+func TestPullRequestsReadTheirBaseBranch(t *testing.T) {
+	base, h, calls := gqlServer(t, func(q string) (int, string) {
+		open := strings.Replace(pr("example-org/web", 2, "feat/DEMO-1-b", "OPEN", "", ""), `"headRefName"`, `"baseRefName":"feat/DEMO-1-a","headRefName"`, 1)
+		merged := strings.Replace(pr("example-org/web", 1, "feat/DEMO-1-a", "MERGED", "", ""), `"headRefName"`, `"baseRefName":"main","headRefName"`, 1)
+		return 200, `{"data":{"r0":{"open":{"nodes":[` + open + `]},"merged":{"nodes":[` + merged + `]}}}}`
+	})
+	c := New(staticTokens(map[string]string{"example-org": "work"})).WithEndpoints(base, h)
+	got, err := c.PullRequests(context.Background(), []string{"example-org/web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Base != "feat/DEMO-1-a" || got[1].Base != "main" {
+		t.Fatalf("bases = %+v", got)
+	}
+	q := (*calls)[0].query
+	open, merged, _ := strings.Cut(q, "merged: ")
+	if !strings.Contains(open, "baseRefName") || !strings.Contains(merged, "baseRefName") {
+		t.Errorf("open and merged pull requests both ask for their base: %s", q)
+	}
+}
+
 func TestPullRequestsCountApprovals(t *testing.T) {
 	reviews := `"latestOpinionatedReviews":{"nodes":[{"state":"APPROVED"},{"state":"CHANGES_REQUESTED"},{"state":"APPROVED"}]}`
 	node := strings.Replace(pr("example-org/web", 9, "feature/DEMO-1-x", "OPEN", "REVIEW_REQUIRED", "SUCCESS"), `"latestOpinionatedReviews":{"nodes":[]}`, reviews, 1)

@@ -3,6 +3,7 @@ const CHECKS = { fail: ["✕", "blocked"], pending: ["…", "working"], pass: ["
 /** The details screen of GET /v1/tickets/{key}, opened from the tab named from. */
 export function detailView(d, from) {
   const t = d.ticket ?? {};
+  const stacks = d.pr_stacks ?? (t.prs ?? []).map((p) => [{ ...p, depth: 0 }]);
   const fields = [["Status", t.status], ["Type", t.type], ["Points", t.points ? String(t.points) : ""], ["Assignee", t.assignee || "unassigned"], ["Label", t.label], ["Board", t.board]];
   return {
     key: t.key,
@@ -16,10 +17,11 @@ export function detailView(d, from) {
     description: d.description ?? "",
     acceptance: d.acceptance_criteria ?? "",
     subtasks: (t.subtasks ?? []).map((s) => ({ key: s.key, status: s.status, summary: s.summary })),
-    prs: (t.prs ?? []).map((p) => {
+    prs: stacks.flat().map((p) => {
       const [mark, tone] = p.state === "open" ? CHECKS[p.checks] ?? ["—", "dim"] : [p.state, "dim"];
-      return { ref: `${p.repo}#${p.number}`, title: p.title, url: p.url, mark, tone };
+      return { ref: `${p.repo}#${p.number}`, title: p.title, url: p.url, mark, tone, depth: p.depth ?? 0 };
     }),
+    stackUrls: stacks.filter((s) => s.length > 1).map((s) => s.map((p) => p.url).join("\n")),
     comments: (d.comments ?? []).map((c) => ({ who: c.author, when: (c.created ?? "").slice(0, 10), body: c.body })),
     work: (d.work ?? []).map((w) => ({ where: `${w.repo} · ${w.branch}`, path: w.path ?? "" })),
   };
