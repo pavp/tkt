@@ -157,7 +157,6 @@ type ticketView struct {
 	Attention []ticket.Reason  `json:"attention,omitempty"`
 	Agent     string           `json:"agent,omitempty"`
 	Work      []workspace.Work `json:"work,omitempty"`
-	PRStacks  []board.PRStack  `json:"pr_stacks,omitempty"`
 }
 
 // daemonDetail serves GET /v1/tickets/{key} with the configuration read afresh, like each sync. Work that cannot
@@ -171,7 +170,8 @@ func (a *App) daemonDetail(ctx context.Context, key ticket.Key, known *ticket.Ti
 	if err != nil {
 		return nil, err
 	}
-	v := ticketView{detail: d, Attention: d.Ticket.Attention(), Agent: agent, PRStacks: board.PRStacksWith(key, d.Ticket.PRs, prs)}
+	d.PRStacks = board.PRStacksWith(key, d.Ticket.PRs, prs)
+	v := ticketView{detail: d, Attention: d.Ticket.Attention(), Agent: agent}
 	if all, err := a.allWork(ctx, c); err == nil {
 		v.Work = workspace.For(all, key)
 	}

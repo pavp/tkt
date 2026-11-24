@@ -207,3 +207,35 @@ func StackedRows(rows []PRRow) []StackedRow {
 	}
 	return out
 }
+
+// PRID names a pull request across repositories, as "owner/name#12".
+func PRID(pr ticket.PullRequest) string { return pr.Repo + "#" + strconv.Itoa(pr.Number) }
+
+// WholeStacks maps each pull request the snapshot knows that sits in a stack of two or more, by PRID, to that
+// whole stack, so a stack split across the PRs tab's groups is named, numbered and copied whole.
+func (s Snapshot) WholeStacks() map[string]*PRStack {
+	var prs []ticket.PullRequest
+	for _, k := range s.KnownPRs() {
+		prs = append(prs, k.PullRequest)
+	}
+	out := map[string]*PRStack{}
+	for _, st := range PRStacks(prs) {
+		if len(st.PRs) < 2 {
+			continue
+		}
+		for _, p := range st.PRs {
+			out[PRID(p.PullRequest)] = &st
+		}
+	}
+	return out
+}
+
+// Step is pr's place in the stack's merge order, from 1 at its bottom; 0 when pr is not in it.
+func (s *PRStack) Step(pr ticket.PullRequest) int {
+	for _, p := range s.PRs {
+		if PRID(p.PullRequest) == PRID(pr) {
+			return p.Depth + 1
+		}
+	}
+	return 0
+}

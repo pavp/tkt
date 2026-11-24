@@ -197,6 +197,12 @@ type item struct {
 	// board, dates and badges, on a backlog group's title row, show its sprint's board and dates and its story
 	// points by stage; shortBadges leaves out the count of unestimated tickets, for narrow panes.
 	board, dates, badges, shortBadges string
+	// stack, on a stack's caption row in the PRs filter, is the whole stack; its group is "stack:" and the
+	// stack's bottom, so it folds as a group does. step and on, on a stacked pull request's row, are its place in
+	// the merge order and, for the first shown when the one it sits on is elsewhere, its base branch.
+	stack *board.PRStack
+	step  int
+	on    string
 }
 
 func (it item) review() bool  { return it.pr != nil && it.ticket == nil && !it.other }
@@ -547,10 +553,44 @@ func (m Model) prItems() []item { return m.prLayout(false) }
 // that collapsing a group never moves the columns.
 func (m Model) prLayout(every bool) []item {
 	var out []item
+	stacks := m.snap.WholeStacks()
 	for _, g := range board.PRGroups(m.snap, m.prFilter()) {
 		out = append(out, item{key: ticket.Key("group:" + g.Group), group: g.Group, title: g.Title, count: len(g.Rows), needs: g.Needs})
-		if every || !m.folded(g.Group) {
-			out = append(out, prItemsOf(g.Rows)...)
+		if !every && m.folded(g.Group) {
+			continue
+		}
+		rows := board.StackedRows(g.Rows)
+		shown := map[*board.PRStack]int{}
+		for _, r := range rows {
+			if w := stacks[board.PRID(*r.PR)]; w != nil {
+				shown[w]++
+			}
+		}
+		var open *board.PRStack
+		for _, r := range rows {
+			it := prItemsOf([]board.PRRow{r.PRRow})[0]
+			w := stacks[board.PRID(*r.PR)]
+			if w == nil || shown[w] < 2 {
+				out = append(out, it)
+				continue
+			}
+			if w != open {
+				open = w
+				group := "stack:" + board.PRID(w.PRs[0].PullRequest)
+				title := fmt.Sprintf("⧉ Stack of %d · %s", len(w.PRs), w.Name)
+				if shown[w] < len(w.PRs) {
+					title += fmt.Sprintf(" · %d here", shown[w])
+				}
+				out = append(out, item{key: ticket.Key("group:" + group), group: group, title: title, count: shown[w], stack: w})
+				if r.After == 0 && board.PRID(*r.PR) != board.PRID(w.PRs[0].PullRequest) {
+					it.on = r.PR.Base
+				}
+			}
+			if !every && m.folded("stack:"+board.PRID(w.PRs[0].PullRequest)) {
+				continue
+			}
+			it.step = w.Step(*r.PR)
+			out = append(out, it)
 		}
 	}
 	return out
@@ -559,6 +599,15 @@ func (m Model) prLayout(every bool) []item {
 // groupTitle renders a group's title row: ▾ while open, ▸ with how many need the user once collapsed.
 func (m Model) groupTitle(it item, sel bool) string {
 	mark, count := "▾ ", strconv.Itoa(it.count)
+	if it.stack != nil {
+		if m.folded(it.group) {
+			mark = "▸ "
+		}
+		if sel {
+			return selected.Render("  " + mark + it.title + "  " + it.stack.Status + "  P copies the stack's URLs")
+		}
+		return "  " + dim.Render(mark+it.title) + "  " + stackStatusStyle(it.stack.Status).Render(it.stack.Status)
+	}
 	if m.folded(it.group) {
 		mark = "▸ "
 		if it.needs > 0 {
@@ -1286,6 +1335,13 @@ func (m Model) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.actions.Copy(it.ticket.URL, "link")
 		}
 	case "p", "P":
+		if it, ok := m.current(); ok && it.stack != nil && k.String() == "P" {
+			urls := make([]string, len(it.stack.PRs))
+			for i, p := range it.stack.PRs {
+				urls[i] = p.URL
+			}
+			return m, m.actions.Copy(strings.Join(urls, "\n"), fmt.Sprintf("stack's %d URLs", len(urls)))
+		}
 		if it, ok := m.current(); ok && !it.heading() {
 			if it.pr == nil && it.ticket != nil && len(it.ticket.PRs) > 1 {
 				m.menu = m.prsMenu(*it.ticket)
@@ -1530,6 +1586,15 @@ func (m Model) contextText() string {
 		parts := []string{fmt.Sprintf("%d open", len(mine))}
 		if needs > 0 {
 			parts = append(parts, fmt.Sprintf("%d needs you", needs))
+		}
+		stacks, seen := m.snap.WholeStacks(), map[*board.PRStack]bool{}
+		for _, it := range m.prLayout(true) {
+			if it.pr != nil && stacks[board.PRID(*it.pr)] != nil {
+				seen[stacks[board.PRID(*it.pr)]] = true
+			}
+		}
+		if s := len(seen); s > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", s, plural(s, "stack", "stacks")))
 		}
 		n := len(m.reviews())
 		return strings.Join(append(parts, fmt.Sprintf("%d review %s", n, plural(n, "request", "requests"))), " · ")
@@ -2745,9 +2810,9 @@ func (m Model) listLines(row func(key, status, agent, pr, title string) string, 
 		}
 		switch {
 		case it.review(), it.other:
-			line = row(string(it.key), status, pad("", pointsW)+authorCell(it.pr.Author, assigneeW)+pad("", agentW), ci, it.pr.Title)
+			line = row(string(it.key), status, pad("", pointsW)+authorCell(it.pr.Author, assigneeW)+pad("", agentW), ci, stackPlace(it, it.pr.Title, i == m.row))
 		case it.mine():
-			line = row(string(it.key), status, authorCell(it.pr.Author, assigneeW)+agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, cmp.Or(it.pr.Title, it.ticket.Summary))
+			line = row(string(it.key), status, authorCell(it.pr.Author, assigneeW)+agentCell(m.snap.Agents[string(it.ticket.Key)], agentW, i == m.row), ci, stackPlace(it, cmp.Or(it.pr.Title, it.ticket.Summary), i == m.row))
 		default:
 			title, key := it.ticket.Summary, string(it.key)
 			if (it.ticket.Team || it.ticket.Category == ticket.Done && it.parent != "") && i != m.row {

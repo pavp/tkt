@@ -73,6 +73,7 @@ func (m Model) buildMenu(it item) *menu {
 		}
 		items = append(items, m.reviewItem(pr))
 		items = append(items, menuItem{label: "Copy the PR link", run: func() tea.Cmd { return a.Copy(pr.URL, "link") }})
+		items = append(items, m.stackCopy([]ticket.PullRequest{pr})...)
 		return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: cmp.Or(pr.Repo, "unknown repository") + " · " + subtitle, reviewed: &pr, items: items}
 	}
 	t := *it.ticket
@@ -110,6 +111,7 @@ func (m Model) buildMenu(it item) *menu {
 		menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }},
 		menuItem{label: "Copy the ticket context (.ticket.md)", run: func() tea.Cmd { return a.CopyContext(t.Key) }},
 	)
+	items = append(items, m.stackCopy(t.PRs)...)
 	return &menu{title: "Actions for " + string(t.Key), subtitle: t.Status, items: items}
 }
 
@@ -139,6 +141,7 @@ func (m Model) prMenu(it item) *menu {
 		items = append(items, menuItem{label: "Copy the Jira link", run: func() tea.Cmd { return a.Copy(t.URL, "link") }})
 	}
 	items = append(items, menuItem{label: "Copy the key " + string(t.Key), run: func() tea.Cmd { return a.Copy(string(t.Key), "key") }})
+	items = append(items, m.stackCopy([]ticket.PullRequest{pr})...)
 	return &menu{title: fmt.Sprintf("Pull request #%d", pr.Number), subtitle: string(t.Key) + " · " + t.Status, reviewed: &pr, items: items}
 }
 
@@ -445,4 +448,33 @@ func (m Model) menuItemAt(x, y, top, height int) int {
 		return -1
 	}
 	return rows[line]
+}
+
+// stackCopy is "Copy the stack's N URLs" for the whole stacks prs sit in, from their bottom, stacks apart by a
+// blank line; nothing when none of prs is stacked.
+func (m Model) stackCopy(prs []ticket.PullRequest) []menuItem {
+	whole := m.snap.WholeStacks()
+	var stacks []string
+	urls, seen := 0, map[*board.PRStack]bool{}
+	for _, pr := range prs {
+		s := whole[board.PRID(pr)]
+		if s == nil || seen[s] {
+			continue
+		}
+		seen[s] = true
+		lines := make([]string, len(s.PRs))
+		for i, p := range s.PRs {
+			lines[i] = p.URL
+		}
+		stacks, urls = append(stacks, strings.Join(lines, "\n")), urls+len(lines)
+	}
+	if len(stacks) == 0 {
+		return nil
+	}
+	what := fmt.Sprintf("stack's %d URLs", urls)
+	if len(stacks) > 1 {
+		what = fmt.Sprintf("stacks' %d URLs", urls)
+	}
+	text := strings.Join(stacks, "\n\n")
+	return []menuItem{{label: "Copy the " + what, run: func() tea.Cmd { return m.actions.Copy(text, what) }}}
 }
