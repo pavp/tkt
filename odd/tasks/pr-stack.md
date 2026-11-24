@@ -15,8 +15,8 @@ Forecast (slice-plan, 2026-11-24): total 410–715 authored changed lines; slice
 
 | ID | Specs | Slice | Route | Status | Commit |
 |---|---|---|---|---|---|
-| T1 | S1 (base from GitHub, stack order in `ticket`) | 1 | inline, no Writer reason | done (RED: did not compile → GREEN) | slice 1 commit |
-| T2 | S1, S2 (details in the mod, daemon `pr_stacks`) | 1 | inline, no Writer reason | done (RED: 1 Go + 3 node tests → GREEN); slice 1 = 241 changed lines | slice 1 commit |
+| T1 | S1 (base from GitHub, stack order in `ticket`) | 1 | inline, no Writer reason | done (RED: did not compile → GREEN) | 9e6ad4c |
+| T2 | S1, S2 (details in the mod, daemon `pr_stacks`) | 1 | inline, no Writer reason | done (RED: 1 Go + 3 node tests → GREEN); slice 1 = 241 changed lines | 9e6ad4c |
 | T3 | S1, S2, S3, S5 (PRs view: board, daemon, mod) | 2 | inline, no Writer reason | pending | |
 | T4 | S1, S2, S4 (TUI details and PRs tab) | 3 | inline, no Writer reason | pending | |
 
