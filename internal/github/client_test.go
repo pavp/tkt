@@ -140,9 +140,9 @@ func TestPullRequestsBatchesPerOwner(t *testing.T) {
 	}
 }
 
-func TestPullRequestsReadTheirBaseBranch(t *testing.T) {
+func TestPullRequestsReadTheirBaseBranchAndLastUpdate(t *testing.T) {
 	base, h, calls := gqlServer(t, func(q string) (int, string) {
-		open := strings.Replace(pr("example-org/web", 2, "feat/DEMO-1-b", "OPEN", "", ""), `"headRefName"`, `"baseRefName":"feat/DEMO-1-a","headRefName"`, 1)
+		open := strings.Replace(pr("example-org/web", 2, "feat/DEMO-1-b", "OPEN", "", ""), `"headRefName"`, `"baseRefName":"feat/DEMO-1-a","updatedAt":"2026-11-23T18:30:00Z","headRefName"`, 1)
 		merged := strings.Replace(pr("example-org/web", 1, "feat/DEMO-1-a", "MERGED", "", ""), `"headRefName"`, `"baseRefName":"main","headRefName"`, 1)
 		return 200, `{"data":{"r0":{"open":{"nodes":[` + open + `]},"merged":{"nodes":[` + merged + `]}}}}`
 	})
@@ -154,10 +154,15 @@ func TestPullRequestsReadTheirBaseBranch(t *testing.T) {
 	if len(got) != 2 || got[0].Base != "feat/DEMO-1-a" || got[1].Base != "main" {
 		t.Fatalf("bases = %+v", got)
 	}
+	if want := time.Date(2026, 11, 23, 18, 30, 0, 0, time.UTC); !got[0].UpdatedAt.Equal(want) || !got[1].UpdatedAt.IsZero() {
+		t.Errorf("updated = %v, %v", got[0].UpdatedAt, got[1].UpdatedAt)
+	}
 	q := (*calls)[0].query
 	open, merged, _ := strings.Cut(q, "merged: ")
-	if !strings.Contains(open, "baseRefName") || !strings.Contains(merged, "baseRefName") {
-		t.Errorf("open and merged pull requests both ask for their base: %s", q)
+	for _, f := range []string{"baseRefName", "updatedAt"} {
+		if !strings.Contains(open, f) || !strings.Contains(merged, f) {
+			t.Errorf("open and merged pull requests both ask for %s: %s", f, q)
+		}
 	}
 }
 

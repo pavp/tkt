@@ -1128,7 +1128,7 @@ export default class Tkt extends View {
     const group = (it) => it.action === "copy" || it.action === "copyContext" ? 3 : it.action === "open" || it.action === "submenu" ? 1 : 2;
     const rest = items.filter((it) => it !== primary).sort((a, b) => group(a) - group(b));
     const prItems = v.prs.slice(0, 3).map((p) => ({ action: "open", url: p.url, label: p.ref }));
-    const moreItem = v.prs.length > 3 ? { action: "submenu", label: "more", menu: prsSubmenu(d.key, v.prs.map((p) => ({ number: Number(p.ref.split("#").pop()), label: `${"  ".repeat(p.depth)}${p.depth > 0 ? "↳ " : ""}#${p.ref.split("#").pop()} ${p.title ?? ""}`.trim(), url: p.url }))) } : null;
+    const moreItem = v.prs.length > 3 ? { action: "submenu", label: "more", menu: prsSubmenu(d.key, v.prs.map((p) => ({ number: Number(p.ref.split("#").pop()), label: `#${p.ref.split("#").pop()} ${p.title ?? ""}`.trim(), url: p.url }))) } : null;
     d.actions = [...(primary ? [primary] : []), ...rest, ...prItems, ...(moreItem ? [moreItem] : [])];
     d.focusY = this.detailsFocusY(d, prItems.length, Boolean(moreItem), Boolean(primary), rest.map(group));
     const lit = (it) => Boolean(d.actFocus) && d.actions[d.actSel ?? 0] === it;
@@ -1146,12 +1146,11 @@ export default class Tkt extends View {
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act(it, cx)).child(it.label)]));
     const pullRequests = v_flex().id("dsec-prs").gap(6).on_size_change((size) => { d.hPrs = size.height; }).child(h3(v.prs.length > 0 ? `Pull requests · ${v.prs.length}` : "Pull requests"))
       .child(v.prs.length === 0 ? div().text_size(12).text_color(t.muted).child("none linked") : v_flex().id("dpr-box").on_size_change((size) => { d.hPrBox = size.height; }).rounded(8).border(1).border_color(t.border).bg(t.raised).overflow_hidden()
-        .children(v.prs.slice(0, 3).map((p, i) => h_flex().id(`dpr-${i}`).h(32).pr(10).pl(10 + 14 * p.depth).gap(8).items_center().min_w_0().hover((h) => h.bg(t.hover))
+        .children(v.prs.slice(0, 3).map((p, i) => h_flex().id(`dpr-${i}`).h(32).px(10).gap(8).items_center().min_w_0().hover((h) => h.bg(t.hover))
           .when(lit(prItems[i]), (el) => el.bg(mix(t.accent, t.raised, 0.14)))
           .when(i > 0, (el) => el.border_t(1).border_color(t.border))
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation()).on_click((_e, cx) => this.act({ action: "open", url: p.url, label: p.ref }, cx))
           .child(div().w(12).flex_none().font_semibold().text_size(11).text_color(p.mark === "✓" ? t.ansi2 : p.mark === "✕" ? ensure(t.ansi1, t.raised, 4.5) : t.muted).child(["✓", "✕", "…", "—"].includes(p.mark) ? p.mark : "·"))
-          .when(p.depth > 0, (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child("↳")))
           .child(this.mono(div().flex_none().text_size(11).text_color(t.muted)).child(`#${p.ref.split("#").pop()}`))
           .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(["✓", "✕", "…", "—"].includes(p.mark) ? t.foreground : t.muted).child(p.title ?? ""))
           .when(!["✓", "✕", "…", "—"].includes(p.mark), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(p.mark)))))

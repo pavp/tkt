@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Key is a Jira issue key such as DEMO-123.
@@ -257,6 +258,8 @@ type PullRequest struct {
 	// Yours marks a pull request the user's gh account opened, whichever ticket it belongs to.
 	Yours   bool   `json:"yours,omitempty"`
 	HeadSHA string `json:"head_sha,omitempty"`
+	// UpdatedAt is when the pull request last changed on GitHub.
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
 	// Approvals counts the reviewers whose latest review approves the pull request.
 	Approvals int `json:"approvals,omitempty"`
 	// ApprovedBy and ChangesRequestedBy name the reviewers whose latest review approves or asks for changes.

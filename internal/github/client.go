@@ -125,7 +125,7 @@ func (c *Client) query(ctx context.Context, owner, q string, vars map[string]any
 	return json.Unmarshal(env.Data, out)
 }
 
-const prFields = `number title url state isDraft mergeStateStatus headRefName headRefOid baseRefName reviewDecision
+const prFields = `number title url state isDraft mergeStateStatus headRefName headRefOid baseRefName updatedAt reviewDecision
   author { login __typename }
   repository { nameWithOwner }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
@@ -134,21 +134,22 @@ const prFields = `number title url state isDraft mergeStateStatus headRefName he
 
 // mergedFields is what a merged pull request needs: the board shows it as merged, so its checks, reviews
 // and threads, the costliest fields, are left out (they halved the listing's time).
-const mergedFields = `number title url state headRefName headRefOid baseRefName
+const mergedFields = `number title url state headRefName headRefOid baseRefName updatedAt
   author { login __typename }
   repository { nameWithOwner }`
 
 type prNode struct {
-	Number           int    `json:"number"`
-	Title            string `json:"title"`
-	URL              string `json:"url"`
-	State            string `json:"state"`
-	HeadRefName      string `json:"headRefName"`
-	HeadRefOid       string `json:"headRefOid"`
-	BaseRefName      string `json:"baseRefName"`
-	ReviewDecision   string `json:"reviewDecision"`
-	IsDraft          bool   `json:"isDraft"`
-	MergeStateStatus string `json:"mergeStateStatus"`
+	Number           int       `json:"number"`
+	Title            string    `json:"title"`
+	URL              string    `json:"url"`
+	State            string    `json:"state"`
+	HeadRefName      string    `json:"headRefName"`
+	HeadRefOid       string    `json:"headRefOid"`
+	BaseRefName      string    `json:"baseRefName"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+	ReviewDecision   string    `json:"reviewDecision"`
+	IsDraft          bool      `json:"isDraft"`
+	MergeStateStatus string    `json:"mergeStateStatus"`
 	Author           *struct {
 		Login    string `json:"login"`
 		Typename string `json:"__typename"`
@@ -182,13 +183,14 @@ type prNode struct {
 
 func (n prNode) toPR() ticket.PullRequest {
 	pr := ticket.PullRequest{
-		Repo:    n.Repository.NameWithOwner,
-		Number:  n.Number,
-		Title:   n.Title,
-		URL:     n.URL,
-		Branch:  n.HeadRefName,
-		HeadSHA: n.HeadRefOid,
-		Base:    n.BaseRefName,
+		Repo:      n.Repository.NameWithOwner,
+		Number:    n.Number,
+		Title:     n.Title,
+		URL:       n.URL,
+		Branch:    n.HeadRefName,
+		HeadSHA:   n.HeadRefOid,
+		Base:      n.BaseRefName,
+		UpdatedAt: n.UpdatedAt,
 	}
 	switch n.State {
 	case "MERGED":
