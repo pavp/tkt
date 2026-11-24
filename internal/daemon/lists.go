@@ -70,6 +70,9 @@ type PRRow struct {
 	// On is the base branch of the first pull request of a stack shown in this group, when the one it sits on is
 	// in another group or hidden.
 	On string `json:"on,omitempty"`
+	// Step is the pull request's place in its whole stack's merge order, from 1 at the bottom; pull requests on
+	// the same parent share it.
+	Step int `json:"step,omitempty"`
 }
 
 // PRRowStack is a stack of the PRs tab: Key, which folds it as a group's key does, its name and worst status, and
@@ -187,6 +190,9 @@ func (s *Server) prs(w http.ResponseWriter, r *http.Request) {
 				out.Stack = &PRRowStack{Key: key, Name: w.Name, Status: w.Status, Shown: shown[bottom], First: row.Stack == nil || row.After == 0, Collapsed: board.Folded(collapsed, key)}
 				for _, p := range w.PRs {
 					out.Stack.URLs = append(out.Stack.URLs, p.URL)
+					if prID(p.PullRequest) == prID(*row.PR) {
+						out.Step = p.Depth + 1
+					}
 				}
 				if out.Stack.First && prID(*row.PR) != bottom {
 					out.On = row.PR.Base

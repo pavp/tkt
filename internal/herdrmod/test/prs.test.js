@@ -52,7 +52,7 @@ test("a stack shows as one row titled with its size, name and status, then its p
   const stack = rows[at];
   assert.deepEqual({ group: stack.group, title: stack.title, status: stack.status, count: stack.count, collapsed: stack.collapsed, tone: stack.tone },
     { group: "stack:example-org/web#39", title: "Stack of 3 · feat/DEMO-2-export · 2 here", status: "CI failing", count: 2, collapsed: false, tone: "ansi1" });
-  assert.deepEqual(rows.slice(at + 1, at + 3).map((r) => [r.key, r.after, r.on, r.inStack]), [["#40", 0, "feat/DEMO-2-export-0-shape", true], ["#41", 40, "", true]]);
+  assert.deepEqual(rows.slice(at + 1, at + 3).map((r) => [r.key, r.after, r.on, r.inStack, r.step]), [["#40", 0, "feat/DEMO-2-export-0-shape", true, 2], ["#41", 40, "", true, 3]]);
   assert.ok(!rows.some((r) => r.kind === "stack" && r.count < 2), "a pull request alone in its group gets no stack title");
   assert.equal(rows[at + 3].inStack, false);
 });

@@ -31,6 +31,7 @@ export function prRows(view) {
         approvals: r.approvals ?? "",
         after: r.after ?? 0,
         on: r.on ?? "",
+        step: grouped ? r.step ?? 0 : 0,
         inStack: grouped,
         stackKey: grouped ? r.stack.key : "",
         block: grouped ? "mid" : undefined,

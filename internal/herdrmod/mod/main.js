@@ -608,7 +608,7 @@ export default class Tkt extends View {
     const pr = r.raw.pr ?? {};
     const ci = { pass: ["✓", t.ansi2], fail: ["✕", ensure(t.ansi1, t.surface, 4.5)], pending: ["…", t.muted] }[pr.checks] ?? ["—", t.dim];
     const tone = t[prStatusTone(r.raw)] ?? t.foreground;
-    const place = [r.stackNote && `⧉ ${r.stackNote}`, r.after ? `after #${r.after}` : r.on && `on ${r.on}`].filter(Boolean).join(" · ");
+    const place = [r.stackNote && `⧉ ${r.stackNote}`, r.on && `on ${r.on}`].filter(Boolean).join(" · ");
     return this.blockBox(t, r.block, sel)
       .child(div().w(20).flex_none().text_size(12).font_semibold().text_color(t[g.tone] ?? t.muted).child(g.text))
       .child(this.mono(div().w(44).flex_none().text_size(11).text_color(sel ? t.accent : t.muted)).child(r.key))
@@ -616,6 +616,7 @@ export default class Tkt extends View {
         .when(Boolean(r.approvals), (el) => el.child(div().text_size(12).text_color(t.muted).child(`· ${r.approvals}`))))
       .child(div().w(140).flex_none().truncate().text_size(12).text_color(t.muted).child(pr.author ?? ""))
       .child(div().w(24).flex_none().font_semibold().text_color(ci[1] ?? t.dim).child(ci[0]))
+      .when(r.step > 0, (el) => el.child(this.mono(h_flex().w(16).h(16).flex_none().items_center().justify_center().rounded(4).border(1).border_color(t.border).text_size(10).text_color(t.muted)).child(String(r.step))))
       .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(pr.draft ? t.muted : t.foreground).child(r.title))
       .when(Boolean(place), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(place)));
   }
