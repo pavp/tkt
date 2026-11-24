@@ -19,7 +19,7 @@ Forecast (slice-plan, 2026-11-24): total 410–715 authored changed lines; slice
 | T1 | S1 (base and age from GitHub, stack order in `ticket`) | 1 | inline, no Writer reason | done (RED: did not compile → GREEN, twice) | 9e6ad4c, 8d057be |
 | T2 | S2 (details: stacks in merge order, Copy the stack's N URLs) | 1 | inline, no Writer reason | done (RED: 1 Go + 3 node tests → GREEN); slice 1 = 319 changed lines | 9e6ad4c, 8d057be |
 | T3 | S1 (stack group in the mod's details: board stacks, daemon shape, card) | 2 | inline, no Writer reason | done (RED: Go build + 5 node tests → GREEN); slice 2 = 378 changed lines | 29d6fcf |
-| T6 | S6 (whole stacks across tickets in the details) | 3 | inline, no Writer reason | done (RED: Go build + daemon/cli/board assertions, 1 node test → GREEN) | slice 3 commit |
+| T6 | S6 (whole stacks across tickets in the details) | 3 | inline, no Writer reason | done (RED: Go build + daemon/cli/board assertions, 1 node test → GREEN) | 37b0073, fix in slice 3 |
 | T4 | S1, S2, S3, S5 (PRs view in the mod) | 4 | inline, no Writer reason | pending | |
 | T5 | S1, S2, S4 (TUI details and PRs tab) | 5 | inline, no Writer reason | pending | |
 
@@ -52,3 +52,4 @@ Native grouping: once the last slice's PR is open, group with `gh stack link <pr
 - L10 (2026-11-24) Slice 2: `go test ./...` 1554, node 191, vet and gofmt clean. Not yet observed in the running mod (render against the canvas and the screenshot) nor walked blind.
 - L11 (2026-11-24, side note relayed by the user): a ticket's details stack only that ticket's pull requests, so a stack split across tickets shows in part and "Copy the stack's N URLs" copies that part silently. Options given: warn only, or build the whole stack from every pull request the sync knows. User: "si, la opción 2" → new slice 3 `feat/pr-stack-3-whole-stack` (60–100 lines); the PRs view becomes slice 4 and the TUI slice 5.
 - L12 (2026-11-24, user): "cuando termines abres el mod para yo ver el resultado" → install the branch build and open the mod once slice 3 is committed.
+- L13 (2026-11-24) Slice 3: 191 changed lines (forecast 60–100, under the 400 budget). Live check on the branch build (read-only): ACTO-175968 gives one stack #284 → #285 → #287 with bases trunk → slice 1 → slice 2; its branches mix chore/ and docs/, which named the stack after the bottom's branch, so the name now takes what they share after their kind ("acto-175968-calver"), with a RED test. Branch daemon running on this computer and the branch mod installed (backup in the session scratchpad); the mod was on machine wsl-dev, whose released tkt sends no pr_stacks.
