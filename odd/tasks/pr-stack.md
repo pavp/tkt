@@ -21,7 +21,7 @@ Forecast (slice-plan, 2026-11-24): total 410–715 authored changed lines; slice
 | T3 | S1 (stack group in the mod's details: board stacks, daemon shape, card) | 2 | inline, no Writer reason | done (RED: Go build + 5 node tests → GREEN); slice 2 = 378 changed lines | 29d6fcf |
 | T6 | S6 (whole stacks across tickets in the details) | 3 | inline, no Writer reason | done (RED: Go build + daemon/cli/board assertions, 1 node test → GREEN) | 37b0073, fix in slice 3 |
 | T4 | S1, S2, S3, S5 (PRs view in the mod) | 4 | inline, no Writer reason | done (RED: board build, contract fixtures missing, 3+1 node tests → GREEN); slice 4 = 235 changed lines | 949fde5, fix in slice 4 |
-| T5 | S1, S2, S4 (TUI details and PRs tab) | 5 | inline, no Writer reason | done (RED: TUI view, context line and menus, show output → GREEN); slice 5 = 330 changed lines | slice 5 commit |
+| T5 | S1, S2, S4 (TUI details and PRs tab) | 5 | inline, no Writer reason | done (RED: TUI view, context line and menus, show output → GREEN); slice 5 = 330 changed lines | 6c5ef48 |
 
 Re-forecast (slice-plan, 2026-11-24, after L7): total ~800–1160.
 
