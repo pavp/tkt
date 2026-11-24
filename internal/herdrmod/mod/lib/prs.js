@@ -1,3 +1,5 @@
+import { stackTone } from "./details.js";
+
 /** The PRs tab's rows from /v1/prs: each group's title (with its count, how many need you, folded or not), then
  *  its pull requests unless folded. */
 export function prRows(view) {
@@ -6,6 +8,13 @@ export function prRows(view) {
     rows.push({ kind: "title", group: s.group, title: s.title, count: s.count, needs: s.needs, collapsed: Boolean(s.collapsed) });
     if (s.collapsed) continue;
     for (const r of s.rows ?? []) {
+      const grouped = (r.stack?.shown ?? 0) >= 2;
+      if (grouped && r.stack.first) {
+        const here = r.stack.shown < r.stack.urls.length ? ` · ${r.stack.shown} here` : "";
+        rows.push({ kind: "stack", group: r.stack.key, title: `Stack of ${r.stack.urls.length} · ${r.stack.name}${here}`, status: r.stack.status,
+          tone: stackTone(r.stack.status), count: r.stack.shown, collapsed: Boolean(r.stack.collapsed) });
+      }
+      if (grouped && r.stack.collapsed) continue;
       rows.push({
         kind: "row",
         key: r.key,
@@ -20,6 +29,9 @@ export function prRows(view) {
         other: Boolean(r.other),
         who: r.pr?.author || r.ticket?.assignee || "",
         approvals: r.approvals ?? "",
+        after: r.after ?? 0,
+        on: r.on ?? "",
+        inStack: grouped,
         raw: r,
       });
     }

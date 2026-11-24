@@ -83,7 +83,7 @@ export function prMenu(row, opts = {}) {
     const how = [pr.author || "unknown author", row.review ? "review requested" : ""].filter(Boolean).join(" · ");
     const items = [{ label: "Open in GitHub ↗", action: "open", url: pr.url }];
     if (row.feedback_key && row.attention?.length) items.push(...feedbackItems(row.feedback_key, row.attention[0], opts.agent, { repo: pr.repo, number: pr.number }));
-    items.push({ label: "Review with ▸", action: "review", pr });
+    items.push({ label: "Review with ▸", action: "review", pr }, ...stackCopy(row));
     return keyed({ title: `Pull request #${pr.number}`, subtitle: `${pr.repo || "unknown repository"} · ${how}`, items, reviewers: reviewersOf(pr) });
   }
   const t = row.ticket;
@@ -92,8 +92,16 @@ export function prMenu(row, opts = {}) {
   items.push({ label: "Review with ▸", action: "review", pr }, startItem(t.key, opts.agent), { label: `Show details of ${t.key}`, action: "details", key: t.key });
   if (t.url) items.push({ label: `Open ${t.key} in Jira ↗`, action: "open", url: t.url });
   items.push({ label: "Move to… ▸", action: "move", key: t.key }, { label: "Assign to… ▸", action: "assignMenu", key: t.key, now: t.assignee ?? "" });
-  items.push(copy(`Copy the key ${t.key}`, t.key));
+  items.push(copy(`Copy the key ${t.key}`, t.key), ...stackCopy(row));
   return keyed({ title: `Pull request #${pr.number}`, subtitle: `${t.key} · ${t.status}`, items, reviewers: reviewersOf(pr) });
+}
+
+/** A stacked pull request's "Copy the stack's N URLs", from the bottom; nothing for one standing alone. */
+function stackCopy(row) {
+  const urls = row.stack?.urls ?? [];
+  if (urls.length < 2) return [];
+  const what = `the stack's ${urls.length} URLs`;
+  return [{ ...copy(`Copy ${what}`, urls.join("\n")), what }];
 }
 
 /** The Backlog's Move to current sprint for a ticket, as the TUI offers it: its board's active sprints, asking

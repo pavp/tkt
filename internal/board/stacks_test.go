@@ -121,3 +121,22 @@ func TestKnownPRsNameTheirTicket(t *testing.T) {
 		t.Errorf("known = %q, want %s", got, want)
 	}
 }
+
+func TestStackedRowsKeepAStackTogetherWhereItsFirstRowWas(t *testing.T) {
+	pr := func(n int, branch, base string) *ticket.PullRequest {
+		return &ticket.PullRequest{Repo: "example-org/web", Number: n, Branch: branch, Base: base, State: ticket.PROpen}
+	}
+	rows := []PRRow{{PR: pr(922, "refactor/m-3", "refactor/m-2")}, {PR: pr(10, "fix/x", "main")}, {PR: pr(920, "refactor/m-1", "main")}, {PR: pr(921, "refactor/m-2", "refactor/m-1")}}
+	var got []string
+	for _, r := range StackedRows(rows) {
+		s := "#" + strconv.Itoa(r.PR.Number)
+		if r.Stack != nil {
+			s += " of " + strconv.Itoa(len(r.Stack.PRs)) + " " + r.Stack.Name + " after " + strconv.Itoa(r.After)
+		}
+		got = append(got, s)
+	}
+	want := []string{"#920 of 3 refactor/m after 0", "#921 of 3 refactor/m after 920", "#922 of 3 refactor/m after 921", "#10"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("rows = %q\nwant %q", got, want)
+	}
+}

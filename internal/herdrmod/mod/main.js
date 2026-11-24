@@ -588,6 +588,14 @@ export default class Tkt extends View {
   }
 
   prRow(t, r) {
+    if (r.kind === "stack") {
+      const sel = this.selected === `group:${r.group}`;
+      return h_flex().h(ROW).pl(32).pr(12).gap(8).items_center().rounded(6).bg(sel ? mix(t.accent, t.surface, 0.1) : t.surface)
+        .child(div().w(12).text_size(10).text_color(t.muted).child(r.collapsed ? "▸" : "▾"))
+        .child(div().flex_none().text_color(t.muted).child(this.icon("stack", 13)))
+        .child(div().min_w_0().truncate().text_size(12).text_color(t.muted).child(r.title))
+        .child(div().flex_none().text_size(11).font_semibold().text_color(r.tone === "ansi1" ? ensure(t.ansi1, t.surface, 4.5) : t[r.tone] ?? t.foreground).child(r.status));
+    }
     if (r.kind === "title") {
       return this.sectionTitle(t, r, { fold: Boolean(r.collapsed), sel: this.selected === `group:${r.group}`,
         extra: r.needs ? [div().text_size(11).text_color(ensure(t.ansi3, t.surface, 4.5)).child(`${r.needs} need you`)] : [] });
@@ -598,13 +606,15 @@ export default class Tkt extends View {
     const ci = { pass: ["✓", t.ansi2], fail: ["✕", ensure(t.ansi1, t.surface, 4.5)], pending: ["…", t.muted] }[pr.checks] ?? ["—", t.dim];
     const tone = t[prStatusTone(r.raw)] ?? t.foreground;
     return this.rowBox(t, sel)
-      .child(div().w(20).flex_none().text_size(12).font_semibold().text_color(t[g.tone] ?? t.muted).child(g.text))
+      .child(div().w(20).flex_none().text_size(12).font_semibold().text_color(t[g.tone] ?? t.muted).child(g.text || (r.inStack ? "│" : "")))
       .child(this.mono(div().w(44).flex_none().text_size(11).text_color(sel ? t.accent : t.muted)).child(r.key))
       .child(h_flex().w(160).flex_none().gap(4).child(div().truncate().text_size(12).text_color(ensure(tone, t.surface, 4.5)).child(r.status))
         .when(Boolean(r.approvals), (el) => el.child(div().text_size(12).text_color(t.muted).child(`· ${r.approvals}`))))
       .child(div().w(140).flex_none().truncate().text_size(12).text_color(t.muted).child(pr.author ?? ""))
       .child(div().w(24).flex_none().font_semibold().text_color(ci[1] ?? t.dim).child(ci[0]))
-      .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(pr.draft ? t.muted : t.foreground).child(r.title));
+      .child(h_flex().flex_1().min_w_0().gap(8).items_center()
+        .when(Boolean(r.after || r.on), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(r.after ? `after #${r.after}` : `on ${r.on}`)))
+        .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(pr.draft ? t.muted : t.foreground).child(r.title)));
   }
 
   prsList(t, view) {
@@ -617,7 +627,7 @@ export default class Tkt extends View {
         rows.slice(range.start, range.end).map((r) => this.prRow(t, r))).size_full().track_scroll(this.scrolls["pr-rows"]).on_item_click((key, cx) => {
         const r = rows[Number(key)];
         if (!r) return;
-        if (r.kind === "title") this.patchState({ collapsed: toggled(view.collapsed, r.group) }, cx);
+        if (r.kind === "title" || r.kind === "stack") this.patchState({ collapsed: toggled(view.collapsed, r.group) }, cx);
         else {
           this.selected = r.key + r.group;
           this.clicked(this.selected, () => this.menuFor(r), cx);
