@@ -51,7 +51,7 @@ test("a stack shows as one row titled with its size, name and status, then its p
   const at = rows.findIndex((r) => r.kind === "stack");
   const stack = rows[at];
   assert.deepEqual({ group: stack.group, title: stack.title, status: stack.status, count: stack.count, collapsed: stack.collapsed, tone: stack.tone },
-    { group: "stack:example-org/web#39", title: "Stack of 3 · feat/DEMO-2-export · 2 here", status: "CI failing", count: 2, collapsed: false, tone: "ansi1" });
+    { group: "stack:example-org/web#39", title: "feat/DEMO-2-export · 3 PRs · 2 here", status: "CI failing", count: 2, collapsed: false, tone: "ansi1" });
   assert.deepEqual(rows.slice(at + 1, at + 3).map((r) => [r.key, r.after, r.on, r.inStack]), [["#40", 0, "feat/DEMO-2-export-0-shape", true], ["#41", 40, "", true]]);
   assert.ok(!rows.some((r) => r.kind === "stack" && r.count < 2), "a pull request alone in its group gets no stack title");
   assert.equal(rows[at + 3].inStack, false);
@@ -87,5 +87,15 @@ test("a stack's title holds its URLs, and its preview says how to fold and copy 
   const { prPreview } = await import("../mod/lib/prs.js");
   const stack = prRows(fixture("prs-stack.json")).find((r) => r.kind === "stack");
   assert.equal(stack.urls.length, 3);
-  assert.deepEqual(prPreview(stack), { title: "Stack of 3 · feat/DEMO-2-export · 2 here", line: "CI failing · enter to fold · P copies the stack's 3 URLs" });
+  assert.deepEqual(prPreview(stack), { title: "feat/DEMO-2-export · 3 PRs · 2 here", line: "CI failing · enter to fold · P copies the stack's 3 URLs" });
+});
+
+test("a stack's rows say where they sit in its block, and a lone part of a stack says which", () => {
+  const rows = prRows(fixture("prs-stack.json"));
+  const at = rows.findIndex((r) => r.kind === "stack");
+  assert.deepEqual(rows.slice(at, at + 4).map((r) => r.block ?? ""), ["top", "mid", "bottom", ""]);
+  const lone = rows.find((r) => r.key === "#39");
+  assert.deepEqual([lone.block ?? "", lone.stackNote], ["", "1 of 3"]);
+  const folded = prRows(fixture("prs-stack-folded.json")).find((r) => r.kind === "stack");
+  assert.equal(folded.block, "only");
 });

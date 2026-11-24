@@ -591,12 +591,12 @@ export default class Tkt extends View {
     if (r.kind === "stack") {
       const sel = this.selected === `group:${r.group}` && !this.inStrip;
       const tone = r.tone === "ansi1" ? ensure(t.ansi1, t.surface, 4.5) : t[r.tone] ?? t.foreground;
-      return this.rowBox(t, sel)
-        .child(div().w(20).flex_none().text_size(10).text_color(t.muted).child(r.collapsed ? "▸" : "▾"))
-        .child(div().w(44).flex_none().text_color(t.muted).child(this.icon("stack", 14)))
-        .child(div().w(160).flex_none().truncate().text_size(12).text_color(tone).child(r.status))
-        .child(div().flex_1().min_w_0().truncate().text_size(12).text_color(t.muted).child(r.title))
-        .when(sel, (el) => el.child(h_flex().flex_none().gap(5).items_center().text_size(11).text_color(t.muted).child(this.keyCap(t, "P")).child(`copy ${r.urls.length} URLs`)));
+      return this.blockBox(t, r.block, sel)
+        .child(div().flex_none().text_color(t.muted).child(this.icon("stack", 13)))
+        .child(div().flex_1().min_w_0().truncate().text_size(11).text_color(t.muted).child(r.title))
+        .when(sel, (el) => el.child(h_flex().flex_none().gap(5).items_center().text_size(11).text_color(t.muted).child(this.keyCap(t, "P")).child(`copy ${r.urls.length} URLs`)))
+        .child(div().flex_none().text_size(11).font_semibold().text_color(tone).child(r.status))
+        .child(div().w(12).flex_none().text_size(10).text_color(t.muted).child(r.collapsed ? "▸" : "▾"));
     }
     if (r.kind === "title") {
       return this.sectionTitle(t, r, { fold: Boolean(r.collapsed), sel: this.selected === `group:${r.group}`,
@@ -607,7 +607,8 @@ export default class Tkt extends View {
     const pr = r.raw.pr ?? {};
     const ci = { pass: ["✓", t.ansi2], fail: ["✕", ensure(t.ansi1, t.surface, 4.5)], pending: ["…", t.muted] }[pr.checks] ?? ["—", t.dim];
     const tone = t[prStatusTone(r.raw)] ?? t.foreground;
-    return this.rowBox(t, sel)
+    const place = [r.stackNote && `⧉ ${r.stackNote}`, r.after ? `after #${r.after}` : r.on && `on ${r.on}`].filter(Boolean).join(" · ");
+    return this.blockBox(t, r.block, sel)
       .child(div().w(20).flex_none().text_size(12).font_semibold().text_color(t[g.tone] ?? t.muted).child(g.text))
       .child(this.mono(div().w(44).flex_none().text_size(11).text_color(sel ? t.accent : t.muted)).child(r.key))
       .child(h_flex().w(160).flex_none().gap(4).child(div().truncate().text_size(12).text_color(ensure(tone, t.surface, 4.5)).child(r.status))
@@ -615,7 +616,7 @@ export default class Tkt extends View {
       .child(div().w(140).flex_none().truncate().text_size(12).text_color(t.muted).child(pr.author ?? ""))
       .child(div().w(24).flex_none().font_semibold().text_color(ci[1] ?? t.dim).child(ci[0]))
       .child(div().flex_1().min_w_0().truncate().text_size(13).text_color(pr.draft ? t.muted : t.foreground).child(r.title))
-      .when(Boolean(r.after || r.on), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(r.after ? `after #${r.after}` : `on ${r.on}`)));
+      .when(Boolean(place), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(place)));
   }
 
   prsList(t, view) {
@@ -2360,6 +2361,18 @@ export default class Tkt extends View {
   }
 
   /** A list row's box: the selected one tinted and outlined in the accent. */
+  /** A row of the PRs tab inside a stack's block: its part of the block's tinted box (top, mid, bottom, or the
+   *  whole box when folded), so the stack reads as one container while every row keeps the table's columns. */
+  blockBox(t, block, sel) {
+    if (!block) return this.rowBox(t, sel);
+    const top = block === "top" || block === "only";
+    const bottom = block === "bottom" || block === "only";
+    return h_flex().h(ROW).px(12).gap(10).items_center().border_x(1).border_color(t.border)
+      .bg(sel ? mix(t.accent, t.surface, 0.12) : mix(t.foreground, t.surface, 0.035))
+      .when(top, (el) => el.border_t(1).rounded_t(8))
+      .when(bottom, (el) => el.border_b(1).rounded_b(8));
+  }
+
   rowBox(t, sel) {
     return h_flex().h(ROW).px(12).gap(10).items_center().rounded(6).border(1).border_color(sel ? t.accent : t.surface).bg(sel ? mix(t.accent, t.surface, 0.1) : t.surface);
   }
