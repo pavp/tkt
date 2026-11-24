@@ -29,6 +29,8 @@ type detail struct {
 	Attachments []jira.Attachment `json:"attachments,omitempty"`
 	Comments    []commentView     `json:"comments,omitempty"`
 	Warnings    []string          `json:"warnings,omitempty"`
+	// PRStacks, set by the daemon, are the ticket's stacks completed with every pull request its sync knows.
+	PRStacks []board.PRStack `json:"pr_stacks,omitempty"`
 }
 
 // resolveKey takes the ticket key from args, or from the current git branch when args are empty.

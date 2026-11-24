@@ -2565,6 +2565,63 @@ func TestRepoFilterNoticeOpensTheModalAndFitsTheTrayPanel(t *testing.T) {
 	}
 }
 
+func TestPRsFilterGroupsAStackUnderItsCaption(t *testing.T) {
+	snap := prsSnapshot()
+	demo4 := &snap.Tickets[len(snap.Tickets)-1]
+	demo4.PRs = append(demo4.PRs,
+		ticket.PullRequest{Repo: "example-org/web", Number: 818, Title: "Part two", URL: "u818", State: ticket.PROpen, Branch: "feat/DEMO-4-2-b", Base: "feat/DEMO-4-1-a"},
+		ticket.PullRequest{Repo: "example-org/web", Number: 817, Title: "Part one", URL: "u817", State: ticket.PROpen, Branch: "feat/DEMO-4-1-a", Base: "main"})
+	r := &recorder{}
+	m := tea.Model(New(snap, false, r, ViewList))
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = press(m, "2")
+	v := stripANSI(m.View())
+	caption, one, two := lineIndex(v, "Stack of 2 · feat/DEMO-4"), lineIndex(v, "#817"), lineIndex(v, "#818")
+	if caption < 0 || one != caption+1 || two != caption+2 {
+		t.Fatalf("the stack's caption then its pull requests from the bottom:\n%s", v)
+	}
+	if !strings.Contains(v, " · 1 stack · ") {
+		t.Errorf("the context line counts the stacks:\n%s", v)
+	}
+	lines := strings.Split(v, "\n")
+	if !strings.Contains(lines[one], "1 Part one") || !strings.Contains(lines[two], "2 Part two") {
+		t.Errorf("each stacked pull request shows its step:\n%s\n%s", lines[one], lines[two])
+	}
+	onCaption := func() bool { it, ok := m.(Model).current(); return ok && it.stack != nil }
+	for _, key := range []string{"w", "s"} {
+		for i := 0; i < 20 && !onCaption(); i++ {
+			m = press(m, key)
+		}
+	}
+	if v := stripANSI(m.View()); !strings.Contains(v, "P copies the stack's URLs") {
+		t.Errorf("the selected caption names P:\n%s", v)
+	}
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("P")})
+	if cmd != nil {
+		cmd()
+	}
+	if !slices.Contains(r.calls, "copy stack's 2 URLs u817\nu818") {
+		t.Errorf("P on the caption copies the stack's URLs: %q", r.calls)
+	}
+	labels := func(mu *menu) (out []string) {
+		for _, it := range mu.items {
+			out = append(out, it.label)
+		}
+		return out
+	}
+	pr817 := snap.Tickets[len(snap.Tickets)-1].PRs[4]
+	if got := labels(m.(Model).buildMenu(item{key: "#817", ticket: demo4, pr: &pr817})); !slices.Contains(got, "Copy the stack's 2 URLs") {
+		t.Errorf("a stacked pull request's menu copies its stack: %q", got)
+	}
+	if got := labels(m.(Model).buildMenu(item{key: "DEMO-4", ticket: demo4})); !slices.Contains(got, "Copy the stack's 2 URLs") {
+		t.Errorf("a ticket's menu copies its stack: %q", got)
+	}
+	m = press(m, "enter")
+	if v := stripANSI(m.View()); strings.Contains(v, "#817") || !strings.Contains(v, "▸ ⧉ Stack of 2") {
+		t.Errorf("enter on the caption folds the stack:\n%s", v)
+	}
+}
+
 func TestPRGroupsCollapse(t *testing.T) {
 	r := &recorder{}
 	m := tea.Model(New(prsSnapshot(), false, r, ViewList))

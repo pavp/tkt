@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/pavp/tkt/internal/board"
 	"github.com/pavp/tkt/internal/ticket"
 )
 
@@ -50,7 +51,7 @@ func newShowCmd(a *App) *cobra.Command {
 			}
 			fmt.Fprint(a.Stdout, "\033[H\033[2J")
 			if t := a.daemonTicket(cmd.Context(), key); t != nil {
-				a.renderHead(a.Stdout, *t)
+				a.renderHead(a.Stdout, *t, nil)
 				fmt.Fprintln(a.Stdout)
 			}
 			fmt.Fprintf(a.Stdout, "Loading %s…\n", key)
@@ -80,7 +81,7 @@ func newShowCmd(a *App) *cobra.Command {
 }
 
 func (a *App) renderShow(w io.Writer, d detail) {
-	a.renderHead(w, d.Ticket)
+	a.renderHead(w, d.Ticket, d.PRStacks)
 	section(w, "Description", d.Description, "No description.")
 	if d.Acceptance != "" {
 		section(w, "Acceptance criteria", d.Acceptance, "")
@@ -105,7 +106,9 @@ func (a *App) renderShow(w io.Writer, d detail) {
 	}
 }
 
-func (a *App) renderHead(w io.Writer, t ticket.Ticket) {
+// renderHead writes the ticket's header and its pull requests, a stack of several as its title over its pull
+// requests from the bottom; stacks nil builds them from the ticket's own pull requests.
+func (a *App) renderHead(w io.Writer, t ticket.Ticket, stacks []board.PRStack) {
 	fmt.Fprintf(w, "%s · %s · %s · %s\n%s\n%s\n", t.Key, t.Type, t.Status, cmp.Or(t.Assignee, "unassigned"), t.Summary, t.URL)
 	if reasons := t.Attention(); len(reasons) > 0 {
 		parts := make([]string, len(reasons))
@@ -119,8 +122,19 @@ func (a *App) renderHead(w io.Writer, t ticket.Ticket) {
 	if len(t.PRs) == 0 {
 		fmt.Fprintln(w, "  none yet")
 	}
-	for _, pr := range t.PRs {
-		fmt.Fprintf(w, "  %s#%d  %s%s  %s\n", pr.Repo, pr.Number, prStateText(pr), reviewText(pr), pr.URL)
+	if stacks == nil {
+		stacks = board.PRStacks(t.PRs)
+	}
+	for _, s := range stacks {
+		if len(s.PRs) == 1 {
+			pr := s.PRs[0].PullRequest
+			fmt.Fprintf(w, "  %s#%d  %s%s  %s\n", pr.Repo, pr.Number, prStateText(pr), reviewText(pr), pr.URL)
+			continue
+		}
+		fmt.Fprintf(w, "  Stack of %d · %s · %s\n", len(s.PRs), s.Name, s.Status)
+		for _, p := range s.PRs {
+			fmt.Fprintf(w, "    %d  %s#%d  %s%s  %s\n", p.Depth+1, p.Repo, p.Number, prStateText(p.PullRequest), reviewText(p.PullRequest), p.URL)
+		}
 	}
 }
 
