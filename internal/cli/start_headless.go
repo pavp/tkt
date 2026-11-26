@@ -59,7 +59,11 @@ func (a *App) startHeadless(ctx context.Context, h HerdrAPI, s agentSpaces, plan
 func (a *App) headlessWorktree(ctx context.Context, key ticket.Key, summary, clone, repo string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, headlessTimeout)
 	defer cancel()
-	out, runErr := a.Run.Run(ctx, clone, a.claudeProgram(), headlessArgs(key, summary, clone, a.Env.Home), nil)
+	claude, err := a.agentPath(ctx, a.claudeProgram())
+	if err != nil {
+		return "", err
+	}
+	out, runErr := a.Run.Run(ctx, clone, claude, headlessArgs(key, summary, clone, a.Env.Home), nil)
 	var res struct {
 		IsError    bool              `json:"is_error"`
 		Result     string            `json:"result"`
