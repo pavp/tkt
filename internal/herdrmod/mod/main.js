@@ -1708,7 +1708,7 @@ export default class Tkt extends View {
   /** The Start the mod waits on, over the dimmed board, which it blocks until hidden or, after a failure, closed. */
   startingBox(t) {
     const v = startingView(this.starting, Date.now());
-    return div().id("starting-block").absolute().inset_0().on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+    return div().id("starting-block").absolute().inset_0().on_mouse_down("left", (_e, cx) => { this.focus.focus(); cx.stop_propagation(); })
       .child(this.dialog(t, "starting", 400, v_flex().gap(12).px(18).py(16)
         .child(div().text_size(14).font_semibold().text_color(t.foreground).child(v.title))
         .child(this.starting.failed
@@ -1717,7 +1717,8 @@ export default class Tkt extends View {
             .child(this.icon("spinner", 15).text_color(t.accent).spin(800))
             .child(div().flex_1().text_color(t.foreground).child(v.line))
             .child(this.mono(div().flex_none().text_size(12).text_color(t.muted)).child(v.elapsed)))
-        .child(div().pt(9).border_t(1).border_color(t.border).child(this.keyLine(t, v.keys)))));
+        .child(div().id("starting-keys").pt(9).border_t(1).border_color(t.border).child(this.keyLine(t, v.keys))
+          .when(Boolean(this.starting.failed), (el) => el.cursor_pointer().on_click((_e, cx) => { this.starting = null; this.focus.focus(); cx.notify(); })))));
   }
 
   async openTask(subject, query) {

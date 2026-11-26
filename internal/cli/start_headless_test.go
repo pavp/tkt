@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -12,12 +14,41 @@ func headlessStart(t *testing.T, out, branch, top string) (*harness, *desktopHer
 	t.Helper()
 	h, d := desktopHarness(t)
 	web := h.clone(t, "web")
-	call := strings.Join(append([]string{"claude"}, headlessArgs("DEMO-7", "Export users", web, h.home)...), " ")
+	call := strings.Join(append([]string{"/usr/local/bin/claude"}, headlessArgs("DEMO-7", "Export users", web, h.home)...), " ")
 	h.run.out[call] = out
 	if branch != "" {
 		h.inCheckout(branch, top, "git@github.com:example-org/web.git")
 	}
 	return h, d, call
+}
+
+func TestHerdrStartOnDesktopRunsTheHeadlessClaudeOnlyTheInteractiveShellFinds(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wt := "/home/u/.herdr/worktrees/web/feature-DEMO-7-export"
+	h, d, _ := headlessStart(t, "", "feature/DEMO-7-export", wt)
+	h.run.missing["claude"] = true
+	h.app.shellCache = &shellPathCache{}
+	h.env["SHELL"] = "/bin/bash"
+	file := filepath.Join(h.app.Env.DataDir(), "shell-path-"+strconv.Itoa(os.Getpid()))
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	h.run.out["sh -c "+shellPathScript("/bin/bash", file)] = ""
+	if err := os.WriteFile(file, []byte(bin), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	web := filepath.Join(h.home, "src", "web")
+	h.run.out[strings.Join(append([]string{filepath.Join(bin, "claude")}, headlessArgs("DEMO-7", "Export users", web, h.home)...), " ")] =
+		`{"type":"result","is_error":false,"structured_output":{"branch":"feature/DEMO-7-export","worktree":"` + wt + `"}}`
+	if code := h.exec("herdr", "start", "DEMO-7", "--repo", "web", "--agent", "claude"); code != 0 {
+		t.Fatalf("exit %d: %s; want the one-shot Claude run by its full path, as the daemon's PATH may lack it", code, h.errOut)
+	}
+	if len(d.calls) == 0 || !strings.HasPrefix(d.calls[0], "space ") {
+		t.Errorf("calls = %q, want the worktree's space opened", d.calls)
+	}
 }
 
 func TestHerdrStartOnDesktopWithClaudeCreatesTheWorktreeHeadlessAndOpensOneSpace(t *testing.T) {
@@ -60,7 +91,7 @@ func TestHerdrStartOnDesktopWithClaudeOpensNothingWhenTheWorktreeIsWrong(t *test
 			h, d := desktopHarness(t)
 			web := h.clone(t, "web")
 			out := strings.ReplaceAll(tt.out, "MAIN", web)
-			h.run.out[strings.Join(append([]string{"claude"}, headlessArgs("DEMO-7", "Export users", web, h.home)...), " ")] = out
+			h.run.out[strings.Join(append([]string{"/usr/local/bin/claude"}, headlessArgs("DEMO-7", "Export users", web, h.home)...), " ")] = out
 			if tt.branch != "" {
 				h.inCheckout(tt.branch, strings.ReplaceAll(tt.top, "MAIN", web), "git@github.com:example-org/web.git")
 			}
