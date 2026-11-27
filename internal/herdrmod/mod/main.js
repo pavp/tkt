@@ -2310,10 +2310,10 @@ export default class Tkt extends View {
     const flagBg = alarm ? mix(t.ansi1, t.raised, 0.16) : t.pill;
     const ci = { "✓": t.ansi2, "✕": t.ansi1 };
     const top = h_flex().h(18).gap(6).items_center()
-      .child(this.mono(div().text_size(11).text_color(sel ? t.accent : t.muted)).when(sel, (el) => el.font_semibold()).child([sel ? "▸" : "", c.subtask ? "↳" : "", c.key].filter(Boolean).join(" ")))
-      .when(Boolean(c.points), (el) => el.child(this.mono(div().px(5).rounded(4).bg(t.pill).text_size(10).text_color(t.muted)).child(c.points)))
+      .child(this.mono(div().flex_none().text_size(11).text_color(sel ? t.accent : t.muted)).when(sel, (el) => el.font_semibold()).child([sel ? "▸" : "", c.subtask ? "↳" : "", c.key].filter(Boolean).join(" ")))
+      .when(Boolean(c.points), (el) => el.child(this.mono(div().flex_none().px(5).rounded(4).bg(t.pill).text_size(10).text_color(t.muted)).child(c.points)))
       .child(div().flex_1())
-      .when(Boolean(flag), (el) => el.child(div().px(6).rounded(5).bg(flagBg).text_size(10).font_semibold().text_color(alarm ? ensure(t.ansi1, flagBg, 4.5) : t.muted).child(flag)))
+      .when(Boolean(flag), (el) => el.child(div().min_w_0().truncate().px(6).rounded(5).bg(flagBg).text_size(10).font_semibold().text_color(alarm ? ensure(t.ansi1, flagBg, 4.5) : t.muted).child(flag)))
       .when(Boolean(c.agent), (el) => el.child(this.agentDot(t, c.agent)));
     const card = v_flex().id(`card-${c.key}`).h(height).px(11).py(compact ? 8 : 10).gap(compact ? 5 : 7)
       .relative().rounded(8).border(1).border_color(t.card).bg(t.card).shadow_sm().hover((s) => s.border_color(mix(t.foreground, t.card, 0.18)))
